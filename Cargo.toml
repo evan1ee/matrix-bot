@@ -1,0 +1,14 @@
+[package]
+name = "matrix-hello-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+matrix-sdk = { version = "0.7", features = ["e2e-encryption"] }
+rusqlite = { version = "0.30", features = ["bundled"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5"
