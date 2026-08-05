@@ -1,6 +1,6 @@
 # Matrix Bot (Rust) 🦀
 
-A production-ready, highly modular, multi-feature Matrix bot written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk) and [`sqlx`](https://github.org/launchbadge/sqlx).
+A production-ready, highly modular, multi-feature Matrix bot & REST API engine written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk), [`axum`](https://github.org/tokio-rs/axum), and [`sqlx`](https://github.org/launchbadge/sqlx).
 
 ---
 
@@ -19,13 +19,19 @@ A production-ready, highly modular, multi-feature Matrix bot written in Rust usi
   - Persistent background worker scheduler — reminders survive bot restarts!
   - Delivery retry logic (up to 5 retries on transient network errors) and downtime catch-up protection.
   - List (`!remind list`) and cancel (`!remind cancel <id>`) pending timers.
+- ⚡ **Embedded Axum REST API Backend**:
+  - Full CRUD REST API for To-Dos and Reminders, enabling Web App integration.
+  - **JWT Authentication** (`/api/v1/auth/register`, `/api/v1/auth/login`) with `bcrypt` password hashing and optional `API_REGISTRATION_SECRET` gating.
+  - **Server-Sent Events (SSE)** real-time stream (`/api/v1/events`) with `event:` header discrimination (`todo_created`, `reminder_triggered`, etc.).
+  - **CORS** middleware & static Single-Page Application web server built-in.
+  - Standardized JSON error response wrapper (`ApiError` with `{ "error": "...", "code": 400 }`).
 - 💾 **SQLx Persistence Layer**:
-  - SQLite default with automatic WAL mode (`journal_mode=WAL`) and busy timeout configuration.
+  - SQLite default with automatic WAL mode (`journal_mode=WAL`), busy timeout, and configurable connection pool limit (`DATABASE_MAX_CONNECTIONS`).
   - Runtime storage cleanly isolated inside the `data/` directory.
   - Abstract repository interface ready for seamless PostgreSQL migration.
 - 🧱 **Extensible `BotModule` Architecture**:
   - Trait-based plugin system where new features live in isolated submodules under `src/modules/`.
-  - Clean code guarantee: **Zero source files exceed 300 lines of code**.
+  - Strict quality guarantee: **Zero source files exceed 300 lines of code** and 100% test pass rate with 0 compilation warnings.
 
 ---
 
@@ -59,6 +65,24 @@ A production-ready, highly modular, multi-feature Matrix bot written in Rust usi
 
 ---
 
+## 🌐 REST API Endpoints
+
+| Method | Endpoint | Auth Required | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/register` | No (Secret if set) | Register web account & get JWT token |
+| `POST` | `/api/v1/auth/login` | No | Login & obtain JWT Bearer token |
+| `GET` | `/api/v1/health` | No | System health, version & DB connection status |
+| `GET` | `/api/v1/todos` | Yes (Bearer) | List tasks (query params: `room_id`, `page`, `limit`) |
+| `POST` | `/api/v1/todos` | Yes (Bearer) | Create new task (500 char max limit) |
+| `PATCH` | `/api/v1/todos/:id` | Yes (Bearer) | Update text, priority, due date, or completion |
+| `DELETE` | `/api/v1/todos/:id` | Yes (Bearer) | Delete task by ID |
+| `GET` | `/api/v1/reminders` | Yes (Bearer) | List pending reminders (query params: `room_id`, `page`, `limit`) |
+| `POST` | `/api/v1/reminders` | Yes (Bearer) | Create timer in seconds (500 char max limit) |
+| `DELETE` | `/api/v1/reminders/:id` | Yes (Bearer) | Cancel reminder by ID |
+| `GET` | `/api/v1/events` | Yes (Bearer) | SSE real-time stream (`event:` type discrimination) |
+
+---
+
 ## 🛠️ Setup & Running
 
 ### 1. Prerequisites
@@ -73,7 +97,7 @@ Copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
-Edit `.env` with your Matrix credentials:
+Edit `.env` with your settings:
 
 ```env
 MATRIX_HOMESERVER=https://matrix.org
@@ -81,16 +105,21 @@ MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=your_optional_e2ee_recovery_key
 DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
+DATABASE_MAX_CONNECTIONS=10
+API_HOST=0.0.0.0
+API_PORT=8080
+JWT_SECRET=matrix_bot_secret_jwt_token_key_change_in_production
+API_REGISTRATION_SECRET=optional_secret_to_gate_registration
 RUST_LOG=info,matrix_bot=debug,matrix_sdk=info
 ```
 
 ### 3. Run & Test
 
 ```bash
-# Run unit & integration tests
+# Run unit & integration test suite (26 tests)
 cargo test
 
-# Launch the bot
+# Launch the bot & REST API server
 cargo run
 ```
 
@@ -111,8 +140,8 @@ We are actively expanding `matrix-bot` into a comprehensive personal assistant p
   - Renewal advance warnings (e.g., notify 3 days before renewal date) and monthly recurring burn rate analytics.
 - 🐘 **PostgreSQL Migration Support**:
   - Production deployment capability switching from SQLite to PostgreSQL via `DATABASE_URL` configuration.
-- 🌐 **Web Admin Dashboard & Metrics API**:
-  - Optional web dashboard for system health, active module metrics, and room management.
+- 🎨 **Web Front-End SPA**:
+  - Modern React/Next.js interface consuming `/api/v1/` REST endpoints and real-time SSE stream.
 
 ---
 
@@ -120,27 +149,35 @@ We are actively expanding `matrix-bot` into a comprehensive personal assistant p
 
 ```
 data/                         # Runtime storage directory (ignored in git)
-├── bot_data.db               # Application SQLite database (todos & reminders)
+├── bot_data.db               # Application SQLite database (todos, reminders, web_users)
 ├── bot_data.db-wal           # SQLite Write-Ahead Log for high-concurrency WAL mode
 ├── bot_data.db-shm           # SQLite shared memory file
 └── bot_store/                # Matrix SDK internal session & crypto store
 
 src/
-├── main.rs                   # Clean entry point bootstrapping DB, modules & Matrix loop (< 40 lines)
-├── config.rs                 # Environment & bot configuration management
-├── error.rs                  # Custom error types and anyhow context
+├── main.rs                   # Entry point bootstrapping Config validation, DB, API & Matrix loop (< 40 lines)
+├── config.rs                 # Environment configuration & runtime validation rules
+├── error.rs                  # Axum ApiError implementation with JSON error response format
+├── events.rs                 # SystemEvent enum & EventBroadcaster for SSE streaming
+├── api/                      # Axum REST API layer
+│   ├── mod.rs                # Router assembly, CORS, static file fallback & launcher
+│   ├── auth.rs               # JWT generation, Claims, AuthUser extractor & auth handlers
+│   ├── health.rs             # System health & database connectivity check endpoint
+│   ├── todos.rs              # To-Do REST CRUD handlers & input validation
+│   ├── reminders.rs          # Reminder REST CRUD handlers & input validation
+│   └── sse.rs                # Server-Sent Events stream with event type discrimination
 ├── bot/                      # Matrix bot client engine
 │   ├── client.rs             # Matrix Client builder, well-known resolution & login
 │   ├── dispatcher.rs         # Mention & command parser with HTML pill stripping
 │   └── handler.rs            # Event routing for room invites and message events
 ├── db/                       # Database persistence layer (SQLx)
-│   ├── pool.rs               # Connection pool manager with SQLite WAL mode
-│   └── schema.rs             # Table DDL migrations (todos & reminders)
+│   ├── pool.rs               # Connection pool manager with WAL mode & configurable max_connections
+│   └── schema.rs             # Table DDL migrations (todos, reminders, web_users)
 ├── modules/                  # Extensible plugin system
-│   ├── mod.rs                # BotModule trait definition & ModuleRegistry dispatcher
+│   ├── mod.rs                # BotModule trait definition, CommandContext & ModuleRegistry
 │   ├── core/                 # Core module (!hello, !ping, !help)
-│   ├── todo/                 # To-Do module (repository, handler, models)
-│   └── reminder/             # Reminder module (repository, handler, scheduler, models)
+│   ├── todo/                 # To-Do module (repository, decomposed sub-handlers, models)
+│   └── reminder/             # Reminder module (repository, handler, scheduler, models, status enum)
 └── utils/                    # Shared utilities
     ├── html.rs               # HTML escaping & strip_html notification fallback
     └── time.rs               # Duration & date parser utilities
