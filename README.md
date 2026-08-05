@@ -1,6 +1,6 @@
 # Matrix Bot (Rust) 🦀
 
-A production-ready, highly modular, multi-feature Matrix bot written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk) and [`sqlx`](https://github.com/launchbadge/sqlx).
+A production-ready, highly modular, multi-feature Matrix bot written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk) and [`sqlx`](https://github.org/launchbadge/sqlx).
 
 ---
 
@@ -21,6 +21,7 @@ A production-ready, highly modular, multi-feature Matrix bot written in Rust usi
   - List (`!remind list`) and cancel (`!remind cancel <id>`) pending timers.
 - 💾 **SQLx Persistence Layer**:
   - SQLite default with automatic WAL mode (`journal_mode=WAL`) and busy timeout configuration.
+  - Runtime storage cleanly isolated inside the `data/` directory.
   - Abstract repository interface ready for seamless PostgreSQL migration.
 - 🧱 **Extensible `BotModule` Architecture**:
   - Trait-based plugin system where new features live in isolated submodules under `src/modules/`.
@@ -79,7 +80,7 @@ MATRIX_HOMESERVER=https://matrix.org
 MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=your_optional_e2ee_recovery_key
-DATABASE_URL=sqlite://bot_data.db?mode=rwc
+DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
 RUST_LOG=info,matrix_bot=debug,matrix_sdk=info
 ```
 
@@ -118,6 +119,12 @@ We are actively expanding `matrix-bot` into a comprehensive personal assistant p
 ## 🏗️ Architecture Overview
 
 ```
+data/                         # Runtime storage directory (ignored in git)
+├── bot_data.db               # Application SQLite database (todos & reminders)
+├── bot_data.db-wal           # SQLite Write-Ahead Log for high-concurrency WAL mode
+├── bot_data.db-shm           # SQLite shared memory file
+└── bot_store/                # Matrix SDK internal session & crypto store
+
 src/
 ├── main.rs                   # Clean entry point bootstrapping DB, modules & Matrix loop (< 40 lines)
 ├── config.rs                 # Environment & bot configuration management
