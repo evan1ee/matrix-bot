@@ -21,7 +21,8 @@ A production-ready, highly modular, multi-feature Matrix bot & REST API engine w
   - List (`!remind list`) and cancel (`!remind cancel <id>`) pending timers.
 - ⚡ **Embedded Axum REST API Backend**:
   - Full CRUD REST API for To-Dos and Reminders, enabling Web App integration.
-  - **JWT Authentication** (`/api/v1/auth/register`, `/api/v1/auth/login`) with `bcrypt` password hashing and optional `API_REGISTRATION_SECRET` gating.
+  - **Native Matrix Authentication**: Authenticate via Matrix Homeserver password (`POST /api/v1/auth/login` with `@user:domain`) or pass Matrix Access Tokens (`syt_...`) directly in Bearer headers. Automatic Matrix Well-Known server discovery included!
+  - **Local JWT Authentication** (`/api/v1/auth/register`, `/api/v1/auth/login`) with `bcrypt` password hashing and optional `API_REGISTRATION_SECRET` gating.
   - **Server-Sent Events (SSE)** real-time stream (`/api/v1/events`) with `event:` header discrimination (`todo_created`, `reminder_triggered`, etc.).
   - **CORS** middleware & static Single-Page Application web server built-in.
   - Standardized JSON error response wrapper (`ApiError` with `{ "error": "...", "code": 400 }`).
@@ -70,16 +71,16 @@ A production-ready, highly modular, multi-feature Matrix bot & REST API engine w
 | Method | Endpoint | Auth Required | Description |
 |---|---|---|---|
 | `POST` | `/api/v1/auth/register` | No (Secret if set) | Register web account & get JWT token |
-| `POST` | `/api/v1/auth/login` | No | Login & obtain JWT Bearer token |
+| `POST` | `/api/v1/auth/login` | No | Login via local account or Matrix Homeserver credentials (`@user:domain`) |
 | `GET` | `/api/v1/health` | No | System health, version & DB connection status |
-| `GET` | `/api/v1/todos` | Yes (Bearer) | List tasks (query params: `room_id`, `page`, `limit`) |
-| `POST` | `/api/v1/todos` | Yes (Bearer) | Create new task (500 char max limit) |
-| `PATCH` | `/api/v1/todos/:id` | Yes (Bearer) | Update text, priority, due date, or completion |
-| `DELETE` | `/api/v1/todos/:id` | Yes (Bearer) | Delete task by ID |
-| `GET` | `/api/v1/reminders` | Yes (Bearer) | List pending reminders (query params: `room_id`, `page`, `limit`) |
-| `POST` | `/api/v1/reminders` | Yes (Bearer) | Create timer in seconds (500 char max limit) |
-| `DELETE` | `/api/v1/reminders/:id` | Yes (Bearer) | Cancel reminder by ID |
-| `GET` | `/api/v1/events` | Yes (Bearer) | SSE real-time stream (`event:` type discrimination) |
+| `GET` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | List tasks (query params: `room_id`, `page`, `limit`) |
+| `POST` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | Create new task (500 char max limit) |
+| `PATCH` | `/api/v1/todos/:id` | Yes (Bearer/Matrix `syt_`) | Update text, priority, due date, or completion |
+| `DELETE` | `/api/v1/todos/:id` | Yes (Bearer/Matrix `syt_`) | Delete task by ID |
+| `GET` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | List pending reminders (query params: `room_id`, `page`, `limit`) |
+| `POST` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | Create timer in seconds (500 char max limit) |
+| `DELETE` | `/api/v1/reminders/:id` | Yes (Bearer/Matrix `syt_`) | Cancel reminder by ID |
+| `GET` | `/api/v1/events` | Yes (Bearer/Matrix `syt_`) | SSE real-time stream (`event:` type discrimination) |
 
 ---
 
@@ -161,7 +162,7 @@ src/
 ├── events.rs                 # SystemEvent enum & EventBroadcaster for SSE streaming
 ├── api/                      # Axum REST API layer
 │   ├── mod.rs                # Router assembly, CORS, static file fallback & launcher
-│   ├── auth.rs               # JWT generation, Claims, AuthUser extractor & auth handlers
+│   ├── auth.rs               # Matrix Homeserver login, Matrix access token whoami, JWT claims & auth handlers
 │   ├── health.rs             # System health & database connectivity check endpoint
 │   ├── todos.rs              # To-Do REST CRUD handlers & input validation
 │   ├── reminders.rs          # Reminder REST CRUD handlers & input validation
