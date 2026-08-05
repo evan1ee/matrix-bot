@@ -1,4 +1,8 @@
 /target
 .env
 *.db
+*.db*
 *.sqlite
+*.sqlite3*
+bot_store/
+.DS_Store
