@@ -27,7 +27,7 @@ impl TodoPriority {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TodoItem {
     pub id: i64,
     pub room_id: String,

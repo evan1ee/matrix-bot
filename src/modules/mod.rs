@@ -23,6 +23,7 @@ pub struct CommandContext {
 pub struct ModuleContext {
     pub client: Client,
     pub db: Database,
+    pub broadcaster: Option<crate::events::EventBroadcaster>,
 }
 
 #[derive(Clone, Debug)]

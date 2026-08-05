@@ -52,6 +52,10 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) {
                         }
 
                         if send_success {
+                            if let Some(broadcaster) = &ctx.broadcaster {
+                                broadcaster.send(crate::events::SystemEvent::ReminderTriggered(reminder.clone()));
+                            }
+
                             // Process recurrence or mark triggered
                             match reminder.recurrence.as_str() {
                                 "daily" => {

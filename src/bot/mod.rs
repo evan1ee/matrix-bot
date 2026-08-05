@@ -8,6 +8,7 @@ use crate::bot::client::BotClient;
 use crate::bot::handler::register_handlers;
 use crate::config::Config;
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
 use crate::modules::reminder::ReminderModule;
 use crate::modules::todo::TodoModule;
@@ -21,11 +22,26 @@ pub struct MatrixBot {
     client: Client,
     db: Database,
     registry: Arc<ModuleRegistry>,
+    broadcaster: Option<EventBroadcaster>,
 }
 
 impl MatrixBot {
+    #[allow(dead_code)]
     pub async fn new(config: &Config) -> Result<Self> {
         let db = Database::connect(&config.database_url).await?;
+        Self::new_with_db(config, db).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn new_with_db(config: &Config, db: Database) -> Result<Self> {
+        Self::new_with_db_and_broadcaster(config, db, None).await
+    }
+
+    pub async fn new_with_db_and_broadcaster(
+        config: &Config,
+        db: Database,
+        broadcaster: Option<EventBroadcaster>,
+    ) -> Result<Self> {
         let client = BotClient::build_and_login(config).await?;
 
         let registry_ref = Arc::new(RwLock::new(None));
@@ -43,6 +59,7 @@ impl MatrixBot {
             client,
             db,
             registry: registry_arc,
+            broadcaster,
         })
     }
 
@@ -50,6 +67,7 @@ impl MatrixBot {
         let module_ctx = ModuleContext {
             client: self.client.clone(),
             db: self.db.clone(),
+            broadcaster: self.broadcaster.clone(),
         };
 
         // Register Matrix event handlers
@@ -58,7 +76,7 @@ impl MatrixBot {
         // Start background workers for all modules (e.g., reminder scheduler)
         self.registry.spawn_all_background_workers(&module_ctx).await;
 
-        tracing::info!("Matrix Hello Bot is active and listening for events...");
+        tracing::info!("Matrix Bot is active and listening for events...");
         self.client.sync(SyncSettings::default()).await?;
 
         Ok(())
