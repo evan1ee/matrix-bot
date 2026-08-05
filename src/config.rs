@@ -26,7 +26,7 @@ impl Config {
         let recovery_key = env::var("MATRIX_RECOVERY_KEY").ok();
         
         let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://bot_data.db?mode=rwc".to_string());
+            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
 
         Ok(Self {
             homeserver,

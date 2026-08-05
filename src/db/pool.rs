@@ -16,6 +16,23 @@ impl Database {
         info!("Connecting to database at {}", database_url);
 
         let pool = if database_url.starts_with("sqlite://") {
+            if !database_url.contains("mode=memory") {
+                let raw_path = database_url
+                    .trim_start_matches("sqlite://")
+                    .split('?')
+                    .next()
+                    .unwrap_or("data/bot_data.db");
+                let path = std::path::Path::new(raw_path);
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                        info!("Creating database directory: {:?}", parent);
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .context("Failed to create database directory")?;
+                    }
+                }
+            }
+
             let options = SqliteConnectOptions::from_str(database_url)?
                 .create_if_missing(true)
                 .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)

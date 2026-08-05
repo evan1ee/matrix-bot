@@ -1,8 +1,9 @@
 /target
 .env
+data/
+bot_store/
 *.db
 *.db*
 *.sqlite
 *.sqlite3*
-bot_store/
 .DS_Store
