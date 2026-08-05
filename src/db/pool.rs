@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::str::FromStr;
 use tracing::info;
 
 use crate::db::schema;
@@ -12,26 +13,26 @@ pub struct Database {
 
 impl Database {
     pub async fn connect(database_url: &str) -> Result<Self> {
-        info!("Connecting to SQLite database at {}", database_url);
+        info!("Connecting to database at {}", database_url);
 
-        // Ensure database file creation for sqlite
-        if database_url.starts_with("sqlite://") && !database_url.contains("mode=memory") {
-            let path = database_url
-                .trim_start_matches("sqlite://")
-                .split('?')
-                .next()
-                .unwrap_or("bot_data.db");
-            if !std::path::Path::new(path).exists() {
-                info!("Creating sqlite database file at {}", path);
-                tokio::fs::File::create(path).await.context("Failed to create sqlite DB file")?;
-            }
-        }
+        let pool = if database_url.starts_with("sqlite://") {
+            let options = SqliteConnectOptions::from_str(database_url)?
+                .create_if_missing(true)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                .busy_timeout(std::time::Duration::from_secs(5));
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .context("Failed to connect to SQLite database")?;
+            SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect_with(options)
+                .await
+                .context("Failed to connect to SQLite database")?
+        } else {
+            SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect(database_url)
+                .await
+                .context("Failed to connect to database")?
+        };
 
         schema::run_migrations(&pool)
             .await

@@ -20,8 +20,8 @@ impl ReminderRepository {
 
         let res = sqlx::query(
             r#"
-            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)
             "#,
         )
         .bind(room_id)
@@ -37,7 +37,7 @@ impl ReminderRepository {
 
         let reminder = sqlx::query_as::<_, Reminder>(
             r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, created_at
+            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
             FROM reminders WHERE id = ?
             "#,
         )
@@ -48,12 +48,24 @@ impl ReminderRepository {
         Ok(reminder)
     }
 
+    pub async fn count_user_pending(pool: &SqlitePool, room_id: &str, sender_mxid: &str) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending'",
+        )
+        .bind(room_id)
+        .bind(sender_mxid)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count)
+    }
+
     pub async fn get_due_reminders(pool: &SqlitePool) -> Result<Vec<Reminder>> {
         let now = Utc::now();
         let reminders = sqlx::query_as::<_, Reminder>(
             r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, created_at
-            FROM reminders WHERE status = 'pending' AND trigger_at <= ?
+            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
+            FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < 5
             "#,
         )
         .bind(now)
@@ -71,8 +83,24 @@ impl ReminderRepository {
         Ok(())
     }
 
+    pub async fn mark_failed(pool: &SqlitePool, id: i64) -> Result<()> {
+        sqlx::query("UPDATE reminders SET status = 'failed' WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn increment_retry(pool: &SqlitePool, id: i64) -> Result<()> {
+        sqlx::query("UPDATE reminders SET retry_count = retry_count + 1 WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn reschedule(pool: &SqlitePool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
-        sqlx::query("UPDATE reminders SET trigger_at = ?, status = 'pending' WHERE id = ?")
+        sqlx::query("UPDATE reminders SET trigger_at = ?, status = 'pending', retry_count = 0 WHERE id = ?")
             .bind(new_trigger_at)
             .bind(id)
             .execute(pool)
@@ -80,16 +108,25 @@ impl ReminderRepository {
         Ok(())
     }
 
-    pub async fn list_user_pending(pool: &SqlitePool, room_id: &str, sender_mxid: &str) -> Result<Vec<Reminder>> {
+    pub async fn list_user_pending(
+        pool: &SqlitePool,
+        room_id: &str,
+        sender_mxid: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Reminder>> {
         let reminders = sqlx::query_as::<_, Reminder>(
             r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, created_at
+            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
             FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending'
             ORDER BY trigger_at ASC
+            LIMIT ? OFFSET ?
             "#,
         )
         .bind(room_id)
         .bind(sender_mxid)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
         .await?;
 

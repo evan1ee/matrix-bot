@@ -27,7 +27,7 @@ impl BotModule for CoreModule {
         vec![
             CommandHelp {
                 name: "hello".to_string(),
-                usage: "!hello [name]".to_string(),
+                usage: "!hello / !hi [name]".to_string(),
                 description: "Get a friendly greeting".to_string(),
             },
             CommandHelp {
@@ -71,5 +71,39 @@ impl BotModule for CoreModule {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_core_commands() {
+        let registry_ref = Arc::new(tokio::sync::RwLock::new(None));
+        let core = CoreModule::new(registry_ref);
+
+        let ctx = CommandContext {
+            room_id: "!room:1".to_string(),
+            sender_mxid: "@user:1".to_string(),
+            sender_name: "Alice".to_string(),
+            command: "hello".to_string(),
+            raw_args: "".to_string(),
+            full_body: "!hello".to_string(),
+        };
+
+        let dummy_db = Database {
+            pool: sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap(),
+        };
+
+        let res = core.handle_command(&ctx, &dummy_db).await.unwrap();
+        assert!(res.contains("Hello, Alice!"));
+
+        let ctx_ping = CommandContext {
+            command: "ping".to_string(),
+            ..ctx
+        };
+        let res_ping = core.handle_command(&ctx_ping, &dummy_db).await.unwrap();
+        assert!(res_ping.contains("Pong!"));
     }
 }

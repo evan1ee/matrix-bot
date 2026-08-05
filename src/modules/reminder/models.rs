@@ -38,6 +38,7 @@ pub struct Reminder {
     pub trigger_at: DateTime<Utc>,
     pub recurrence: String,
     pub status: String,
+    pub retry_count: i64,
     pub created_at: Option<DateTime<Utc>>,
 }
 

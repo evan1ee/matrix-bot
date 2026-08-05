@@ -45,29 +45,46 @@ impl TodoRepository {
         Ok(item)
     }
 
-    pub async fn list_room(pool: &SqlitePool, room_id: &str) -> Result<Vec<TodoItem>> {
+    pub async fn count_room_active(pool: &SqlitePool, room_id: &str) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND completed = 0",
+        )
+        .bind(room_id)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    pub async fn list_room(pool: &SqlitePool, room_id: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
         let items = sqlx::query_as::<_, TodoItem>(
             r#"
             SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at
             FROM todos WHERE room_id = ? ORDER BY completed ASC, id ASC
+            LIMIT ? OFFSET ?
             "#,
         )
         .bind(room_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
         .await?;
 
         Ok(items)
     }
 
-    pub async fn list_user(pool: &SqlitePool, room_id: &str, sender_mxid: &str) -> Result<Vec<TodoItem>> {
+    pub async fn list_user(pool: &SqlitePool, room_id: &str, sender_mxid: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
         let items = sqlx::query_as::<_, TodoItem>(
             r#"
             SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at
             FROM todos WHERE room_id = ? AND sender_mxid = ? ORDER BY completed ASC, id ASC
+            LIMIT ? OFFSET ?
             "#,
         )
         .bind(room_id)
         .bind(sender_mxid)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
         .await?;
 
@@ -146,6 +163,30 @@ impl TodoRepository {
         Ok(item)
     }
 
+    pub async fn set_due_date(pool: &SqlitePool, room_id: &str, id: i64, due_at: &str) -> Result<Option<TodoItem>> {
+        let result = sqlx::query(
+            "UPDATE todos SET due_at = ? WHERE room_id = ? AND id = ?",
+        )
+        .bind(due_at)
+        .bind(room_id)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        let item = sqlx::query_as::<_, TodoItem>(
+            "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(item)
+    }
+
     pub async fn clear_completed_user(pool: &SqlitePool, room_id: &str, sender_mxid: &str) -> Result<u64> {
         let result = sqlx::query(
             "DELETE FROM todos WHERE room_id = ? AND sender_mxid = ? AND completed = 1",
@@ -192,11 +233,14 @@ mod tests {
         assert_eq!(item.priority, "high");
         assert!(!item.completed);
 
-        let list = TodoRepository::list_user(&pool, "!room:a", "@alice:a").await.unwrap();
+        let list = TodoRepository::list_user(&pool, "!room:a", "@alice:a", 25, 0).await.unwrap();
         assert_eq!(list.len(), 1);
 
         let updated = TodoRepository::edit_text(&pool, "!room:a", item.id, "Buy oat milk").await.unwrap().unwrap();
         assert_eq!(updated.text, "Buy oat milk");
+
+        let due_item = TodoRepository::set_due_date(&pool, "!room:a", item.id, "2026-12-31 23:59 UTC").await.unwrap().unwrap();
+        assert_eq!(due_item.due_at.as_deref(), Some("2026-12-31 23:59 UTC"));
 
         let done = TodoRepository::mark_done(&pool, "!room:a", item.id).await.unwrap().unwrap();
         assert!(done.completed);
@@ -204,7 +248,7 @@ mod tests {
         let cleared = TodoRepository::clear_completed_user(&pool, "!room:a", "@alice:a").await.unwrap();
         assert_eq!(cleared, 1);
 
-        let empty_list = TodoRepository::list_user(&pool, "!room:a", "@alice:a").await.unwrap();
+        let empty_list = TodoRepository::list_user(&pool, "!room:a", "@alice:a", 25, 0).await.unwrap();
         assert!(empty_list.is_empty());
     }
 }

@@ -33,14 +33,15 @@ pub fn parse_reminder_args(input: &str) -> Option<(Duration, String)> {
 
     let num: u64 = num_str.parse().ok()?;
     let secs = match unit.to_lowercase().as_str() {
-        "s" | "sec" | "secs" | "second" | "seconds" => num,
-        "m" | "min" | "mins" | "minute" | "minutes" => num * 60,
-        "h" | "hr" | "hrs" | "hour" | "hours" => num * 3600,
-        "d" | "day" | "days" => num * 86400,
+        "s" | "sec" | "secs" | "second" | "seconds" => Some(num),
+        "m" | "min" | "mins" | "minute" | "minutes" => num.checked_mul(60),
+        "h" | "hr" | "hrs" | "hour" | "hours" => num.checked_mul(3600),
+        "d" | "day" | "days" => num.checked_mul(86400),
         _ => return None,
-    };
+    }?;
 
-    if secs == 0 {
+    if secs == 0 || secs > 365 * 86400 * 10 {
+        // Enforce max 10-year limit to prevent overflow
         return None;
     }
 
@@ -73,5 +74,8 @@ mod tests {
         let (dur, msg) = parse_reminder_args("5m").unwrap();
         assert_eq!(dur.as_secs(), 300);
         assert_eq!(msg, "Reminder!");
+
+        assert!(parse_reminder_args("9999999999999999d").is_none());
+        assert!(parse_reminder_args("0s").is_none());
     }
 }

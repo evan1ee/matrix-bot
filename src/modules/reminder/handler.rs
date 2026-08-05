@@ -19,14 +19,26 @@ pub async fn handle_reminder_command(
         return None;
     }
 
-    // 1. !remind list
-    if clean_lower == "remind list" || clean_lower == "!remind list" {
-        match ReminderRepository::list_user_pending(pool, room_id, sender_mxid).await {
+    // 1. !remind list [page]
+    if clean_lower == "remind list"
+        || clean_lower == "!remind list"
+        || clean_lower.starts_with("remind list ")
+        || clean_lower.starts_with("!remind list ")
+    {
+        let rest = clean_body.split_whitespace().nth(2).unwrap_or("1");
+        let page: i64 = rest.parse().unwrap_or(1).max(1);
+        let offset = (page - 1) * 25;
+
+        match ReminderRepository::list_user_pending(pool, room_id, sender_mxid, 25, offset).await {
             Ok(reminders) => {
                 if reminders.is_empty() {
-                    Some("⏰ You have no pending reminders in this room.".to_string())
+                    if page > 1 {
+                        Some(format!("⏰ <b>Pending Reminders (Page {}):</b><br/>No more reminders on this page.", page))
+                    } else {
+                        Some("⏰ You have no pending reminders in this room.".to_string())
+                    }
                 } else {
-                    let mut html = format!("⏰ <b>Pending Reminders for {}:</b><br/>", html_escape(sender_name));
+                    let mut html = format!("⏰ <b>Pending Reminders for {} (Page {}):</b><br/>", html_escape(sender_name), page);
                     for r in reminders {
                         let rec_str = if r.recurrence != "none" {
                             format!(" 🔄 <i>({})</i>", r.recurrence)
@@ -52,11 +64,15 @@ pub async fn handle_reminder_command(
         }
     }
     // 2. !remind cancel <id>
-    else if clean_lower.starts_with("remind cancel ") || clean_lower.starts_with("!remind cancel ") {
+    else if clean_lower.starts_with("remind cancel") || clean_lower.starts_with("!remind cancel") {
         let id_str = clean_body
-            .trim_start_matches("!remind cancel ")
-            .trim_start_matches("remind cancel ")
+            .trim_start_matches("!remind cancel")
+            .trim_start_matches("remind cancel")
             .trim();
+
+        if id_str.is_empty() {
+            return Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code>".to_string());
+        }
 
         if let Ok(id) = id_str.parse::<i64>() {
             match ReminderRepository::cancel(pool, room_id, sender_mxid, id).await {
@@ -80,6 +96,14 @@ pub async fn handle_reminder_command(
             .trim_start_matches("remind ")
             .trim();
 
+        if raw_args.is_empty() {
+            return Some(
+                "⚠️ Usage: <code>!remind [daily|weekly] &lt;time&gt; &lt;message&gt;</code><br/>\
+                 Examples: <code>!remind 10s check oven</code>, <code>!remind daily 8h standup</code>"
+                    .to_string(),
+            );
+        }
+
         let (recurrence, args_to_parse) = if raw_args.to_lowercase().starts_with("daily ") {
             (RecurrencePattern::Daily, raw_args[6..].trim())
         } else if raw_args.to_lowercase().starts_with("weekly ") {
@@ -89,7 +113,30 @@ pub async fn handle_reminder_command(
         };
 
         if let Some((dur, msg)) = parse_reminder_args(args_to_parse) {
-            let trigger_at = Utc::now() + ChronoDuration::from_std(dur).unwrap_or(ChronoDuration::seconds(10));
+            // Security: Message length limit (300 chars)
+            if msg.len() > 300 {
+                return Some("⚠️ Reminder message too long! Maximum limit is 300 characters.".to_string());
+            }
+
+            // Quota check: max 100 pending reminders per user
+            match ReminderRepository::count_user_pending(pool, room_id, sender_mxid).await {
+                Ok(count) if count >= 100 => {
+                    return Some("⚠️ Reminder limit reached (100 pending reminders). Cancel existing reminders using <code>!remind cancel &lt;id&gt;</code>.".to_string());
+                }
+                Err(err) => {
+                    error!("Failed checking pending reminder count: {:?}", err);
+                }
+                _ => {}
+            }
+
+            let dur_chrono = match ChronoDuration::from_std(dur) {
+                Ok(c) => c,
+                Err(_) => {
+                    return Some("⚠️ Duration is too large or out of range!".to_string());
+                }
+            };
+
+            let trigger_at = Utc::now() + dur_chrono;
 
             match ReminderRepository::create(pool, room_id, sender_mxid, sender_name, &msg, trigger_at, recurrence.clone()).await {
                 Ok(reminder) => {
@@ -114,11 +161,49 @@ pub async fn handle_reminder_command(
             }
         } else {
             Some(
-                "⚠️ <b>Invalid reminder format.</b><br/>\
+                "⚠️ <b>Invalid reminder format or time value.</b><br/>\
                  Usage: <code>!remind [daily|weekly] &lt;time&gt; &lt;message&gt;</code><br/>\
                  Examples: <code>!remind 10s check oven</code>, <code>!remind daily 8h morning standup</code>"
                     .to_string(),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+
+    async fn setup_test_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_handle_reminder_set_list_cancel() {
+        let pool = setup_test_db().await;
+
+        let res_set = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 10s Check oven")
+            .await
+            .unwrap();
+        assert!(res_set.contains("Reminder #1 set!"));
+
+        let res_list = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list")
+            .await
+            .unwrap();
+        assert!(res_list.contains("Pending Reminders for bob"));
+        assert!(res_list.contains("Check oven"));
+
+        let res_cancel = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind cancel 1")
+            .await
+            .unwrap();
+        assert!(res_cancel.contains("Cancelled reminder"));
+
+        let res_empty_args = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind")
+            .await
+            .unwrap();
+        assert!(res_empty_args.contains("Usage:"));
     }
 }

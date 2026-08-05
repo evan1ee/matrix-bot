@@ -22,3 +22,24 @@ pub fn generate_help_html(module_helps: &[(String, Vec<CommandHelp>)]) -> String
     html.push_str("<i>Tip: You can use <code>!command</code> or mention me <code>@bot command</code>.</i>");
     html
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_help_html() {
+        let helps = vec![(
+            "TestModule".to_string(),
+            vec![CommandHelp {
+                name: "test".to_string(),
+                usage: "!test".to_string(),
+                description: "Test description".to_string(),
+            }],
+        )];
+
+        let html = generate_help_html(&helps);
+        assert!(html.contains("TestModule Module:"));
+        assert!(html.contains("<code>!test</code> - Test description"));
+    }
+}

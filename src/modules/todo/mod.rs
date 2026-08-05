@@ -25,13 +25,13 @@ impl BotModule for TodoModule {
         vec![
             CommandHelp {
                 name: "todo add".to_string(),
-                usage: "!todo add <task>".to_string(),
-                description: "Add a new task to your list".to_string(),
+                usage: "!todo add [[high|low]] <task>".to_string(),
+                description: "Add a new task (supports inline priority like [high])".to_string(),
             },
             CommandHelp {
                 name: "todo list".to_string(),
-                usage: "!todo [list|my|room]".to_string(),
-                description: "View your personal or room-wide tasks".to_string(),
+                usage: "!todo [list|room] [page]".to_string(),
+                description: "View personal or room tasks with pagination".to_string(),
             },
             CommandHelp {
                 name: "todo done".to_string(),
@@ -42,6 +42,11 @@ impl BotModule for TodoModule {
                 name: "todo priority".to_string(),
                 usage: "!todo priority <id> <low|medium|high>".to_string(),
                 description: "Change task priority".to_string(),
+            },
+            CommandHelp {
+                name: "todo due".to_string(),
+                usage: "!todo due <id> <time>".to_string(),
+                description: "Set task due date (e.g. !todo due 1 2d)".to_string(),
             },
             CommandHelp {
                 name: "todo edit".to_string(),

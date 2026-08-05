@@ -62,7 +62,8 @@ pub fn register_handlers(
                 );
 
                 if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db).await {
-                    let content = RoomMessageEventContent::text_html(&reply_html, &reply_html);
+                    let plain_text = crate::utils::strip_html(&reply_html);
+                    let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
                     if let Err(err) = room.send(content).await {
                         error!("Failed to send message to room {}: {:?}", room.room_id(), err);
                     }
