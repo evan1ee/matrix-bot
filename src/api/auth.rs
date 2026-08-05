@@ -6,6 +6,8 @@ use axum::{
 };
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use matrix_sdk::ruma::{ServerName, UserId};
+use matrix_sdk::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::db::Database;
@@ -186,7 +188,7 @@ pub async fn login(
         }
     }
 
-    // 2. Fallback: Authenticate directly against the Matrix Homeserver
+    // 2. Fallback: Authenticate directly against the Matrix Homeserver with Well-Known discovery
     if let Some(matrix_user_id) = authenticate_matrix_user(&state, &payload.username, &payload.password).await {
         let token = generate_jwt(&matrix_user_id, &state.jwt_secret)
             .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -201,11 +203,35 @@ pub async fn login(
     Err(ApiError::unauthorized("Invalid username or password"))
 }
 
+async fn get_matrix_sdk_client(homeserver_input: &str) -> Option<Client> {
+    let clean_domain = homeserver_input
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+
+    if let Ok(server_name) = ServerName::parse(clean_domain) {
+        if let Ok(c) = Client::builder().server_name(&server_name).build().await {
+            return Some(c);
+        }
+    }
+
+    let fallback_url = if homeserver_input.starts_with("http://") || homeserver_input.starts_with("https://") {
+        homeserver_input.to_string()
+    } else {
+        format!("https://{}", clean_domain)
+    };
+
+    Client::builder().homeserver_url(&fallback_url).build().await.ok()
+}
+
 async fn validate_matrix_access_token(state: &ApiState, token: &str) -> Option<String> {
-    let url = format!("{}/_matrix/client/v3/account/whoami", state.homeserver.trim_end_matches('/'));
+    let client = get_matrix_sdk_client(&state.homeserver).await?;
+    let hs_url = client.homeserver().to_string();
+    let whoami_url = format!("{}/_matrix/client/v3/account/whoami", hs_url.trim_end_matches('/'));
+
     let res = state
         .http_client
-        .get(&url)
+        .get(&whoami_url)
         .bearer_auth(token)
         .send()
         .await
@@ -224,34 +250,27 @@ async fn validate_matrix_access_token(state: &ApiState, token: &str) -> Option<S
 }
 
 async fn authenticate_matrix_user(state: &ApiState, username: &str, password: &str) -> Option<String> {
-    let url = format!("{}/_matrix/client/v3/login", state.homeserver.trim_end_matches('/'));
-    
-    let login_body = serde_json::json!({
-        "type": "m.login.password",
-        "identifier": {
-            "type": "m.id.user",
-            "user": username
-        },
-        "password": password
-    });
+    let homeserver_input = &state.homeserver;
+    let clean_domain = homeserver_input
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
 
-    let res = state
-        .http_client
-        .post(&url)
-        .json(&login_body)
-        .send()
-        .await
-        .ok()?;
-
-    if res.status().is_success() {
-        #[derive(Deserialize)]
-        struct MatrixLoginRes {
-            user_id: String,
-        }
-        let data: MatrixLoginRes = res.json().await.ok()?;
-        Some(data.user_id)
+    let user_id = if username.starts_with('@') {
+        UserId::parse(username).ok()?
     } else {
-        None
+        let raw_id = format!("@{}:{}", username, clean_domain);
+        UserId::parse(&raw_id).ok()?
+    };
+
+    let client = get_matrix_sdk_client(&state.homeserver).await?;
+
+    match client.matrix_auth().login_username(&user_id, password).send().await {
+        Ok(res) => Some(res.user_id.to_string()),
+        Err(err) => {
+            tracing::warn!("Matrix authentication failed for {}: {:?}", username, err);
+            None
+        }
     }
 }
 
