@@ -1,4 +1,4 @@
-# Matrix Hello Bot (Rust) 🦀
+# Matrix Bot (Rust) 🦀
 
 A production-ready, highly modular, multi-feature Matrix bot written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk) and [`sqlx`](https://github.com/launchbadge/sqlx).
 
@@ -80,7 +80,7 @@ MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=your_optional_e2ee_recovery_key
 DATABASE_URL=sqlite://bot_data.db?mode=rwc
-RUST_LOG=info,matrix_hello_bot=debug,matrix_sdk=info
+RUST_LOG=info,matrix_bot=debug,matrix_sdk=info
 ```
 
 ### 3. Run & Test
@@ -97,7 +97,7 @@ cargo run
 
 ## 🚀 Future Roadmap & Planned Features
 
-We are actively expanding `matrix-hello-bot` into a comprehensive personal assistant platform. Planned future modules include:
+We are actively expanding `matrix-bot` into a comprehensive personal assistant platform. Planned future modules include:
 
 - 📈 **Portfolio Management Module (`src/modules/portfolio/`)**:
   - Real-time crypto & stock price tracking (`!portfolio add 1.5 BTC`, `!portfolio quote SOL`).

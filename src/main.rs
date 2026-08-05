@@ -17,11 +17,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,matrix_hello_bot=debug,matrix_sdk=info")),
+                .unwrap_or_else(|_| EnvFilter::new("info,matrix_bot=debug,matrix_sdk=info")),
         )
         .init();
 
-    info!("Starting Modular Production Matrix Hello Bot...");
+    info!("Starting Modular Production Matrix Bot...");
 
     let config = Config::from_env()?;
     let bot = MatrixBot::new(&config).await?;

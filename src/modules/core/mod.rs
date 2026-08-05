@@ -49,7 +49,7 @@ impl BotModule for CoreModule {
             "hello" | "hi" => {
                 if ctx.raw_args.is_empty() {
                     Some(format!(
-                        "👋 Hello, {}! Greetings from <b>matrix-hello-bot</b> written in Rust! 🦀",
+                        "👋 Hello, {}! Greetings from <b>matrix-bot</b> written in Rust! 🦀",
                         html_escape(&ctx.sender_name)
                     ))
                 } else {
@@ -59,14 +59,14 @@ impl BotModule for CoreModule {
                     ))
                 }
             }
-            "ping" => Some("🏓 <b>Pong!</b> Matrix Hello Bot is active and running!".to_string()),
+            "ping" => Some("🏓 <b>Pong!</b> Matrix Bot is active and running!".to_string()),
             "help" => {
                 let guard = self.registry_ref.read().await;
                 if let Some(registry) = guard.as_ref() {
                     let helps = registry.get_all_help();
                     Some(help::generate_help_html(&helps))
                 } else {
-                    Some("🤖 <b>Matrix Hello Bot</b> (Core commands: !hello, !ping, !help)".to_string())
+                    Some("🤖 <b>Matrix Bot</b> (Core commands: !hello, !ping, !help)".to_string())
                 }
             }
             _ => None,

@@ -1,6 +1,6 @@
 # AGENTS.md — Development & Architecture Guidelines for AI Agents & Developers
 
-This document defines the architectural conventions, coding rules, and development practices for working on `matrix-hello-bot`.
+This document defines the architectural conventions, coding rules, and development practices for working on `matrix-bot`.
 
 ---
 

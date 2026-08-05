@@ -75,8 +75,8 @@ impl BotClient {
             client
                 .matrix_auth()
                 .login_username(&user_id, &config.password)
-                .device_id("RUST_HELLO_BOT_SESSION")
-                .initial_device_display_name("Rust Matrix Hello Bot")
+                .device_id("RUST_MATRIX_BOT_SESSION")
+                .initial_device_display_name("Rust Matrix Bot")
                 .send()
                 .await
                 .context("Failed to log in to Matrix server")?;

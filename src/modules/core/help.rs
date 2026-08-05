@@ -2,7 +2,7 @@ use crate::modules::CommandHelp;
 use crate::utils::html_escape;
 
 pub fn generate_help_html(module_helps: &[(String, Vec<CommandHelp>)]) -> String {
-    let mut html = String::from("🤖 <b>Matrix Hello Bot Commands</b><br/><br/>");
+    let mut html = String::from("🤖 <b>Matrix Bot Commands</b><br/><br/>");
 
     for (module_name, commands) in module_helps {
         if commands.is_empty() {
