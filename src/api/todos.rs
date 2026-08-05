@@ -5,9 +5,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::error::ApiError;
-
 use crate::api::auth::{ApiState, AuthUser};
+use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
@@ -87,13 +86,24 @@ pub async fn create_todo(
         .map(TodoPriority::from_str)
         .unwrap_or(TodoPriority::Medium);
 
-    let sender_mxid = format!("@web-{}:api", user.username);
+    let (sender_mxid, sender_name) = if user.username.starts_with('@') {
+        let name = user
+            .username
+            .trim_start_matches('@')
+            .split(':')
+            .next()
+            .unwrap_or(&user.username)
+            .to_string();
+        (user.username.clone(), name)
+    } else {
+        (format!("@web-{}:api", user.username), user.username.clone())
+    };
 
     let item = TodoRepository::add(
         &state.db.pool,
         &payload.room_id,
         &sender_mxid,
-        &user.username,
+        &sender_name,
         &payload.text,
         priority,
     )
@@ -199,6 +209,8 @@ mod tests {
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "secret".to_string(),
             registration_secret: None,
+            homeserver: "https://matrix.org".to_string(),
+            http_client: reqwest::Client::new(),
         };
         let user = AuthUser {
             username: "alice".to_string(),

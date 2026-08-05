@@ -23,6 +23,8 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
         broadcaster,
         jwt_secret: config.jwt_secret.clone(),
         registration_secret: config.registration_secret.clone(),
+        homeserver: config.homeserver.clone(),
+        http_client: reqwest::Client::new(),
     };
 
     let cors = CorsLayer::new()

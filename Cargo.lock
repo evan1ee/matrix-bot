@@ -1838,6 +1838,7 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "matrix-sdk",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",

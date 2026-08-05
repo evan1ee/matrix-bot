@@ -62,6 +62,8 @@ pub struct ApiState {
     pub broadcaster: crate::events::EventBroadcaster,
     pub jwt_secret: String,
     pub registration_secret: Option<String>,
+    pub homeserver: String,
+    pub http_client: reqwest::Client,
 }
 
 impl FromRef<ApiState> for Database {
@@ -92,14 +94,31 @@ where
         }
 
         let token = &auth_header[7..];
+
+        // 1. Try Matrix Access Token validation (if starts with syt_ or token decode fails)
+        if token.starts_with("syt_") {
+            if let Some(user_id) = validate_matrix_access_token(&api_state, token).await {
+                return Ok(AuthUser { username: user_id });
+            } else {
+                return Err(ApiError::unauthorized("Invalid or expired Matrix access token"));
+            }
+        }
+
+        // 2. Try Local API JWT decoding
         let keys = JwtKeys::new(api_state.jwt_secret.as_bytes());
-
-        let token_data = decode::<Claims>(token, &keys.decoding, &Validation::default())
-            .map_err(|_| ApiError::unauthorized("Invalid or expired token"))?;
-
-        Ok(AuthUser {
-            username: token_data.claims.sub,
-        })
+        match decode::<Claims>(token, &keys.decoding, &Validation::default()) {
+            Ok(token_data) => Ok(AuthUser {
+                username: token_data.claims.sub,
+            }),
+            Err(_) => {
+                // 3. Fallback: try checking if it's a raw Matrix Access Token that doesn't start with syt_
+                if let Some(user_id) = validate_matrix_access_token(&api_state, token).await {
+                    Ok(AuthUser { username: user_id })
+                } else {
+                    Err(ApiError::unauthorized("Invalid or expired authentication token"))
+                }
+            }
+        }
     }
 }
 
@@ -128,9 +147,9 @@ pub async fn register(
         .await;
 
     if let Err(err) = res {
-        return Err(ApiError::bad_request(
-            format!("Username already exists or database error: {}", err),
-        ));
+        return Err(ApiError::bad_request(format!(
+            "Username already exists or database error: {}", err
+        )));
     }
 
     let token = generate_jwt(&payload.username, &state.jwt_secret)
@@ -147,30 +166,93 @@ pub async fn login(
     State(state): State<ApiState>,
     Json(payload): Json<AuthPayload>,
 ) -> Result<Json<AuthResponse>, ApiError> {
+    // 1. Try local database authentication first
     let row: Option<(String,)> = sqlx::query_as("SELECT password_hash FROM web_users WHERE username = ?")
         .bind(&payload.username)
         .fetch_optional(&state.db.pool)
         .await
         .map_err(ApiError::from)?;
 
-    let (stored_hash,) = match row {
-        Some(r) => r,
-        None => return Err(ApiError::unauthorized("Invalid username or password")),
-    };
+    if let Some((stored_hash,)) = row {
+        if verify(&payload.password, &stored_hash).unwrap_or(false) {
+            let token = generate_jwt(&payload.username, &state.jwt_secret)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let valid = verify(&payload.password, &stored_hash).unwrap_or(false);
-    if !valid {
-        return Err(ApiError::unauthorized("Invalid username or password"));
+            return Ok(Json(AuthResponse {
+                token,
+                token_type: "Bearer".to_string(),
+                username: payload.username,
+            }));
+        }
     }
 
-    let token = generate_jwt(&payload.username, &state.jwt_secret)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    // 2. Fallback: Authenticate directly against the Matrix Homeserver
+    if let Some(matrix_user_id) = authenticate_matrix_user(&state, &payload.username, &payload.password).await {
+        let token = generate_jwt(&matrix_user_id, &state.jwt_secret)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    Ok(Json(AuthResponse {
-        token,
-        token_type: "Bearer".to_string(),
-        username: payload.username,
-    }))
+        return Ok(Json(AuthResponse {
+            token,
+            token_type: "Bearer".to_string(),
+            username: matrix_user_id,
+        }));
+    }
+
+    Err(ApiError::unauthorized("Invalid username or password"))
+}
+
+async fn validate_matrix_access_token(state: &ApiState, token: &str) -> Option<String> {
+    let url = format!("{}/_matrix/client/v3/account/whoami", state.homeserver.trim_end_matches('/'));
+    let res = state
+        .http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+
+    if res.status().is_success() {
+        #[derive(Deserialize)]
+        struct WhoAmI {
+            user_id: String,
+        }
+        let data: WhoAmI = res.json().await.ok()?;
+        Some(data.user_id)
+    } else {
+        None
+    }
+}
+
+async fn authenticate_matrix_user(state: &ApiState, username: &str, password: &str) -> Option<String> {
+    let url = format!("{}/_matrix/client/v3/login", state.homeserver.trim_end_matches('/'));
+    
+    let login_body = serde_json::json!({
+        "type": "m.login.password",
+        "identifier": {
+            "type": "m.id.user",
+            "user": username
+        },
+        "password": password
+    });
+
+    let res = state
+        .http_client
+        .post(&url)
+        .json(&login_body)
+        .send()
+        .await
+        .ok()?;
+
+    if res.status().is_success() {
+        #[derive(Deserialize)]
+        struct MatrixLoginRes {
+            user_id: String,
+        }
+        let data: MatrixLoginRes = res.json().await.ok()?;
+        Some(data.user_id)
+    } else {
+        None
+    }
 }
 
 fn generate_jwt(username: &str, secret: &str) -> Result<String, jsonwebtoken::errors::Error> {
@@ -213,6 +295,8 @@ mod tests {
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "test_secret".to_string(),
             registration_secret: None,
+            homeserver: "https://matrix.org".to_string(),
+            http_client: reqwest::Client::new(),
         };
 
         let payload = RegisterPayload {

@@ -38,6 +38,8 @@ mod tests {
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "secret".to_string(),
             registration_secret: None,
+            homeserver: "https://matrix.org".to_string(),
+            http_client: reqwest::Client::new(),
         };
 
         let res = health_check(State(state)).await;

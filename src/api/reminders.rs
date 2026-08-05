@@ -6,9 +6,8 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::error::ApiError;
-
 use crate::api::auth::{ApiState, AuthUser};
+use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::reminder::models::{RecurrencePattern, Reminder};
 use crate::modules::reminder::repository::ReminderRepository;
@@ -90,13 +89,24 @@ pub async fn create_reminder(
         .map(RecurrencePattern::from_str)
         .unwrap_or(RecurrencePattern::None);
 
-    let sender_mxid = format!("@web-{}:api", user.username);
+    let (sender_mxid, sender_name) = if user.username.starts_with('@') {
+        let name = user
+            .username
+            .trim_start_matches('@')
+            .split(':')
+            .next()
+            .unwrap_or(&user.username)
+            .to_string();
+        (user.username.clone(), name)
+    } else {
+        (format!("@web-{}:api", user.username), user.username.clone())
+    };
 
     let reminder = ReminderRepository::create(
         &state.db.pool,
         &payload.room_id,
         &sender_mxid,
-        &user.username,
+        &sender_name,
         &payload.message,
         trigger_at,
         recurrence,
@@ -152,6 +162,8 @@ mod tests {
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "secret".to_string(),
             registration_secret: None,
+            homeserver: "https://matrix.org".to_string(),
+            http_client: reqwest::Client::new(),
         };
         let user = AuthUser {
             username: "bob".to_string(),
