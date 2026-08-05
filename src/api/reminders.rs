@@ -130,3 +130,54 @@ pub async fn delete_reminder(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+    use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
+
+    #[tokio::test]
+    async fn test_reminder_api_crud() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState {
+            db: crate::db::Database { pool },
+            broadcaster: EventBroadcaster::default(),
+            jwt_secret: "secret".to_string(),
+        };
+        let user = AuthUser {
+            username: "bob".to_string(),
+        };
+
+        // Create
+        let req = CreateReminderRequest {
+            room_id: "!room:1".to_string(),
+            message: "Meeting".to_string(),
+            seconds: 60,
+            recurrence: Some("daily".to_string()),
+        };
+        let created = create_reminder(State(state.clone()), user.clone(), Json(req))
+            .await
+            .unwrap();
+        assert_eq!(created.message, "Meeting");
+
+        // List
+        let query = ReminderQuery {
+            room_id: Some("!room:1".to_string()),
+            page: None,
+            limit: None,
+        };
+        let list = list_reminders(State(state.clone()), user.clone(), Query(query))
+            .await
+            .unwrap();
+        assert_eq!(list.items.len(), 1);
+
+        // Delete
+        let status = delete_reminder(State(state), user, Path(created.id))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+}

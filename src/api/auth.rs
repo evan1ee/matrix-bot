@@ -176,13 +176,43 @@ fn generate_jwt(username: &str, secret: &str) -> Result<String, jsonwebtoken::er
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::schema::run_migrations;
+    use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
-    #[test]
-    fn test_jwt_generation_and_validation() {
+    #[tokio::test]
+    async fn test_jwt_generation_and_validation() {
         let secret = "my_test_secret_key_12345";
         let token = generate_jwt("alice", secret).unwrap();
         let keys = JwtKeys::new(secret.as_bytes());
         let decoded = decode::<Claims>(&token, &keys.decoding, &Validation::default()).unwrap();
         assert_eq!(decoded.claims.sub, "alice");
+    }
+
+    #[tokio::test]
+    async fn test_register_and_login_flow() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState {
+            db: crate::db::Database { pool },
+            broadcaster: EventBroadcaster::default(),
+            jwt_secret: "test_secret".to_string(),
+        };
+
+        let payload = AuthPayload {
+            username: "bob".to_string(),
+            password: "password123".to_string(),
+        };
+
+        let reg_res = register(State(state.clone()), Json(payload)).await.unwrap();
+        assert_eq!(reg_res.username, "bob");
+        assert!(!reg_res.token.is_empty());
+
+        let login_payload = AuthPayload {
+            username: "bob".to_string(),
+            password: "password123".to_string(),
+        };
+        let login_res = login(State(state), Json(login_payload)).await.unwrap();
+        assert_eq!(login_res.username, "bob");
     }
 }

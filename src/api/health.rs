@@ -21,3 +21,26 @@ pub async fn health_check(State(state): State<ApiState>) -> Json<HealthResponse>
         db_status: if db_ok { "connected".to_string() } else { "disconnected".to_string() },
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+    use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState {
+            db: crate::db::Database { pool },
+            broadcaster: EventBroadcaster::default(),
+            jwt_secret: "secret".to_string(),
+        };
+
+        let res = health_check(State(state)).await;
+        assert_eq!(res.status, "ok");
+        assert_eq!(res.db_status, "connected");
+    }
+}
