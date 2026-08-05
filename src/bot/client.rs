@@ -18,11 +18,16 @@ impl BotClient {
             .trim_start_matches("http://")
             .trim_end_matches('/');
 
+        // Ensure data directory exists for matrix-sdk sqlite store
+        tokio::fs::create_dir_all("data").await.ok();
+
+        let store_path = "data/bot_store";
+
         let client = if let Ok(server_name) = ServerName::parse(clean_domain) {
             info!("Attempting Server / Well-Known Discovery for: {}", server_name);
             match Client::builder()
                 .server_name(&server_name)
-                .sqlite_store("bot_store", None)
+                .sqlite_store(store_path, None)
                 .build()
                 .await
             {
@@ -40,7 +45,7 @@ impl BotClient {
 
                     Client::builder()
                         .homeserver_url(&fallback_url)
-                        .sqlite_store("bot_store", None)
+                        .sqlite_store(store_path, None)
                         .build()
                         .await
                         .context("Failed to build Matrix client with fallback URL")?
@@ -55,7 +60,7 @@ impl BotClient {
             info!("Using direct homeserver URL: {}", fallback_url);
             Client::builder()
                 .homeserver_url(&fallback_url)
-                .sqlite_store("bot_store", None)
+                .sqlite_store(store_path, None)
                 .build()
                 .await
                 .context("Failed to build Matrix client with direct URL")?
