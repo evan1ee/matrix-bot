@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Pattern for recurring reminders (none, daily, or weekly).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecurrencePattern {
     None,
@@ -9,6 +10,7 @@ pub enum RecurrencePattern {
 }
 
 impl RecurrencePattern {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             RecurrencePattern::None => "none",
@@ -27,6 +29,38 @@ impl RecurrencePattern {
     }
 }
 
+/// Status of a reminder in the database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReminderStatus {
+    Pending,
+    Triggered,
+    Cancelled,
+    Failed,
+}
+
+impl ReminderStatus {
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReminderStatus::Pending => "pending",
+            ReminderStatus::Triggered => "triggered",
+            ReminderStatus::Cancelled => "cancelled",
+            ReminderStatus::Failed => "failed",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "triggered" => ReminderStatus::Triggered,
+            "cancelled" => ReminderStatus::Cancelled,
+            "failed" => ReminderStatus::Failed,
+            _ => ReminderStatus::Pending,
+        }
+    }
+}
+
+/// A reminder stored in the database.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Reminder {
@@ -58,5 +92,19 @@ mod tests {
         assert_eq!(RecurrencePattern::Daily.as_str(), "daily");
         assert_eq!(RecurrencePattern::Weekly.as_str(), "weekly");
         assert_eq!(RecurrencePattern::None.as_str(), "none");
+    }
+
+    #[test]
+    fn test_reminder_status_conversion() {
+        assert_eq!(ReminderStatus::from_str("pending"), ReminderStatus::Pending);
+        assert_eq!(ReminderStatus::from_str("triggered"), ReminderStatus::Triggered);
+        assert_eq!(ReminderStatus::from_str("cancelled"), ReminderStatus::Cancelled);
+        assert_eq!(ReminderStatus::from_str("failed"), ReminderStatus::Failed);
+        assert_eq!(ReminderStatus::from_str("unknown"), ReminderStatus::Pending);
+
+        assert_eq!(ReminderStatus::Pending.as_str(), "pending");
+        assert_eq!(ReminderStatus::Triggered.as_str(), "triggered");
+        assert_eq!(ReminderStatus::Cancelled.as_str(), "cancelled");
+        assert_eq!(ReminderStatus::Failed.as_str(), "failed");
     }
 }

@@ -37,6 +37,7 @@ mod tests {
             db: crate::db::Database { pool },
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "secret".to_string(),
+            registration_secret: None,
         };
 
         let res = health_check(State(state)).await;

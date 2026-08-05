@@ -1,7 +1,7 @@
 use axum::{
     async_trait,
     extract::{FromRef, FromRequestParts, State},
-    http::{request::Parts, StatusCode},
+    http::request::Parts,
     Json,
 };
 use bcrypt::{hash, verify, DEFAULT_COST};
@@ -9,6 +9,7 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 
 use crate::db::Database;
+use crate::error::ApiError;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -20,6 +21,13 @@ pub struct Claims {
 pub struct AuthPayload {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterPayload {
+    pub username: String,
+    pub password: String,
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +61,7 @@ pub struct ApiState {
     pub db: Database,
     pub broadcaster: crate::events::EventBroadcaster,
     pub jwt_secret: String,
+    pub registration_secret: Option<String>,
 }
 
 impl FromRef<ApiState> for Database {
@@ -67,7 +76,7 @@ where
     S: Send + Sync,
     ApiState: FromRef<S>,
 {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let api_state = ApiState::from_ref(state);
@@ -76,17 +85,17 @@ where
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header"))?;
+            .ok_or_else(|| ApiError::unauthorized("Missing Authorization header"))?;
 
         if !auth_header.starts_with("Bearer ") {
-            return Err((StatusCode::UNAUTHORIZED, "Invalid token scheme"));
+            return Err(ApiError::unauthorized("Invalid token scheme"));
         }
 
         let token = &auth_header[7..];
         let keys = JwtKeys::new(api_state.jwt_secret.as_bytes());
 
         let token_data = decode::<Claims>(token, &keys.decoding, &Validation::default())
-            .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token"))?;
+            .map_err(|_| ApiError::unauthorized("Invalid or expired token"))?;
 
         Ok(AuthUser {
             username: token_data.claims.sub,
@@ -96,14 +105,21 @@ where
 
 pub async fn register(
     State(state): State<ApiState>,
-    Json(payload): Json<AuthPayload>,
-) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+    Json(payload): Json<RegisterPayload>,
+) -> Result<Json<AuthResponse>, ApiError> {
+    if let Some(ref required_secret) = state.registration_secret {
+        let provided_secret = payload.secret.as_deref().unwrap_or("");
+        if required_secret != provided_secret {
+            return Err(ApiError::unauthorized("Invalid registration secret"));
+        }
+    }
+
     if payload.username.trim().is_empty() || payload.password.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Username and password required".to_string()));
+        return Err(ApiError::bad_request("Username and password required"));
     }
 
     let password_hash = hash(payload.password, DEFAULT_COST)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let res = sqlx::query("INSERT INTO web_users (username, password_hash) VALUES (?, ?)")
         .bind(&payload.username)
@@ -112,14 +128,13 @@ pub async fn register(
         .await;
 
     if let Err(err) = res {
-        return Err((
-            StatusCode::BAD_REQUEST,
+        return Err(ApiError::bad_request(
             format!("Username already exists or database error: {}", err),
         ));
     }
 
     let token = generate_jwt(&payload.username, &state.jwt_secret)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(AuthResponse {
         token,
@@ -131,25 +146,25 @@ pub async fn register(
 pub async fn login(
     State(state): State<ApiState>,
     Json(payload): Json<AuthPayload>,
-) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+) -> Result<Json<AuthResponse>, ApiError> {
     let row: Option<(String,)> = sqlx::query_as("SELECT password_hash FROM web_users WHERE username = ?")
         .bind(&payload.username)
         .fetch_optional(&state.db.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(ApiError::from)?;
 
     let (stored_hash,) = match row {
         Some(r) => r,
-        None => return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string())),
+        None => return Err(ApiError::unauthorized("Invalid username or password")),
     };
 
     let valid = verify(&payload.password, &stored_hash).unwrap_or(false);
     if !valid {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()));
+        return Err(ApiError::unauthorized("Invalid username or password"));
     }
 
     let token = generate_jwt(&payload.username, &state.jwt_secret)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(AuthResponse {
         token,
@@ -197,11 +212,13 @@ mod tests {
             db: crate::db::Database { pool },
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "test_secret".to_string(),
+            registration_secret: None,
         };
 
-        let payload = AuthPayload {
+        let payload = RegisterPayload {
             username: "bob".to_string(),
             password: "password123".to_string(),
+            secret: None,
         };
 
         let reg_res = register(State(state.clone()), Json(payload)).await.unwrap();

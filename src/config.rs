@@ -11,6 +11,8 @@ pub struct Config {
     pub api_host: String,
     pub api_port: u16,
     pub jwt_secret: String,
+    pub registration_secret: Option<String>,
+    pub db_max_connections: u32,
 }
 
 impl Config {
@@ -42,6 +44,13 @@ impl Config {
         let jwt_secret = env::var("JWT_SECRET")
             .unwrap_or_else(|_| "matrix_bot_secret_jwt_token_key_change_in_production".to_string());
 
+        let registration_secret = env::var("API_REGISTRATION_SECRET").ok();
+
+        let db_max_connections: u32 = env::var("DATABASE_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(10);
+
         Ok(Self {
             homeserver,
             username,
@@ -51,6 +60,24 @@ impl Config {
             api_host,
             api_port,
             jwt_secret,
+            registration_secret,
+            db_max_connections,
         })
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.homeserver.is_empty() {
+            anyhow::bail!("MATRIX_HOMESERVER cannot be empty");
+        }
+        if self.username.is_empty() {
+            anyhow::bail!("MATRIX_USERNAME cannot be empty");
+        }
+        if self.password.is_empty() {
+            anyhow::bail!("MATRIX_PASSWORD cannot be empty");
+        }
+        if self.jwt_secret.len() < 16 {
+            tracing::warn!("JWT_SECRET is shorter than 16 characters — consider using a stronger secret in production");
+        }
+        Ok(())
     }
 }

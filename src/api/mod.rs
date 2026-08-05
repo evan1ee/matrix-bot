@@ -22,6 +22,7 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
         db,
         broadcaster,
         jwt_secret: config.jwt_secret.clone(),
+        registration_secret: config.registration_secret.clone(),
     };
 
     let cors = CorsLayer::new()

@@ -28,7 +28,7 @@ pub struct MatrixBot {
 impl MatrixBot {
     #[allow(dead_code)]
     pub async fn new(config: &Config) -> Result<Self> {
-        let db = Database::connect(&config.database_url).await?;
+        let db = Database::connect(&config.database_url, 10).await?;
         Self::new_with_db(config, db).await
     }
 

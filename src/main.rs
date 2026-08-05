@@ -28,7 +28,8 @@ async fn main() -> Result<()> {
     info!("Starting Modular Production Matrix Bot & Web API...");
 
     let config = Config::from_env()?;
-    let db = Database::connect(&config.database_url).await?;
+    config.validate()?;
+    let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
 
     // 1. Start background Axum REST API & Web Server

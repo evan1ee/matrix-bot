@@ -6,6 +6,8 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::error::ApiError;
+
 use crate::api::auth::{ApiState, AuthUser};
 use crate::events::SystemEvent;
 use crate::modules::reminder::models::{RecurrencePattern, Reminder};
@@ -37,7 +39,7 @@ pub async fn list_reminders(
     State(state): State<ApiState>,
     _user: AuthUser,
     Query(query): Query<ReminderQuery>,
-) -> Result<Json<ReminderListResponse>, (StatusCode, String)> {
+) -> Result<Json<ReminderListResponse>, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
@@ -51,7 +53,7 @@ pub async fn list_reminders(
         .bind(offset)
         .fetch_all(&state.db.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?
     } else {
         sqlx::query_as::<_, Reminder>(
             "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
@@ -60,7 +62,7 @@ pub async fn list_reminders(
         .bind(offset)
         .fetch_all(&state.db.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?
     };
 
     Ok(Json(ReminderListResponse { items, page, limit }))
@@ -70,12 +72,15 @@ pub async fn create_reminder(
     State(state): State<ApiState>,
     user: AuthUser,
     Json(payload): Json<CreateReminderRequest>,
-) -> Result<Json<Reminder>, (StatusCode, String)> {
+) -> Result<Json<Reminder>, ApiError> {
     if payload.message.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Message required".to_string()));
+        return Err(ApiError::bad_request("Message required"));
     }
     if payload.seconds == 0 {
-        return Err((StatusCode::BAD_REQUEST, "Seconds must be greater than 0".to_string()));
+        return Err(ApiError::bad_request("Seconds must be greater than 0"));
+    }
+    if payload.message.len() > 500 {
+        return Err(ApiError::bad_request("Message exceeds 500 character limit"));
     }
 
     let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
@@ -97,7 +102,7 @@ pub async fn create_reminder(
         recurrence,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(SystemEvent::ReminderCreated(reminder.clone()));
 
@@ -108,23 +113,23 @@ pub async fn delete_reminder(
     State(state): State<ApiState>,
     _user: AuthUser,
     Path(id): Path<i64>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ApiError> {
     let row: Option<(String,)> = sqlx::query_as("SELECT room_id FROM reminders WHERE id = ?")
         .bind(id)
         .fetch_optional(&state.db.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let (room_id,) = match row {
         Some(r) => r,
-        None => return Err((StatusCode::NOT_FOUND, "Reminder not found".to_string())),
+        None => return Err(ApiError::not_found("Reminder not found")),
     };
 
     sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
         .bind(id)
         .execute(&state.db.pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(SystemEvent::ReminderCancelled { id, room_id });
 
@@ -146,6 +151,7 @@ mod tests {
             db: crate::db::Database { pool },
             broadcaster: EventBroadcaster::default(),
             jwt_secret: "secret".to_string(),
+            registration_secret: None,
         };
         let user = AuthUser {
             username: "bob".to_string(),
