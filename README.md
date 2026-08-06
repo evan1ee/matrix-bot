@@ -23,7 +23,7 @@ A production-ready, highly modular, multi-feature Matrix bot & REST API engine w
   - Full CRUD REST API for To-Dos and Reminders, enabling Web App integration.
   - **Native Matrix Authentication**: Authenticate via Matrix Homeserver password (`POST /api/v1/auth/login` with `@user:domain`) or pass Matrix Access Tokens (`syt_...`) directly in Bearer headers. Automatic Matrix Well-Known server discovery included!
   - **Local JWT Authentication** (`/api/v1/auth/register`, `/api/v1/auth/login`) with `bcrypt` password hashing and optional `API_REGISTRATION_SECRET` gating.
-  - **Server-Sent Events (SSE)** real-time stream (`/api/v1/events`) with `event:` header discrimination (`todo_created`, `reminder_triggered`, etc.).
+  - **Server-Sent Events (SSE)** real-time stream (`/api/v1/events`), scoped to the authenticated user — a client receives only events for rows it owns. Messages are unnamed, carrying `{"type": "TodoCreated", "payload": {...}}` in the body, so browsers read them from `EventSource.onmessage` and discriminate on `type`.
   - **CORS** middleware & static Single-Page Application web server built-in.
   - Standardized JSON error response wrapper (`ApiError` with `{ "error": "...", "code": 400 }`).
 - 💾 **SQLx Persistence Layer**:
@@ -80,7 +80,8 @@ A production-ready, highly modular, multi-feature Matrix bot & REST API engine w
 | `GET` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | List pending reminders (query params: `room_id`, `page`, `limit`) |
 | `POST` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | Create timer in seconds (500 char max limit) |
 | `DELETE` | `/api/v1/reminders/:id` | Yes (Bearer/Matrix `syt_`) | Cancel reminder by ID |
-| `GET` | `/api/v1/events` | Yes (Bearer/Matrix `syt_`) | SSE real-time stream (`event:` type discrimination) |
+| `POST` | `/api/v1/events/ticket` | Yes (Bearer/Matrix `syt_`) | Exchange the API token for a 30-second SSE stream ticket |
+| `GET` | `/api/v1/events` | Yes (Bearer, or `?ticket=`) | SSE stream of the caller's own events (`type` field in the JSON body) |
 
 ---
 

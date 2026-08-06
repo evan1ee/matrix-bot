@@ -14,6 +14,7 @@ This document defines the architectural conventions, coding rules, and developme
    - Web API endpoints live in `src/api/` (`auth.rs`, `todos.rs`, `reminders.rs`, `sse.rs`, `health.rs`).
    - Use `ApiError` in [`src/error.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/src/error.rs) for all REST API error responses to guarantee standardized JSON `{ "error": "...", "code": 400 }` output.
    - Every state-modifying action (create, update, delete, trigger) must emit a `SystemEvent` via `EventBroadcaster` in [`src/events.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/src/events.rs) for real-time SSE streaming.
+   - Every `SystemEvent` variant must expose its owner through `SystemEvent::owner_id()`. The broadcast channel is process-wide and the SSE handler delivers an event only to that owner — a variant with no owner would either leak across users or never be delivered.
    - Enforce input length validation (max 500 chars) on all API payload strings to prevent DoS/database bloat.
 
 3. **Strict File Line Limit (< 500 Lines)**:
