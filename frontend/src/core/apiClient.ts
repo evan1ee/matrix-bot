@@ -37,7 +37,18 @@ export async function fetchApi<T>(
     return {} as T;
   }
 
-  const data = await response.json();
+  let data: any;
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    try {
+      data = await response.json();
+    } catch {
+      data = { error: `Malformed JSON response from server (Status: ${response.status})` };
+    }
+  } else {
+    const rawText = await response.text();
+    data = { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
+  }
 
   if (!response.ok) {
     throw new Error(data.error || `HTTP error! Status: ${response.status}`);

@@ -1,7 +1,7 @@
 use axum::{response::IntoResponse, Json};
 use utoipa::OpenApi;
 
-use crate::api::{auth, health, reminders, sse, todos};
+use crate::api::{auth, health, reminders, rooms, sse, todos};
 use crate::error::ApiErrorResponse;
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
@@ -15,6 +15,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         auth::login,
         auth::get_current_user,
         auth::media_proxy,
+        rooms::list_rooms,
         todos::list_todos,
         todos::create_todo,
         todos::update_todo,
@@ -32,6 +33,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             auth::AuthResponse,
             auth::UserProfileResponse,
             auth::MediaProxyQuery,
+            rooms::JoinedRoomInfo,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,

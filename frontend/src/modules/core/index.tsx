@@ -1,8 +1,8 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchApi } from '../../core/apiClient';
+import { fetchApi, getAuthToken } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
-import { Activity, Radio, ShieldCheck, Database, Server } from 'lucide-react';
+import { Activity, Radio, Database, Server } from 'lucide-react';
 
 interface HealthResponse {
   status: string;
@@ -15,6 +15,8 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
   events = [],
   isConnected = false,
 }) => {
+  const hasToken = !!getAuthToken();
+
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ['health'],
     queryFn: () => fetchApi<HealthResponse>('/health'),
@@ -53,12 +55,14 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
             <span>SSE BROADCASTER</span>
-            <Radio className={`w-4 h-4 ${isConnected ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'}`} />
+            <Radio className={`w-4 h-4 ${!hasToken ? 'text-neutral-400 dark:text-neutral-500' : isConnected ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'}`} />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
-            {isConnected ? 'Stream Active' : 'Connecting...'}
+            {!hasToken ? 'Auth Required' : isConnected ? 'Stream Active' : 'Connecting...'}
           </div>
-          <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">Real-time System Events</div>
+          <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
+            {!hasToken ? 'Login to listen for real-time events' : 'Real-time System Events'}
+          </div>
         </div>
       </div>
 
@@ -74,7 +78,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
 
         {events.length === 0 ? (
           <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-850 rounded">
-            Listening for live Matrix & REST API events...
+            {!hasToken ? 'Please click "Login / Token" to view real-time system events.' : 'Listening for live Matrix & REST API events...'}
           </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">

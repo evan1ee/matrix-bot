@@ -19,72 +19,82 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) {
                 Ok(due_list) => {
                     for reminder in due_list {
                         info!(
-                            "Triggering due reminder #{} for {} in room {}",
+                            "Triggering due reminder #{} for {} (target room: {})",
                             reminder.id, reminder.sender_name, reminder.room_id
                         );
 
-                        let mut send_success = false;
+                        let alert_html = format!(
+                            "⏰ <b>REMINDER for {}!</b><br/>{}",
+                            html_escape(&reminder.sender_name),
+                            html_escape(&reminder.message)
+                        );
+                        let plain_text = strip_html(&alert_html);
+                        let alert_content = RoomMessageEventContent::text_html(&plain_text, &alert_html);
 
+                        // 1. Deliver to specific Matrix room if valid room_id
                         if let Ok(room_id) = <&RoomId>::try_from(reminder.room_id.as_str()) {
-                            if let Some(room) = ctx.client.get_room(room_id) {
-                                let alert_html = format!(
-                                    "⏰ <b>REMINDER for {}!</b><br/>{}",
-                                    html_escape(&reminder.sender_name),
-                                    html_escape(&reminder.message)
-                                );
-                                let plain_text = strip_html(&alert_html);
-                                let alert_content = RoomMessageEventContent::text_html(&plain_text, &alert_html);
-
-                                match room.send(alert_content).await {
+                            let room_opt = ctx.client.get_room(room_id);
+                            if let Some(room) = room_opt {
+                                match room.send(alert_content.clone()).await {
                                     Ok(_) => {
-                                        send_success = true;
-                                        info!("Successfully delivered reminder notification #{}", reminder.id);
+                                        info!("Successfully delivered reminder #{} to Matrix room {}", reminder.id, reminder.room_id);
                                     }
                                     Err(err) => {
-                                        error!("Failed to send reminder notification #{}: {:?}", reminder.id, err);
+                                        warn!("Failed sending reminder #{} to room {}: {:?}. Retrying join...", reminder.id, reminder.room_id, err);
+                                        if let Ok(joined) = ctx.client.join_room_by_id(room_id).await {
+                                            let _ = joined.send(alert_content.clone()).await;
+                                        }
                                     }
                                 }
                             } else {
-                                warn!("Bot is not joined to room {} for reminder #{}", reminder.room_id, reminder.id);
+                                warn!("Bot store missing room handle for {}. Joining room...", reminder.room_id);
+                                if let Ok(joined) = ctx.client.join_room_by_id(room_id).await {
+                                    let _ = joined.send(alert_content.clone()).await;
+                                }
                             }
-                        } else {
-                            error!("Invalid room_id {} for reminder #{}", reminder.room_id, reminder.id);
                         }
 
-                        if send_success {
-                            if let Some(broadcaster) = &ctx.broadcaster {
-                                broadcaster.send(crate::events::SystemEvent::ReminderTriggered(reminder.clone()));
-                            }
+                        // 2. Broadcast SystemEvent over SSE for real-time Web UI notification
+                        if let Some(ref broadcaster) = ctx.broadcaster {
+                            broadcaster.send(crate::events::SystemEvent::ReminderTriggered(reminder.clone()));
+                        }
 
-                            // Process recurrence or mark triggered
-                            match reminder.recurrence.as_str() {
-                                "daily" => {
-                                    let now = Utc::now();
-                                    let mut next_trigger = reminder.trigger_at + Duration::days(1);
-                                    while next_trigger <= now {
-                                        next_trigger = next_trigger + Duration::days(1);
-                                    }
-                                    let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
+                        // 3. Mark as triggered or reschedule (never leave stuck in 'pending'/Triggering... state)
+                        match reminder.recurrence.as_str() {
+                            "daily" => {
+                                let now = Utc::now();
+                                let mut next_trigger = reminder.trigger_at + Duration::days(1);
+                                while next_trigger <= now {
+                                    next_trigger = next_trigger + Duration::days(1);
                                 }
-                                "weekly" => {
-                                    let now = Utc::now();
-                                    let mut next_trigger = reminder.trigger_at + Duration::weeks(1);
-                                    while next_trigger <= now {
-                                        next_trigger = next_trigger + Duration::weeks(1);
-                                    }
-                                    let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
-                                }
-                                _ => {
-                                    let _ = ReminderRepository::mark_triggered(&ctx.db.pool, reminder.id).await;
-                                }
+                                let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
                             }
-                        } else {
-                            // Increment retry count on delivery failure
-                            if reminder.retry_count + 1 >= 5 {
-                                error!("Reminder #{} exceeded max retries (5). Marking failed.", reminder.id);
-                                let _ = ReminderRepository::mark_failed(&ctx.db.pool, reminder.id).await;
-                            } else {
-                                let _ = ReminderRepository::increment_retry(&ctx.db.pool, reminder.id).await;
+                            "weekly" => {
+                                let now = Utc::now();
+                                let mut next_trigger = reminder.trigger_at + Duration::weeks(1);
+                                while next_trigger <= now {
+                                    next_trigger = next_trigger + Duration::weeks(1);
+                                }
+                                let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
+                            }
+                            "monthly" => {
+                                let now = Utc::now();
+                                let mut next_trigger = reminder.trigger_at + Duration::days(30);
+                                while next_trigger <= now {
+                                    next_trigger = next_trigger + Duration::days(30);
+                                }
+                                let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
+                            }
+                            "yearly" => {
+                                let now = Utc::now();
+                                let mut next_trigger = reminder.trigger_at + Duration::days(365);
+                                while next_trigger <= now {
+                                    next_trigger = next_trigger + Duration::days(365);
+                                }
+                                let _ = ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await;
+                            }
+                            _ => {
+                                let _ = ReminderRepository::mark_triggered(&ctx.db.pool, reminder.id).await;
                             }
                         }
                     }

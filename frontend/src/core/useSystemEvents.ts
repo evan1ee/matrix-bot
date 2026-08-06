@@ -2,14 +2,23 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { registry } from './registry';
 import { SystemEvent } from './types';
+import { getAuthToken } from './apiClient';
 
-export function useSystemEvents() {
+export function useSystemEvents(token?: string | null) {
   const queryClient = useQueryClient();
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
 
+  const activeToken = token !== undefined ? token : getAuthToken();
+
   useEffect(() => {
-    const eventSource = new EventSource('/api/v1/events');
+    if (!activeToken) {
+      setIsConnected(false);
+      return;
+    }
+
+    const sseUrl = `/api/v1/events?token=${encodeURIComponent(activeToken)}`;
+    const eventSource = new EventSource(sseUrl);
 
     eventSource.onopen = () => {
       setIsConnected(true);
@@ -20,7 +29,7 @@ export function useSystemEvents() {
         const rawData = JSON.parse(event.data);
         const sysEvent: SystemEvent = {
           type: rawData.type || 'Event',
-          payload: rawData.data || rawData,
+          payload: rawData.payload !== undefined ? rawData.payload : rawData,
           timestamp: new Date().toLocaleTimeString(),
         };
 
@@ -44,7 +53,7 @@ export function useSystemEvents() {
     return () => {
       eventSource.close();
     };
-  }, [queryClient]);
+  }, [queryClient, activeToken]);
 
   return { events, isConnected };
 }

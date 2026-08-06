@@ -183,11 +183,21 @@
           "sse"
         ],
         "summary": "SSE endpoint streaming real-time system events to authenticated web clients.",
-        "description": "Each event includes an `event:` type field (e.g. `todo_created`, `reminder_triggered`)\nallowing frontends to selectively listen via `EventSource.addEventListener()`.",
+        "description": "Requires authentication (`AuthUser`). Emits default event stream objects containing `type` and `payload`.",
         "operationId": "sse_handler",
         "responses": {
           "200": {
             "description": "Server-Sent Events (SSE) live stream"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -370,6 +380,44 @@
           },
           "404": {
             "description": "Reminder not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rooms": {
+      "get": {
+        "tags": [
+          "rooms"
+        ],
+        "operationId": "list_rooms",
+        "responses": {
+          "200": {
+            "description": "List Matrix rooms joined by bot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JoinedRoomInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -741,6 +789,21 @@
           }
         }
       },
+      "JoinedRoomInfo": {
+        "type": "object",
+        "required": [
+          "room_id",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          }
+        }
+      },
       "MediaProxyQuery": {
         "type": "object",
         "required": [
@@ -762,11 +825,13 @@
       },
       "RecurrencePattern": {
         "type": "string",
-        "description": "Pattern for recurring reminders (none, daily, or weekly).",
+        "description": "Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).",
         "enum": [
           "None",
           "Daily",
-          "Weekly"
+          "Weekly",
+          "Monthly",
+          "Yearly"
         ]
       },
       "RegisterPayload": {

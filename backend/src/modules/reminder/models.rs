@@ -2,12 +2,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Pattern for recurring reminders (none, daily, or weekly).
+/// Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum RecurrencePattern {
     None,
     Daily,
     Weekly,
+    Monthly,
+    Yearly,
 }
 
 impl RecurrencePattern {
@@ -17,6 +19,8 @@ impl RecurrencePattern {
             RecurrencePattern::None => "none",
             RecurrencePattern::Daily => "daily",
             RecurrencePattern::Weekly => "weekly",
+            RecurrencePattern::Monthly => "monthly",
+            RecurrencePattern::Yearly => "yearly",
         }
     }
 
@@ -25,6 +29,8 @@ impl RecurrencePattern {
         match s.to_lowercase().as_str() {
             "daily" | "day" => RecurrencePattern::Daily,
             "weekly" | "week" => RecurrencePattern::Weekly,
+            "monthly" | "month" => RecurrencePattern::Monthly,
+            "yearly" | "year" => RecurrencePattern::Yearly,
             _ => RecurrencePattern::None,
         }
     }
@@ -87,11 +93,17 @@ mod tests {
         assert_eq!(RecurrencePattern::from_str("day"), RecurrencePattern::Daily);
         assert_eq!(RecurrencePattern::from_str("weekly"), RecurrencePattern::Weekly);
         assert_eq!(RecurrencePattern::from_str("week"), RecurrencePattern::Weekly);
+        assert_eq!(RecurrencePattern::from_str("monthly"), RecurrencePattern::Monthly);
+        assert_eq!(RecurrencePattern::from_str("month"), RecurrencePattern::Monthly);
+        assert_eq!(RecurrencePattern::from_str("yearly"), RecurrencePattern::Yearly);
+        assert_eq!(RecurrencePattern::from_str("year"), RecurrencePattern::Yearly);
         assert_eq!(RecurrencePattern::from_str("none"), RecurrencePattern::None);
         assert_eq!(RecurrencePattern::from_str("random"), RecurrencePattern::None);
 
         assert_eq!(RecurrencePattern::Daily.as_str(), "daily");
         assert_eq!(RecurrencePattern::Weekly.as_str(), "weekly");
+        assert_eq!(RecurrencePattern::Monthly.as_str(), "monthly");
+        assert_eq!(RecurrencePattern::Yearly.as_str(), "yearly");
         assert_eq!(RecurrencePattern::None.as_str(), "none");
     }
 

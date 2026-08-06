@@ -23,18 +23,49 @@ export interface ReminderListResponse {
   limit: number;
 }
 
+export interface JoinedRoomInfo {
+  room_id: string;
+  name: string;
+}
+
 export const ReminderMainView: React.FC = () => {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
-  const [seconds, setSeconds] = useState(60);
+  const [durationValue, setDurationValue] = useState<number>(5);
+  const [durationUnit, setDurationUnit] = useState<'seconds' | 'minutes' | 'hours' | 'days'>('minutes');
+  
+  // Custom Time Picker State
+  const [hour12, setHour12] = useState('09');
+  const [minute, setMinute] = useState('30');
+  const [amPm, setAmPm] = useState<'AM' | 'PM'>('AM');
+
   const [recurrence, setRecurrence] = useState('none');
-  const [roomId, setRoomId] = useState('!global:matrix.org');
+  const [roomId, setRoomId] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { data, isLoading } = useQuery<ReminderListResponse>({
     queryKey: ['reminders'],
     queryFn: () => fetchApi<ReminderListResponse>('/reminders?limit=100'),
   });
+
+  const { data: roomsData } = useQuery<JoinedRoomInfo[]>({
+    queryKey: ['rooms'],
+    queryFn: () => fetchApi<JoinedRoomInfo[]>('/rooms'),
+  });
+
+  React.useEffect(() => {
+    if (roomsData && roomsData.length > 0 && (!roomId || roomId === 'web')) {
+      setRoomId(roomsData[0].room_id);
+    }
+  }, [roomsData]);
 
   const createMutation = useMutation({
     mutationFn: (newReminder: { room_id: string; message: string; seconds: number; recurrence: string }) =>
@@ -62,22 +93,65 @@ export const ReminderMainView: React.FC = () => {
     },
   });
 
+  const getCalculatedSeconds = (): number => {
+    switch (durationUnit) {
+      case 'seconds':
+        return durationValue;
+      case 'minutes':
+        return durationValue * 60;
+      case 'hours':
+        return durationValue * 3600;
+      case 'days':
+        return durationValue * 86400;
+      default:
+        return durationValue * 60;
+    }
+  };
+
+  const calculateSecondsForRecurringTime = (): number => {
+    let targetHours = parseInt(hour12, 10) || 9;
+    const targetMinutes = parseInt(minute, 10) || 0;
+
+    if (amPm === 'PM' && targetHours < 12) {
+      targetHours += 12;
+    } else if (amPm === 'AM' && targetHours === 12) {
+      targetHours = 0;
+    }
+
+    const currDate = new Date();
+    const target = new Date();
+    target.setHours(targetHours, targetMinutes, 0, 0);
+
+    if (target.getTime() <= currDate.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+
+    return Math.max(1, Math.floor((target.getTime() - currDate.getTime()) / 1000));
+  };
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
-    if (seconds <= 0) {
-      setErrorMsg('Duration must be greater than 0 seconds.');
+
+    const computedSecs =
+      recurrence === 'none'
+        ? getCalculatedSeconds()
+        : calculateSecondsForRecurringTime();
+
+    if (computedSecs <= 0) {
+      setErrorMsg('Duration must be greater than 0.');
       return;
     }
     if (message.length > 500) {
       setErrorMsg('Message exceeds 500 character limit.');
       return;
     }
-    createMutation.mutate({ room_id: roomId, message: message.trim(), seconds, recurrence });
+    const targetRoom = roomId || (roomsData && roomsData.length > 0 ? roomsData[0].room_id : 'web');
+    createMutation.mutate({ room_id: targetRoom, message: message.trim(), seconds: computedSecs, recurrence });
   };
 
   const calculateTimeLeft = (triggerAtStr: string) => {
-    const diffMs = new Date(triggerAtStr).getTime() - new Date().getTime();
+    const diffMs = new Date(triggerAtStr).getTime() - now;
     if (diffMs <= 0) return 'Triggering...';
     const totalSecs = Math.floor(diffMs / 1000);
     const mins = Math.floor(totalSecs / 60);
@@ -88,6 +162,12 @@ export const ReminderMainView: React.FC = () => {
     }
     if (mins > 0) return `in ${mins}m ${secs}s`;
     return `in ${secs}s`;
+  };
+
+  const getRoomDisplayName = (id: string) => {
+    if (!roomsData) return id;
+    const match = roomsData.find((r) => r.room_id === id);
+    return match ? match.name : id;
   };
 
   return (
@@ -110,7 +190,7 @@ export const ReminderMainView: React.FC = () => {
         )}
 
         <form onSubmit={handleCreate} className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
             <input
               type="text"
               placeholder="Reminder message..."
@@ -119,17 +199,59 @@ export const ReminderMainView: React.FC = () => {
               className="sm:col-span-2 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
             />
 
-            <div className="flex items-center gap-1.5 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800">
-              <span className="text-xs font-mono text-neutral-500">In</span>
-              <input
-                type="number"
-                min="1"
-                value={seconds}
-                onChange={(e) => setSeconds(parseInt(e.target.value) || 0)}
-                className="w-16 bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none"
-              />
-              <span className="text-xs font-mono text-neutral-500">secs</span>
-            </div>
+            {recurrence === 'none' ? (
+              <div className="flex items-center gap-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800">
+                <span className="text-xs font-mono text-neutral-500">In</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={durationValue}
+                  onChange={(e) => setDurationValue(parseInt(e.target.value) || 1)}
+                  className="w-12 bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none text-center"
+                />
+                <select
+                  value={durationUnit}
+                  onChange={(e) => setDurationUnit(e.target.value as any)}
+                  className="bg-transparent text-xs font-mono text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+                >
+                  <option value="seconds">Secs</option>
+                  <option value="minutes">Mins</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 font-mono text-xs">
+                <span className="text-neutral-500">At</span>
+                <select
+                  value={hour12}
+                  onChange={(e) => setHour12(e.target.value)}
+                  className="bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none cursor-pointer"
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => {
+                    const val = h < 10 ? `0${h}` : `${h}`;
+                    return <option key={val} value={val}>{val}</option>;
+                  })}
+                </select>
+                <span className="text-neutral-400 font-mono">:</span>
+                <select
+                  value={minute}
+                  onChange={(e) => setMinute(e.target.value)}
+                  className="bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none cursor-pointer"
+                >
+                  {['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setAmPm(amPm === 'AM' ? 'PM' : 'AM')}
+                  className="ml-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] uppercase font-mono text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition"
+                >
+                  {amPm}
+                </button>
+              </div>
+            )}
 
             <select
               value={recurrence}
@@ -139,6 +261,26 @@ export const ReminderMainView: React.FC = () => {
               <option value="none">One-time</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+
+            <select
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+              className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 font-sans focus:outline-none focus:border-neutral-500 truncate"
+            >
+              {roomsData && roomsData.length > 0 ? (
+                roomsData.map((r) => (
+                  <option key={r.room_id} value={r.room_id}>
+                    {r.name}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>
+                  Loading rooms...
+                </option>
+              )}
             </select>
 
             <button
@@ -192,11 +334,13 @@ export const ReminderMainView: React.FC = () => {
                     <span>Target: {new Date(item.trigger_at).toLocaleTimeString()}</span>
                     <span>•</span>
                     <span>by {item.sender_name}</span>
+                    <span>•</span>
+                    <span className="truncate max-w-[180px]">Room: {getRoomDisplayName(item.room_id)}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="px-2.5 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-amber-600 dark:text-amber-300">
+                  <span className="px-2.5 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-amber-600 dark:text-amber-300 animate-pulse">
                     {calculateTimeLeft(item.trigger_at)}
                   </span>
                   <button

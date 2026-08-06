@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fetchApi, setAuthToken, clearAuthToken, getAuthToken } from '../core/apiClient';
 import { X, Lock, User, LogOut, Copy, Check } from 'lucide-react';
 
@@ -22,6 +22,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -64,15 +74,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         onSuccess(res.token);
         onClose();
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
     }
   };
 
+  const maskedToken = currentToken
+    ? `${currentToken.substring(0, 12)}...${currentToken.substring(currentToken.length - 8)}`
+    : '';
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+    >
       <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg max-w-md w-full p-6 space-y-6 shadow-2xl">
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-850 pb-4">
           <div className="flex items-center gap-2">
@@ -81,7 +100,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ) : (
               <Lock className="w-4 h-4 text-neutral-700 dark:text-neutral-300" />
             )}
-            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            <h3 id="auth-modal-title" className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
               {currentToken
                 ? 'Session Information'
                 : mode === 'login'
@@ -89,7 +108,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 : 'Register Web Account'}
             </h3>
           </div>
-          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition">
+          <button
+            onClick={onClose}
+            aria-label="Close authentication modal"
+            className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -135,8 +158,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               </div>
 
-              <div className="p-3 rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 font-mono text-xs text-neutral-800 dark:text-neutral-300 break-all max-h-24 overflow-y-auto">
-                {currentToken}
+              <div className="p-3 rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 font-mono text-xs text-neutral-800 dark:text-neutral-300 break-all select-none">
+                {maskedToken}
               </div>
             </div>
 

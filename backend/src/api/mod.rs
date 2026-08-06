@@ -15,10 +15,19 @@ pub mod auth;
 pub mod health;
 pub mod openapi;
 pub mod reminders;
+pub mod rooms;
 pub mod sse;
 pub mod todos;
 
-pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventBroadcaster) -> std::sync::Arc<tokio::sync::RwLock<Option<String>>> {
+pub async fn start_api_server(
+    config: &Config,
+    db: Database,
+    broadcaster: EventBroadcaster,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) -> (
+    std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+    std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
+) {
     let state = auth::ApiState::new(
         db,
         broadcaster,
@@ -29,6 +38,7 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
     );
 
     let matrix_access_token = state.matrix_access_token.clone();
+    let matrix_client_handle = state.matrix_client.clone();
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -42,15 +52,25 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
         .route("/auth/login", post(auth::login))
         .route("/auth/me", get(auth::get_current_user))
         .route("/auth/media", get(auth::media_proxy))
+        .route("/rooms", get(rooms::list_rooms))
         .route("/events", get(sse::sse_handler))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route("/todos/:id", patch(todos::update_todo).delete(todos::delete_todo))
         .route("/reminders", get(reminders::list_reminders).post(reminders::create_reminder))
         .route("/reminders/:id", delete(reminders::delete_reminder));
 
+    let web_dist = if std::path::Path::new("web/dist").exists() {
+        "web/dist"
+    } else if std::path::Path::new("backend/web/dist").exists() {
+        "backend/web/dist"
+    } else {
+        "web/dist"
+    };
+
     let app = Router::new()
         .nest("/api/v1", api_routes)
-        .fallback_service(ServeDir::new("web/dist").fallback(ServeDir::new("web")))
+        .route("/api-docs/openapi.json", get(openapi::openapi_json))
+        .fallback_service(ServeDir::new(web_dist))
         .layer(cors)
         .with_state(state);
 
@@ -62,7 +82,12 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
     tokio::spawn(async move {
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
-                if let Err(err) = axum::serve(listener, app).await {
+                let serve_future = axum::serve(listener, app).with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.recv().await;
+                    info!("Axum REST API server received shutdown signal.");
+                });
+
+                if let Err(err) = serve_future.await {
                     tracing::error!("REST API server error: {:?}", err);
                 }
             }
@@ -72,5 +97,5 @@ pub async fn start_api_server(config: &Config, db: Database, broadcaster: EventB
         }
     });
 
-    matrix_access_token
+    (matrix_access_token, matrix_client_handle)
 }

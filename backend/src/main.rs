@@ -32,25 +32,39 @@ async fn main() -> Result<()> {
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
 
-    // 1. Start background Axum REST API & Web Server
-    let matrix_token_handle = api::start_api_server(&config, db.clone(), broadcaster.clone()).await;
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+
+    // 1. Start background Axum REST API & Web Server with graceful shutdown
+    let (matrix_token_handle, matrix_client_handle) =
+        api::start_api_server(&config, db.clone(), broadcaster.clone(), shutdown_rx).await;
 
     // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
     let config_clone = config.clone();
     let db_clone = db.clone();
     let broadcaster_clone = broadcaster.clone();
     let matrix_token_clone = matrix_token_handle.clone();
+    let matrix_client_clone = matrix_client_handle.clone();
+    let mut bot_shutdown_rx = shutdown_tx.subscribe();
+
     tokio::spawn(async move {
         loop {
             info!("Starting Matrix bot event loop sync...");
-            match MatrixBot::new_full(&config_clone, db_clone.clone(), Some(broadcaster_clone.clone()), Some(matrix_token_clone.clone())).await {
-                Ok(bot) => {
-                    if let Err(err) = bot.run().await {
-                        tracing::error!("Matrix bot sync error: {:?}. Retrying in 5 seconds...", err);
-                    }
+            tokio::select! {
+                _ = bot_shutdown_rx.recv() => {
+                    info!("Matrix bot loop shutting down cleanly...");
+                    break;
                 }
-                Err(err) => {
-                    tracing::error!("Failed to initialize Matrix bot client: {:?}. Retrying in 5 seconds...", err);
+                bot_res = MatrixBot::new_full(&config_clone, db_clone.clone(), Some(broadcaster_clone.clone()), Some(matrix_token_clone.clone()), Some(matrix_client_clone.clone())) => {
+                    match bot_res {
+                        Ok(bot) => {
+                            if let Err(err) = bot.run().await {
+                                tracing::error!("Matrix bot sync error: {:?}. Retrying in 5 seconds...", err);
+                            }
+                        }
+                        Err(err) => {
+                            tracing::error!("Failed to initialize Matrix bot client: {:?}. Retrying in 5 seconds...", err);
+                        }
+                    }
                 }
             }
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -59,5 +73,8 @@ async fn main() -> Result<()> {
 
     tokio::signal::ctrl_c().await?;
     info!("Shutting down Matrix Bot & Web API server...");
+    let _ = shutdown_tx.send(());
+    // Short grace period for cleanup
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     Ok(())
 }

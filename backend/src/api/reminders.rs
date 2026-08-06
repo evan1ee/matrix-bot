@@ -47,18 +47,22 @@ pub struct ReminderListResponse {
 )]
 pub async fn list_reminders(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
     Query(query): Query<ReminderQuery>,
 ) -> Result<Json<ReminderListResponse>, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
+    let sender_mxid = user.sender_mxid();
 
     let items = if let Some(room) = &query.room_id {
         sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
+            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
         )
         .bind(room)
+        .bind(&sender_mxid)
+        .bind(&user.username)
+        .bind(&user.username)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db.pool)
@@ -66,8 +70,11 @@ pub async fn list_reminders(
         .map_err(|e| ApiError::internal(e.to_string()))?
     } else {
         sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
+            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
         )
+        .bind(&sender_mxid)
+        .bind(&user.username)
+        .bind(&user.username)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db.pool)
@@ -111,17 +118,16 @@ pub async fn create_reminder(
         .map(RecurrencePattern::from_str)
         .unwrap_or(RecurrencePattern::None);
 
-    let (sender_mxid, sender_name) = if user.username.starts_with('@') {
-        let name = user
-            .username
+    let sender_mxid = user.sender_mxid();
+    let sender_name = if user.username.starts_with('@') {
+        user.username
             .trim_start_matches('@')
             .split(':')
             .next()
             .unwrap_or(&user.username)
-            .to_string();
-        (user.username.clone(), name)
+            .to_string()
     } else {
-        (format!("@web-{}:api", user.username), user.username.clone())
+        user.username.clone()
     };
 
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
@@ -156,18 +162,24 @@ pub async fn create_reminder(
 )]
 pub async fn delete_reminder(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT room_id FROM reminders WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let sender_mxid = user.sender_mxid();
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT room_id FROM reminders WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
+    )
+    .bind(id)
+    .bind(&sender_mxid)
+    .bind(&user.username)
+    .bind(&user.username)
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let (room_id,) = match row {
         Some(r) => r,
-        None => return Err(ApiError::not_found("Reminder not found")),
+        None => return Err(ApiError::not_found("Reminder not found or access denied")),
     };
 
     sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
@@ -189,7 +201,7 @@ mod tests {
     use sqlx::SqlitePool;
 
     #[tokio::test]
-    async fn test_reminder_api_crud() {
+    async fn test_reminder_api_crud_and_isolation() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
@@ -200,35 +212,44 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser {
+        let alice = AuthUser {
+            username: "alice".to_string(),
+        };
+        let bob = AuthUser {
             username: "bob".to_string(),
         };
 
-        // Create
+        // Alice creates reminder
         let req = CreateReminderRequest {
             room_id: Some("!room:1".to_string()),
-            message: "Meeting".to_string(),
+            message: "Alice reminder".to_string(),
             seconds: 60,
             recurrence: Some("daily".to_string()),
         };
-        let created = create_reminder(State(state.clone()), user.clone(), Json(req))
+        let created = create_reminder(State(state.clone()), alice.clone(), Json(req))
             .await
             .unwrap();
-        assert_eq!(created.message, "Meeting");
+        assert_eq!(created.message, "Alice reminder");
 
-        // List
+        // Bob lists reminders -> empty
         let query = ReminderQuery {
-            room_id: Some("!room:1".to_string()),
+            room_id: None,
             page: None,
             limit: None,
         };
-        let list = list_reminders(State(state.clone()), user.clone(), Query(query))
+        let bob_list = list_reminders(State(state.clone()), bob.clone(), Query(query))
             .await
             .unwrap();
-        assert_eq!(list.items.len(), 1);
+        assert_eq!(bob_list.items.len(), 0);
 
-        // Delete
-        let status = delete_reminder(State(state), user, Path(created.id))
+        // Bob deletes Alice's reminder -> gets 404 access denied
+        let err = delete_reminder(State(state.clone()), bob, Path(created.id))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        // Alice deletes her reminder -> 204
+        let status = delete_reminder(State(state), alice, Path(created.id))
             .await
             .unwrap();
         assert_eq!(status, StatusCode::NO_CONTENT);

@@ -5,15 +5,17 @@ import { coreModule } from './modules/core';
 import { todoModule } from './modules/todo';
 import { reminderModule } from './modules/reminder';
 import { useSystemEvents } from './core/useSystemEvents';
-import { VercelShell } from './components/VercelShell';
+import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { getAuthToken } from './core/apiClient';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
-// Register all modules into the Plugin System Registry
-registry.register(coreModule);
-registry.register(todoModule);
-registry.register(reminderModule);
+// Safely register modules only once without HMR re-registration warnings
+[coreModule, todoModule, reminderModule].forEach((mod) => {
+  if (!registry.get(mod.id)) {
+    registry.register(mod);
+  }
+});
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,7 +32,7 @@ const AppContent: React.FC = () => {
   const [token, setToken] = useState<string | null>(getAuthToken());
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
 
-  const { events, isConnected } = useSystemEvents();
+  const { events, isConnected } = useSystemEvents(token);
 
   useEffect(() => {
     applyTheme(theme);
@@ -43,7 +45,7 @@ const AppContent: React.FC = () => {
 
   return (
     <>
-      <VercelShell
+      <AppShell
         activeModuleId={activeModuleId}
         onSelectModule={setActiveModuleId}
         events={events}

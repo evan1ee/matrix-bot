@@ -1,13 +1,13 @@
-export type Theme = 'dark' | 'light' | 'system';
+export type Theme = 'dark' | 'light';
 
 const THEME_STORAGE_KEY = 'matrix_bot_theme';
 
 export function getStoredTheme(): Theme {
   const saved = localStorage.getItem(THEME_STORAGE_KEY) as Theme;
-  if (saved === 'dark' || saved === 'light' || saved === 'system') {
+  if (saved === 'dark' || saved === 'light') {
     return saved;
   }
-  return 'dark'; // Default to Vercel dark mode
+  return 'dark';
 }
 
 export function setStoredTheme(theme: Theme) {
@@ -17,13 +17,7 @@ export function setStoredTheme(theme: Theme) {
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
-  
-  let isDark = false;
-  if (theme === 'system') {
-    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  } else {
-    isDark = theme === 'dark';
-  }
+  const isDark = theme === 'dark';
 
   if (isDark) {
     root.classList.add('dark');

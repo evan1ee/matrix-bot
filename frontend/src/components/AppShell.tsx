@@ -15,7 +15,7 @@ export interface UserProfileResponse {
   avatar_url?: string | null;
 }
 
-interface VercelShellProps {
+interface AppShellProps {
   activeModuleId: string;
   onSelectModule: (id: string) => void;
   events: SystemEvent[];
@@ -26,7 +26,7 @@ interface VercelShellProps {
   onThemeChange: (theme: Theme) => void;
 }
 
-export const VercelShell: React.FC<VercelShellProps> = ({
+export const AppShell: React.FC<AppShellProps> = ({
   activeModuleId,
   onSelectModule,
   events,
@@ -43,11 +43,13 @@ export const VercelShell: React.FC<VercelShellProps> = ({
   const { data: todosData } = useQuery<TodoListResponse>({
     queryKey: ['todos'],
     queryFn: () => fetchApi<TodoListResponse>('/todos?limit=100'),
+    enabled: !!userToken,
   });
 
   const { data: remindersData } = useQuery<ReminderListResponse>({
     queryKey: ['reminders'],
     queryFn: () => fetchApi<ReminderListResponse>('/reminders?limit=100'),
+    enabled: !!userToken,
   });
 
   const { data: userProfile } = useQuery<UserProfileResponse>({
@@ -61,9 +63,8 @@ export const VercelShell: React.FC<VercelShellProps> = ({
 
   const displayName = userProfile?.display_name || userProfile?.username;
 
-  const finalAvatarUrl = userProfile?.avatar_url
-    ? `${userProfile.avatar_url}${userToken ? `&token=${encodeURIComponent(userToken)}` : ''}`
-    : null;
+  // Clean avatar URL without security-sensitive token query parameters
+  const finalAvatarUrl = userProfile?.avatar_url || null;
 
   return (
     <div className="min-h-screen bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-150">
@@ -75,29 +76,30 @@ export const VercelShell: React.FC<VercelShellProps> = ({
               <Bot className="w-4 h-4" />
             </div>
             <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
-              Matrix Hello Bot
+              Matrix Halo Bot
             </span>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Theme Toggle Component */}
-            <ThemeToggle currentTheme={currentTheme} onThemeChange={onThemeChange} />
-
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  isConnected ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse' : 'bg-amber-500 dark:bg-amber-400'
+                  !userToken
+                    ? 'bg-neutral-400 dark:bg-neutral-600'
+                    : isConnected
+                    ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
+                    : 'bg-amber-500 dark:bg-amber-400'
                 }`}
               />
               <span className="text-neutral-700 dark:text-neutral-300">
-                {isConnected ? 'SSE Live' : 'Reconnecting...'}
+                {!userToken ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting...'}
               </span>
             </div>
 
             {/* Matrix User Profile / Login Button */}
             <button
               onClick={onOpenAuth}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-medium text-neutral-800 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-850 transition"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-medium text-neutral-800 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-850 transition cursor-pointer"
               title={userToken ? `Logged in as ${displayName || 'User'}` : 'Login / Token'}
             >
               {userToken ? (
@@ -130,6 +132,9 @@ export const VercelShell: React.FC<VercelShellProps> = ({
                 </>
               )}
             </button>
+
+            {/* Theme Toggle Component at the far end */}
+            <ThemeToggle currentTheme={currentTheme} onThemeChange={onThemeChange} />
           </div>
         </div>
       </header>
@@ -214,7 +219,7 @@ export const VercelShell: React.FC<VercelShellProps> = ({
       <footer className="border-t border-neutral-200 dark:border-neutral-850 py-6 px-6 text-xs text-neutral-500 font-mono">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span>Matrix Hello Bot — Modular Plugin System & REST API</span>
+            <span>Matrix Halo Bot — Modular Plugin System & REST API</span>
           </div>
           <span>Confidential & Proprietary</span>
         </div>

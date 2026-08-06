@@ -13,12 +13,20 @@ pub struct BotClient;
 impl BotClient {
     #[allow(dead_code)]
     pub async fn build_and_login(config: &Config) -> Result<Client> {
-        Self::build_and_login_with_token_handle(config, None).await
+        Self::build_and_login_with_token_handles(config, None, None).await
     }
 
     pub async fn build_and_login_with_token_handle(
         config: &Config,
         token_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<String>>>>,
+    ) -> Result<Client> {
+        Self::build_and_login_with_token_handles(config, token_lock, None).await
+    }
+
+    pub async fn build_and_login_with_token_handles(
+        config: &Config,
+        token_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<String>>>>,
+        client_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<Client>>>>,
     ) -> Result<Client> {
         let homeserver_input = &config.homeserver;
         let clean_domain = homeserver_input
@@ -43,21 +51,12 @@ impl BotClient {
             Client::builder().homeserver_url(&fallback_url).sqlite_store(store_path, None).build().await.context("Failed to build client")?
         };
 
-        if client.matrix_auth().session().is_none() {
-            info!("No active Matrix session found. Purging store at {} and logging in as user: {}", store_path, config.username);
-            tokio::fs::remove_dir_all(store_path).await.ok();
+        if let Some(ref lock) = client_lock {
+            *lock.write().await = Some(client.clone());
+        }
 
-            let fresh_client = if let Ok(server_name) = ServerName::parse(clean_domain) {
-                if let Ok(c) = Client::builder().server_name(&server_name).sqlite_store(store_path, None).build().await {
-                    c
-                } else {
-                    let fallback_url = if homeserver_input.starts_with("http") { homeserver_input.to_string() } else { format!("https://{}", clean_domain) };
-                    Client::builder().homeserver_url(&fallback_url).sqlite_store(store_path, None).build().await.context("Failed rebuild fallback")?
-                }
-            } else {
-                let fallback_url = if homeserver_input.starts_with("http") { homeserver_input.to_string() } else { format!("https://{}", clean_domain) };
-                Client::builder().homeserver_url(&fallback_url).sqlite_store(store_path, None).build().await.context("Failed rebuild fallback")?
-            };
+        if client.matrix_auth().session().is_none() {
+            info!("No active Matrix session found in store at {}. Logging in as user: {}", store_path, config.username);
 
             let user_id = if config.username.starts_with('@') {
                 UserId::parse(&config.username)
@@ -67,23 +66,67 @@ impl BotClient {
                 UserId::parse(&raw_id).context("Failed to construct valid Matrix User ID")?
             };
 
-            fresh_client
+            match client
                 .matrix_auth()
                 .login_username(&user_id, &config.password)
                 .initial_device_display_name("Rust Matrix Bot")
                 .send()
                 .await
-                .context("Failed to log in to Matrix server")?;
+            {
+                Ok(_) => {
+                    info!("Successfully logged in as {}", client.user_id().unwrap());
+                }
+                Err(err) => {
+                    warn!("Failed to login with existing crypto store: {:?}. Resetting store for new device login...", err);
+                    tokio::fs::remove_dir_all(store_path).await.ok();
 
-            client = fresh_client;
-            info!("Successfully logged in as {}", client.user_id().unwrap());
+                    let fresh_client = if let Ok(server_name) = ServerName::parse(clean_domain) {
+                        if let Ok(c) = Client::builder().server_name(&server_name).sqlite_store(store_path, None).build().await {
+                            c
+                        } else {
+                            let fallback_url = if homeserver_input.starts_with("http") { homeserver_input.to_string() } else { format!("https://{}", clean_domain) };
+                            Client::builder().homeserver_url(&fallback_url).sqlite_store(store_path, None).build().await.context("Failed rebuild fallback")?
+                        }
+                    } else {
+                        let fallback_url = if homeserver_input.starts_with("http") { homeserver_input.to_string() } else { format!("https://{}", clean_domain) };
+                        Client::builder().homeserver_url(&fallback_url).sqlite_store(store_path, None).build().await.context("Failed rebuild fallback")?
+                    };
+
+                    fresh_client
+                        .matrix_auth()
+                        .login_username(&user_id, &config.password)
+                        .initial_device_display_name("Rust Matrix Bot")
+                        .send()
+                        .await
+                        .context("Failed to log in to Matrix server")?;
+
+                    client = fresh_client;
+                    if let Some(ref lock) = client_lock {
+                        *lock.write().await = Some(client.clone());
+                    }
+                    info!("Successfully logged in as {}", client.user_id().unwrap());
+                }
+            }
         } else {
             info!("Restored existing session from store for user: {}", client.user_id().unwrap());
         }
 
         if let Some(tok) = client.access_token() {
             std::fs::create_dir_all("data").ok();
-            std::fs::write("data/matrix_token.json", tok).ok();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create(true).truncate(true).mode(0o600);
+                if let Ok(mut f) = options.open("data/matrix_token.json") {
+                    use std::io::Write;
+                    let _ = f.write_all(tok.as_bytes());
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::write("data/matrix_token.json", tok).ok();
+            }
         }
 
         if let Some(ref lock) = token_lock {

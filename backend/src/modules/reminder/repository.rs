@@ -64,7 +64,7 @@ impl ReminderRepository {
         let reminders = sqlx::query_as::<_, Reminder>(
             r#"
             SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
-            FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < 5
+            FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < 10
             "#,
         )
         .bind(now)
@@ -90,8 +90,9 @@ impl ReminderRepository {
         Ok(())
     }
 
-    pub async fn increment_retry(pool: &SqlitePool, id: i64) -> Result<()> {
-        sqlx::query("UPDATE reminders SET retry_count = retry_count + 1 WHERE id = ?")
+    pub async fn increment_retry(pool: &SqlitePool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
+        sqlx::query("UPDATE reminders SET retry_count = retry_count + 1, trigger_at = ? WHERE id = ?")
+            .bind(new_trigger_at)
             .bind(id)
             .execute(pool)
             .await?;

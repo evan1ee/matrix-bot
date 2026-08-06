@@ -143,6 +143,8 @@ pub async fn handle_reminder_command(
                     let rec_note = match recurrence {
                         RecurrencePattern::Daily => " 🔄 (Recurring daily)",
                         RecurrencePattern::Weekly => " 🔄 (Recurring weekly)",
+                        RecurrencePattern::Monthly => " 🔄 (Recurring monthly)",
+                        RecurrencePattern::Yearly => " 🔄 (Recurring yearly)",
                         RecurrencePattern::None => "",
                     };
                     Some(format!(

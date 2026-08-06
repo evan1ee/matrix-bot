@@ -53,26 +53,31 @@ pub struct TodoListResponse {
 )]
 pub async fn list_todos(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
     Query(query): Query<TodoQuery>,
 ) -> Result<Json<TodoListResponse>, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
+    let sender_mxid = user.sender_mxid();
 
     let items = if let Some(room) = &query.room_id {
-        TodoRepository::list_room(&state.db.pool, room, limit, offset)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-    } else {
         sqlx::query_as::<_, TodoItem>(
-            "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?",
+            "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE room_id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?",
         )
+        .bind(room)
+        .bind(&sender_mxid)
+        .bind(&user.username)
+        .bind(&user.username)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db.pool)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
+    } else {
+        TodoRepository::list_all_user(&state.db.pool, &user.username, limit, offset)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
     };
 
     Ok(Json(TodoListResponse { items, page, limit }))
@@ -108,17 +113,16 @@ pub async fn create_todo(
         .map(TodoPriority::from_str)
         .unwrap_or(TodoPriority::Medium);
 
-    let (sender_mxid, sender_name) = if user.username.starts_with('@') {
-        let name = user
-            .username
+    let sender_mxid = user.sender_mxid();
+    let sender_name = if user.username.starts_with('@') {
+        user.username
             .trim_start_matches('@')
             .split(':')
             .next()
             .unwrap_or(&user.username)
-            .to_string();
-        (user.username.clone(), name)
+            .to_string()
     } else {
-        (format!("@web-{}:api", user.username), user.username.clone())
+        user.username.clone()
     };
 
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
@@ -153,18 +157,22 @@ pub async fn create_todo(
 )]
 pub async fn update_todo(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
+    let sender_mxid = user.sender_mxid();
     let mut item = sqlx::query_as::<_, TodoItem>(
-        "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE id = ?",
+        "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
     )
     .bind(id)
+    .bind(&sender_mxid)
+    .bind(&user.username)
+    .bind(&user.username)
     .fetch_optional(&state.db.pool)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found("Task not found"))?;
+    .ok_or_else(|| ApiError::not_found("Task not found or access denied"))?;
 
     if let Some(text) = payload.text {
         TodoRepository::edit_text(&state.db.pool, id, &text)
@@ -215,18 +223,24 @@ pub async fn update_todo(
 )]
 pub async fn delete_todo(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT room_id FROM todos WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let sender_mxid = user.sender_mxid();
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT room_id FROM todos WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
+    )
+    .bind(id)
+    .bind(&sender_mxid)
+    .bind(&user.username)
+    .bind(&user.username)
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let (room_id,) = match row {
         Some(r) => r,
-        None => return Err(ApiError::not_found("Task not found")),
+        None => return Err(ApiError::not_found("Task not found or access denied")),
     };
 
     sqlx::query("DELETE FROM todos WHERE id = ?")
@@ -248,7 +262,7 @@ mod tests {
     use sqlx::SqlitePool;
 
     #[tokio::test]
-    async fn test_todo_api_crud() {
+    async fn test_todo_api_crud_and_isolation() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
@@ -259,53 +273,60 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser {
+        let alice = AuthUser {
             username: "alice".to_string(),
         };
+        let bob = AuthUser {
+            username: "bob".to_string(),
+        };
 
-        // Create
+        // Alice creates todo
         let req = CreateTodoRequest {
             room_id: Some("!room:1".to_string()),
-            text: "Buy milk".to_string(),
+            text: "Alice task".to_string(),
             priority: Some("high".to_string()),
         };
-        let created = create_todo(State(state.clone()), user.clone(), Json(req))
+        let created = create_todo(State(state.clone()), alice.clone(), Json(req))
             .await
             .unwrap();
-        assert_eq!(created.text, "Buy milk");
-        assert_eq!(created.priority, "high");
+        assert_eq!(created.text, "Alice task");
 
-        // List
+        // Bob tries to list Alice's tasks -> gets empty list
         let query = TodoQuery {
-            room_id: Some("!room:1".to_string()),
+            room_id: None,
             page: None,
             limit: None,
         };
-        let list = list_todos(State(state.clone()), user.clone(), Query(query))
+        let bob_list = list_todos(State(state.clone()), bob.clone(), Query(query))
             .await
             .unwrap();
-        assert_eq!(list.items.len(), 1);
+        assert_eq!(bob_list.items.len(), 0);
 
-        // Update
+        // Bob tries to delete Alice's task -> gets 404/access denied error
+        let err = delete_todo(State(state.clone()), bob.clone(), Path(created.id))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        // Alice updates her own task -> succeeds
         let update_req = UpdateTodoRequest {
-            text: Some("Buy oat milk".to_string()),
+            text: Some("Alice task updated".to_string()),
             priority: None,
             completed: Some(true),
             due_at: None,
         };
         let updated = update_todo(
             State(state.clone()),
-            user.clone(),
+            alice.clone(),
             Path(created.id),
             Json(update_req),
         )
         .await
         .unwrap();
-        assert_eq!(updated.text, "Buy oat milk");
-        assert!(updated.completed);
+        assert_eq!(updated.text, "Alice task updated");
 
-        // Delete
-        let status = delete_todo(State(state), user, Path(created.id))
+        // Alice deletes her task -> succeeds
+        let status = delete_todo(State(state), alice, Path(created.id))
             .await
             .unwrap();
         assert_eq!(status, StatusCode::NO_CONTENT);

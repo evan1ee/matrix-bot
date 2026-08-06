@@ -7,30 +7,30 @@ use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::api::auth::ApiState;
+use crate::api::auth::{ApiState, AuthUser};
 
 /// SSE endpoint streaming real-time system events to authenticated web clients.
 ///
-/// Each event includes an `event:` type field (e.g. `todo_created`, `reminder_triggered`)
-/// allowing frontends to selectively listen via `EventSource.addEventListener()`.
+/// Requires authentication (`AuthUser`). Emits default event stream objects containing `type` and `payload`.
 #[utoipa::path(
     get,
     path = "/api/v1/events",
     responses(
-        (status = 200, description = "Server-Sent Events (SSE) live stream", content_type = "text/event-stream")
+        (status = 200, description = "Server-Sent Events (SSE) live stream", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
     security(("bearer_auth" = []))
 )]
 pub async fn sse_handler(
     State(state): State<ApiState>,
+    _user: AuthUser,
 ) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>> {
     let rx = state.broadcaster.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|item| async move {
         match item {
             Ok(msg) => {
-                let event_type = msg.event_type();
                 let json_str = serde_json::to_string(&msg).ok()?;
-                Some(Ok(Event::default().event(event_type).data(json_str)))
+                Some(Ok(Event::default().data(json_str)))
             }
             Err(_) => None,
         }
@@ -58,7 +58,10 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
+        let user = AuthUser {
+            username: "alice".to_string(),
+        };
 
-        let _sse = sse_handler(State(state)).await;
+        let _sse = sse_handler(State(state), user).await;
     }
 }

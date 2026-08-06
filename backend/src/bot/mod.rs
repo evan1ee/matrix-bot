@@ -42,7 +42,7 @@ impl MatrixBot {
         db: Database,
         broadcaster: Option<EventBroadcaster>,
     ) -> Result<Self> {
-        Self::new_full(config, db, broadcaster, None).await
+        Self::new_full(config, db, broadcaster, None, None).await
     }
 
     pub async fn new_full(
@@ -50,8 +50,13 @@ impl MatrixBot {
         db: Database,
         broadcaster: Option<EventBroadcaster>,
         token_handle: Option<Arc<RwLock<Option<String>>>>,
+        client_handle: Option<Arc<RwLock<Option<Client>>>>,
     ) -> Result<Self> {
-        let client = BotClient::build_and_login_with_token_handle(config, token_handle).await?;
+        let client = BotClient::build_and_login_with_token_handles(config, token_handle, client_handle.clone()).await?;
+
+        if let Some(ref handle) = client_handle {
+            *handle.write().await = Some(client.clone());
+        }
 
         let registry_ref = Arc::new(RwLock::new(None));
         let mut registry = ModuleRegistry::new();

@@ -21,20 +21,19 @@ impl Config {
 
         let homeserver = env::var("MATRIX_HOMESERVER")
             .unwrap_or_else(|_| "https://matrix.org".to_string());
-        
+
         let username = env::var("MATRIX_USERNAME")
             .context("MATRIX_USERNAME environment variable is required")?;
-        
+
         let password = env::var("MATRIX_PASSWORD")
             .context("MATRIX_PASSWORD environment variable is required")?;
-        
+
         let recovery_key = env::var("MATRIX_RECOVERY_KEY").ok();
-        
+
         let database_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
 
-        let api_host = env::var("API_HOST")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        let api_host = env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
         let api_port: u16 = env::var("API_PORT")
             .ok()
@@ -75,9 +74,18 @@ impl Config {
         if self.password.is_empty() {
             anyhow::bail!("MATRIX_PASSWORD cannot be empty");
         }
+
+        let is_prod = env::var("ENVIRONMENT").map(|v| v.to_lowercase() == "production").unwrap_or(false)
+            || cfg!(not(debug_assertions));
+
+        if is_prod && self.jwt_secret == "matrix_bot_secret_jwt_token_key_change_in_production" {
+            anyhow::bail!("Insecure default JWT_SECRET used in production environment. Set a custom JWT_SECRET!");
+        }
+
         if self.jwt_secret.len() < 16 {
             tracing::warn!("JWT_SECRET is shorter than 16 characters — consider using a stronger secret in production");
         }
+
         Ok(())
     }
 }
