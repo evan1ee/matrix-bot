@@ -13,6 +13,12 @@ pub struct Config {
     pub jwt_secret: String,
     pub registration_secret: Option<String>,
     pub db_max_connections: u32,
+    /// Origins permitted to call the API cross-origin.
+    ///
+    /// Empty by default: the SPA is served by this same server, and the Vite dev
+    /// server proxies `/api`, so neither needs cross-origin access. Set
+    /// `CORS_ALLOWED_ORIGINS` only for a genuinely separate front-end host.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl Config {
@@ -50,6 +56,13 @@ impl Config {
             .and_then(|c| c.parse().ok())
             .unwrap_or(10);
 
+        let cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
         Ok(Self {
             homeserver,
             username,
@@ -61,6 +74,7 @@ impl Config {
             jwt_secret,
             registration_secret,
             db_max_connections,
+            cors_allowed_origins,
         })
     }
 
@@ -107,6 +121,7 @@ mod tests {
             jwt_secret: "super_secret_jwt_key_12345".to_string(),
             registration_secret: None,
             db_max_connections: 5,
+            cors_allowed_origins: Vec::new(),
         };
         assert!(valid_cfg.validate().is_ok());
 

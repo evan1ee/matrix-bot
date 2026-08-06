@@ -26,25 +26,6 @@ pub struct MatrixBot {
 }
 
 impl MatrixBot {
-    #[allow(dead_code)]
-    pub async fn new(config: &Config) -> Result<Self> {
-        let db = Database::connect(&config.database_url, 10).await?;
-        Self::new_with_db(config, db).await
-    }
-
-    #[allow(dead_code)]
-    pub async fn new_with_db(config: &Config, db: Database) -> Result<Self> {
-        Self::new_with_db_and_broadcaster(config, db, None).await
-    }
-
-    pub async fn new_with_db_and_broadcaster(
-        config: &Config,
-        db: Database,
-        broadcaster: Option<EventBroadcaster>,
-    ) -> Result<Self> {
-        Self::new_full(config, db, broadcaster, None, None).await
-    }
-
     pub async fn new_full(
         config: &Config,
         db: Database,
@@ -75,11 +56,6 @@ impl MatrixBot {
             registry: registry_arc,
             broadcaster,
         })
-    }
-
-    #[allow(dead_code)]
-    pub fn client(&self) -> &Client {
-        &self.client
     }
 
     pub async fn run(self) -> Result<()> {

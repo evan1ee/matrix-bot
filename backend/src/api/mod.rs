@@ -1,9 +1,10 @@
 use axum::{
+    http::{header, HeaderValue, Method},
     routing::{delete, get, patch, post},
     Router,
 };
 use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tracing::info;
 
@@ -34,16 +35,43 @@ pub async fn start_api_server(
         config.jwt_secret.clone(),
         config.registration_secret.clone(),
         config.homeserver.clone(),
-        reqwest::Client::new(),
+        // Always bound outbound calls: a slow homeserver must not be able to pin
+        // a request task indefinitely.
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new()),
     );
 
-    let matrix_access_token = state.matrix_access_token.clone();
-    let matrix_client_handle = state.matrix_client.clone();
+    let bot_access_token = state.bot_access_token.clone();
+    let bot_client_handle = state.bot_client.clone();
+
+    // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
+    // script authenticated calls against this API using a token it had obtained;
+    // an explicit allowlist keeps that surface to hosts the operator names.
+    let allowed_origins: Vec<HeaderValue> = config
+        .cors_allowed_origins
+        .iter()
+        .filter_map(|origin| match origin.parse::<HeaderValue>() {
+            Ok(value) => Some(value),
+            Err(_) => {
+                tracing::warn!("Ignoring malformed CORS origin: {}", origin);
+                None
+            }
+        })
+        .collect();
+
+    if allowed_origins.is_empty() {
+        info!("CORS: same-origin only (set CORS_ALLOWED_ORIGINS to permit others)");
+    } else {
+        info!("CORS: allowing origins {:?}", config.cors_allowed_origins);
+    }
 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(allowed_origins)
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
 
     let api_routes = Router::new()
         .route("/health", get(health::health_check))
@@ -54,6 +82,7 @@ pub async fn start_api_server(
         .route("/auth/media", get(auth::media_proxy))
         .route("/rooms", get(rooms::list_rooms))
         .route("/events", get(sse::sse_handler))
+        .route("/events/ticket", post(auth::create_sse_ticket))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route("/todos/:id", patch(todos::update_todo).delete(todos::delete_todo))
         .route("/reminders", get(reminders::list_reminders).post(reminders::create_reminder))
@@ -97,5 +126,5 @@ pub async fn start_api_server(
         }
     });
 
-    (matrix_access_token, matrix_client_handle)
+    (bot_access_token, bot_client_handle)
 }

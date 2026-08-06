@@ -11,19 +11,6 @@ use crate::config::Config;
 pub struct BotClient;
 
 impl BotClient {
-    #[allow(dead_code)]
-    pub async fn build_and_login(config: &Config) -> Result<Client> {
-        Self::build_and_login_with_token_handles(config, None, None).await
-    }
-
-    #[allow(dead_code)]
-    pub async fn build_and_login_with_token_handle(
-        config: &Config,
-        token_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<String>>>>,
-    ) -> Result<Client> {
-        Self::build_and_login_with_token_handles(config, token_lock, None).await
-    }
-
     pub async fn build_and_login_with_token_handles(
         config: &Config,
         token_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<String>>>>,

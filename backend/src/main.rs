@@ -1,20 +1,88 @@
 use anyhow::Result;
-use tracing::info;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-mod api;
-mod bot;
-mod config;
-mod db;
-mod error;
-mod events;
-mod modules;
-mod utils;
+use matrix_bot::api;
+use matrix_bot::bot::MatrixBot;
+use matrix_bot::config::Config;
+use matrix_bot::db::Database;
+use matrix_bot::events::EventBroadcaster;
 
-use bot::MatrixBot;
-use config::Config;
-use db::Database;
-use events::EventBroadcaster;
+/// Reconnect backoff bounds for the Matrix sync loop.
+const RECONNECT_MIN: Duration = Duration::from_secs(5);
+const RECONNECT_MAX: Duration = Duration::from_secs(300);
+
+/// Runs the Matrix sync loop until shutdown is signalled.
+///
+/// Every await that can block for a long time — building the client, syncing,
+/// and backing off — sits inside a `select!` against the shutdown channel. An
+/// earlier version awaited `bot.run()` in a select *branch body*, which is
+/// outside the select, so once syncing started Ctrl-C could not interrupt it and
+/// the process simply exited from under the running task.
+async fn run_bot_loop(
+    config: Config,
+    db: Database,
+    broadcaster: EventBroadcaster,
+    bot_token_handle: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+    bot_client_handle: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    let mut backoff = RECONNECT_MIN;
+
+    loop {
+        info!("Starting Matrix bot event loop sync...");
+
+        let build = MatrixBot::new_full(
+            &config,
+            db.clone(),
+            Some(broadcaster.clone()),
+            Some(bot_token_handle.clone()),
+            Some(bot_client_handle.clone()),
+        );
+
+        let bot = tokio::select! {
+            _ = shutdown.recv() => {
+                info!("Matrix bot loop shutting down cleanly...");
+                return;
+            }
+            built = build => built,
+        };
+
+        match bot {
+            Ok(bot) => {
+                let outcome = tokio::select! {
+                    _ = shutdown.recv() => {
+                        info!("Matrix bot loop shutting down cleanly...");
+                        return;
+                    }
+                    outcome = bot.run() => outcome,
+                };
+
+                match outcome {
+                    // A clean return means sync stopped on its own; reconnect promptly.
+                    Ok(()) => backoff = RECONNECT_MIN,
+                    Err(err) => error!("Matrix bot sync error: {:?}", err),
+                }
+            }
+            Err(err) => error!("Failed to initialize Matrix bot client: {:?}", err),
+        }
+
+        info!("Reconnecting to Matrix in {:?}...", backoff);
+        tokio::select! {
+            _ = shutdown.recv() => {
+                info!("Matrix bot loop shutting down cleanly...");
+                return;
+            }
+            _ = tokio::time::sleep(backoff) => {}
+        }
+
+        // Back off on repeated failures so a persistently unreachable homeserver
+        // is not hammered every five seconds.
+        backoff = (backoff * 2).min(RECONNECT_MAX);
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,49 +100,33 @@ async fn main() -> Result<()> {
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
 
-    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     // 1. Start background Axum REST API & Web Server with graceful shutdown
-    let (matrix_token_handle, matrix_client_handle) =
+    let (bot_token_handle, bot_client_handle) =
         api::start_api_server(&config, db.clone(), broadcaster.clone(), shutdown_rx).await;
 
     // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
-    let config_clone = config.clone();
-    let db_clone = db.clone();
-    let broadcaster_clone = broadcaster.clone();
-    let matrix_token_clone = matrix_token_handle.clone();
-    let matrix_client_clone = matrix_client_handle.clone();
-    let mut bot_shutdown_rx = shutdown_tx.subscribe();
-
-    tokio::spawn(async move {
-        loop {
-            info!("Starting Matrix bot event loop sync...");
-            tokio::select! {
-                _ = bot_shutdown_rx.recv() => {
-                    info!("Matrix bot loop shutting down cleanly...");
-                    break;
-                }
-                bot_res = MatrixBot::new_full(&config_clone, db_clone.clone(), Some(broadcaster_clone.clone()), Some(matrix_token_clone.clone()), Some(matrix_client_clone.clone())) => {
-                    match bot_res {
-                        Ok(bot) => {
-                            if let Err(err) = bot.run().await {
-                                tracing::error!("Matrix bot sync error: {:?}. Retrying in 5 seconds...", err);
-                            }
-                        }
-                        Err(err) => {
-                            tracing::error!("Failed to initialize Matrix bot client: {:?}. Retrying in 5 seconds...", err);
-                        }
-                    }
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-    });
+    let bot_task = tokio::spawn(run_bot_loop(
+        config.clone(),
+        db.clone(),
+        broadcaster.clone(),
+        bot_token_handle,
+        bot_client_handle,
+        shutdown_tx.subscribe(),
+    ));
 
     tokio::signal::ctrl_c().await?;
     info!("Shutting down Matrix Bot & Web API server...");
     let _ = shutdown_tx.send(());
-    // Short grace period for cleanup
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Wait for the bot loop to actually observe the signal rather than assuming
+    // a fixed grace period is enough.
+    match tokio::time::timeout(Duration::from_secs(10), bot_task).await {
+        Ok(Ok(())) => info!("Matrix bot loop stopped."),
+        Ok(Err(err)) => error!("Matrix bot task panicked: {:?}", err),
+        Err(_) => error!("Matrix bot loop did not stop within 10s; exiting anyway."),
+    }
+
     Ok(())
 }
