@@ -82,6 +82,7 @@ impl ReminderRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn mark_failed(pool: &SqlitePool, id: i64) -> Result<()> {
         sqlx::query("UPDATE reminders SET status = 'failed' WHERE id = ?")
             .bind(id)
@@ -90,6 +91,7 @@ impl ReminderRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn increment_retry(pool: &SqlitePool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
         sqlx::query("UPDATE reminders SET retry_count = retry_count + 1, trigger_at = ? WHERE id = ?")
             .bind(new_trigger_at)

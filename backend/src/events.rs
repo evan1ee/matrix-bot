@@ -18,6 +18,7 @@ pub enum SystemEvent {
 
 impl SystemEvent {
     /// Returns a lowercase event type string for SSE `event:` field discrimination.
+    #[allow(dead_code)]
     pub fn event_type(&self) -> &'static str {
         match self {
             SystemEvent::TodoCreated(_) => "todo_created",

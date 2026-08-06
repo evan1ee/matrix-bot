@@ -16,6 +16,7 @@ impl BotClient {
         Self::build_and_login_with_token_handles(config, None, None).await
     }
 
+    #[allow(dead_code)]
     pub async fn build_and_login_with_token_handle(
         config: &Config,
         token_lock: Option<std::sync::Arc<tokio::sync::RwLock<Option<String>>>>,
