@@ -21,6 +21,7 @@ export interface ReminderListResponse {
   items: ReminderItem[];
   page: number;
   limit: number;
+  total: number;
 }
 
 export interface JoinedRoomInfo {

@@ -106,25 +106,48 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "token",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
           }
         ],
         "responses": {
           "200": {
             "description": "Matrix avatar image stream"
           },
+          "400": {
+            "description": "Malformed server name or media ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Media not found"
+            "description": "Media not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/api/v1/auth/register": {
@@ -183,11 +206,58 @@
           "sse"
         ],
         "summary": "SSE endpoint streaming real-time system events to authenticated web clients.",
-        "description": "Requires authentication (`AuthUser`). Emits default event stream objects containing `type` and `payload`.",
+        "description": "Emits unnamed event-stream messages whose body carries `type` and `payload`.\n\nThe broadcast channel is process-wide, so every subscriber sees every event.\nThis handler is what narrows it back down: a client receives only events it\nowns, matching the per-owner scoping the REST endpoints enforce.",
         "operationId": "sse_handler",
+        "parameters": [
+          {
+            "name": "ticket",
+            "in": "query",
+            "description": "Short-lived ticket from `POST /api/v1/events/ticket`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Server-Sent Events (SSE) live stream"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/events/ticket": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "create_sse_ticket",
+        "responses": {
+          "200": {
+            "description": "Short-lived ticket for opening the SSE stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseTicketResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized",
@@ -816,10 +886,6 @@
           },
           "server": {
             "type": "string"
-          },
-          "token": {
-            "type": "string",
-            "nullable": true
           }
         }
       },
@@ -910,7 +976,8 @@
         "required": [
           "items",
           "page",
-          "limit"
+          "limit",
+          "total"
         ],
         "properties": {
           "items": {
@@ -926,6 +993,11 @@
           "page": {
             "type": "integer",
             "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total pending reminders matching the query."
           }
         }
       },
@@ -957,6 +1029,24 @@
           "Cancelled",
           "Failed"
         ]
+      },
+      "SseTicketResponse": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "properties": {
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the ticket expires."
+          },
+          "ticket": {
+            "type": "string",
+            "description": "Present this as `?ticket=` when opening `/api/v1/events`."
+          }
+        }
       },
       "TodoItem": {
         "type": "object",
@@ -1008,7 +1098,8 @@
         "required": [
           "items",
           "page",
-          "limit"
+          "limit",
+          "total"
         ],
         "properties": {
           "items": {
@@ -1024,6 +1115,11 @@
           "page": {
             "type": "integer",
             "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total rows matching the query, so clients can render page counts."
           }
         }
       },
@@ -1093,6 +1189,13 @@
             "type": "string"
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A local API JWT, or a Matrix access token. The SSE endpoint additionally accepts the same value as a `token` query parameter, because EventSource cannot set request headers."
       }
     }
   },

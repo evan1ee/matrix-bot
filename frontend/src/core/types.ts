@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { QueryClient } from '@tanstack/react-query';
 
 export interface StatItem {
   id: string;
@@ -9,8 +9,9 @@ export interface StatItem {
 }
 
 export interface SystemEvent {
+  /// The Rust `SystemEvent` variant name, e.g. `TodoCreated`.
   type: string;
-  payload: any;
+  payload: unknown;
   timestamp: string;
 }
 
@@ -26,7 +27,7 @@ export interface FrontendModule {
     badgeCount?: number;
   };
   
-  getStatItems?: (queryClient: any) => StatItem[];
+  getStatItems?: (queryClient: QueryClient) => StatItem[];
   
   MainView: React.ComponentType<{
     activeRoomId?: string;
@@ -35,5 +36,5 @@ export interface FrontendModule {
     isConnected?: boolean;
   }>;
   
-  handleSseEvent?: (event: SystemEvent, queryClient: any) => void;
+  handleSseEvent?: (event: SystemEvent, queryClient: QueryClient) => void;
 }

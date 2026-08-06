@@ -20,6 +20,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_current_user"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["media_proxy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/register": {
         parameters: {
             query?: never;
@@ -45,12 +77,31 @@ export interface paths {
         };
         /**
          * SSE endpoint streaming real-time system events to authenticated web clients.
-         * @description Each event includes an `event:` type field (e.g. `todo_created`, `reminder_triggered`)
-         *     allowing frontends to selectively listen via `EventSource.addEventListener()`.
+         * @description Emits unnamed event-stream messages whose body carries `type` and `payload`.
+         *
+         *     The broadcast channel is process-wide, so every subscriber sees every event.
+         *     This handler is what narrows it back down: a client receives only events it
+         *     owns, matching the per-owner scoping the REST endpoints enforce.
          */
         get: operations["sse_handler"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_sse_ticket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -100,6 +151,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["delete_reminder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rooms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_rooms"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -158,13 +225,13 @@ export interface components {
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
-            room_id: string;
+            room_id?: string | null;
             /** Format: int64 */
             seconds: number;
         };
         CreateTodoRequest: {
             priority?: string | null;
-            room_id: string;
+            room_id?: string | null;
             text: string;
         };
         HealthResponse: {
@@ -173,11 +240,19 @@ export interface components {
             status: string;
             version: string;
         };
+        JoinedRoomInfo: {
+            name: string;
+            room_id: string;
+        };
+        MediaProxyQuery: {
+            media_id: string;
+            server: string;
+        };
         /**
-         * @description Pattern for recurring reminders (none, daily, or weekly).
+         * @description Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
          * @enum {string}
          */
-        RecurrencePattern: "None" | "Daily" | "Weekly";
+        RecurrencePattern: "None" | "Daily" | "Weekly" | "Monthly" | "Yearly";
         RegisterPayload: {
             password: string;
             secret?: string | null;
@@ -206,6 +281,11 @@ export interface components {
             limit: number;
             /** Format: int64 */
             page: number;
+            /**
+             * Format: int64
+             * @description Total pending reminders matching the query.
+             */
+            total: number;
         };
         ReminderQuery: {
             /** Format: int64 */
@@ -219,6 +299,15 @@ export interface components {
          * @enum {string}
          */
         ReminderStatus: "Pending" | "Triggered" | "Cancelled" | "Failed";
+        SseTicketResponse: {
+            /**
+             * Format: int64
+             * @description Seconds until the ticket expires.
+             */
+            expires_in: number;
+            /** @description Present this as `?ticket=` when opening `/api/v1/events`. */
+            ticket: string;
+        };
         TodoItem: {
             completed: boolean;
             /** Format: date-time */
@@ -238,6 +327,11 @@ export interface components {
             limit: number;
             /** Format: int64 */
             page: number;
+            /**
+             * Format: int64
+             * @description Total rows matching the query, so clients can render page counts.
+             */
+            total: number;
         };
         /** @enum {string} */
         TodoPriority: "Low" | "Medium" | "High";
@@ -253,6 +347,11 @@ export interface components {
             due_at?: string | null;
             priority?: string | null;
             text?: string | null;
+        };
+        UserProfileResponse: {
+            avatar_url?: string | null;
+            display_name?: string | null;
+            username: string;
         };
     };
     responses: never;
@@ -287,6 +386,83 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_current_user: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authenticated user profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserProfileResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    media_proxy: {
+        parameters: {
+            query: {
+                server: string;
+                media_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matrix avatar image stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed server name or media ID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Media not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -340,7 +516,10 @@ export interface operations {
     };
     sse_handler: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Short-lived ticket from `POST /api/v1/events/ticket`. */
+                ticket?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -353,6 +532,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_sse_ticket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Short-lived ticket for opening the SSE stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SseTicketResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
             };
         };
     };
@@ -481,6 +698,35 @@ export interface operations {
             };
             /** @description Reminder not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_rooms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List Matrix rooms joined by bot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinedRoomInfo"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

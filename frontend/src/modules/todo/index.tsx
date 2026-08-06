@@ -20,6 +20,7 @@ export interface TodoListResponse {
   items: TodoItem[];
   page: number;
   limit: number;
+  total: number;
 }
 
 export const TodoMainView: React.FC = () => {
