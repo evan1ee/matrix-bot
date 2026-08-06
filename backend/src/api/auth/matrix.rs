@@ -1,109 +1,32 @@
 use matrix_sdk::ruma::{ServerName, UserId};
 use matrix_sdk::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::api::auth::types::{ApiState, Claims, JwtKeys};
+use chrono::Duration;
 
+use crate::api::auth::types::{ApiState, AuthKind, Claims, JwtKeys, TokenScope};
+
+/// The bot's access token, if the bot has one.
+///
+/// Reads the shared slot the bot bootstrap populates, falling back to the token
+/// the bot cached on disk at last login. It deliberately does **not** log in:
+/// authenticating as the bot is the bot's job, and doing it from inside a
+/// request handler meant a single HTTP call could trigger a password login and
+/// rewrite `data/matrix_token.json` as a side effect. If the bot has not logged
+/// in, callers get `None` and degrade accordingly.
 pub async fn get_bot_matrix_access_token(state: &ApiState) -> Option<String> {
-    if let Some(tok) = state.matrix_access_token.read().await.clone() {
+    if let Some(tok) = state.bot_access_token.read().await.clone() {
         return Some(tok);
     }
 
-    if let Ok(file_tok) = std::fs::read_to_string("data/matrix_token.json") {
-        let trimmed = file_tok.trim().to_string();
-        if !trimmed.is_empty() {
-            *state.matrix_access_token.write().await = Some(trimmed.clone());
-            return Some(trimmed);
-        }
+    let file_tok = std::fs::read_to_string("data/matrix_token.json").ok()?;
+    let trimmed = file_tok.trim().to_string();
+    if trimmed.is_empty() {
+        return None;
     }
 
-    dotenvy::dotenv().ok();
-    let env_user = std::env::var("MATRIX_USERNAME").ok()?;
-    let env_pass = std::env::var("MATRIX_PASSWORD").ok()?;
-
-    let client = get_matrix_sdk_client(&state.homeserver).await;
-    let hs_url = if let Some(c) = client {
-        c.homeserver().to_string()
-    } else {
-        state.homeserver.clone()
-    };
-    let clean_hs = hs_url.trim_end_matches('/');
-    let clean_domain = state
-        .homeserver
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .trim_end_matches('/');
-
-    let full_user_id = if env_user.starts_with('@') {
-        env_user.clone()
-    } else {
-        format!("@{}:{}", env_user, clean_domain)
-    };
-
-    let login_url = format!("{}/_matrix/client/v3/login", clean_hs);
-
-    #[derive(Serialize)]
-    struct LoginReq<'a> {
-        #[serde(rename = "type")]
-        login_type: &'a str,
-        identifier: UserIdentifier<'a>,
-        password: &'a str,
-    }
-
-    #[derive(Serialize)]
-    struct UserIdentifier<'a> {
-        #[serde(rename = "type")]
-        id_type: &'a str,
-        user: &'a str,
-    }
-
-    let payload = LoginReq {
-        login_type: "m.login.password",
-        identifier: UserIdentifier {
-            id_type: "m.id.user",
-            user: &full_user_id,
-        },
-        password: &env_pass,
-    };
-
-    match state.http_client.post(&login_url).json(&payload).send().await {
-        Ok(res) => {
-            tracing::info!("Bot login request to {}: status={}", login_url, res.status());
-            if res.status().is_success() {
-                #[derive(Deserialize)]
-                struct LoginResp {
-                    access_token: String,
-                }
-                if let Ok(data) = res.json::<LoginResp>().await {
-                    tracing::info!("Successfully obtained bot access_token from homeserver!");
-                    std::fs::create_dir_all("data").ok();
-
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::OpenOptionsExt;
-                        let mut options = std::fs::OpenOptions::new();
-                        options.write(true).create(true).truncate(true).mode(0o600);
-                        if let Ok(mut f) = options.open("data/matrix_token.json") {
-                            use std::io::Write;
-                            let _ = f.write_all(data.access_token.as_bytes());
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        std::fs::write("data/matrix_token.json", &data.access_token).ok();
-                    }
-
-                    *state.matrix_access_token.write().await = Some(data.access_token.clone());
-                    return Some(data.access_token);
-                }
-            }
-        }
-        Err(err) => {
-            tracing::warn!("Bot login HTTP error: {:?}", err);
-        }
-    }
-
-    None
+    *state.bot_access_token.write().await = Some(trimmed.clone());
+    Some(trimmed)
 }
 
 pub async fn get_matrix_sdk_client(homeserver_input: &str) -> Option<Client> {
@@ -129,9 +52,46 @@ pub async fn get_matrix_sdk_client(homeserver_input: &str) -> Option<Client> {
     Client::builder().homeserver_url(&fallback_url).build().await.ok()
 }
 
+/// The homeserver base URL, resolved once and reused.
+///
+/// Falls back to the configured value if discovery fails, so a transient
+/// `.well-known` outage degrades rather than caching a wrong answer.
+pub async fn resolved_homeserver(state: &ApiState) -> String {
+    if let Some(url) = state.resolved_homeserver.read().await.clone() {
+        return url;
+    }
+
+    let resolved = match get_matrix_sdk_client(&state.homeserver).await {
+        Some(client) => {
+            let url = client.homeserver().to_string();
+            let url = url.trim_end_matches('/').to_string();
+            *state.resolved_homeserver.write().await = Some(url.clone());
+            url
+        }
+        None => state.homeserver.trim_end_matches('/').to_string(),
+    };
+
+    resolved
+}
+
+/// Whether a string is shaped like a Matrix access token.
+///
+/// Guards the extractor's last-resort `whoami` probe: without it, any malformed
+/// bearer string cost an outbound round trip, letting an unauthenticated caller
+/// amplify one request into homeserver traffic.
+pub fn looks_like_access_token(token: &str) -> bool {
+    (16..=512).contains(&token.len())
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '~' | '+' | '/' | '='))
+}
+
 pub async fn validate_matrix_access_token(state: &ApiState, token: &str) -> Option<String> {
-    let client = get_matrix_sdk_client(&state.homeserver).await?;
-    let hs_url = client.homeserver().to_string();
+    if !looks_like_access_token(token) {
+        return None;
+    }
+
+    let hs_url = resolved_homeserver(state).await;
     let whoami_url = format!("{}/_matrix/client/v3/account/whoami", hs_url.trim_end_matches('/'));
 
     let res = state
@@ -183,15 +143,33 @@ pub async fn authenticate_matrix_user(
     }
 }
 
-pub fn generate_jwt(username: &str, secret: &str) -> Result<String, jsonwebtoken::errors::Error> {
+/// Issues a full-access API token, valid for 7 days.
+pub fn generate_jwt(
+    subject: &str,
+    kind: AuthKind,
+    secret: &str,
+) -> Result<String, jsonwebtoken::errors::Error> {
+    generate_scoped_jwt(subject, kind, TokenScope::Api, Duration::days(7), secret)
+}
+
+/// Issues a token limited to `scope` and `ttl`.
+pub fn generate_scoped_jwt(
+    subject: &str,
+    kind: AuthKind,
+    scope: TokenScope,
+    ttl: Duration,
+    secret: &str,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::days(7))
+        .checked_add_signed(ttl)
         .expect("valid timestamp")
         .timestamp() as usize;
 
     let claims = Claims {
-        sub: username.to_string(),
+        sub: subject.to_string(),
         exp: expiration,
+        kind,
+        scope,
     };
 
     let keys = JwtKeys::new(secret.as_bytes());

@@ -74,20 +74,20 @@ impl TodoRepository {
     }
 
 
-    pub async fn list_all_user(pool: &SqlitePool, sender_mxid: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
-        let clean_name = sender_mxid.trim_start_matches('@').split(':').next().unwrap_or(sender_mxid);
-        let web_mxid = format!("@web-{}:api", clean_name);
-
+    /// Lists every task owned by `owner_id` across all rooms.
+    ///
+    /// `sender_mxid` is the sole ownership key. `sender_name` is a display field
+    /// that users control and that collides across identity spaces, so it must
+    /// never appear in this predicate.
+    pub async fn list_all_user(pool: &SqlitePool, owner_id: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
         let items = sqlx::query_as::<_, TodoItem>(
             r#"
             SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at
-            FROM todos WHERE sender_mxid = ? OR sender_mxid = ? OR sender_name = ? ORDER BY completed ASC, id ASC
+            FROM todos WHERE sender_mxid = ? ORDER BY completed ASC, id ASC
             LIMIT ? OFFSET ?
             "#,
         )
-        .bind(sender_mxid)
-        .bind(&web_mxid)
-        .bind(clean_name)
+        .bind(owner_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
@@ -96,10 +96,29 @@ impl TodoRepository {
         Ok(items)
     }
 
-    pub async fn mark_done(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
-        let result = sqlx::query(
-            "UPDATE todos SET completed = 1 WHERE id = ?",
+    /// Total tasks owned by `owner_id`, for pagination metadata.
+    pub async fn count_all_user(pool: &SqlitePool, owner_id: &str) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM todos WHERE sender_mxid = ?",
         )
+        .bind(owner_id)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    pub async fn mark_done(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
+        Self::set_completed(pool, id, true).await
+    }
+
+    /// Sets completion in either direction. The API exposes `completed` as a
+    /// boolean, so un-completing has to be as reachable as completing.
+    pub async fn set_completed(pool: &SqlitePool, id: i64, completed: bool) -> Result<Option<TodoItem>> {
+        let result = sqlx::query(
+            "UPDATE todos SET completed = ? WHERE id = ?",
+        )
+        .bind(completed)
         .bind(id)
         .execute(pool)
         .await?;

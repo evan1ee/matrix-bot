@@ -26,8 +26,17 @@ impl ApiError {
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::NOT_FOUND, message: msg.into() }
     }
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() }
+    /// Records the underlying failure and returns an opaque 500.
+    ///
+    /// Call sites pass raw `sqlx`/IO errors here. Those name tables, columns and
+    /// file paths, so they belong in the log, not in a response body.
+    pub fn internal(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        tracing::error!("Internal API error: {}", detail);
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "Internal server error".to_string(),
+        }
     }
 }
 
@@ -71,5 +80,18 @@ mod tests {
 
         let err = ApiError::internal("db crash");
         assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// Internal failures must not describe themselves to the caller.
+    #[test]
+    fn test_internal_errors_do_not_leak_detail() {
+        let err = ApiError::internal(
+            "error returned from database: no such column: todos.secret_column",
+        );
+        assert_eq!(err.message, "Internal server error");
+        assert!(!err.message.contains("todos"));
+
+        let err = ApiError::from(sqlx::Error::RowNotFound);
+        assert_eq!(err.message, "Internal server error");
     }
 }

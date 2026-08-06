@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { registry } from '../core/registry';
 import { fetchApi } from '../core/apiClient';
@@ -36,7 +36,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   currentTheme,
   onThemeChange,
 }) => {
-  const [avatarError, setAvatarError] = useState(false);
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
   const modules = registry.getAll();
   const activeModule = registry.get(activeModuleId) || modules[0];
 
@@ -63,8 +63,36 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const displayName = userProfile?.display_name || userProfile?.username;
 
-  // Clean avatar URL without security-sensitive token query parameters
-  const finalAvatarUrl = userProfile?.avatar_url || null;
+  // The media proxy is authenticated, so the avatar can't be a bare <img src>.
+  // Fetch it with the bearer token and hand <img> an object URL instead — this
+  // keeps the token in a header rather than in a URL the browser would log.
+  const avatarPath = userProfile?.avatar_url || null;
+
+  useEffect(() => {
+    if (!avatarPath || !userToken) {
+      setAvatarObjectUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    fetch(avatarPath, { headers: { Authorization: `Bearer ${userToken}` } })
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('Avatar unavailable'))))
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setAvatarObjectUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setAvatarObjectUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [avatarPath, userToken]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-150">
@@ -103,12 +131,11 @@ export const AppShell: React.FC<AppShellProps> = ({
               title={userToken ? `Logged in as ${displayName || 'User'}` : 'Login / Token'}
             >
               {userToken ? (
-                finalAvatarUrl && !avatarError ? (
+                avatarObjectUrl ? (
                   <>
                     <img
-                      src={finalAvatarUrl}
+                      src={avatarObjectUrl}
                       alt={displayName || 'Matrix User Avatar'}
-                      onError={() => setAvatarError(true)}
                       className="w-5 h-5 rounded-full object-cover border border-neutral-300 dark:border-neutral-700"
                     />
                     <span className="font-mono text-xs max-w-[120px] truncate">

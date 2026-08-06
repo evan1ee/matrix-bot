@@ -39,6 +39,8 @@ pub struct TodoListResponse {
     pub items: Vec<TodoItem>,
     pub page: i64,
     pub limit: i64,
+    /// Total rows matching the query, so clients can render page counts.
+    pub total: i64,
 }
 
 #[utoipa::path(
@@ -59,28 +61,41 @@ pub async fn list_todos(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
-    let sender_mxid = user.sender_mxid();
+    let owner_id = user.owner_id();
 
-    let items = if let Some(room) = &query.room_id {
-        sqlx::query_as::<_, TodoItem>(
-            "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE room_id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?",
+    let (items, total) = if let Some(room) = &query.room_id {
+        let items = sqlx::query_as::<_, TodoItem>(
+            "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE room_id = ? AND sender_mxid = ? ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?",
         )
         .bind(room)
-        .bind(&sender_mxid)
-        .bind(&user.username)
-        .bind(&user.username)
+        .bind(&owner_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db.pool)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        let total = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND sender_mxid = ?",
+        )
+        .bind(room)
+        .bind(&owner_id)
+        .fetch_one(&state.db.pool)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        (items, total)
     } else {
-        TodoRepository::list_all_user(&state.db.pool, &user.username, limit, offset)
+        let items = TodoRepository::list_all_user(&state.db.pool, &owner_id, limit, offset)
             .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total = TodoRepository::count_all_user(&state.db.pool, &owner_id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        (items, total)
     };
 
-    Ok(Json(TodoListResponse { items, page, limit }))
+    Ok(Json(TodoListResponse { items, page, limit, total }))
 }
 
 #[utoipa::path(
@@ -113,25 +128,13 @@ pub async fn create_todo(
         .map(TodoPriority::from_str)
         .unwrap_or(TodoPriority::Medium);
 
-    let sender_mxid = user.sender_mxid();
-    let sender_name = if user.username.starts_with('@') {
-        user.username
-            .trim_start_matches('@')
-            .split(':')
-            .next()
-            .unwrap_or(&user.username)
-            .to_string()
-    } else {
-        user.username.clone()
-    };
-
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
 
     let item = TodoRepository::add(
         &state.db.pool,
         &room_id,
-        &sender_mxid,
-        &sender_name,
+        &user.owner_id(),
+        &user.display_name(),
         &payload.text,
         priority,
     )
@@ -161,14 +164,11 @@ pub async fn update_todo(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
-    let sender_mxid = user.sender_mxid();
     let mut item = sqlx::query_as::<_, TodoItem>(
-        "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
+        "SELECT id, room_id, sender_mxid, sender_name, text, priority, due_at, completed, created_at FROM todos WHERE id = ? AND sender_mxid = ?",
     )
     .bind(id)
-    .bind(&sender_mxid)
-    .bind(&user.username)
-    .bind(&user.username)
+    .bind(user.owner_id())
     .fetch_optional(&state.db.pool)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?
@@ -190,12 +190,10 @@ pub async fn update_todo(
     }
 
     if let Some(completed) = payload.completed {
-        if completed {
-            TodoRepository::mark_done(&state.db.pool, id)
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-            item.completed = true;
-        }
+        TodoRepository::set_completed(&state.db.pool, id, completed)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        item.completed = completed;
     }
 
     if let Some(due) = payload.due_at {
@@ -226,14 +224,12 @@ pub async fn delete_todo(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let sender_mxid = user.sender_mxid();
+    let owner_id = user.owner_id();
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT room_id FROM todos WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
+        "SELECT room_id FROM todos WHERE id = ? AND sender_mxid = ?",
     )
     .bind(id)
-    .bind(&sender_mxid)
-    .bind(&user.username)
-    .bind(&user.username)
+    .bind(&owner_id)
     .fetch_optional(&state.db.pool)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -249,7 +245,7 @@ pub async fn delete_todo(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::TodoDeleted { id, room_id });
+    state.broadcaster.send(SystemEvent::TodoDeleted { id, room_id, owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -273,12 +269,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser {
-            username: "alice".to_string(),
-        };
-        let bob = AuthUser {
-            username: "bob".to_string(),
-        };
+        let alice = AuthUser::local("alice");
+        let bob = AuthUser::local("bob");
 
         // Alice creates todo
         let req = CreateTodoRequest {
@@ -330,5 +322,165 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    /// `completed` is a boolean on the wire, so it has to work in both
+    /// directions — `false` used to be accepted and silently ignored.
+    #[tokio::test]
+    async fn test_completion_can_be_toggled_back_off() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            "secret".to_string(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let alice = AuthUser::local("alice");
+
+        let created = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateTodoRequest {
+                room_id: None,
+                text: "Water the plants".to_string(),
+                priority: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!created.completed);
+
+        let set = |flag: bool| UpdateTodoRequest {
+            text: None,
+            priority: None,
+            completed: Some(flag),
+            due_at: None,
+        };
+
+        let done = update_todo(
+            State(state.clone()),
+            alice.clone(),
+            Path(created.id),
+            Json(set(true)),
+        )
+        .await
+        .unwrap();
+        assert!(done.completed);
+
+        let undone = update_todo(
+            State(state.clone()),
+            alice.clone(),
+            Path(created.id),
+            Json(set(false)),
+        )
+        .await
+        .unwrap();
+        assert!(!undone.completed, "response must reflect the un-completion");
+
+        // And it must have actually persisted, not just been echoed back.
+        let listed = list_todos(
+            State(state),
+            alice,
+            Query(TodoQuery { room_id: None, page: None, limit: None }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed.items.len(), 1);
+        assert!(!listed.items[0].completed);
+    }
+
+    /// A local account and a Matrix user sharing a name are different people.
+    ///
+    /// Ownership used to also match on `sender_name`, so registering the local
+    /// account `evan` was enough to read and delete `@evan:mbm.one`'s tasks.
+    #[tokio::test]
+    async fn test_local_account_cannot_reach_matrix_user_data() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            "secret".to_string(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+
+        let matrix_evan = AuthUser::matrix("@evan:mbm.one");
+        let impostor = AuthUser::local("evan");
+
+        // Both derive the same display name — that must not grant access.
+        assert_eq!(matrix_evan.display_name(), impostor.display_name());
+
+        let created = create_todo(
+            State(state.clone()),
+            matrix_evan.clone(),
+            Json(CreateTodoRequest {
+                room_id: Some("!room:mbm.one".to_string()),
+                text: "Matrix-owned task".to_string(),
+                priority: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Cross-room listing
+        let listed = list_todos(
+            State(state.clone()),
+            impostor.clone(),
+            Query(TodoQuery { room_id: None, page: None, limit: None }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed.items.len(), 0, "local account must not see Matrix user's tasks");
+
+        // Room-scoped listing takes a different code path — check it too.
+        let listed_in_room = list_todos(
+            State(state.clone()),
+            impostor.clone(),
+            Query(TodoQuery {
+                room_id: Some("!room:mbm.one".to_string()),
+                page: None,
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed_in_room.items.len(), 0);
+
+        // Mutation and deletion must both be refused.
+        let err = update_todo(
+            State(state.clone()),
+            impostor.clone(),
+            Path(created.id),
+            Json(UpdateTodoRequest {
+                text: Some("hijacked".to_string()),
+                priority: None,
+                completed: None,
+                due_at: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        let err = delete_todo(State(state.clone()), impostor, Path(created.id))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        // The real owner still has full access.
+        let owner_view = list_todos(
+            State(state),
+            matrix_evan,
+            Query(TodoQuery { room_id: None, page: None, limit: None }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(owner_view.items.len(), 1);
+        assert_eq!(owner_view.items[0].text, "Matrix-owned task");
     }
 }

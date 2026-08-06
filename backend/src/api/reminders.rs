@@ -33,6 +33,8 @@ pub struct ReminderListResponse {
     pub items: Vec<Reminder>,
     pub page: i64,
     pub limit: i64,
+    /// Total pending reminders matching the query.
+    pub total: i64,
 }
 
 #[utoipa::path(
@@ -53,36 +55,41 @@ pub async fn list_reminders(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
-    let sender_mxid = user.sender_mxid();
+    let owner_id = user.owner_id();
 
-    let items = if let Some(room) = &query.room_id {
-        sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
+    let (items, total) = if let Some(room) = &query.room_id {
+        let items = sqlx::query_as::<_, Reminder>(
+            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
         )
         .bind(room)
-        .bind(&sender_mxid)
-        .bind(&user.username)
-        .bind(&user.username)
+        .bind(&owner_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db.pool)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-    } else {
-        sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?) AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        let total = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending'",
         )
-        .bind(&sender_mxid)
-        .bind(&user.username)
-        .bind(&user.username)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&state.db.pool)
+        .bind(room)
+        .bind(&owner_id)
+        .fetch_one(&state.db.pool)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        (items, total)
+    } else {
+        let items = ReminderRepository::list_user_pending(&state.db.pool, &owner_id, limit, offset)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total = ReminderRepository::count_user_pending(&state.db.pool, &owner_id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        (items, total)
     };
 
-    Ok(Json(ReminderListResponse { items, page, limit }))
+    Ok(Json(ReminderListResponse { items, page, limit, total }))
 }
 
 #[utoipa::path(
@@ -118,25 +125,13 @@ pub async fn create_reminder(
         .map(RecurrencePattern::from_str)
         .unwrap_or(RecurrencePattern::None);
 
-    let sender_mxid = user.sender_mxid();
-    let sender_name = if user.username.starts_with('@') {
-        user.username
-            .trim_start_matches('@')
-            .split(':')
-            .next()
-            .unwrap_or(&user.username)
-            .to_string()
-    } else {
-        user.username.clone()
-    };
-
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
 
     let reminder = ReminderRepository::create(
         &state.db.pool,
         &room_id,
-        &sender_mxid,
-        &sender_name,
+        &user.owner_id(),
+        &user.display_name(),
         &payload.message,
         trigger_at,
         recurrence,
@@ -165,14 +160,12 @@ pub async fn delete_reminder(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let sender_mxid = user.sender_mxid();
+    let owner_id = user.owner_id();
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT room_id FROM reminders WHERE id = ? AND (sender_mxid = ? OR sender_mxid = ? OR sender_name = ?)",
+        "SELECT room_id FROM reminders WHERE id = ? AND sender_mxid = ?",
     )
     .bind(id)
-    .bind(&sender_mxid)
-    .bind(&user.username)
-    .bind(&user.username)
+    .bind(&owner_id)
     .fetch_optional(&state.db.pool)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -188,7 +181,7 @@ pub async fn delete_reminder(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::ReminderCancelled { id, room_id });
+    state.broadcaster.send(SystemEvent::ReminderCancelled { id, room_id, owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -212,12 +205,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser {
-            username: "alice".to_string(),
-        };
-        let bob = AuthUser {
-            username: "bob".to_string(),
-        };
+        let alice = AuthUser::local("alice");
+        let bob = AuthUser::local("bob");
 
         // Alice creates reminder
         let req = CreateReminderRequest {

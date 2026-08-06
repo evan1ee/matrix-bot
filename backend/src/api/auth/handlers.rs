@@ -6,11 +6,11 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use serde::Deserialize;
 
 use crate::api::auth::matrix::{
-    authenticate_matrix_user, generate_jwt, get_bot_matrix_access_token, get_matrix_sdk_client,
+    generate_jwt, generate_scoped_jwt, get_bot_matrix_access_token, resolved_homeserver,
 };
 use crate::api::auth::types::{
-    ApiState, AuthPayload, AuthResponse, AuthUser, MediaProxyQuery, RegisterPayload,
-    UserProfileResponse,
+    is_valid_local_username, ApiState, AuthKind, AuthPayload, AuthResponse, AuthUser,
+    MediaProxyQuery, RegisterPayload, SseTicketResponse, TokenScope, UserProfileResponse,
 };
 use crate::error::ApiError;
 
@@ -35,8 +35,17 @@ pub async fn register(
         }
     }
 
-    if payload.username.trim().is_empty() || payload.password.trim().is_empty() {
+    if payload.password.trim().is_empty() {
         return Err(ApiError::bad_request("Username and password required"));
+    }
+
+    // Reject anything that could be read as a Matrix user ID. Without this, an
+    // account named `@someone:matrix.org` would resolve to that MXID's owner_id
+    // and inherit their data.
+    if !is_valid_local_username(&payload.username) {
+        return Err(ApiError::bad_request(
+            "Username must be 1-64 characters of letters, digits, '.', '-' or '_'",
+        ));
     }
 
     let password_hash = hash(payload.password, DEFAULT_COST)
@@ -49,13 +58,11 @@ pub async fn register(
         .await;
 
     if let Err(err) = res {
-        return Err(ApiError::bad_request(format!(
-            "Username already exists or database error: {}",
-            err
-        )));
+        tracing::warn!("Registration failed for {}: {:?}", payload.username, err);
+        return Err(ApiError::bad_request("Username already exists"));
     }
 
-    let token = generate_jwt(&payload.username, &state.jwt_secret)
+    let token = generate_jwt(&payload.username, AuthKind::Local, &state.jwt_secret)
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(AuthResponse {
@@ -88,7 +95,7 @@ pub async fn login(
 
     if let Some((stored_hash,)) = row {
         if verify(&payload.password, &stored_hash).unwrap_or(false) {
-            let token = generate_jwt(&payload.username, &state.jwt_secret)
+            let token = generate_jwt(&payload.username, AuthKind::Local, &state.jwt_secret)
                 .map_err(|e| ApiError::internal(e.to_string()))?;
 
             return Ok(Json(AuthResponse {
@@ -99,14 +106,20 @@ pub async fn login(
         }
     }
 
-    // 2. Fallback: Authenticate directly against the Matrix Homeserver
-    if let Some((matrix_user_id, matrix_token)) =
-        authenticate_matrix_user(&state, &payload.username, &payload.password).await
+    // 2. Fallback: Authenticate directly against the Matrix Homeserver.
+    //
+    // The caller's own Matrix access token is deliberately discarded. It proved
+    // who they are, and that is all it is needed for — the JWT below is what they
+    // authenticate to this API with. Storing it in `bot_access_token` (as this
+    // once did) would hand every bot-credentialed endpoint the identity of
+    // whoever logged in most recently.
+    if let Some((matrix_user_id, _caller_access_token)) = state
+        .matrix_identity
+        .login(&state, &payload.username, &payload.password)
+        .await
     {
-        let token = generate_jwt(&matrix_user_id, &state.jwt_secret)
+        let token = generate_jwt(&matrix_user_id, AuthKind::Matrix, &state.jwt_secret)
             .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        *state.matrix_access_token.write().await = Some(matrix_token);
 
         return Ok(Json(AuthResponse {
             token,
@@ -134,15 +147,9 @@ pub async fn get_current_user(
     let mut display_name = None;
     let mut avatar_url = None;
 
-    if auth_user.username.starts_with('@') && auth_user.username.contains(':') {
-        let client = get_matrix_sdk_client(&state.homeserver).await;
-        let hs_url = if let Some(c) = client {
-            c.homeserver().to_string()
-        } else {
-            state.homeserver.clone()
-        };
-        let clean_hs = hs_url.trim_end_matches('/');
-        let encoded_user = auth_user.username.replace('@', "%40").replace(':', "%3A");
+    if auth_user.kind == AuthKind::Matrix {
+        let clean_hs = resolved_homeserver(&state).await;
+        let encoded_user = auth_user.subject.replace('@', "%40").replace(':', "%3A");
         let profile_url = format!("{}/_matrix/client/v3/profile/{}", clean_hs, encoded_user);
 
         if let Ok(res) = state.http_client.get(&profile_url).send().await {
@@ -172,10 +179,86 @@ pub async fn get_current_user(
     }
 
     Ok(Json(UserProfileResponse {
-        username: auth_user.username,
+        username: auth_user.subject,
         display_name,
         avatar_url,
     }))
+}
+
+/// How long a stream ticket stays usable. Long enough to open a connection,
+/// short enough that leaking it through a URL is largely inconsequential.
+const SSE_TICKET_TTL_SECONDS: i64 = 30;
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/events/ticket",
+    responses(
+        (status = 200, description = "Short-lived ticket for opening the SSE stream", body = SseTicketResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_sse_ticket(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<SseTicketResponse>, ApiError> {
+    let ticket = generate_scoped_jwt(
+        &user.subject,
+        user.kind,
+        TokenScope::SseStream,
+        chrono::Duration::seconds(SSE_TICKET_TTL_SECONDS),
+        &state.jwt_secret,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(SseTicketResponse {
+        ticket,
+        expires_in: SSE_TICKET_TTL_SECONDS,
+    }))
+}
+
+/// Matrix server names are hostnames with an optional port, or an IP literal.
+///
+/// Rejecting everything outside this set keeps the value safe to interpolate as a
+/// URL path segment: no `/`, `%`, `?`, `#` or `@`, so it cannot escape the path,
+/// inject a query, or smuggle userinfo into the authority.
+fn is_valid_server_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s.contains("..")
+        && s.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '[')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+}
+
+/// Media IDs are opaque to clients but restricted to unreserved characters.
+fn is_valid_media_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
+/// Streams an upstream media response back to the caller, refusing anything that
+/// isn't an image so the proxy can't be used to relay arbitrary content.
+async fn image_response(res: reqwest::Response) -> Option<axum::response::Response> {
+    // Literal header name: reqwest 0.11 carries `http` 0.2, so axum's `http` 1.x
+    // header constants are a different (sealed) type here.
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .filter(|ct| ct.starts_with("image/"))
+        .unwrap_or("image/png")
+        .to_string();
+
+    let bytes = res.bytes().await.ok()?;
+
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, content_type)
+        // `private`: this is an authenticated endpoint, so shared caches must not store it.
+        .header(axum::http::header::CACHE_CONTROL, "private, max-age=86400")
+        .body(axum::body::Body::from(bytes))
+        .ok()
 }
 
 #[utoipa::path(
@@ -184,118 +267,69 @@ pub async fn get_current_user(
     params(MediaProxyQuery),
     responses(
         (status = 200, description = "Matrix avatar image stream"),
-        (status = 404, description = "Media not found")
-    )
+        (status = 400, description = "Malformed server name or media ID", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Media not found", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn media_proxy(
     State(state): State<ApiState>,
+    _user: AuthUser,
     Query(query): Query<MediaProxyQuery>,
 ) -> Result<axum::response::Response, ApiError> {
-    let client = get_matrix_sdk_client(&state.homeserver).await;
-    let hs_url = if let Some(c) = client {
-        c.homeserver().to_string()
-    } else {
-        state.homeserver.clone()
-    };
-    let clean_hs = hs_url.trim_end_matches('/');
+    if !is_valid_server_name(&query.server) {
+        return Err(ApiError::bad_request("Malformed Matrix server name"));
+    }
+    if !is_valid_media_id(&query.media_id) {
+        return Err(ApiError::bad_request("Malformed Matrix media ID"));
+    }
 
-    let bases = vec![
-        format!(
-            "https://matrix.{}/_matrix/client/v1/media/download/{}/{}",
-            query.server, query.server, query.media_id
-        ),
-        format!(
-            "https://matrix.{}/_matrix/client/v1/media/thumbnail/{}/{}?width=96&height=96&method=crop",
-            query.server, query.server, query.media_id
-        ),
-        format!(
-            "{}/_matrix/client/v1/media/download/{}/{}",
-            clean_hs, query.server, query.media_id
-        ),
+    let clean_hs = resolved_homeserver(&state).await;
+
+    // Media is always fetched *through our own homeserver*, which proxies remote
+    // servers on our behalf. `query.server` is a path segment identifying the
+    // origin server — never a host we connect to — so a hostile value cannot
+    // redirect the request (and with it the bot's access token) off-homeserver.
+    let authenticated_urls = [
         format!(
             "{}/_matrix/client/v1/media/thumbnail/{}/{}?width=96&height=96&method=crop",
             clean_hs, query.server, query.media_id
         ),
         format!(
-            "https://matrix.{}/_matrix/media/v3/download/{}/{}",
-            query.server, query.server, query.media_id
+            "{}/_matrix/client/v1/media/download/{}/{}",
+            clean_hs, query.server, query.media_id
         ),
+    ];
+
+    // Pre-Matrix-1.11 homeservers still expose these unauthenticated.
+    let legacy_urls = [
         format!(
-            "https://matrix.{}/_matrix/media/v3/thumbnail/{}/{}?width=96&height=96&method=crop",
-            query.server, query.server, query.media_id
+            "{}/_matrix/media/v3/thumbnail/{}/{}?width=96&height=96&method=crop",
+            clean_hs, query.server, query.media_id
         ),
         format!(
             "{}/_matrix/media/v3/download/{}/{}",
             clean_hs, query.server, query.media_id
         ),
-        format!(
-            "{}/_matrix/media/v3/thumbnail/{}/{}?width=96&height=96&method=crop",
-            clean_hs, query.server, query.media_id
-        ),
     ];
 
-    let bot_token = get_bot_matrix_access_token(&state).await;
-
-    for media_url in &bases {
-        if let Some(ref tok) = bot_token {
-            if let Ok(res) = state.http_client.get(media_url).bearer_auth(tok).send().await {
+    if let Some(token) = get_bot_matrix_access_token(&state).await {
+        for media_url in authenticated_urls.iter().chain(legacy_urls.iter()) {
+            if let Ok(res) = state.http_client.get(media_url).bearer_auth(&token).send().await {
                 if res.status().is_success() {
-                    let content_type = res
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("image/png")
-                        .to_string();
-
-                    if let Ok(bytes) = res.bytes().await {
-                        let response = axum::response::Response::builder()
-                            .header(axum::http::header::CONTENT_TYPE, content_type)
-                            .header(axum::http::header::CACHE_CONTROL, "public, max-age=86400")
-                            .body(axum::body::Body::from(bytes))
-                            .map_err(|e| ApiError::internal(e.to_string()))?;
+                    if let Some(response) = image_response(res).await {
                         return Ok(response);
                     }
                 }
             }
         }
+    }
 
-        if let Some(ref tok) = query.token {
-            if let Ok(res) = state.http_client.get(media_url).bearer_auth(tok).send().await {
-                if res.status().is_success() {
-                    let content_type = res
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("image/png")
-                        .to_string();
-
-                    if let Ok(bytes) = res.bytes().await {
-                        let response = axum::response::Response::builder()
-                            .header(axum::http::header::CONTENT_TYPE, content_type)
-                            .header(axum::http::header::CACHE_CONTROL, "public, max-age=86400")
-                            .body(axum::body::Body::from(bytes))
-                            .map_err(|e| ApiError::internal(e.to_string()))?;
-                        return Ok(response);
-                    }
-                }
-            }
-        }
-
+    for media_url in &legacy_urls {
         if let Ok(res) = state.http_client.get(media_url).send().await {
             if res.status().is_success() {
-                let content_type = res
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("image/png")
-                    .to_string();
-
-                if let Ok(bytes) = res.bytes().await {
-                    let response = axum::response::Response::builder()
-                        .header(axum::http::header::CONTENT_TYPE, content_type)
-                        .header(axum::http::header::CACHE_CONTROL, "public, max-age=86400")
-                        .body(axum::body::Body::from(bytes))
-                        .map_err(|e| ApiError::internal(e.to_string()))?;
+                if let Some(response) = image_response(res).await {
                     return Ok(response);
                 }
             }
@@ -303,4 +337,83 @@ pub async fn media_proxy(
     }
 
     Err(ApiError::not_found("Avatar media not found on Matrix homeserver"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_server_names_accepted() {
+        assert!(is_valid_server_name("matrix.org"));
+        assert!(is_valid_server_name("mbm.one"));
+        assert!(is_valid_server_name("example.com:8448"));
+        assert!(is_valid_server_name("127.0.0.1"));
+        assert!(is_valid_server_name("[::1]:8448"));
+    }
+
+    #[test]
+    fn test_server_name_rejects_path_and_authority_escapes() {
+        // Path traversal out of the media route
+        assert!(!is_valid_server_name(".."));
+        assert!(!is_valid_server_name("evil.com/../.."));
+        assert!(!is_valid_server_name("a..b"));
+        // Query / fragment injection
+        assert!(!is_valid_server_name("evil.com?x=1"));
+        assert!(!is_valid_server_name("evil.com#frag"));
+        // Userinfo smuggling and percent-encoded escapes
+        assert!(!is_valid_server_name("evil.com@attacker.com"));
+        assert!(!is_valid_server_name("evil.com%2f.."));
+        assert!(!is_valid_server_name(""));
+        assert!(!is_valid_server_name(&"a".repeat(256)));
+    }
+
+    #[test]
+    fn test_media_id_rejects_separators() {
+        assert!(is_valid_media_id("AbC123_-xyz"));
+        assert!(!is_valid_media_id("../../secret"));
+        assert!(!is_valid_media_id("abc/def"));
+        assert!(!is_valid_media_id("abc?width=1"));
+        assert!(!is_valid_media_id("abc.png"));
+        assert!(!is_valid_media_id(""));
+    }
+
+    #[tokio::test]
+    async fn test_media_proxy_rejects_malformed_input_before_any_request() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            crate::events::EventBroadcaster::default(),
+            "secret".to_string(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let user = AuthUser::local("alice");
+
+        let err = media_proxy(
+            State(state.clone()),
+            user.clone(),
+            Query(MediaProxyQuery {
+                server: "evil.example@attacker.test".to_string(),
+                media_id: "abc".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+
+        let err = media_proxy(
+            State(state),
+            user,
+            Query(MediaProxyQuery {
+                server: "matrix.org".to_string(),
+                media_id: "../../etc/passwd".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+    }
 }

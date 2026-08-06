@@ -5,10 +5,59 @@ use utoipa::ToSchema;
 
 use crate::db::Database;
 
+/// Which identity space a caller authenticated in.
+///
+/// This is recorded at authentication time rather than inferred later from the
+/// shape of the subject string: a local account name and a Matrix user ID are
+/// different namespaces, and guessing between them by looking for a leading `@`
+/// is what previously let a local account impersonate a Matrix user.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthKind {
+    /// A locally registered `web_users` account.
+    #[default]
+    Local,
+    /// A Matrix user, proven either by homeserver login or by access token.
+    Matrix,
+}
+
+/// Local account names must never be mistakable for a Matrix user ID, because
+/// `@` and `:` are exactly what keeps the two identity spaces apart in
+/// [`AuthUser::owner_id`].
+pub fn is_valid_local_username(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+/// What a token is allowed to do.
+///
+/// `EventSource` cannot set request headers, so the SSE stream has to take its
+/// credential from the URL — where it lands in browser history, proxy logs and
+/// `Referer`. Rather than put the 7-day API token there, callers exchange it for
+/// a short-lived stream ticket that opens nothing else.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenScope {
+    /// Full access to the REST API. Must be presented in the `Authorization` header.
+    #[default]
+    Api,
+    /// Opens the SSE stream and nothing else.
+    SseStream,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
+    /// Defaults to `Local` so that tokens issued before this field existed fail
+    /// closed: they resolve to a namespaced owner that owns nothing.
+    #[serde(default)]
+    pub kind: AuthKind,
+    /// Defaults to `Api`, matching tokens issued before scoping existed.
+    #[serde(default)]
+    pub scope: TokenScope,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -33,15 +82,47 @@ pub struct AuthResponse {
 
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    pub username: String,
+    /// The MXID for [`AuthKind::Matrix`], or the account name for [`AuthKind::Local`].
+    pub subject: String,
+    pub kind: AuthKind,
 }
 
 impl AuthUser {
-    pub fn sender_mxid(&self) -> String {
-        if self.username.starts_with('@') {
-            self.username.clone()
-        } else {
-            format!("@web-{}:api", self.username)
+    pub fn matrix(mxid: impl Into<String>) -> Self {
+        Self { subject: mxid.into(), kind: AuthKind::Matrix }
+    }
+
+    /// Test-only: the production path builds local identities from signed JWT
+    /// claims in the extractor, never from a bare username.
+    #[cfg(test)]
+    pub fn local(username: impl Into<String>) -> Self {
+        Self { subject: username.into(), kind: AuthKind::Local }
+    }
+
+    /// The single canonical owner string persisted in `sender_mxid`.
+    ///
+    /// Every ownership check compares against this and nothing else. Local
+    /// accounts are namespaced into `@web-*:api`, which registration validation
+    /// guarantees a real MXID can never collide with.
+    pub fn owner_id(&self) -> String {
+        match self.kind {
+            AuthKind::Matrix => self.subject.clone(),
+            AuthKind::Local => format!("@web-{}:api", self.subject),
+        }
+    }
+
+    /// The human-facing name persisted in `sender_name`. Display only — it is
+    /// never used to decide who owns a row.
+    pub fn display_name(&self) -> String {
+        match self.kind {
+            AuthKind::Matrix => self
+                .subject
+                .trim_start_matches('@')
+                .split(':')
+                .next()
+                .unwrap_or(&self.subject)
+                .to_string(),
+            AuthKind::Local => self.subject.clone(),
         }
     }
 }
@@ -60,6 +141,41 @@ impl JwtKeys {
     }
 }
 
+/// The homeserver interactions the auth layer depends on.
+///
+/// Behind a trait purely so those paths are testable: verifying that a Matrix
+/// token yields `AuthKind::Matrix`, or that logging in leaves the bot's
+/// credentials alone, otherwise requires a live homeserver — which is exactly
+/// what kept this security boundary untested.
+#[async_trait::async_trait]
+pub trait MatrixIdentityProvider: Send + Sync {
+    /// Resolves an access token to its Matrix user ID.
+    async fn whoami(&self, state: &ApiState, token: &str) -> Option<String>;
+
+    /// Authenticates with a password, yielding `(user_id, access_token)`.
+    async fn login(&self, state: &ApiState, username: &str, password: &str)
+        -> Option<(String, String)>;
+}
+
+/// Talks to the real homeserver.
+pub struct HomeserverIdentityProvider;
+
+#[async_trait::async_trait]
+impl MatrixIdentityProvider for HomeserverIdentityProvider {
+    async fn whoami(&self, state: &ApiState, token: &str) -> Option<String> {
+        crate::api::auth::matrix::validate_matrix_access_token(state, token).await
+    }
+
+    async fn login(
+        &self,
+        state: &ApiState,
+        username: &str,
+        password: &str,
+    ) -> Option<(String, String)> {
+        crate::api::auth::matrix::authenticate_matrix_user(state, username, password).await
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Database,
@@ -68,8 +184,22 @@ pub struct ApiState {
     pub registration_secret: Option<String>,
     pub homeserver: String,
     pub http_client: reqwest::Client,
-    pub matrix_access_token: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
-    pub matrix_client: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
+    /// The **bot's** own Matrix access token, shared with the bot bootstrap.
+    ///
+    /// Written only by the bot's login path; request handlers read it to make
+    /// bot-credentialed calls (`/rooms`, the media proxy). A request handler must
+    /// never write a caller's token here — doing so silently repoints every
+    /// bot-credentialed endpoint at whoever logged in most recently.
+    pub bot_access_token: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+    /// The bot's Matrix SDK client, under the same ownership rule as above.
+    pub bot_client: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
+    /// Homeserver base URL after `.well-known` discovery.
+    ///
+    /// Memoized because resolving it built a fresh `matrix_sdk::Client` — and so
+    /// re-ran discovery — on every request carrying a Matrix token.
+    pub resolved_homeserver: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+    /// How the auth layer reaches Matrix. Swapped in tests.
+    pub matrix_identity: std::sync::Arc<dyn MatrixIdentityProvider>,
 }
 
 impl ApiState {
@@ -88,9 +218,22 @@ impl ApiState {
             registration_secret,
             homeserver,
             http_client,
-            matrix_access_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-            matrix_client: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            bot_access_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            bot_client: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            resolved_homeserver: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            matrix_identity: std::sync::Arc::new(HomeserverIdentityProvider),
         }
+    }
+
+    /// Replaces the Matrix identity provider, so tests can exercise the
+    /// Matrix-credential paths without a homeserver.
+    #[cfg(test)]
+    pub fn with_matrix_identity(
+        mut self,
+        provider: std::sync::Arc<dyn MatrixIdentityProvider>,
+    ) -> Self {
+        self.matrix_identity = provider;
+        self
     }
 }
 
@@ -98,6 +241,14 @@ impl FromRef<ApiState> for Database {
     fn from_ref(state: &ApiState) -> Self {
         state.db.clone()
     }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SseTicketResponse {
+    /// Present this as `?ticket=` when opening `/api/v1/events`.
+    pub ticket: String,
+    /// Seconds until the ticket expires.
+    pub expires_in: i64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -111,5 +262,4 @@ pub struct UserProfileResponse {
 pub struct MediaProxyQuery {
     pub server: String,
     pub media_id: String,
-    pub token: Option<String>,
 }
