@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Design & Implementation Principles
+
+- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+
+- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+
+- Keep components modular and concerns clearly separated.
+
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+
 ## Repository Layout
 
 Cargo workspace at the root with a single member, plus a separate npm frontend:
@@ -19,7 +35,7 @@ Note: `README.md`'s architecture tree shows `src/` at the repo root and `api/aut
 ```bash
 # Backend (run from repo root — paths below are cwd-relative)
 cargo check                      # must be warning-free
-cargo test                       # ~33 tests, all in-crate #[cfg(test)] modules
+cargo test                       # 60 tests, all in-crate #[cfg(test)] modules
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
 cargo run                        # starts bot + API server
@@ -43,7 +59,8 @@ The crate is a lib (`matrix_bot`) plus two bins, so `generate-openapi` can reuse
 ### Working-directory gotchas
 
 - `DATABASE_URL` defaults to the relative `sqlite://data/bot_data.db?mode=rwc`, and `api/mod.rs` probes for `web/dist` then `backend/web/dist`. Both assume `cargo run` from the **repo root**.
-- `frontend/vite.config.ts` proxies `/api` to `http://localhost:3000`, but `API_PORT` defaults to `8080` (and `.env` sets 8080). Set `API_PORT=3000` or fix the proxy target when running dev mode against a live backend.
+- Bare `cargo run` from the root resolves to the bot only because of workspace `default-members = ["backend"]` plus `default-run = "matrix-bot"` in `backend/Cargo.toml` (the crate ships two bins). Keep both if you add a workspace member or a third binary.
+- `frontend/vite.config.ts` proxies `/api` to `http://localhost:8080`, matching the `API_PORT` default and `.env`. If you change one, change the other.
 
 ## Architecture
 
@@ -55,6 +72,8 @@ The crate is a lib (`matrix_bot`) plus two bins, so `generate-openapi` can reuse
 2. The Matrix sync loop in a `tokio::spawn` retry loop (reconnects every 5s on error), receiving those same handles via `MatrixBot::new_full`.
 
 Those handles are the coupling point: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that require homeserver access. Shutdown is a `broadcast::channel::<()>` fanned out to both halves on Ctrl-C.
+
+`api/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs (`room.is_direct()`), rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where either the bot or the caller is not a joined member. `bot/client.rs` pins `device_id("MATRIX_BOT_MAIN_DEVICE")` on login so a restart reuses the existing crypto store instead of minting a device per boot; the fallback path drops the client, sleeps, wipes the store, and logs in fresh only when that fails.
 
 ### Backend module plugin system
 
