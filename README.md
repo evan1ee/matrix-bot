@@ -73,6 +73,7 @@ A production-ready, highly modular, multi-feature Matrix bot & REST API engine w
 | `POST` | `/api/v1/auth/register` | No (Secret if set) | Register web account & get JWT token |
 | `POST` | `/api/v1/auth/login` | No | Login via local account or Matrix Homeserver credentials (`@user:domain`) |
 | `GET` | `/api/v1/health` | No | System health, version & DB connection status |
+| `GET` | `/api/v1/rooms` | Yes (Bearer/Matrix `syt_`) | List Matrix group rooms joined by bot & user |
 | `GET` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | List tasks (query params: `room_id`, `page`, `limit`) |
 | `POST` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | Create new task (500 char max limit) |
 | `PATCH` | `/api/v1/todos/:id` | Yes (Bearer/Matrix `syt_`) | Update text, priority, due date, or completion |
@@ -118,7 +119,7 @@ RUST_LOG=info,matrix_bot=debug,matrix_sdk=info
 ### 3. Run & Test
 
 ```bash
-# Run unit & integration test suite (26 tests)
+# Run unit & integration test suite (60 tests)
 cargo test
 
 # Launch the bot & REST API server
