@@ -2,6 +2,7 @@
 name = "matrix-bot"
 version = "0.1.0"
 edition = "2021"
+default-run = "matrix-bot"
 
 [lib]
 name = "matrix_bot"
