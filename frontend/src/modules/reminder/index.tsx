@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Clock, Plus, Trash2, BellRing, Repeat, AlertCircle } from 'lucide-react';
+import { CustomSelect } from '../../components/CustomSelect';
 
 export interface ReminderItem {
   id: number;
@@ -201,7 +202,7 @@ export const ReminderMainView: React.FC = () => {
             />
 
             {recurrence === 'none' ? (
-              <div className="flex items-center gap-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800">
+              <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm">
                 <span className="text-xs font-mono text-neutral-500">In</span>
                 <input
                   type="number"
@@ -210,79 +211,75 @@ export const ReminderMainView: React.FC = () => {
                   onChange={(e) => setDurationValue(parseInt(e.target.value) || 1)}
                   className="w-12 bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none text-center"
                 />
-                <select
+                <CustomSelect
                   value={durationUnit}
-                  onChange={(e) => setDurationUnit(e.target.value as any)}
-                  className="bg-transparent text-xs font-mono text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
-                >
-                  <option value="seconds">Secs</option>
-                  <option value="minutes">Mins</option>
-                  <option value="hours">Hours</option>
-                  <option value="days">Days</option>
-                </select>
+                  onChange={(val) => setDurationUnit(val as any)}
+                  variant="inline"
+                  mono
+                  options={[
+                    { value: 'seconds', label: 'Secs' },
+                    { value: 'minutes', label: 'Mins' },
+                    { value: 'hours', label: 'Hours' },
+                    { value: 'days', label: 'Days' },
+                  ]}
+                />
               </div>
             ) : (
-              <div className="flex items-center gap-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 font-mono text-xs">
+              <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm font-mono text-xs">
                 <span className="text-neutral-500">At</span>
-                <select
+                <CustomSelect
                   value={hour12}
-                  onChange={(e) => setHour12(e.target.value)}
-                  className="bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none cursor-pointer"
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => {
+                  onChange={(val) => setHour12(val)}
+                  variant="inline"
+                  mono
+                  options={Array.from({ length: 12 }, (_, i) => i + 1).map((h) => {
                     const val = h < 10 ? `0${h}` : `${h}`;
-                    return <option key={val} value={val}>{val}</option>;
+                    return { value: val, label: val };
                   })}
-                </select>
+                />
                 <span className="text-neutral-400 font-mono">:</span>
-                <select
+                <CustomSelect
                   value={minute}
-                  onChange={(e) => setMinute(e.target.value)}
-                  className="bg-transparent text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none cursor-pointer"
-                >
-                  {['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setMinute(val)}
+                  variant="inline"
+                  mono
+                  options={['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((m) => ({
+                    value: m,
+                    label: m,
+                  }))}
+                />
                 <button
                   type="button"
                   onClick={() => setAmPm(amPm === 'AM' ? 'PM' : 'AM')}
-                  className="ml-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] uppercase font-mono text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition"
+                  className="ml-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] uppercase font-mono text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition cursor-pointer"
                 >
                   {amPm}
                 </button>
               </div>
             )}
 
-            <select
+            <CustomSelect
               value={recurrence}
-              onChange={(e) => setRecurrence(e.target.value)}
-              className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-            >
-              <option value="none">One-time</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="yearly">Yearly</option>
-            </select>
+              onChange={(val) => setRecurrence(val)}
+              mono
+              options={[
+                { value: 'none', label: 'One-time' },
+                { value: 'daily', label: 'Daily' },
+                { value: 'weekly', label: 'Weekly' },
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'yearly', label: 'Yearly' },
+              ]}
+            />
 
-            <select
+            <CustomSelect
               value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 font-sans focus:outline-none focus:border-neutral-500 truncate"
-            >
-              {roomsData && roomsData.length > 0 ? (
-                roomsData.map((r) => (
-                  <option key={r.room_id} value={r.room_id}>
-                    {r.name}
-                  </option>
-                ))
-              ) : (
-                <option value="" disabled>
-                  Loading rooms...
-                </option>
-              )}
-            </select>
+              onChange={(val) => setRoomId(val)}
+              options={
+                roomsData && roomsData.length > 0
+                  ? roomsData.map((r) => ({ value: r.room_id, label: r.name }))
+                  : [{ value: '', label: 'Loading rooms...' }]
+              }
+            />
 
             <button
               type="submit"
@@ -311,7 +308,7 @@ export const ReminderMainView: React.FC = () => {
         {isLoading ? (
           <div className="py-8 text-center text-xs font-mono text-neutral-500">Loading reminders...</div>
         ) : !data || data.items.length === 0 ? (
-          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-850 rounded">
+          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-800 rounded">
             No pending reminders. Set one above!
           </div>
         ) : (

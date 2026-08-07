@@ -97,7 +97,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   return (
     <div className="min-h-screen bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-150">
       {/* Masthead Header */}
-      <header className="border-b border-neutral-200 dark:border-neutral-850 px-6 py-4">
+      <header className="border-b border-neutral-200 dark:border-neutral-800 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black flex items-center justify-center font-bold">
@@ -170,7 +170,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8 space-y-8">
         {/* Stat Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-850 space-y-1">
+          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
               <span>TOTAL TASKS</span>
               <CheckSquare className="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-500" />
@@ -181,7 +181,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">Managed via Matrix / API</div>
           </div>
 
-          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-850 space-y-1">
+          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
               <span>ACTIVE REMINDERS</span>
               <Clock className="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-500" />
@@ -192,7 +192,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">Pending execution</div>
           </div>
 
-          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-850 space-y-1">
+          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
               <span>LIVE EVENTS</span>
               <Radio className="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-500" />
@@ -203,7 +203,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">Streamed via SSE</div>
           </div>
 
-          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-850 space-y-1">
+          <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
               <span>OPENAPI API SPEC</span>
               <Shield className="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-500" />
@@ -216,7 +216,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
 
         {/* Dynamic Navigation Tabs */}
-        <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-850 pb-0">
+        <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 pb-0">
           {modules.map((mod) => (
             <button
               key={mod.id}
@@ -243,7 +243,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-neutral-200 dark:border-neutral-850 py-6 px-6 text-xs text-neutral-500 font-mono">
+      <footer className="border-t border-neutral-200 dark:border-neutral-800 py-6 px-6 text-xs text-neutral-500 font-mono">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span>Matrix Halo Bot — Modular Plugin System & REST API</span>

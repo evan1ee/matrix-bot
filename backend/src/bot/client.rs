@@ -54,19 +54,24 @@ impl BotClient {
                 UserId::parse(&raw_id).context("Failed to construct valid Matrix User ID")?
             };
 
-            match client
+            let login_res = client
                 .matrix_auth()
                 .login_username(&user_id, &config.password)
+                .device_id("MATRIX_BOT_MAIN_DEVICE")
                 .initial_device_display_name("Rust Matrix Bot")
                 .send()
-                .await
-            {
+                .await;
+
+            match login_res {
                 Ok(_) => {
                     info!("Successfully logged in as {}", client.user_id().unwrap());
                 }
                 Err(err) => {
                     warn!("Failed to login with existing crypto store: {:?}. Resetting store for new device login...", err);
-                    tokio::fs::remove_dir_all(store_path).await.ok();
+                    drop(client);
+
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    let _ = tokio::fs::remove_dir_all(store_path).await;
 
                     let fresh_client = if let Ok(server_name) = ServerName::parse(clean_domain) {
                         if let Ok(c) = Client::builder().server_name(&server_name).sqlite_store(store_path, None).build().await {
@@ -83,6 +88,7 @@ impl BotClient {
                     fresh_client
                         .matrix_auth()
                         .login_username(&user_id, &config.password)
+                        .device_id("MATRIX_BOT_MAIN_DEVICE")
                         .initial_device_display_name("Rust Matrix Bot")
                         .send()
                         .await

@@ -32,11 +32,19 @@ async fn is_joined_member(room: &Room, user_id: &UserId) -> bool {
 /// SDK's computed display name, so a room is never dropped merely for lacking an
 /// explicit title.
 async fn describe_room(room: &Room) -> Option<JoinedRoomInfo> {
+    if room.is_space() {
+        return None;
+    }
+
+    if room.is_direct().await.unwrap_or(false) {
+        return None;
+    }
+
     let name = match room.name() {
         Some(name) => name,
         None => match room.canonical_alias() {
             Some(alias) => alias.to_string(),
-            None => room.display_name().await.ok()?.to_string(),
+            None => return None,
         },
     };
 
@@ -95,8 +103,19 @@ pub async fn list_rooms(
         }
     }
 
+    let bot_id = match client.user_id() {
+        Some(id) => id,
+        None => return Ok(Json(Vec::new())),
+    };
+
     let mut rooms = Vec::new();
     for room in client.joined_rooms() {
+        if room.state() != matrix_sdk::RoomState::Joined {
+            continue;
+        }
+        if !is_joined_member(&room, bot_id).await {
+            continue;
+        }
         if !is_joined_member(&room, &caller).await {
             continue;
         }

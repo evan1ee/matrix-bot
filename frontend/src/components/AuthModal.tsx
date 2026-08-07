@@ -93,7 +93,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       aria-labelledby="auth-modal-title"
     >
       <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg max-w-md w-full p-6 space-y-6 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-850 pb-4">
+        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-4">
           <div className="flex items-center gap-2">
             {currentToken ? (
               <User className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />

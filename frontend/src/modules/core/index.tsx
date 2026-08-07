@@ -77,7 +77,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
         </div>
 
         {events.length === 0 ? (
-          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-850 rounded">
+          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-800 rounded">
             {!hasToken ? 'Please click "Login / Token" to view real-time system events.' : 'Listening for live Matrix & REST API events...'}
           </div>
         ) : (
@@ -85,7 +85,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
             {events.map((ev, i) => (
               <div
                 key={i}
-                className="flex items-start justify-between p-3 rounded bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-850 text-xs font-mono transition hover:border-neutral-300 dark:hover:border-neutral-700"
+                className="flex items-start justify-between p-3 rounded bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 text-xs font-mono transition hover:border-neutral-300 dark:hover:border-neutral-700"
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { CheckSquare, Plus, Trash2, CheckCircle2, Circle, AlertCircle } from 'lucide-react';
+import { CustomSelect } from '../../components/CustomSelect';
 
 export interface TodoItem {
   id: number;
@@ -117,15 +118,16 @@ export const TodoMainView: React.FC = () => {
               className="sm:col-span-2 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
             />
 
-            <select
+            <CustomSelect
               value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-            >
-              <option value="low">Low Priority</option>
-              <option value="medium">Medium Priority</option>
-              <option value="high">High Priority</option>
-            </select>
+              onChange={(val) => setPriority(val)}
+              mono
+              options={[
+                { value: 'low', label: 'Low Priority' },
+                { value: 'medium', label: 'Medium Priority' },
+                { value: 'high', label: 'High Priority' },
+              ]}
+            />
 
             <button
               type="submit"
@@ -168,7 +170,7 @@ export const TodoMainView: React.FC = () => {
         {isLoading ? (
           <div className="py-8 text-center text-xs font-mono text-neutral-500">Loading tasks...</div>
         ) : filteredItems.length === 0 ? (
-          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-850 rounded">
+          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-800 rounded">
             No tasks found. Create one above!
           </div>
         ) : (

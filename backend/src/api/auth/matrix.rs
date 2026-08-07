@@ -35,12 +35,6 @@ pub async fn get_matrix_sdk_client(homeserver_input: &str) -> Option<Client> {
         .trim_start_matches("http://")
         .trim_end_matches('/');
 
-    if let Ok(server_name) = ServerName::parse(clean_domain) {
-        if let Ok(c) = Client::builder().server_name(&server_name).build().await {
-            return Some(c);
-        }
-    }
-
     let fallback_url = if homeserver_input.starts_with("http://")
         || homeserver_input.starts_with("https://")
     {
@@ -49,7 +43,17 @@ pub async fn get_matrix_sdk_client(homeserver_input: &str) -> Option<Client> {
         format!("https://{}", clean_domain)
     };
 
-    Client::builder().homeserver_url(&fallback_url).build().await.ok()
+    if let Ok(c) = Client::builder().homeserver_url(&fallback_url).build().await {
+        return Some(c);
+    }
+
+    if let Ok(server_name) = ServerName::parse(clean_domain) {
+        if let Ok(c) = Client::builder().server_name(&server_name).build().await {
+            return Some(c);
+        }
+    }
+
+    None
 }
 
 /// Reads `m.homeserver.base_url` from the configured domain's `.well-known`.
@@ -160,8 +164,9 @@ pub async fn authenticate_matrix_user(
     username: &str,
     password: &str,
 ) -> Option<(String, String)> {
-    let homeserver_input = &state.homeserver;
-    let clean_domain = homeserver_input
+    let hs_url = resolved_homeserver(state).await;
+    let clean_domain = state
+        .homeserver
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .trim_end_matches('/');
@@ -173,12 +178,31 @@ pub async fn authenticate_matrix_user(
         UserId::parse(&raw_id).ok()?
     };
 
-    let client = get_matrix_sdk_client(&state.homeserver).await?;
+    let client = get_matrix_sdk_client(&hs_url).await?;
 
-    match client.matrix_auth().login_username(&user_id, password).send().await {
-        Ok(res) => Some((res.user_id.to_string(), res.access_token)),
-        Err(err) => {
+    // Try logging in with localpart first (e.g. "evan"), then full MXID if that fails.
+    let login_localpart = client
+        .matrix_auth()
+        .login_username(user_id.localpart(), password)
+        .send();
+
+    if let Ok(Ok(res)) = tokio::time::timeout(std::time::Duration::from_secs(10), login_localpart).await {
+        return Some((res.user_id.to_string(), res.access_token));
+    }
+
+    let login_full = client
+        .matrix_auth()
+        .login_username(&user_id, password)
+        .send();
+
+    match tokio::time::timeout(std::time::Duration::from_secs(10), login_full).await {
+        Ok(Ok(res)) => Some((res.user_id.to_string(), res.access_token)),
+        Ok(Err(err)) => {
             tracing::warn!("Matrix authentication failed for {}: {:?}", username, err);
+            None
+        }
+        Err(_) => {
+            tracing::warn!("Matrix authentication timed out after 10s for {}", username);
             None
         }
     }
