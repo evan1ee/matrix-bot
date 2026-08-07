@@ -2,4 +2,7 @@
 members = [
     "backend",
 ]
+default-members = [
+    "backend",
+]
 resolver = "2"
