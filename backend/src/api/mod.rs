@@ -12,6 +12,11 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
+/// Ceiling on a single outbound homeserver request, start to finish.
+const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Ceiling on establishing the TCP/TLS connection alone.
+const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 pub mod auth;
 pub mod health;
 pub mod openapi;
@@ -35,11 +40,14 @@ pub async fn start_api_server(
         config.jwt_secret.clone(),
         config.registration_secret.clone(),
         config.homeserver.clone(),
-        // Always bound outbound calls: a slow homeserver must not be able to pin
-        // a request task indefinitely.
+        // Bound outbound calls so a stalled homeserver cannot pin a request task
+        // indefinitely -- but generously. Reaching a homeserver through a VPN or
+        // proxy can take several seconds just to establish the TCP connection
+        // (measured at ~6s against one such setup), and a connect timeout tighter
+        // than that silently breaks profile and media lookups.
         reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(HTTP_TOTAL_TIMEOUT)
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new()),
     );

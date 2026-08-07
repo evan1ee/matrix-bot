@@ -7,7 +7,7 @@ import { reminderModule } from './modules/reminder';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
-import { getAuthToken } from './core/apiClient';
+import { AUTH_EXPIRED_EVENT, getAuthToken } from './core/apiClient';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
@@ -37,6 +37,17 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // A rejected token has already been cleared from storage; drop it from state
+  // and open the login prompt so the session can be re-established.
+  useEffect(() => {
+    const onExpired = () => {
+      setToken(null);
+      setIsAuthOpen(true);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
 
   const handleThemeChange = (newTheme: Theme) => {
     setTheme(newTheme);

@@ -152,8 +152,12 @@ pub async fn get_current_user(
         let encoded_user = auth_user.subject.replace('@', "%40").replace(':', "%3A");
         let profile_url = format!("{}/_matrix/client/v3/profile/{}", clean_hs, encoded_user);
 
-        if let Ok(res) = state.http_client.get(&profile_url).send().await {
-            if res.status().is_success() {
+        match state.http_client.get(&profile_url).send().await {
+            Err(err) => tracing::warn!("Profile lookup failed for {}: {:?}", auth_user.subject, err),
+            Ok(res) if !res.status().is_success() => {
+                tracing::warn!("Profile lookup for {} returned {}", auth_user.subject, res.status())
+            }
+            Ok(res) => {
                 #[derive(Deserialize)]
                 struct MatrixProfile {
                     displayname: Option<String>,

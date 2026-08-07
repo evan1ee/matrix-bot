@@ -182,6 +182,40 @@ mod tests {
         assert_eq!(user.owner_id(), "@evan:mbm.one");
     }
 
+    /// A token predating the `kind` claim must be refused outright.
+    ///
+    /// Defaulting it to `Local` let an existing session keep working while
+    /// silently becoming a different principal: writes landed under
+    /// `@web-@evan:mbm.one:api` and the user's real rows disappeared from every
+    /// view. Failing the request sends them back through login.
+    #[tokio::test]
+    async fn test_tokens_without_a_kind_claim_are_rejected() {
+        #[derive(serde::Serialize)]
+        struct LegacyClaims {
+            sub: String,
+            exp: usize,
+        }
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = fake_matrix_state(pool);
+
+        let legacy = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &LegacyClaims {
+                sub: "@evan:mbm.one".to_string(),
+                exp: (chrono::Utc::now() + chrono::Duration::days(1)).timestamp() as usize,
+            },
+            &JwtKeys::new(state.jwt_secret.as_bytes()).encoding,
+        )
+        .unwrap();
+
+        let err = extract(&state, Some(&format!("Bearer {}", legacy)))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn test_extractor_rejects_bad_credentials() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

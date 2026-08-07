@@ -1,9 +1,12 @@
 use axum::{extract::State, Json};
 use matrix_sdk::room::Room;
+use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::UserId;
 use serde::Serialize;
 use tracing::warn;
 use utoipa::ToSchema;
 
+use crate::api::auth::types::AuthKind;
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 
@@ -13,25 +16,29 @@ pub struct JoinedRoomInfo {
     pub name: String,
 }
 
-/// Describes a room if it is one a user would want to pick from a list.
+/// Whether `user_id` is currently joined to `room`.
+async fn is_joined_member(room: &Room, user_id: &UserId) -> bool {
+    matches!(
+        room.get_member(user_id).await,
+        Ok(Some(member)) if *member.membership() == MembershipState::Join
+    )
+}
+
+/// Describes a joined room for the web room picker.
 ///
-/// That means a named group room: direct messages and rooms with no explicit
-/// name or canonical alias are left out, since their only "name" would be a
-/// heuristic built from the member list.
-async fn describe_group_room(room: &Room) -> Option<JoinedRoomInfo> {
-    if room.joined_members_count() <= 1 {
-        return None;
-    }
-
-    // `is_direct` consults account data, which is authoritative for DMs —
-    // unlike guessing from the member count.
-    if room.is_direct().await.unwrap_or(false) {
-        return None;
-    }
-
-    let name = room
-        .name()
-        .or_else(|| room.canonical_alias().map(|alias| alias.to_string()))?;
+/// One-to-one chats with the bot are included — for a single-user deployment
+/// that DM is usually the *only* room, so excluding it leaves the picker empty.
+/// Names fall back through `m.room.name`, the canonical alias, and finally the
+/// SDK's computed display name, so a room is never dropped merely for lacking an
+/// explicit title.
+async fn describe_room(room: &Room) -> Option<JoinedRoomInfo> {
+    let name = match room.name() {
+        Some(name) => name,
+        None => match room.canonical_alias() {
+            Some(alias) => alias.to_string(),
+            None => room.display_name().await.ok()?.to_string(),
+        },
+    };
 
     let name = name.trim();
     if name.is_empty() {
@@ -55,13 +62,30 @@ async fn describe_group_room(room: &Room) -> Option<JoinedRoomInfo> {
 )]
 pub async fn list_rooms(
     State(state): State<ApiState>,
-    _user: AuthUser,
+    user: AuthUser,
 ) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
-    // Everything here comes from the bot's synced SDK state. Membership is
-    // implied by `joined_rooms()`, so there is no bot user ID to guess and no
-    // access token to hand around.
+    // Everything here comes from the bot's synced SDK state. The bot's own
+    // membership is implied by `joined_rooms()` — that list is exactly the rooms
+    // the account in MATRIX_USERNAME has joined — so there is no bot user ID to
+    // guess and no access token to hand around.
     let Some(client) = state.bot_client.read().await.clone() else {
         return Ok(Json(Vec::new()));
+    };
+
+    // The caller must be in the room too. Without this the endpoint hands every
+    // registered account the names of every room the bot belongs to, including
+    // ones the caller has nothing to do with.
+    let caller = match user.kind {
+        AuthKind::Matrix => match UserId::parse(&user.subject) {
+            Ok(id) => id,
+            Err(_) => {
+                warn!("Authenticated Matrix subject is not a valid user ID: {}", user.subject);
+                return Ok(Json(Vec::new()));
+            }
+        },
+        // A local web account has no Matrix identity, so it shares no rooms with
+        // the bot. Log in with Matrix credentials to pick a room.
+        AuthKind::Local => return Ok(Json(Vec::new())),
     };
 
     // Accept pending invitations so a freshly invited room shows up here.
@@ -73,7 +97,10 @@ pub async fn list_rooms(
 
     let mut rooms = Vec::new();
     for room in client.joined_rooms() {
-        if let Some(info) = describe_group_room(&room).await {
+        if !is_joined_member(&room, &caller).await {
+            continue;
+        }
+        if let Some(info) = describe_room(&room).await {
             rooms.push(info);
         }
     }

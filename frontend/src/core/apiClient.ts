@@ -16,6 +16,10 @@ export function clearAuthToken() {
   localStorage.removeItem('matrix_bot_jwt');
 }
 
+/// Fired when the server rejects our credentials, so the app can drop the dead
+/// token and prompt for login instead of retrying it forever.
+export const AUTH_EXPIRED_EVENT = 'matrixbot:auth-expired';
+
 export async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -48,6 +52,13 @@ export async function fetchApi<T>(
   } else {
     const rawText = await response.text();
     data = { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
+  }
+
+  if (response.status === 401 && getAuthToken()) {
+    // The stored token is no longer usable — expired, or issued before a claim
+    // the server now requires. Keeping it only produces more 401s.
+    clearAuthToken();
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
 
   if (!response.ok) {

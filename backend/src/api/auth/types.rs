@@ -51,9 +51,11 @@ pub enum TokenScope {
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
-    /// Defaults to `Local` so that tokens issued before this field existed fail
-    /// closed: they resolve to a namespaced owner that owns nothing.
-    #[serde(default)]
+    /// Required. A token issued before this field existed is **rejected**, not
+    /// defaulted: defaulting it silently reinterpreted a Matrix subject as a
+    /// local account, so the holder kept working but as a different principal —
+    /// their rows went to `@web-@user:server:api` and their real data vanished
+    /// from view. A 401 sends them back through login instead.
     pub kind: AuthKind,
     /// Defaults to `Api`, matching tokens issued before scoping existed.
     #[serde(default)]
