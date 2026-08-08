@@ -135,6 +135,8 @@ pub async fn create_reminder(
         &payload.message,
         trigger_at,
         recurrence,
+        // Standalone reminder: not scheduled from a todo's due date.
+        None,
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;

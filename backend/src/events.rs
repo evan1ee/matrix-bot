@@ -97,6 +97,7 @@ mod tests {
             text: "task".to_string(),
             priority: "medium".to_string(),
             due_at: None,
+            remind_before_minutes: None,
             completed: false,
             created_at: None,
         }

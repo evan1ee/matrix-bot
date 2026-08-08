@@ -138,7 +138,7 @@ pub async fn handle_reminder_command(
 
             let trigger_at = Utc::now() + dur_chrono;
 
-            match ReminderRepository::create(pool, room_id, sender_mxid, sender_name, &msg, trigger_at, recurrence.clone()).await {
+            match ReminderRepository::create(pool, room_id, sender_mxid, sender_name, &msg, trigger_at, recurrence.clone(), None).await {
                 Ok(reminder) => {
                     let rec_note = match recurrence {
                         RecurrencePattern::Daily => " 🔄 (Recurring daily)",

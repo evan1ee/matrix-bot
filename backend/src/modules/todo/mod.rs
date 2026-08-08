@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::db::Database;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod due_reminder;
 pub mod handler;
 pub mod models;
 pub mod repository;
@@ -45,8 +46,10 @@ impl BotModule for TodoModule {
             },
             CommandHelp {
                 name: "todo due".to_string(),
-                usage: "!todo due <id> <time>".to_string(),
-                description: "Set task due date (e.g. !todo due 1 2d)".to_string(),
+                usage: "!todo due <id> <time> [remind <lead>]".to_string(),
+                description: "Set a task due date, optionally with a reminder beforehand \
+                              (e.g. !todo due 1 2d remind 1h). Use 'none' to clear it."
+                    .to_string(),
             },
             CommandHelp {
                 name: "todo edit".to_string(),

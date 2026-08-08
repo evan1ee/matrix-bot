@@ -230,7 +230,22 @@ export interface components {
             seconds: number;
         };
         CreateTodoRequest: {
+            /**
+             * Format: date-time
+             * @description When the task is due.
+             */
+            due_at?: string | null;
             priority?: string | null;
+            /**
+             * Format: int64
+             * @description Minutes before `due_at` to send a reminder. Requires `due_at`.
+             */
+            remind_before_minutes?: number | null;
+            /**
+             * @description Matrix room the due reminder should be delivered to. Defaults to the
+             *     task's own room; required when that is the `web` sentinel.
+             */
+            remind_room_id?: string | null;
             room_id?: string | null;
             text: string;
         };
@@ -272,6 +287,12 @@ export interface components {
             sender_mxid: string;
             sender_name: string;
             status: string;
+            /**
+             * Format: int64
+             * @description Set when this reminder was scheduled from a todo's due date, so changing
+             *     or completing that todo can reschedule or cancel it.
+             */
+            todo_id?: number | null;
             /** Format: date-time */
             trigger_at: string;
         };
@@ -312,10 +333,20 @@ export interface components {
             completed: boolean;
             /** Format: date-time */
             created_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the task is due, stored as a real timestamp so a lead-time reminder
+             *     can be computed from it. Rendered for display only at the edges.
+             */
             due_at?: string | null;
             /** Format: int64 */
             id: number;
             priority: string;
+            /**
+             * Format: int64
+             * @description Minutes before `due_at` to fire a reminder. `None` means no reminder.
+             */
+            remind_before_minutes?: number | null;
             room_id: string;
             sender_mxid: string;
             sender_name: string;
@@ -342,10 +373,22 @@ export interface components {
             page?: number | null;
             room_id?: string | null;
         };
+        /**
+         * @description A PATCH body.
+         *
+         *     The nullable fields are `Option<Option<T>>` so the three cases stay
+         *     distinguishable on the wire: absent leaves the value alone, `null` clears it,
+         *     and a value sets it. A plain `Option<T>` would make "clear the due date"
+         *     unexpressible.
+         */
         UpdateTodoRequest: {
             completed?: boolean | null;
+            /** Format: date-time */
             due_at?: string | null;
             priority?: string | null;
+            /** Format: int64 */
+            remind_before_minutes?: number | null;
+            remind_room_id?: string | null;
             text?: string | null;
         };
         UserProfileResponse: {

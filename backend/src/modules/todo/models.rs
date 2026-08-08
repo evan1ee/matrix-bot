@@ -36,7 +36,11 @@ pub struct TodoItem {
     pub sender_name: String,
     pub text: String,
     pub priority: String,
-    pub due_at: Option<String>,
+    /// When the task is due, stored as a real timestamp so a lead-time reminder
+    /// can be computed from it. Rendered for display only at the edges.
+    pub due_at: Option<DateTime<Utc>>,
+    /// Minutes before `due_at` to fire a reminder. `None` means no reminder.
+    pub remind_before_minutes: Option<i64>,
     pub completed: bool,
     pub created_at: Option<DateTime<Utc>>,
 }

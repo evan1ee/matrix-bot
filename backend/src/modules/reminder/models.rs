@@ -80,6 +80,9 @@ pub struct Reminder {
     pub recurrence: String,
     pub status: String,
     pub retry_count: i64,
+    /// Set when this reminder was scheduled from a todo's due date, so changing
+    /// or completing that todo can reschedule or cancel it.
+    pub todo_id: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
 }
 

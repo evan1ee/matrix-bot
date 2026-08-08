@@ -10,6 +10,11 @@ use crate::modules::reminder::models::{RecurrencePattern, Reminder};
 /// disagree about when to stop retrying.
 pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 
+/// The `Reminder` column list. Shared by every read so a new column cannot be
+/// missed by one query.
+const COLUMNS: &str = "id, room_id, sender_mxid, sender_name, message, trigger_at, \
+                       recurrence, status, retry_count, todo_id, created_at";
+
 pub struct ReminderRepository;
 
 impl ReminderRepository {
@@ -21,13 +26,14 @@ impl ReminderRepository {
         message: &str,
         trigger_at: DateTime<Utc>,
         recurrence: RecurrencePattern,
+        todo_id: Option<i64>,
     ) -> Result<Reminder> {
         let rec_str = recurrence.as_str();
 
         let res = sqlx::query(
             r#"
-            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)
+            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, todo_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?)
             "#,
         )
         .bind(room_id)
@@ -36,22 +42,54 @@ impl ReminderRepository {
         .bind(message)
         .bind(trigger_at)
         .bind(rec_str)
+        .bind(todo_id)
         .execute(pool)
         .await?;
 
         let id = res.last_insert_rowid();
 
-        let reminder = sqlx::query_as::<_, Reminder>(
-            r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
-            FROM reminders WHERE id = ?
-            "#,
-        )
+        let reminder = sqlx::query_as::<_, Reminder>(&format!(
+            "SELECT {COLUMNS} FROM reminders WHERE id = ?"
+        ))
         .bind(id)
         .fetch_one(pool)
         .await?;
 
         Ok(reminder)
+    }
+
+    /// The pending reminder scheduled from `todo_id`, if there is one.
+    ///
+    /// At most one exists at a time: `sync` reschedules rather than stacking a
+    /// second row.
+    pub async fn find_pending_for_todo(pool: &SqlitePool, todo_id: i64) -> Result<Option<Reminder>> {
+        let reminder = sqlx::query_as::<_, Reminder>(&format!(
+            "SELECT {COLUMNS} FROM reminders WHERE todo_id = ? AND status = 'pending' \
+             ORDER BY id DESC LIMIT 1"
+        ))
+        .bind(todo_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(reminder)
+    }
+
+    /// Cancels the pending reminder linked to `todo_id`, returning it so the
+    /// caller can broadcast the cancellation.
+    ///
+    /// Ownership is not re-checked here: the caller reached this todo through
+    /// an owner-scoped lookup, and the link column is not user-supplied.
+    pub async fn cancel_for_todo(pool: &SqlitePool, todo_id: i64) -> Result<Option<Reminder>> {
+        let Some(reminder) = Self::find_pending_for_todo(pool, todo_id).await? else {
+            return Ok(None);
+        };
+
+        sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
+            .bind(reminder.id)
+            .execute(pool)
+            .await?;
+
+        Ok(Some(reminder))
     }
 
     pub async fn count_user_pending(pool: &SqlitePool, sender_mxid: &str) -> Result<i64> {
@@ -67,12 +105,9 @@ impl ReminderRepository {
 
     pub async fn get_due_reminders(pool: &SqlitePool) -> Result<Vec<Reminder>> {
         let now = Utc::now();
-        let reminders = sqlx::query_as::<_, Reminder>(
-            r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
-            FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < ?
-            "#,
-        )
+        let reminders = sqlx::query_as::<_, Reminder>(&format!(
+            "SELECT {COLUMNS} FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < ?"
+        ))
         .bind(now)
         .bind(MAX_DELIVERY_ATTEMPTS)
         .fetch_all(pool)
@@ -121,14 +156,10 @@ impl ReminderRepository {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Reminder>> {
-        let reminders = sqlx::query_as::<_, Reminder>(
-            r#"
-            SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at
-            FROM reminders WHERE sender_mxid = ? AND status = 'pending'
-            ORDER BY trigger_at ASC
-            LIMIT ? OFFSET ?
-            "#,
-        )
+        let reminders = sqlx::query_as::<_, Reminder>(&format!(
+            "SELECT {COLUMNS} FROM reminders WHERE sender_mxid = ? AND status = 'pending' \
+             ORDER BY trigger_at ASC LIMIT ? OFFSET ?"
+        ))
         .bind(sender_mxid)
         .bind(limit)
         .bind(offset)
@@ -176,6 +207,7 @@ mod tests {
             "Check oven",
             past_time,
             RecurrencePattern::None,
+            None,
         )
         .await
         .unwrap();
@@ -199,7 +231,7 @@ mod tests {
         let past = Utc::now() - Duration::seconds(10);
 
         let rem = ReminderRepository::create(
-            &pool, "!room:a", "@bob:a", "bob", "Check oven", past, RecurrencePattern::None,
+            &pool, "!room:a", "@bob:a", "bob", "Check oven", past, RecurrencePattern::None, None,
         )
         .await
         .unwrap();
@@ -238,7 +270,7 @@ mod tests {
         let past = Utc::now() - Duration::seconds(10);
 
         let rem = ReminderRepository::create(
-            &pool, "!room:a", "@bob:a", "bob", "Standup", past, RecurrencePattern::Daily,
+            &pool, "!room:a", "@bob:a", "bob", "Standup", past, RecurrencePattern::Daily, None,
         )
         .await
         .unwrap();

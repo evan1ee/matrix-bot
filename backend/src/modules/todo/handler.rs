@@ -2,6 +2,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use tracing::error;
 
+use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
 use crate::utils::{format_datetime, html_escape, parse_reminder_args, priority_badge};
@@ -45,13 +46,13 @@ pub async fn handle_todo_command(
     if args_lower.starts_with("add") {
         handle_add(pool, room_id, sender_mxid, sender_name, args_body).await
     } else if args_lower.starts_with("done") {
-        handle_done(pool, args_body).await
+        handle_done(pool, room_id, args_body).await
     } else if args_lower.starts_with("edit") {
         handle_edit(pool, args_body).await
     } else if args_lower.starts_with("priority") {
         handle_priority(pool, args_body).await
     } else if args_lower.starts_with("due") {
-        handle_due(pool, args_body).await
+        handle_due(pool, room_id, args_body).await
     } else if args_lower.starts_with("clear") {
         handle_clear(pool, room_id, sender_mxid, sender_name, args_body).await
     } else if args_lower.starts_with("room") {
@@ -119,7 +120,7 @@ async fn handle_add(
         _ => {}
     }
 
-    match TodoRepository::add(pool, room_id, sender_mxid, sender_name, raw_text, priority).await {
+    match TodoRepository::add(pool, room_id, sender_mxid, sender_name, raw_text, priority, None, None).await {
         Ok(item) => Some(format!(
             "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}",
             item.id,
@@ -134,7 +135,7 @@ async fn handle_add(
     }
 }
 
-async fn handle_done(pool: &SqlitePool, args_body: &str) -> Option<String> {
+async fn handle_done(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
     let id_str = args_body[4..].trim();
     if id_str.is_empty() {
         return Some("⚠️ Usage: <code>!todo done &lt;id&gt;</code> \
@@ -143,10 +144,19 @@ async fn handle_done(pool: &SqlitePool, args_body: &str) -> Option<String> {
 
     if let Ok(id) = id_str.parse::<i64>() {
         match TodoRepository::mark_done(pool, id).await {
-            Ok(Some(item)) => Some(format!(
-                "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅",
-                item.id, html_escape(&item.text)
-            )),
+            Ok(Some(item)) => {
+                // A finished task should stop nagging.
+                let cancelled = matches!(
+                    due_reminder::sync(pool, None, &item, room_id).await,
+                    Ok(due_reminder::SyncOutcome::Cancelled)
+                );
+                Some(format!(
+                    "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}",
+                    item.id,
+                    html_escape(&item.text),
+                    if cancelled { " <i>(due reminder cancelled)</i>" } else { "" }
+                ))
+            }
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
             Err(err) => {
                 error!("Failed to mark todo done: {:?}", err);
@@ -219,36 +229,114 @@ async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
     }
 }
 
-async fn handle_due(pool: &SqlitePool, args_body: &str) -> Option<String> {
+const DUE_USAGE: &str = "⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt; [remind &lt;lead&gt;]</code> \
+                         (e.g. <code>!todo due 1 2d remind 1h</code>, or \
+                         <code>!todo due 1 none</code> to clear)";
+
+async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
     let rest = args_body[3..].trim();
     let mut parts = rest.splitn(2, ' ');
     let id_str = parts.next().unwrap_or("");
     let time_arg = parts.next().unwrap_or("").trim();
 
     if id_str.is_empty() || time_arg.is_empty() {
-        return Some("⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt;</code> \
-                      (e.g. <code>!todo due 1 2d</code>)".to_string());
+        return Some(DUE_USAGE.to_string());
     }
 
-    if let (Ok(id), Some((dur, _))) = (id_str.parse::<i64>(), parse_reminder_args(time_arg)) {
-        let due_dt = Utc::now() + chrono::Duration::from_std(dur).unwrap_or(chrono::Duration::days(1));
-        let due_str = format_datetime(&due_dt);
+    let Ok(id) = id_str.parse::<i64>() else {
+        return Some(DUE_USAGE.to_string());
+    };
 
-        match TodoRepository::set_due_date(pool, id, &due_str).await {
-            Ok(Some(item)) => Some(format!(
-                "📅 Set Task <b>#{}</b> due date to <b>{}</b>",
-                item.id, html_escape(&due_str)
-            )),
+    // `remind <lead>` is an optional suffix on the due time.
+    let (due_arg, lead_arg) = match time_arg.split_once(" remind ") {
+        Some((due, lead)) => (due.trim(), Some(lead.trim())),
+        None => (time_arg, None),
+    };
+
+    if matches!(due_arg.to_lowercase().as_str(), "none" | "clear") {
+        return match TodoRepository::set_due_date(pool, id, None).await {
+            Ok(Some(item)) => {
+                due_reminder::tear_down(pool, None, item.id).await.ok();
+                Some(format!("📅 Cleared the due date on Task <b>#{}</b>.", item.id))
+            }
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
             Err(err) => {
-                error!("Failed to set todo due date: {:?}", err);
-                Some("❌ Database error setting due date.".to_string())
+                error!("Failed to clear todo due date: {:?}", err);
+                Some("❌ Database error clearing due date.".to_string())
             }
-        }
-    } else {
-        Some("⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt;</code> \
-              (e.g. <code>!todo due 1 2d</code>)".to_string())
+        };
     }
+
+    let Some((dur, _)) = parse_reminder_args(due_arg) else {
+        return Some(DUE_USAGE.to_string());
+    };
+    let due_dt = Utc::now() + chrono::Duration::from_std(dur).unwrap_or(chrono::Duration::days(1));
+
+    let lead_minutes = match lead_arg {
+        Some(raw) => match parse_reminder_args(raw) {
+            Some((lead, _)) => {
+                let minutes = (lead.as_secs() / 60) as i64;
+                if minutes <= 0 || minutes > due_reminder::MAX_LEAD_MINUTES {
+                    return Some(
+                        "⚠️ The reminder lead time must be between 1 minute and 30 days."
+                            .to_string(),
+                    );
+                }
+                Some(minutes)
+            }
+            None => return Some(DUE_USAGE.to_string()),
+        },
+        None => None,
+    };
+
+    if let Err(err) = TodoRepository::set_due_date(pool, id, Some(due_dt)).await {
+        error!("Failed to set todo due date: {:?}", err);
+        return Some("❌ Database error setting due date.".to_string());
+    }
+
+    // An explicit `remind` replaces whatever was set before; omitting it leaves
+    // an existing lead time alone, so re-dating a task keeps its reminder.
+    if lead_minutes.is_some() {
+        if let Err(err) = TodoRepository::set_remind_before(pool, id, lead_minutes).await {
+            error!("Failed to set todo reminder lead time: {:?}", err);
+            return Some("❌ Database error setting reminder lead time.".to_string());
+        }
+    }
+
+    let item = match TodoRepository::find(pool, id).await {
+        Ok(Some(item)) => item,
+        Ok(None) => return Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(err) => {
+            error!("Failed to re-read todo after setting due date: {:?}", err);
+            return Some("❌ Database error setting due date.".to_string());
+        }
+    };
+
+    let due_note = format!(
+        "📅 Set Task <b>#{}</b> due date to <b>{}</b>",
+        item.id,
+        html_escape(&format_datetime(&due_dt))
+    );
+
+    let reminder_note = match due_reminder::sync(pool, None, &item, room_id).await {
+        Ok(due_reminder::SyncOutcome::Scheduled(at)) => format!(
+            "<br/>⏰ Reminder set for <b>{}</b>.",
+            html_escape(&format_datetime(&at))
+        ),
+        Ok(due_reminder::SyncOutcome::LeadTimeInPast(_)) => {
+            "<br/>⚠️ That lead time is already in the past, so no reminder was set.".to_string()
+        }
+        Ok(due_reminder::SyncOutcome::Cancelled) => {
+            "<br/>⏰ Previous due reminder cancelled.".to_string()
+        }
+        Ok(due_reminder::SyncOutcome::Nothing) => String::new(),
+        Err(err) => {
+            error!("Failed to sync due reminder: {:?}", err);
+            "<br/>❌ Due date saved, but the reminder could not be scheduled.".to_string()
+        }
+    };
+
+    Some(format!("{}{}", due_note, reminder_note))
 }
 
 async fn handle_clear(
@@ -330,7 +418,7 @@ fn format_todo_list(title: &str, items: &[TodoItem], page: i64) -> String {
     for item in items {
         let badge = priority_badge(&item.priority);
         let due_note = if let Some(due) = &item.due_at {
-            format!(" 📅 <i>(Due: {})</i>", html_escape(due))
+            format!(" 📅 <i>(Due: {})</i>", html_escape(&format_datetime(due)))
         } else {
             String::new()
         };

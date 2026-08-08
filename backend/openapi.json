@@ -823,8 +823,25 @@
           "text"
         ],
         "properties": {
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the task is due.",
+            "nullable": true
+          },
           "priority": {
             "type": "string",
+            "nullable": true
+          },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minutes before `due_at` to send a reminder. Requires `due_at`.",
+            "nullable": true
+          },
+          "remind_room_id": {
+            "type": "string",
+            "description": "Matrix room the due reminder should be delivered to. Defaults to the\ntask's own room; required when that is the `web` sentinel.",
             "nullable": true
           },
           "room_id": {
@@ -965,6 +982,12 @@
           "status": {
             "type": "string"
           },
+          "todo_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Set when this reminder was scheduled from a todo's due date, so changing\nor completing that todo can reschedule or cancel it.",
+            "nullable": true
+          },
           "trigger_at": {
             "type": "string",
             "format": "date-time"
@@ -1070,6 +1093,8 @@
           },
           "due_at": {
             "type": "string",
+            "format": "date-time",
+            "description": "When the task is due, stored as a real timestamp so a lead-time reminder\ncan be computed from it. Rendered for display only at the edges.",
             "nullable": true
           },
           "id": {
@@ -1078,6 +1103,12 @@
           },
           "priority": {
             "type": "string"
+          },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minutes before `due_at` to fire a reminder. `None` means no reminder.",
+            "nullable": true
           },
           "room_id": {
             "type": "string"
@@ -1152,6 +1183,7 @@
       },
       "UpdateTodoRequest": {
         "type": "object",
+        "description": "A PATCH body.\n\nThe nullable fields are `Option<Option<T>>` so the three cases stay\ndistinguishable on the wire: absent leaves the value alone, `null` clears it,\nand a value sets it. A plain `Option<T>` would make \"clear the due date\"\nunexpressible.",
         "properties": {
           "completed": {
             "type": "boolean",
@@ -1159,9 +1191,19 @@
           },
           "due_at": {
             "type": "string",
+            "format": "date-time",
             "nullable": true
           },
           "priority": {
+            "type": "string",
+            "nullable": true
+          },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "remind_room_id": {
             "type": "string",
             "nullable": true
           },
