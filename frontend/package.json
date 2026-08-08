@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "generate-api": "openapi-typescript ../backend/openapi.json -o src/types/api.ts"
+    "generate-api": "openapi-typescript ../backend/openapi.json -o src/types/api.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.67.0",
@@ -16,6 +18,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.0.7",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.10",

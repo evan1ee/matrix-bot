@@ -11,3 +11,9 @@ node_modules/
 dist/
 web/dist/
 backend/web/dist/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
