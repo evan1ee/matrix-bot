@@ -19,6 +19,7 @@ use crate::modules::{ModuleContext, ModuleRegistry};
 pub mod client;
 pub mod dispatcher;
 pub mod handler;
+pub mod self_verify;
 pub mod verification;
 
 pub struct MatrixBot {

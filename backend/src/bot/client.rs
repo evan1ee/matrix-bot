@@ -6,24 +6,20 @@ use matrix_sdk::{
 use std::time::Duration;
 use tracing::{info, warn};
 
+use crate::bot::self_verify::ensure_self_verified;
+use crate::bot::verification::request_verification_from_allowlist;
 use crate::config::Config;
 
 /// Where the full Matrix session is persisted between runs.
 ///
 /// The sqlite store keeps crypto state but not the session, so without this the
-/// bot password-logs-in on every boot. Because the device ID is pinned, each
-/// such login invalidates the previous access token for that device — and any
-/// in-flight end-to-end key upload then fails with `401 UnknownToken`, leaving
-/// the device with no keys at all. A client in that state cannot participate in
-/// encryption and shows in Element as "doesn't support encryption".
+/// bot password-logs-in on every boot. Every such login mints a brand new
+/// device (see `delete_stale_device`), so skipping this on an ordinary restart
+/// is what keeps the account from accumulating one device per boot.
 const SESSION_PATH: &str = "data/matrix_session.json";
 
 /// Where the matrix-sdk sqlite stores (crypto + room state) live.
 const STORE_PATH: &str = "data/bot_store";
-
-/// The device ID the bot logs in with. Pinned so a restart keeps one device
-/// instead of minting a new one per boot.
-const DEVICE_ID: &str = "MATRIX_BOT_MAIN_DEVICE";
 
 pub struct BotClient;
 
@@ -117,6 +113,60 @@ fn archive_store(suffix: &str) -> Option<String> {
 /// Timestamp suffix for archived stores, unique to the second.
 fn archive_suffix() -> String {
     chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string()
+}
+
+/// Removes `device_id` from the account via password-authenticated UIA.
+///
+/// Called after a fresh login, on the account's *previous* device — the one
+/// whose crypto store was just archived because its session no longer
+/// restored. Every peer who already talked to that device still has it
+/// cross-signed and holds an Olm session keyed to its identity keys. Simply
+/// logging in again and leaving that device on the server would let a new
+/// device silently inherit its old device ID with different keys underneath,
+/// which every peer's client then encrypts to as if nothing changed — the
+/// homeserver signals the key change, but a client only rebuilds a peer's Olm
+/// session by *receiving* a decrypt failure against it, and the peer who is
+/// still encrypting *to* the swapped device never gets one to react to. It
+/// silently produces ciphertext the new device can't read, and there is no
+/// event that would prompt the peer's client to notice on its own.
+///
+/// Deleting the old device instead makes the replacement an unambiguous *new*
+/// device: every peer sees it appear fresh, verifies it through the normal new
+/// device flow, and establishes a new Olm session from scratch — the well-worn
+/// path, rather than the in-place key swap most clients don't handle.
+///
+/// Best-effort: this is cleanup, not a precondition for the bot to run, so a
+/// failure here is logged and otherwise ignored.
+async fn delete_stale_device(client: &Client, config: &Config, device_id: &matrix_sdk::ruma::OwnedDeviceId) {
+    use matrix_sdk::ruma::api::client::uiaa;
+
+    let devices = [device_id.clone()];
+    let first_attempt = client.delete_devices(&devices, None).await;
+
+    let Err(err) = first_attempt else {
+        info!("Deleted the previous device {} from the account", device_id);
+        return;
+    };
+
+    let Some(uiaa_info) = err.as_uiaa_response() else {
+        warn!("Could not delete the previous device {}: {:?}", device_id, err);
+        return;
+    };
+
+    let mut password = uiaa::Password::new(
+        uiaa::UserIdentifier::UserIdOrLocalpart(config.username.clone()),
+        config.password.clone(),
+    );
+    password.session = uiaa_info.session.clone();
+
+    match client.delete_devices(&devices, Some(uiaa::AuthData::Password(password))).await {
+        Ok(_) => info!("Deleted the previous device {} from the account", device_id),
+        Err(err) => warn!(
+            "Could not delete the previous device {} even with password auth: {:?}. It will \
+             stay on the account; peers who talked to it will need to re-verify the new device.",
+            device_id, err
+        ),
+    }
 }
 
 /// The MXID to log in as, whether `username` is a full ID or a localpart.
@@ -237,6 +287,11 @@ impl BotClient {
         // Ensure data directory exists for matrix-sdk sqlite store
         tokio::fs::create_dir_all("data").await.ok();
 
+        // Captured before the restore attempt, which deletes the session file
+        // on failure — this is the only chance to learn which device is about
+        // to be orphaned, so it can be cleaned up once the new one is live.
+        let stale_device_id = load_session().map(|s| s.meta.device_id);
+
         let existing = build_client(homeserver_input, clean_domain).await?;
         let client = if restore_previous_session(&existing).await {
             existing
@@ -264,7 +319,11 @@ impl BotClient {
             client
                 .matrix_auth()
                 .login_username(&user_id, &config.password)
-                .device_id(DEVICE_ID)
+                // No pinned device ID: reusing one across a genuine key change
+                // is exactly what leaves every peer's Olm session silently
+                // stale — see `delete_stale_device`. Letting the homeserver
+                // assign a fresh ID makes this an unambiguous new device that
+                // every peer verifies and re-sessions through the normal path.
                 .initial_device_display_name("Rust Matrix Bot")
                 .send()
                 .await
@@ -272,6 +331,15 @@ impl BotClient {
 
             info!("Successfully logged in as {}", user_id);
             save_session(&client);
+
+            if let Some(old_device_id) = stale_device_id {
+                let client_clone = client.clone();
+                let config_clone = config.clone();
+                tokio::spawn(async move {
+                    delete_stale_device(&client_clone, &config_clone, &old_device_id).await;
+                });
+            }
+
             client
         };
 
@@ -287,23 +355,46 @@ impl BotClient {
             }
         }
 
-        if let Some(key) = &config.recovery_key {
-            let trimmed_key = key.trim().to_string();
-            if !trimmed_key.is_empty() {
-                let client_clone = client.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    info!("Attempting session verification using MATRIX_RECOVERY_KEY...");
-                    match client_clone.encryption().recovery().recover(&trimmed_key).await {
-                        Ok(_) => {
-                            info!("Successfully verified bot session via Recovery Key! 🎉");
-                            restore_room_keys_from_backup(&client_clone).await;
-                        }
-                        Err(err) => warn!("Failed to verify session using Recovery Key: {:?}", err),
-                    }
-                });
+        // Secret storage comes first because it is where the cross-signing keys
+        // come from on a fresh store, but signing runs either way: a restored
+        // store already holds them, and then no recovery key is needed to make
+        // the session verified.
+        let recovery_key = config
+            .recovery_key
+            .as_ref()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
+        let allowlist = config.verification_allowlist.clone();
+        let client_clone = client.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+
+            let mut secrets_imported = false;
+            if let Some(key) = recovery_key {
+                info!("Opening secret storage with MATRIX_RECOVERY_KEY...");
+                match client_clone.encryption().recovery().recover(&key).await {
+                    Ok(_) => secrets_imported = true,
+                    Err(err) => warn!(
+                        "MATRIX_RECOVERY_KEY did not open secret storage: {:?}. No room keys can \
+                         be restored, and a fresh crypto store has no cross-signing keys to sign \
+                         this device with.",
+                        err
+                    ),
+                }
             }
-        }
+
+            ensure_self_verified(&client_clone).await;
+
+            // Signing our own device covers trust inside this account only. An
+            // allowlisted user has to sign the bot's identity from their side,
+            // and their client will refuse to send the `!verify` that would
+            // start it, so the bot offers first.
+            request_verification_from_allowlist(&client_clone, &allowlist).await;
+
+            if secrets_imported {
+                restore_room_keys_from_backup(&client_clone).await;
+            }
+        });
 
         Ok(client)
     }
