@@ -26,6 +26,12 @@ impl ApiError {
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::NOT_FOUND, message: msg.into() }
     }
+    /// The request is valid but conflicts with existing state — a duplicate
+    /// name, say. Distinct from a 400 so clients can tell "you typed something
+    /// wrong" from "that already exists".
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::CONFLICT, message: msg.into() }
+    }
     /// Records the underlying failure and returns an opaque 500.
     ///
     /// Call sites pass raw `sqlx`/IO errors here. Those name tables, columns and

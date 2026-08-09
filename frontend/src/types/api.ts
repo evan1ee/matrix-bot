@@ -108,6 +108,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_categories"];
+        put?: never;
+        post: operations["create_category"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/categories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_category"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_transactions"];
+        put?: never;
+        post: operations["create_transaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_transaction"];
+        post?: never;
+        delete: operations["delete_transaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -222,6 +302,38 @@ export interface components {
             token_type: string;
             username: string;
         };
+        /** @description A user-defined spending category. */
+        Category: {
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description The owning `sender_mxid`. Categories are per-user, never shared. */
+            owner_id: string;
+        };
+        CategoryDeletedResponse: {
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: int64
+             * @description Entries kept but left uncategorised. Deleting a category never deletes
+             *     financial records.
+             */
+            uncategorised: number;
+        };
+        CategoryRequest: {
+            name: string;
+        };
+        /** @description Per-category totals within one currency. */
+        CategoryTotal: {
+            /** @description `None` for uncategorised entries. */
+            category?: string | null;
+            /** Format: int64 */
+            expense_minor: number;
+            /** Format: int64 */
+            income_minor: number;
+        };
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
@@ -249,6 +361,33 @@ export interface components {
             room_id?: string | null;
             text: string;
         };
+        /**
+         * @description Totals for one currency. Currencies are never combined — without a rate
+         *     source, adding EUR to JPY would produce a meaningless number.
+         */
+        CurrencySummary: {
+            categories: components["schemas"]["CategoryTotal"][];
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            expense_minor: number;
+            /** Format: int64 */
+            income_minor: number;
+            /**
+             * Format: int64
+             * @description `income - expense`. May legitimately be negative.
+             */
+            net_minor: number;
+        };
+        /**
+         * @description Which way the money moved.
+         *
+         *     `amount_minor` is always positive; this is what carries the sign, so a row
+         *     cannot contradict itself.
+         * @enum {string}
+         */
+        Direction: "expense" | "income";
         HealthResponse: {
             db_status: string;
             service: string;
@@ -258,6 +397,23 @@ export interface components {
         JoinedRoomInfo: {
             name: string;
             room_id: string;
+        };
+        LedgerQuery: {
+            /** @description `expense` or `income`. Omit for both. */
+            direction?: string | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: int64 */
+            page?: number | null;
+        };
+        LedgerResponse: {
+            items: components["schemas"]["Transaction"][];
+            /** Format: int64 */
+            limit: number;
+            /** Format: int64 */
+            page: number;
+            /** Format: int64 */
+            total: number;
         };
         MediaProxyQuery: {
             media_id: string;
@@ -329,6 +485,18 @@ export interface components {
             /** @description Present this as `?ticket=` when opening `/api/v1/events`. */
             ticket: string;
         };
+        SummaryQuery: {
+            /**
+             * Format: date-time
+             * @description Start of the period, inclusive.
+             */
+            from: string;
+            /**
+             * Format: date-time
+             * @description End of the period, exclusive — so month boundaries do not double-count.
+             */
+            to: string;
+        };
         TodoItem: {
             completed: boolean;
             /** Format: date-time */
@@ -371,6 +539,67 @@ export interface components {
             limit?: number | null;
             /** Format: int64 */
             page?: number | null;
+            room_id?: string | null;
+        };
+        /** @description A single ledger entry. */
+        Transaction: {
+            /**
+             * Format: int64
+             * @description Minor units (cents), always positive.
+             */
+            amount_minor: number;
+            /**
+             * Format: int64
+             * @description `None` means uncategorised, which is a valid and expected state.
+             */
+            category_id?: number | null;
+            /** @description Denormalised for reads so listing a ledger is one query, not N+1. */
+            category_name?: string | null;
+            /** Format: date-time */
+            created_at?: string | null;
+            currency: string;
+            /**
+             * Format: int64
+             * @description Decimal places for this row's currency, stored so a later change to the
+             *     currency table cannot rewrite what this row means.
+             */
+            currency_exponent: number;
+            direction: string;
+            /** Format: int64 */
+            id: number;
+            note?: string | null;
+            /**
+             * Format: date-time
+             * @description When the money moved — not when the row was written.
+             */
+            occurred_at: string;
+            room_id: string;
+            /** @description The sole ownership key, matching `AuthUser::owner_id()`. */
+            sender_mxid: string;
+            /** @description Display only — user-controlled, and collides across identity spaces. */
+            sender_name: string;
+        };
+        /**
+         * @description Amounts arrive as decimal strings, never as JSON numbers.
+         *
+         *     A JSON number is an IEEE-754 double by the time most clients have parsed it,
+         *     and `15.50` does not survive that exactly. The string is converted to minor
+         *     units by string manipulation.
+         */
+        TransactionRequest: {
+            /** @description Decimal string, e.g. `"15.50"`. */
+            amount: string;
+            /** Format: int64 */
+            category_id?: number | null;
+            /** @description ISO 4217 code, e.g. `"EUR"`. */
+            currency: string;
+            direction: components["schemas"]["Direction"];
+            note?: string | null;
+            /**
+             * Format: date-time
+             * @description When the money moved. Defaults to now.
+             */
+            occurred_at?: string | null;
             room_id?: string | null;
         };
         /**
@@ -607,6 +836,312 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_categories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your categories */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_category: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Category created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_category: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Category ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Category deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryDeletedResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    summary: {
+        parameters: {
+            query: {
+                /** @description Start of the period, inclusive. */
+                from: string;
+                /** @description End of the period, exclusive — so month boundaries do not double-count. */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-currency totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrencySummary"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_transactions: {
+        parameters: {
+            query?: {
+                /** @description `expense` or `income`. Omit for both. */
+                direction?: string | null;
+                page?: number | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ledger entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LedgerResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_transaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Entry recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_transaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Transaction ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Entry updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_transaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Transaction ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Entry deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

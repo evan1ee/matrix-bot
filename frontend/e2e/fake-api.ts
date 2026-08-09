@@ -37,6 +37,29 @@ export interface FakeReminder {
   created_at: string;
 }
 
+export interface FakeTransaction {
+  id: number;
+  room_id: string;
+  sender_mxid: string;
+  sender_name: string;
+  direction: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  category_id: number | null;
+  category_name: string | null;
+  note: string | null;
+  occurred_at: string;
+  created_at: string;
+}
+
+export interface FakeCategory {
+  id: number;
+  owner_id: string;
+  name: string;
+  created_at: string;
+}
+
 export interface FakeRoom {
   room_id: string;
   name: string;
@@ -61,8 +84,13 @@ export class FakeApi {
   /** Set to make the next matching call fail, for error-path tests. */
   failNext: { path: RegExp; status: number; error: string } | null = null;
 
+  transactions: FakeTransaction[] = [];
+  categories: FakeCategory[] = [];
+
   private nextTodoId = 1;
   private nextReminderId = 1;
+  private nextTxId = 1;
+  private nextCategoryId = 1;
 
   seedTodo(partial: Partial<FakeTodo> = {}): FakeTodo {
     const todo: FakeTodo = {
@@ -99,6 +127,38 @@ export class FakeApi {
     };
     this.reminders.push(reminder);
     return reminder;
+  }
+
+  seedCategory(name: string): FakeCategory {
+    const category: FakeCategory = {
+      id: this.nextCategoryId++,
+      owner_id: OWNER,
+      name,
+      created_at: new Date().toISOString(),
+    };
+    this.categories.push(category);
+    return category;
+  }
+
+  seedTransaction(partial: Partial<FakeTransaction> = {}): FakeTransaction {
+    const tx: FakeTransaction = {
+      id: this.nextTxId++,
+      room_id: 'web',
+      sender_mxid: OWNER,
+      sender_name: DISPLAY_NAME,
+      direction: 'expense',
+      amount_minor: 1000,
+      currency: 'EUR',
+      currency_exponent: 2,
+      category_id: null,
+      category_name: null,
+      note: 'Seeded entry',
+      occurred_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      ...partial,
+    };
+    this.transactions.push(tx);
+    return tx;
   }
 
   /** The pending reminder linked to a todo, mirroring `find_pending_for_todo`. */
@@ -298,6 +358,135 @@ export class FakeApi {
       }
     }
 
+    // --- finance ---
+    if (path === '/finance/categories' && method === 'GET') {
+      return json(route, 200, this.categories);
+    }
+    if (path === '/finance/categories' && method === 'POST') {
+      const name = String(body?.name ?? '').trim();
+      if (!name || name.length > 64) {
+        return json(route, 400, { error: 'Category name must be 1–64 characters', code: 400 });
+      }
+      if (this.categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+        return json(route, 409, {
+          error: 'You already have a category with that name',
+          code: 409,
+        });
+      }
+      return json(route, 200, this.seedCategory(name));
+    }
+    const categoryMatch = path.match(/^\/finance\/categories\/(\d+)$/);
+    if (categoryMatch && method === 'DELETE') {
+      const id = Number(categoryMatch[1]);
+      if (!this.categories.some((c) => c.id === id)) {
+        return json(route, 404, { error: 'Category not found', code: 404 });
+      }
+      // Entries are kept and left uncategorised — money is never destroyed by
+      // tidying the category list.
+      let uncategorised = 0;
+      for (const tx of this.transactions) {
+        if (tx.category_id === id) {
+          tx.category_id = null;
+          tx.category_name = null;
+          uncategorised += 1;
+        }
+      }
+      this.categories = this.categories.filter((c) => c.id !== id);
+      return json(route, 200, { id, uncategorised });
+    }
+
+    if (path === '/finance/transactions' && method === 'GET') {
+      return json(route, 200, {
+        items: this.transactions,
+        page: 1,
+        limit: 200,
+        total: this.transactions.length,
+      });
+    }
+    if (path === '/finance/transactions' && method === 'POST') {
+      const parsed = parseAmount(String(body?.amount ?? ''), String(body?.currency ?? ''));
+      if ('error' in parsed) return json(route, 400, { error: parsed.error, code: 400 });
+
+      const categoryId = body?.category_id ?? null;
+      const category = this.categories.find((c) => c.id === categoryId) ?? null;
+      if (categoryId !== null && !category) {
+        return json(route, 400, { error: 'Unknown category', code: 400 });
+      }
+
+      const tx = this.seedTransaction({
+        direction: body?.direction ?? 'expense',
+        amount_minor: parsed.minor,
+        currency: parsed.currency,
+        currency_exponent: parsed.exponent,
+        category_id: category?.id ?? null,
+        category_name: category?.name ?? null,
+        note: body?.note ?? null,
+        occurred_at: body?.occurred_at ?? new Date().toISOString(),
+      });
+      return json(route, 200, tx);
+    }
+    const txMatch = path.match(/^\/finance\/transactions\/(\d+)$/);
+    if (txMatch && method === 'PUT') {
+      const id = Number(txMatch[1]);
+      const tx = this.transactions.find((t) => t.id === id);
+      if (!tx) return json(route, 404, { error: 'Entry not found', code: 404 });
+
+      const parsed = parseAmount(String(body?.amount ?? ''), String(body?.currency ?? ''));
+      if ('error' in parsed) return json(route, 400, { error: parsed.error, code: 400 });
+
+      const categoryId = body?.category_id ?? null;
+      const category = this.categories.find((c) => c.id === categoryId) ?? null;
+      if (categoryId !== null && !category) {
+        return json(route, 400, { error: 'Unknown category', code: 400 });
+      }
+
+      tx.direction = body?.direction ?? tx.direction;
+      tx.amount_minor = parsed.minor;
+      tx.currency = parsed.currency;
+      tx.currency_exponent = parsed.exponent;
+      tx.category_id = category?.id ?? null;
+      tx.category_name = category?.name ?? null;
+      tx.note = body?.note ?? null;
+      return json(route, 200, tx);
+    }
+    if (txMatch && method === 'DELETE') {
+      const id = Number(txMatch[1]);
+      if (!this.transactions.some((t) => t.id === id)) {
+        return json(route, 404, { error: 'Entry not found', code: 404 });
+      }
+      this.transactions = this.transactions.filter((t) => t.id !== id);
+      return route.fulfill({ status: 204, body: '' });
+    }
+
+    if (path === '/finance/summary') {
+      const byCurrency = new Map<string, any>();
+      for (const tx of this.transactions) {
+        if (!byCurrency.has(tx.currency)) {
+          byCurrency.set(tx.currency, {
+            currency: tx.currency,
+            currency_exponent: tx.currency_exponent,
+            expense_minor: 0,
+            income_minor: 0,
+            net_minor: 0,
+            categories: [],
+          });
+        }
+        const entry = byCurrency.get(tx.currency);
+        if (tx.direction === 'expense') entry.expense_minor += tx.amount_minor;
+        else entry.income_minor += tx.amount_minor;
+        entry.net_minor = entry.income_minor - entry.expense_minor;
+
+        let bucket = entry.categories.find((c: any) => c.category === tx.category_name);
+        if (!bucket) {
+          bucket = { category: tx.category_name, expense_minor: 0, income_minor: 0 };
+          entry.categories.push(bucket);
+        }
+        if (tx.direction === 'expense') bucket.expense_minor += tx.amount_minor;
+        else bucket.income_minor += tx.amount_minor;
+      }
+      return json(route, 200, [...byCurrency.values()]);
+    }
+
     // --- reminders ---
     if (path === '/reminders' && method === 'GET') {
       const pending = this.reminders.filter((r) => r.status === 'pending');
@@ -355,4 +544,38 @@ function json(route: Route, status: number, payload: unknown) {
     contentType: 'application/json',
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * Mirrors `modules::finance::money` — minor units by string manipulation, never
+ * through a float, and per-currency decimal places.
+ */
+function parseAmount(
+  raw: string,
+  currencyRaw: string
+): { minor: number; currency: string; exponent: number } | { error: string } {
+  const currency = currencyRaw.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return { error: 'Currency must be a 3-letter code such as EUR or JPY' };
+  }
+
+  const zeroDecimal = ['JPY', 'KRW', 'VND', 'CLP', 'ISK'];
+  const threeDecimal = ['BHD', 'KWD', 'OMR', 'TND', 'JOD'];
+  const exponent = zeroDecimal.includes(currency) ? 0 : threeDecimal.includes(currency) ? 3 : 2;
+
+  const cleaned = raw.trim().replace(/[$€£¥₹,\s]/g, '');
+  if (cleaned.startsWith('-')) return { error: 'Amount must be greater than zero' };
+  if (!/^\d*\.?\d*$/.test(cleaned) || cleaned === '' || cleaned === '.') {
+    return { error: 'Amount must be a number such as 15.50' };
+  }
+
+  const [whole, fraction = ''] = cleaned.split('.');
+  if (fraction.length > exponent) {
+    return { error: `That currency has ${exponent} decimal place(s)` };
+  }
+
+  const minor = Number(`${whole || '0'}${fraction.padEnd(exponent, '0')}`);
+  if (!minor) return { error: 'Amount must be greater than zero' };
+
+  return { minor, currency, exponent };
 }

@@ -4,6 +4,7 @@ import { registry } from './core/registry';
 import { coreModule } from './modules/core';
 import { todoModule } from './modules/todo';
 import { reminderModule } from './modules/reminder';
+import { financeModule } from './modules/finance';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
@@ -11,7 +12,7 @@ import { AUTH_EXPIRED_EVENT, getAuthToken } from './core/apiClient';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[coreModule, todoModule, reminderModule].forEach((mod) => {
+[coreModule, todoModule, reminderModule, financeModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }

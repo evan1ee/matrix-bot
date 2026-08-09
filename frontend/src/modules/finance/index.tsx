@@ -1,0 +1,678 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchApi } from '../../core/apiClient';
+import { FrontendModule } from '../../core/types';
+import {
+  Wallet,
+  Plus,
+  Trash2,
+  AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Tag,
+  X,
+  Pencil,
+  Check,
+} from 'lucide-react';
+import { CustomSelect } from '../../components/CustomSelect';
+
+export type Direction = 'expense' | 'income';
+
+export interface Transaction {
+  id: number;
+  room_id: string;
+  sender_mxid: string;
+  sender_name: string;
+  direction: string;
+  /** Minor units — always positive; `direction` carries the sign. */
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  category_id?: number | null;
+  category_name?: string | null;
+  note?: string | null;
+  occurred_at: string;
+  created_at?: string | null;
+}
+
+export interface Category {
+  id: number;
+  owner_id: string;
+  name: string;
+  created_at?: string | null;
+}
+
+interface LedgerResponse {
+  items: Transaction[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+interface CategoryTotal {
+  category: string | null;
+  expense_minor: number;
+  income_minor: number;
+}
+
+interface CurrencySummary {
+  currency: string;
+  currency_exponent: number;
+  expense_minor: number;
+  income_minor: number;
+  net_minor: number;
+  categories: CategoryTotal[];
+}
+
+/** The currencies offered in the picker. */
+export const CURRENCY_OPTIONS = [
+  { value: 'CNY', label: 'CNY' },
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+];
+
+/**
+ * The picker options for a given value.
+ *
+ * The API accepts any ISO 4217 code — a Matrix `!expense add 500 JPY ramen`
+ * writes one this list does not offer — so an unlisted currency is appended
+ * rather than dropped. Without this the select would fall back to its
+ * placeholder and saving would blank a currency the user never touched.
+ */
+export function currencyOptionsFor(current: string) {
+  if (!current || CURRENCY_OPTIONS.some((o) => o.value === current)) {
+    return CURRENCY_OPTIONS;
+  }
+  return [...CURRENCY_OPTIONS, { value: current, label: current }];
+}
+
+/**
+ * Renders minor units as a decimal string.
+ *
+ * Integer maths only — dividing by 100 into a float is exactly the rounding
+ * this whole design avoids on the server.
+ */
+export function formatMinor(minor: number, exponent: number): string {
+  const negative = minor < 0;
+  const digits = Math.abs(minor).toString().padStart(exponent + 1, '0');
+  const text =
+    exponent === 0
+      ? digits
+      : `${digits.slice(0, digits.length - exponent)}.${digits.slice(digits.length - exponent)}`;
+  return negative ? `-${text}` : text;
+}
+
+/** The first and last instant of the viewer's current local month, as UTC ISO. */
+function currentMonthRange(): { from: string; to: string } {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+function formatOccurred(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+interface LedgerEditRowProps {
+  tx: Transaction;
+  categories: Category[];
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (body: Record<string, unknown>) => Promise<void>;
+}
+
+const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
+  tx,
+  categories,
+  saving,
+  onCancel,
+  onSave,
+}) => {
+  const [direction, setDirection] = useState<Direction>(tx.direction as Direction);
+  const [amount, setAmount] = useState(formatMinor(tx.amount_minor, tx.currency_exponent));
+  const [currency, setCurrency] = useState(tx.currency);
+  const [note, setNote] = useState(tx.note ?? '');
+  const [categoryId, setCategoryId] = useState(tx.category_id ? String(tx.category_id) : '');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount.trim()) {
+      setError('Enter an amount.');
+      return;
+    }
+    setError(null);
+    try {
+      await onSave({
+        direction,
+        amount: amount.trim(),
+        currency: currency.trim().toUpperCase(),
+        category_id: categoryId ? Number(categoryId) : null,
+        note: note.trim() || null,
+        occurred_at: tx.occurred_at,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save changes.');
+    }
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      data-testid="ledger-row-edit"
+      className="py-3 px-2 space-y-3 bg-neutral-100/60 dark:bg-neutral-900/30 rounded"
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase font-mono text-neutral-500">Direction</span>
+          <CustomSelect
+            value={direction}
+            onChange={(v) => setDirection(v as Direction)}
+            mono
+            options={[
+              { value: 'expense', label: 'Expense' },
+              { value: 'income', label: 'Income' },
+            ]}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
+          <CustomSelect
+            value={currency}
+            onChange={setCurrency}
+            mono
+            options={currencyOptionsFor(currency)}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase font-mono text-neutral-500">Category</span>
+          <CustomSelect
+            value={categoryId}
+            onChange={setCategoryId}
+            mono
+            options={[
+              { value: '', label: 'Uncategorised' },
+              ...categories.map((c) => ({ value: String(c.id), label: c.name })),
+            ]}
+          />
+        </label>
+      </div>
+
+      <input
+        type="text"
+        value={note}
+        placeholder="What was it for?"
+        onChange={(e) => setNote(e.target.value)}
+        className="w-full px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+      />
+
+      {error && (
+        <div className="flex items-center gap-2 p-2 rounded bg-red-100 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300 text-xs font-mono">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+        >
+          <Check className="w-3.5 h-3.5" />
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
+        >
+          <X className="w-3.5 h-3.5" />
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+};
+
+export const FinanceMainView: React.FC = () => {
+  const queryClient = useQueryClient();
+  const [direction, setDirection] = useState<Direction>('expense');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('CNY');
+  const [note, setNote] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [filter, setFilter] = useState<'all' | Direction>('all');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [showCategories, setShowCategories] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  const { data: ledger, isLoading } = useQuery<LedgerResponse>({
+    queryKey: ['transactions'],
+    queryFn: () => fetchApi<LedgerResponse>('/finance/transactions?limit=200'),
+  });
+
+  const { data: categories } = useQuery<Category[]>({
+    queryKey: ['finance-categories'],
+    queryFn: () => fetchApi<Category[]>('/finance/categories'),
+  });
+
+  const month = currentMonthRange();
+  const { data: summary } = useQuery<CurrencySummary[]>({
+    queryKey: ['finance-summary', month.from, month.to],
+    queryFn: () =>
+      fetchApi<CurrencySummary[]>(
+        `/finance/summary?from=${encodeURIComponent(month.from)}&to=${encodeURIComponent(month.to)}`
+      ),
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      fetchApi<Transaction>('/finance/transactions', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      setAmount('');
+      setNote('');
+      setErrorMsg(null);
+      invalidate();
+    },
+    onError: (err: Error) => setErrorMsg(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => fetchApi(`/finance/transactions/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  });
+
+  // The API replaces the whole entry, so the edit form always states every
+  // field rather than sending a partial patch.
+  const editMutation = useMutation({
+    mutationFn: ({ id, ...body }: Record<string, unknown> & { id: number }) =>
+      fetchApi<Transaction>(`/finance/transactions/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  });
+
+  const addCategoryMutation = useMutation({
+    mutationFn: (name: string) =>
+      fetchApi<Category>('/finance/categories', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      setNewCategory('');
+      setCategoryError(null);
+      queryClient.invalidateQueries({ queryKey: ['finance-categories'] });
+    },
+    onError: (err: Error) => setCategoryError(err.message),
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: (id: number) => fetchApi(`/finance/categories/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['finance-categories'] });
+      invalidate();
+    },
+  });
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount.trim()) {
+      setErrorMsg('Enter an amount.');
+      return;
+    }
+    createMutation.mutate({
+      direction,
+      // Sent as a string: a JSON number would be a double by the time it
+      // reaches the server, and 15.50 does not survive that exactly.
+      amount: amount.trim(),
+      currency: currency.trim().toUpperCase(),
+      category_id: categoryId ? Number(categoryId) : null,
+      note: note.trim() || null,
+    });
+  };
+
+  const items = (ledger?.items ?? []).filter((tx) =>
+    filter === 'all' ? true : tx.direction === filter
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Per-currency summary — currencies are never added together. */}
+      {summary && summary.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="finance-summary">
+          {summary.map((s) => (
+            <div
+              key={s.currency}
+              className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1"
+            >
+              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
+                <span>{s.currency} THIS MONTH</span>
+                <Wallet className="w-3.5 h-3.5" />
+              </div>
+              <div
+                className={`text-2xl font-bold font-mono tracking-tight ${
+                  s.net_minor < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}
+              >
+                {formatMinor(s.net_minor, s.currency_exponent)}
+              </div>
+              <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">
+                in {formatMinor(s.income_minor, s.currency_exponent)} · out{' '}
+                {formatMinor(s.expense_minor, s.currency_exponent)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Entry form */}
+      <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-neutral-600 dark:text-neutral-300" />
+            <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">
+              Record Entry
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCategories((open) => !open)}
+            className="inline-flex items-center gap-1.5 text-xs font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+          >
+            <Tag className="w-3.5 h-3.5" />
+            Categories
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="flex items-center gap-2 p-3 rounded bg-red-100 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300 text-xs font-mono">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {showCategories && (
+          <div
+            data-testid="category-manager"
+            className="p-4 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3"
+          >
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="New category name"
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                className="flex-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+              />
+              <button
+                type="button"
+                onClick={() => newCategory.trim() && addCategoryMutation.mutate(newCategory.trim())}
+                className="px-3 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition"
+              >
+                Add
+              </button>
+            </div>
+
+            {categoryError && (
+              <p className="text-xs font-mono text-red-700 dark:text-red-400">{categoryError}</p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {(categories ?? []).length === 0 ? (
+                <span className="text-xs font-mono text-neutral-500">No categories yet.</span>
+              ) : (
+                (categories ?? []).map((cat) => (
+                  <span
+                    key={cat.id}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono"
+                  >
+                    {cat.name}
+                    <button
+                      type="button"
+                      title={`Delete category ${cat.name}`}
+                      onClick={() => deleteCategoryMutation.mutate(cat.id)}
+                      className="text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 transition"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <p className="text-[11px] font-mono text-neutral-500">
+              Deleting a category keeps its entries and leaves them uncategorised.
+            </p>
+          </div>
+        )}
+
+        <form onSubmit={handleCreate} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Direction</span>
+              <CustomSelect
+                value={direction}
+                onChange={(v) => setDirection(v as Direction)}
+                mono
+                options={[
+                  { value: 'expense', label: 'Expense' },
+                  { value: 'income', label: 'Income' },
+                ]}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="15.50"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
+              <CustomSelect
+                value={currency}
+                onChange={setCurrency}
+                mono
+                options={currencyOptionsFor(currency)}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Category</span>
+              <CustomSelect
+                value={categoryId}
+                onChange={setCategoryId}
+                mono
+                options={[
+                  { value: '', label: 'Uncategorised' },
+                  ...(categories ?? []).map((c) => ({ value: String(c.id), label: c.name })),
+                ]}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <input
+              type="text"
+              placeholder="What was it for?"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="sm:col-span-3 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+            />
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{createMutation.isPending ? 'Saving...' : 'Record'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Ledger */}
+      <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">LEDGER</span>
+            <div className="flex items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded p-0.5 text-xs font-mono">
+              {(['all', 'expense', 'income'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setFilter(tab)}
+                  className={`px-2.5 py-1 rounded capitalize transition ${
+                    filter === tab
+                      ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
+          <span className="text-xs font-mono text-neutral-500">{items.length} items</span>
+        </div>
+
+        {isLoading ? (
+          <div className="py-8 text-center text-xs font-mono text-neutral-500">Loading ledger...</div>
+        ) : items.length === 0 ? (
+          <div className="py-8 text-center text-xs font-mono text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-800 rounded">
+            Nothing recorded yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-neutral-200 dark:divide-neutral-850">
+            {items.map((tx) => {
+              const isExpense = tx.direction === 'expense';
+
+              if (editingId === tx.id) {
+                return (
+                  <LedgerEditRow
+                    key={tx.id}
+                    tx={tx}
+                    categories={categories ?? []}
+                    saving={editMutation.isPending}
+                    onCancel={() => setEditingId(null)}
+                    onSave={async (body) => {
+                      await editMutation.mutateAsync({ id: tx.id, ...body });
+                      setEditingId(null);
+                    }}
+                  />
+                );
+              }
+
+              return (
+                <div
+                  key={tx.id}
+                  data-testid="ledger-row"
+                  className="py-3 flex items-center justify-between gap-4 px-2 rounded transition hover:bg-neutral-100 dark:hover:bg-neutral-900/30"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {isExpense ? (
+                      <ArrowDownRight className="w-5 h-5 text-rose-500 shrink-0" />
+                    ) : (
+                      <ArrowUpRight className="w-5 h-5 text-emerald-500 shrink-0" />
+                    )}
+                    <div className="space-y-0.5 truncate">
+                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                        {tx.note || (isExpense ? 'Expense' : 'Income')}
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-neutral-500">
+                        <span>{formatOccurred(tx.occurred_at)}</span>
+                        <span>{tx.category_name ?? 'Uncategorised'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span
+                      className={`font-mono text-sm font-medium ${
+                        isExpense
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {isExpense ? '−' : '+'}
+                      {formatMinor(tx.amount_minor, tx.currency_exponent)} {tx.currency}
+                    </span>
+                    <button
+                      onClick={() => setEditingId(tx.id)}
+                      title="Edit entry"
+                      className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => deleteMutation.mutate(tx.id)}
+                      title="Delete entry"
+                      className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const financeModule: FrontendModule = {
+  id: 'finance',
+  name: 'Expenses & Income',
+  description: 'Track spending and income per currency, with your own categories',
+  navTab: { label: 'Finance' },
+  MainView: FinanceMainView,
+  handleSseEvent: (event, queryClient) => {
+    if (
+      event.type === 'TransactionCreated' ||
+      event.type === 'TransactionUpdated' ||
+      event.type === 'TransactionDeleted'
+    ) {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+    }
+    if (event.type === 'CategoryCreated' || event.type === 'CategoryDeleted') {
+      queryClient.invalidateQueries({ queryKey: ['finance-categories'] });
+    }
+  },
+};

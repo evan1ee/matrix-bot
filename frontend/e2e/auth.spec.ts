@@ -54,3 +54,33 @@ test('signs out and clears the stored token', async ({ app }) => {
     .poll(() => app.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
     .toBeNull();
 });
+
+test('registers a new account and keeps the session', async ({ anonApp, api }) => {
+  await anonApp.goto('/');
+
+  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
+  await anonApp.getByRole('button', { name: /need an account\? register/i }).click();
+  await anonApp.getByPlaceholder('e.g. alice').fill('newcomer');
+  await anonApp.getByPlaceholder('••••••••').fill('hunter2');
+  await anonApp.getByRole('button', { name: 'Register', exact: true }).click();
+
+  await expect
+    .poll(() => anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
+    .toBe('fake-jwt-token');
+  expect(api.requests.some((r) => r.url === '/auth/register')).toBe(true);
+});
+
+// Local usernames may never be shaped like an MXID, or the two identity spaces
+// collide — the server rejects it and the UI must show why.
+test('rejects an MXID-shaped username at registration', async ({ anonApp }) => {
+  await anonApp.goto('/');
+
+  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
+  await anonApp.getByRole('button', { name: /need an account\? register/i }).click();
+  await anonApp.getByPlaceholder('e.g. alice').fill('@alice:matrix.org');
+  await anonApp.getByPlaceholder('••••••••').fill('hunter2');
+  await anonApp.getByRole('button', { name: 'Register', exact: true }).click();
+
+  await expect(anonApp.getByText(/cannot contain/i)).toBeVisible();
+  expect(await anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt'))).toBeNull();
+});

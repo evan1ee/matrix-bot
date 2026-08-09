@@ -2,8 +2,11 @@ use axum::{response::IntoResponse, Json};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::api::{auth, health, reminders, rooms, sse, todos};
+use crate::api::{auth, finance, health, reminders, rooms, sse, todos};
 use crate::error::ApiErrorResponse;
+use crate::modules::finance::models::{
+    Category, CategoryTotal, CurrencySummary, Direction, Transaction,
+};
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 
@@ -24,7 +27,15 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         todos::delete_todo,
         reminders::list_reminders,
         reminders::create_reminder,
-        reminders::delete_reminder
+        reminders::delete_reminder,
+        finance::list_transactions,
+        finance::create_transaction,
+        finance::update_transaction,
+        finance::delete_transaction,
+        finance::summary,
+        finance::list_categories,
+        finance::create_category,
+        finance::delete_category
     ),
     components(
         schemas(
@@ -48,7 +59,18 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             RecurrencePattern,
             reminders::ReminderQuery,
             reminders::CreateReminderRequest,
-            reminders::ReminderListResponse
+            reminders::ReminderListResponse,
+            Transaction,
+            Category,
+            Direction,
+            CategoryTotal,
+            CurrencySummary,
+            finance::LedgerQuery,
+            finance::SummaryQuery,
+            finance::TransactionRequest,
+            finance::CategoryRequest,
+            finance::LedgerResponse,
+            finance::CategoryDeletedResponse
         )
     ),
     modifiers(&SecurityAddon),

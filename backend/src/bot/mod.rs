@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
+use crate::modules::finance::FinanceModule;
 use crate::modules::reminder::ReminderModule;
 use crate::modules::todo::TodoModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
@@ -46,6 +47,7 @@ impl MatrixBot {
         registry.register(CoreModule::new(registry_ref.clone()));
         registry.register(TodoModule::new());
         registry.register(ReminderModule::new());
+        registry.register(FinanceModule::new());
 
         let registry_arc = Arc::new(registry);
         *registry_ref.write().await = Some(registry_arc.clone());

@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::reminder::models::Reminder;
 use crate::modules::todo::models::TodoItem;
 
@@ -19,6 +20,11 @@ pub enum SystemEvent {
     ReminderCreated(Reminder),
     ReminderTriggered(Reminder),
     ReminderCancelled { id: i64, room_id: String, owner_id: String },
+    TransactionCreated(Transaction),
+    TransactionUpdated(Transaction),
+    TransactionDeleted { id: i64, room_id: String, owner_id: String },
+    CategoryCreated(Category),
+    CategoryDeleted { id: i64, owner_id: String },
 }
 
 impl SystemEvent {
@@ -36,6 +42,12 @@ impl SystemEvent {
             }
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
             SystemEvent::ReminderCancelled { owner_id, .. } => owner_id,
+            SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
+                &tx.sender_mxid
+            }
+            SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
+            SystemEvent::CategoryCreated(cat) => &cat.owner_id,
+            SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
         }
     }
 

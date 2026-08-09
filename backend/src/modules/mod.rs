@@ -6,6 +6,7 @@ use tracing::info;
 use crate::db::Database;
 
 pub mod core;
+pub mod finance;
 pub mod reminder;
 pub mod todo;
 
@@ -105,5 +106,101 @@ impl ModuleRegistry {
             .iter()
             .map(|m| (m.name().to_string(), m.commands()))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    /// A module that claims only the command it was told to claim.
+    struct StubModule {
+        label: &'static str,
+        claims: &'static str,
+    }
+
+    #[async_trait]
+    impl BotModule for StubModule {
+        fn name(&self) -> &str {
+            self.label
+        }
+
+        fn commands(&self) -> Vec<CommandHelp> {
+            vec![CommandHelp {
+                name: self.claims.to_string(),
+                usage: format!("!{}", self.claims),
+                description: format!("stub for {}", self.claims),
+            }]
+        }
+
+        async fn handle_command(&self, ctx: &CommandContext, _db: &Database) -> Option<String> {
+            (ctx.command == self.claims).then(|| format!("handled by {}", self.label))
+        }
+    }
+
+    fn ctx_for(command: &str) -> CommandContext {
+        CommandContext {
+            room_id: "!room:a".to_string(),
+            sender_mxid: "@alice:a".to_string(),
+            sender_name: "alice".to_string(),
+            command: command.to_string(),
+            raw_args: String::new(),
+            full_body: format!("!{}", command),
+        }
+    }
+
+    async fn memory_db() -> Database {
+        Database::connect("sqlite::memory:", 1).await.unwrap()
+    }
+
+    /// Dispatch returns the *first* module that claims the command. Registration
+    /// order is therefore a real contract, not an implementation detail.
+    #[tokio::test]
+    async fn test_dispatch_returns_the_first_claiming_module() {
+        let db = memory_db().await;
+        let mut registry = ModuleRegistry::new();
+        registry.register(StubModule { label: "first", claims: "shared" });
+        registry.register(StubModule { label: "second", claims: "shared" });
+
+        let reply = registry.dispatch(&ctx_for("shared"), &db).await;
+        assert_eq!(reply.as_deref(), Some("handled by first"));
+    }
+
+    /// An unclaimed command must fall through as `None` so the bot stays silent
+    /// rather than answering with something arbitrary.
+    #[tokio::test]
+    async fn test_unclaimed_command_falls_through() {
+        let db = memory_db().await;
+        let mut registry = ModuleRegistry::new();
+        registry.register(StubModule { label: "todo", claims: "todo" });
+
+        assert!(registry.dispatch(&ctx_for("nonsense"), &db).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_reaches_a_later_module() {
+        let db = memory_db().await;
+        let mut registry = ModuleRegistry::new();
+        registry.register(StubModule { label: "todo", claims: "todo" });
+        registry.register(StubModule { label: "finance", claims: "expense" });
+
+        let reply = registry.dispatch(&ctx_for("expense"), &db).await;
+        assert_eq!(reply.as_deref(), Some("handled by finance"));
+    }
+
+    /// Help generation must cover every registered module, or a command becomes
+    /// undiscoverable the moment its module is added.
+    #[test]
+    fn test_help_covers_every_registered_module() {
+        let mut registry = ModuleRegistry::new();
+        registry.register(StubModule { label: "todo", claims: "todo" });
+        registry.register(StubModule { label: "finance", claims: "expense" });
+
+        let help = registry.get_all_help();
+        assert_eq!(help.len(), 2);
+        assert_eq!(help[0].0, "todo");
+        assert_eq!(help[1].0, "finance");
+        assert!(help.iter().all(|(_, cmds)| !cmds.is_empty()));
     }
 }

@@ -54,6 +54,64 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Per-user spending categories. Names are unique per owner, not globally.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS finance_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_categories_owner_name \
+         ON finance_categories(owner_id, name);",
+    )
+    .execute(pool)
+    .await?;
+
+    // The ledger. `amount_minor` is always positive and `direction` carries the
+    // sign, so a row cannot contradict itself; `currency_exponent` is stored per
+    // row so a later change to the currency table cannot rewrite history.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id TEXT NOT NULL,
+            sender_mxid TEXT NOT NULL,
+            sender_name TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            amount_minor INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            category_id INTEGER,
+            note TEXT,
+            occurred_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_owner_occurred \
+         ON transactions(sender_mxid, occurred_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);",
+    )
+    .execute(pool)
+    .await?;
+
     // Composite indexes for performance optimization
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger ON reminders(status, trigger_at);"
@@ -114,4 +172,100 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     info!("Database migrations applied successfully.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::SqlitePool;
+
+    async fn table_names(pool: &SqlitePool) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_creates_every_table() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let tables = table_names(&pool).await;
+        for expected in [
+            "finance_categories",
+            "reminders",
+            "todos",
+            "transactions",
+            "web_users",
+        ] {
+            assert!(tables.contains(&expected.to_string()), "missing table {expected}");
+        }
+    }
+
+    /// This is the only migration mechanism there is, and it runs on every boot.
+    /// It must be safe to apply repeatedly to an already-migrated database.
+    #[tokio::test]
+    async fn test_migrations_are_idempotent() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+        run_migrations(&pool).await.unwrap();
+        let first = table_names(&pool).await;
+
+        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let third = table_names(&pool).await;
+
+        assert_eq!(first, third, "re-running migrations must not change the schema");
+    }
+
+    /// Re-running migrations must not disturb rows that already exist.
+    #[tokio::test]
+    async fn test_migrations_preserve_existing_data() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO todos (room_id, sender_mxid, sender_name, text, priority, completed) \
+             VALUES ('web', '@a:x', 'a', 'keep me', 'medium', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool).await.unwrap();
+
+        let text: String = sqlx::query_scalar("SELECT text FROM todos")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(text, "keep me");
+    }
+
+    /// The unique index is what stops a user ending up with two categories of
+    /// the same name; the repository relies on it rather than a read-then-write.
+    #[tokio::test]
+    async fn test_category_name_uniqueness_is_enforced_by_the_schema() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let duplicate =
+            sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
+                .execute(&pool)
+                .await;
+        assert!(duplicate.is_err(), "a duplicate name must be rejected by the index");
+
+        // A different owner may reuse the name.
+        sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')")
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
 }

@@ -57,3 +57,43 @@ impl BotModule for ReminderModule {
         scheduler::start_reminder_scheduler(ctx.clone());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::CommandContext;
+
+    fn ctx(body: &str) -> CommandContext {
+        CommandContext {
+            room_id: "!room:a".to_string(),
+            sender_mxid: "@alice:a".to_string(),
+            sender_name: "alice".to_string(),
+            command: body.split_whitespace().next().unwrap_or("").trim_start_matches('!').to_string(),
+            raw_args: String::new(),
+            full_body: body.to_string(),
+        }
+    }
+
+    async fn db() -> Database {
+        Database::connect("sqlite::memory:", 1).await.unwrap()
+    }
+
+    #[test]
+    fn test_advertises_its_commands() {
+        let module = ReminderModule::new();
+        assert_eq!(module.name(), "Reminder");
+        let commands = module.commands();
+        assert!(!commands.is_empty());
+        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn test_claims_only_its_own_commands() {
+        let module = ReminderModule::new();
+        let db = db().await;
+
+        assert!(module.handle_command(&ctx("!remind list"), &db).await.is_some());
+        assert!(module.handle_command(&ctx("!todo list"), &db).await.is_none());
+        assert!(module.handle_command(&ctx("!expense list"), &db).await.is_none());
+    }
+}

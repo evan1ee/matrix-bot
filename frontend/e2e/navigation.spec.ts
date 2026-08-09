@@ -11,6 +11,13 @@ test('switches between module tabs', async ({ app }) => {
 
   await app.getByRole('button', { name: 'Reminders', exact: true }).click();
   await expect(app.getByText('Schedule Reminder')).toBeVisible();
+
+  await app.getByRole('button', { name: 'Finance', exact: true }).click();
+  await expect(app.getByText('Record Entry')).toBeVisible();
+
+  // And back again — switching away and returning must not lose the view.
+  await app.getByRole('button', { name: 'Todos', exact: true }).click();
+  await expect(app.getByText('Create New Task')).toBeVisible();
 });
 
 test('shows live counts in the header stats', async ({ app, api }) => {

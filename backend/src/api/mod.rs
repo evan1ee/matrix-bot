@@ -1,6 +1,6 @@
 use axum::{
     http::{header, HeaderValue, Method},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use std::net::SocketAddr;
@@ -20,6 +20,7 @@ const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub mod auth;
 pub mod health;
 pub mod openapi;
+pub mod finance;
 pub mod reminders;
 pub mod rooms;
 pub mod sse;
@@ -94,7 +95,21 @@ pub async fn start_api_server(
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route("/todos/:id", patch(todos::update_todo).delete(todos::delete_todo))
         .route("/reminders", get(reminders::list_reminders).post(reminders::create_reminder))
-        .route("/reminders/:id", delete(reminders::delete_reminder));
+        .route("/reminders/:id", delete(reminders::delete_reminder))
+        .route(
+            "/finance/transactions",
+            get(finance::list_transactions).post(finance::create_transaction),
+        )
+        .route(
+            "/finance/transactions/:id",
+            put(finance::update_transaction).delete(finance::delete_transaction),
+        )
+        .route("/finance/summary", get(finance::summary))
+        .route(
+            "/finance/categories",
+            get(finance::list_categories).post(finance::create_category),
+        )
+        .route("/finance/categories/:id", delete(finance::delete_category));
 
     let web_dist = if std::path::Path::new("web/dist").exists() {
         "web/dist"
