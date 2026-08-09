@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
+import { DateTimePicker } from '../../components/DateTimePicker';
 
 export interface TodoItem {
   id: number;
@@ -52,8 +53,8 @@ const LEAD_OPTIONS = [
 ];
 
 /**
- * Converts a `datetime-local` value (which the browser gives us in the viewer's
- * own zone, with no offset) into the UTC instant the API stores.
+ * Converts a `DateTimePicker` value (`YYYY-MM-DDTHH:mm` in the viewer's own
+ * zone, with no offset) into the UTC instant the API stores.
  */
 function localInputToUtcIso(value: string): string | null {
   if (!value) return null;
@@ -63,7 +64,7 @@ function localInputToUtcIso(value: string): string | null {
 
 /**
  * The inverse of `localInputToUtcIso`: renders a stored UTC instant as the
- * `YYYY-MM-DDTHH:mm` a `datetime-local` input expects, in the viewer's zone.
+ * `YYYY-MM-DDTHH:mm` the picker expects, in the viewer's zone.
  */
 function utcIsoToLocalInput(iso: string | null | undefined): string {
   if (!iso) return '';
@@ -212,12 +213,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
 
           <label className="flex flex-col gap-1">
             <span className="text-[10px] uppercase font-mono text-neutral-500">Due date</span>
-            <input
-              type="datetime-local"
-              value={draftDue}
-              onChange={(e) => setDraftDue(e.target.value)}
-              className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
-            />
+            <DateTimePicker value={draftDue} onChange={setDraftDue} placeholder="No due date" />
           </label>
 
           <label className="flex flex-col gap-1">
@@ -300,6 +296,10 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
             <span>by {item.sender_name}</span>
             {item.due_at && (
               <span
+                data-testid="due-date"
+                data-overdue={
+                  !item.completed && new Date(item.due_at) < new Date() ? 'true' : 'false'
+                }
                 className={`inline-flex items-center gap-1 ${
                   !item.completed && new Date(item.due_at) < new Date()
                     ? 'text-rose-600 dark:text-rose-400'
@@ -526,12 +526,7 @@ export const TodoMainView: React.FC = () => {
               <span className="text-[10px] uppercase font-mono text-neutral-500">
                 Due date (optional)
               </span>
-              <input
-                type="datetime-local"
-                value={dueAt}
-                onChange={(e) => setDueAt(e.target.value)}
-                className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
-              />
+              <DateTimePicker value={dueAt} onChange={setDueAt} placeholder="No due date" />
             </label>
 
             <label className="flex flex-col gap-1">

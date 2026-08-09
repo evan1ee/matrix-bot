@@ -6,6 +6,9 @@ import {
   todoEditForm,
   chooseOption,
   selectField,
+  dateField,
+  setDateTime,
+  clearDateTime,
   datetimeLocal,
 } from './fixtures';
 
@@ -16,7 +19,7 @@ test.describe('setting a due date and reminder at creation', () => {
     await gotoApp(app, 'Todos');
 
     await app.getByPlaceholder('What needs to be done?').fill('Cut the release');
-    await app.getByLabel('Due date (optional)').fill(datetimeLocal(6 * HOUR));
+    await setDateTime(dateField(app, 'Due date'), datetimeLocal(6 * HOUR));
     await chooseOption(selectField(app, 'Remind me'), '1 hour before');
     await chooseOption(selectField(app, 'Send to room'), 'Ops');
     await app.getByRole('button', { name: 'Add Task' }).click();
@@ -60,7 +63,7 @@ test.describe('setting a due date and reminder at creation', () => {
     await gotoApp(app, 'Todos');
 
     await app.getByPlaceholder('What needs to be done?').fill('No room');
-    await app.getByLabel('Due date (optional)').fill(datetimeLocal(6 * HOUR));
+    await setDateTime(dateField(app, 'Due date'), datetimeLocal(6 * HOUR));
     await chooseOption(selectField(app, 'Remind me'), '1 hour before');
     await app.getByRole('button', { name: 'Add Task' }).click();
 
@@ -74,7 +77,7 @@ test.describe('setting a due date and reminder at creation', () => {
     await gotoApp(app, 'Todos');
 
     await app.getByPlaceholder('What needs to be done?').fill('Just a deadline');
-    await app.getByLabel('Due date (optional)').fill(datetimeLocal(3 * HOUR));
+    await setDateTime(dateField(app, 'Due date'), datetimeLocal(3 * HOUR));
     await app.getByRole('button', { name: 'Add Task' }).click();
 
     await expect(todoRow(app, 'Just a deadline')).toBeVisible();
@@ -120,11 +123,16 @@ test.describe('showing due dates in the list', () => {
     });
     await gotoApp(app, 'Todos');
 
-    const overdue = todoRow(app, 'Overdue task').locator('span.text-rose-600, span.text-rose-400');
-    await expect(overdue).toHaveCount(1);
-
-    const future = todoRow(app, 'Future task').locator('span.text-rose-600, span.text-rose-400');
-    await expect(future).toHaveCount(0);
+    // Asserted via a data attribute rather than a Tailwind class: the class set
+    // varies with the active theme, which made this assertion flaky.
+    await expect(todoRow(app, 'Overdue task').getByTestId('due-date')).toHaveAttribute(
+      'data-overdue',
+      'true'
+    );
+    await expect(todoRow(app, 'Future task').getByTestId('due-date')).toHaveAttribute(
+      'data-overdue',
+      'false'
+    );
   });
 });
 
@@ -167,7 +175,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Bare task').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.getByLabel('Due date').fill(datetimeLocal(8 * HOUR));
+    await setDateTime(dateField(form, 'Due date'), datetimeLocal(8 * HOUR));
     await chooseOption(selectField(form, 'Remind me'), '10 minutes before');
     await chooseOption(selectField(form, 'Send to room'), 'General');
     await form.getByRole('button', { name: 'Save' }).click();
@@ -185,7 +193,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Needs a room').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.getByLabel('Due date').fill(datetimeLocal(8 * HOUR));
+    await setDateTime(dateField(form, 'Due date'), datetimeLocal(8 * HOUR));
     await chooseOption(selectField(form, 'Remind me'), '1 hour before');
     await form.getByRole('button', { name: 'Save' }).click();
 
@@ -215,9 +223,9 @@ test.describe('editing an existing task', () => {
       .poll(() => api.todos.find((t) => t.id === todo.id)?.remind_before_minutes)
       .toBe(1440);
 
-    // The edit form round-trips through a `datetime-local` input, which has
-    // minute granularity — so compare against the stored date, not the seeded
-    // one, and assert the invariant that matters: trigger == due - lead.
+    // The edit form round-trips through the picker, which has minute
+    // granularity — so compare against the stored date, not the seeded one,
+    // and assert the invariant that matters: trigger == due - lead.
     const saved = api.todos.find((t) => t.id === todo.id)!;
     const reminder = api.reminderForTodo(todo.id)!;
     expect(new Date(reminder.trigger_at).getTime()).toBe(
@@ -260,7 +268,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Drop the date').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.getByLabel('Due date').fill('');
+    await clearDateTime(dateField(form, 'Due date'));
     await chooseOption(selectField(form, 'Remind me'), 'No reminder');
     await form.getByRole('button', { name: 'Save' }).click();
 

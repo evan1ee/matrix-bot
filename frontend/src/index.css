@@ -2,6 +2,17 @@
 
 @variant dark (&:where(.dark, .dark *));
 
+/*
+ * `neutral-850` is used across the app for surfaces that sit between
+ * `neutral-800` and `neutral-900`, but Tailwind's palette has no such step, so
+ * every `dark:*-neutral-850` silently emitted nothing. In `CustomSelect` that
+ * left the selected option as white text on the light `bg-neutral-100` that the
+ * missing dark override was meant to replace — invisible in dark mode.
+ */
+@theme {
+  --color-neutral-850: #1f1f1f;
+}
+
 @layer base {
   :root {
     color-scheme: light;
