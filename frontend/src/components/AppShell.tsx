@@ -7,7 +7,7 @@ import { TodoListResponse } from '../modules/todo';
 import { ReminderListResponse } from '../modules/reminder';
 import { ThemeToggle } from './ThemeToggle';
 import { Theme } from '../core/theme';
-import { Shield, Radio, CheckSquare, Clock, LogIn, Bot } from 'lucide-react';
+import { Shield, Radio, CheckSquare, Clock, LogIn, Bot, Settings } from 'lucide-react';
 
 export interface UserProfileResponse {
   username: string;
@@ -21,6 +21,7 @@ interface AppShellProps {
   events: SystemEvent[];
   isConnected: boolean;
   onOpenAuth: () => void;
+  onOpenSettings: () => void;
   userToken: string | null;
   currentTheme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -32,6 +33,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   events,
   isConnected,
   onOpenAuth,
+  onOpenSettings,
   userToken,
   currentTheme,
   onThemeChange,
@@ -159,6 +161,19 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </>
               )}
             </button>
+
+            {/* Timezone & currency preferences. Hidden while signed out —
+                settings are per-user and there is no user yet. */}
+            {userToken && (
+              <button
+                onClick={onOpenSettings}
+                aria-label="Preferences"
+                title="Timezone & currency"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             {/* Theme Toggle Component at the far end */}
             <ThemeToggle currentTheme={currentTheme} onThemeChange={onThemeChange} />

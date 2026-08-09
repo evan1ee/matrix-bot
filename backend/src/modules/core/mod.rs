@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleRegistry};
 use crate::utils::html_escape;
 
@@ -43,7 +44,12 @@ impl BotModule for CoreModule {
         ]
     }
 
-    async fn handle_command(&self, ctx: &CommandContext, _db: &Database) -> Option<String> {
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        _db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
         let cmd_lower = ctx.command.to_lowercase();
         match cmd_lower.as_str() {
             "hello" | "hi" => {
@@ -96,14 +102,14 @@ mod tests {
             pool: sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap(),
         };
 
-        let res = core.handle_command(&ctx, &dummy_db).await.unwrap();
+        let res = core.handle_command(&ctx, &dummy_db, None).await.unwrap();
         assert!(res.contains("Hello, Alice!"));
 
         let ctx_ping = CommandContext {
             command: "ping".to_string(),
             ..ctx
         };
-        let res_ping = core.handle_command(&ctx_ping, &dummy_db).await.unwrap();
+        let res_ping = core.handle_command(&ctx_ping, &dummy_db, None).await.unwrap();
         assert!(res_ping.contains("Pong!"));
     }
 }

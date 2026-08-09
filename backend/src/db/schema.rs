@@ -54,6 +54,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Per-user display preferences, keyed by the same `owner_id` as every other
+    // ownership check. A user with no row uses the defaults, so rows appear only
+    // when a preference is actually changed.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_settings (
+            owner_id TEXT PRIMARY KEY,
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            currency TEXT NOT NULL DEFAULT 'USD',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     // Per-user spending categories. Names are unique per owner, not globally.
     sqlx::query(
         r#"
@@ -199,6 +215,7 @@ mod tests {
             "reminders",
             "todos",
             "transactions",
+            "user_settings",
             "web_users",
         ] {
             assert!(tables.contains(&expected.to_string()), "missing table {expected}");

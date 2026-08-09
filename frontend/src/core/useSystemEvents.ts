@@ -3,6 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { registry } from './registry';
 import { SystemEvent } from './types';
 import { fetchApi, getAuthToken } from './apiClient';
+import {
+  DEFAULT_SETTINGS,
+  formatTimeInZone,
+  SETTINGS_QUERY_KEY,
+  UserSettings,
+} from './settings';
 
 export function useSystemEvents(token?: string | null) {
   const queryClient = useQueryClient();
@@ -57,13 +63,27 @@ export function useSystemEvents(token?: string | null) {
       eventSource.onmessage = (event) => {
         try {
           const rawData = JSON.parse(event.data);
+          // Read from the cache rather than through `useSettings`, so a settings
+          // change does not tear down and reopen the stream.
+          const timezone =
+            queryClient.getQueryData<UserSettings>(SETTINGS_QUERY_KEY)?.timezone ??
+            DEFAULT_SETTINGS.timezone;
+
           const sysEvent: SystemEvent = {
             type: rawData.type || 'Event',
             payload: rawData.payload !== undefined ? rawData.payload : rawData,
-            timestamp: new Date().toLocaleTimeString(),
+            timestamp: formatTimeInZone(new Date().toISOString(), timezone),
           };
 
           setEvents((prev) => [sysEvent, ...prev.slice(0, 49)]);
+
+          // Settings are core, not a module: every module formats against them,
+          // so a change made in another tab has to land in the shared cache
+          // before the modules are notified.
+          if (sysEvent.type === 'SettingsUpdated') {
+            const { settings } = sysEvent.payload as { settings: UserSettings };
+            queryClient.setQueryData(SETTINGS_QUERY_KEY, settings);
+          }
 
           // Notify all registered modules
           registry.getAll().forEach((mod) => {

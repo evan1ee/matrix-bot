@@ -4,6 +4,7 @@ use tracing::error;
 
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
+use crate::modules::settings::SettingsRepository;
 use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder_args};
 
 pub async fn handle_reminder_command(
@@ -18,6 +19,10 @@ pub async fn handle_reminder_command(
     if !(clean_lower.starts_with("remind") || clean_lower.starts_with("!remind")) {
         return None;
     }
+
+    // Read after the command is claimed, so an unrelated message never costs a
+    // settings query.
+    let tz = SettingsRepository::get_or_default(pool, sender_mxid).await.tz();
 
     // 1. !remind list [page]
     if clean_lower == "remind list"
@@ -49,7 +54,7 @@ pub async fn handle_reminder_command(
                             "• [<b>#{}</b>] <i>\"{}\"</i> at <b>{}</b>{}<br/>",
                             r.id,
                             html_escape(&r.message),
-                            format_datetime(&r.trigger_at),
+                            format_datetime(&r.trigger_at, &tz),
                             rec_str
                         ));
                     }
@@ -151,7 +156,7 @@ pub async fn handle_reminder_command(
                         "⏱️ <b>Reminder #{} set!</b> I will remind you in <b>{}</b> (at {}) for: <i>\"{}\"</i>{}",
                         reminder.id,
                         format_duration(dur),
-                        format_datetime(&trigger_at),
+                        format_datetime(&trigger_at, &tz),
                         html_escape(&msg),
                         rec_note
                     ))

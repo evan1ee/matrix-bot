@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
 pub mod due_reminder;
@@ -64,7 +65,12 @@ impl BotModule for TodoModule {
         ]
     }
 
-    async fn handle_command(&self, ctx: &CommandContext, db: &Database) -> Option<String> {
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
         handler::handle_todo_command(
             &db.pool,
             &ctx.room_id,
@@ -114,9 +120,9 @@ mod tests {
         let module = TodoModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!todo list"), &db).await.is_some());
-        assert!(module.handle_command(&ctx("!expense add 1 EUR x"), &db).await.is_none());
-        assert!(module.handle_command(&ctx("!remind me later"), &db).await.is_none());
+        assert!(module.handle_command(&ctx("!todo list"), &db, None).await.is_some());
+        assert!(module.handle_command(&ctx("!expense add 1 EUR x"), &db, None).await.is_none());
+        assert!(module.handle_command(&ctx("!remind me later"), &db, None).await.is_none());
     }
 
     #[tokio::test]
@@ -124,10 +130,39 @@ mod tests {
         let module = TodoModule::new();
         let db = db().await;
 
-        module.handle_command(&ctx("!todo add <img src=x onerror=1>"), &db).await.unwrap();
-        let listed = module.handle_command(&ctx("!todo list"), &db).await.unwrap();
+        module.handle_command(&ctx("!todo add <img src=x onerror=1>"), &db, None).await.unwrap();
+        let listed = module.handle_command(&ctx("!todo list"), &db, None).await.unwrap();
 
         assert!(!listed.contains("<img"), "raw markup must not survive: {listed}");
         assert!(listed.contains("&lt;img"));
+    }
+
+    /// The whole point of the timezone setting: a due date the user set must read
+    /// back in *their* zone from the Matrix side too, not only in the web UI.
+    /// Before this, every bot reply was hardcoded to UTC.
+    #[tokio::test]
+    async fn test_due_dates_render_in_the_senders_saved_timezone() {
+        use crate::modules::settings::{SettingsRepository, UserSettings};
+
+        let module = TodoModule::new();
+        let db = db().await;
+
+        module.handle_command(&ctx("!todo add ship it"), &db, None).await.unwrap();
+
+        // With no preference saved, the reply stays in UTC.
+        let utc_reply = module.handle_command(&ctx("!todo due 1 2d"), &db, None).await.unwrap();
+        assert!(utc_reply.contains("UTC"), "default must render as UTC: {utc_reply}");
+
+        SettingsRepository::upsert(
+            &db.pool,
+            "@alice:a",
+            &UserSettings { timezone: "Asia/Shanghai".to_string(), currency: "CNY".to_string() },
+        )
+        .await
+        .unwrap();
+
+        let listed = module.handle_command(&ctx("!todo list"), &db, None).await.unwrap();
+        assert!(listed.contains("CST"), "should render in Asia/Shanghai: {listed}");
+        assert!(!listed.contains("UTC"), "should no longer claim UTC: {listed}");
     }
 }

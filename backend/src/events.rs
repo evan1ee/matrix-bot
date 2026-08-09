@@ -4,6 +4,7 @@ use tokio::sync::broadcast;
 use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::reminder::models::Reminder;
 use crate::modules::todo::models::TodoItem;
+use crate::modules::settings::UserSettings;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -25,6 +26,10 @@ pub enum SystemEvent {
     TransactionDeleted { id: i64, room_id: String, owner_id: String },
     CategoryCreated(Category),
     CategoryDeleted { id: i64, owner_id: String },
+    /// Carries `owner_id` alongside the settings because `UserSettings` holds
+    /// only the two preferences — the row is keyed by owner, not identified by
+    /// its contents.
+    SettingsUpdated { owner_id: String, settings: UserSettings },
 }
 
 impl SystemEvent {
@@ -48,6 +53,7 @@ impl SystemEvent {
             SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
             SystemEvent::CategoryCreated(cat) => &cat.owner_id,
             SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
+            SystemEvent::SettingsUpdated { owner_id, .. } => owner_id,
         }
     }
 

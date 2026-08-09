@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
 pub mod handler;
@@ -42,7 +43,12 @@ impl BotModule for ReminderModule {
         ]
     }
 
-    async fn handle_command(&self, ctx: &CommandContext, db: &Database) -> Option<String> {
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
         handler::handle_reminder_command(
             &db.pool,
             &ctx.room_id,
@@ -92,8 +98,8 @@ mod tests {
         let module = ReminderModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!remind list"), &db).await.is_some());
-        assert!(module.handle_command(&ctx("!todo list"), &db).await.is_none());
-        assert!(module.handle_command(&ctx("!expense list"), &db).await.is_none());
+        assert!(module.handle_command(&ctx("!remind list"), &db, None).await.is_some());
+        assert!(module.handle_command(&ctx("!todo list"), &db, None).await.is_none());
+        assert!(module.handle_command(&ctx("!expense list"), &db, None).await.is_none());
     }
 }

@@ -4,6 +4,7 @@ import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Clock, Plus, Trash2, BellRing, Repeat, AlertCircle } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
+import { formatTimeInZone, nowInZone, useSettings } from '../../core/settings';
 
 export interface ReminderItem {
   id: number;
@@ -31,6 +32,7 @@ export interface JoinedRoomInfo {
 }
 
 export const ReminderMainView: React.FC = () => {
+  const { timezone } = useSettings();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
   const [durationValue, setDurationValue] = useState<number>(5);
@@ -120,8 +122,11 @@ export const ReminderMainView: React.FC = () => {
       targetHours = 0;
     }
 
-    const currDate = new Date();
-    const target = new Date();
+    // "Daily at 8am" means 8am where the user is, not where their browser is.
+    // Both clocks are the same zone's wall clock, so their difference is the
+    // real interval to wait.
+    const currDate = nowInZone(timezone);
+    const target = nowInZone(timezone);
     target.setHours(targetHours, targetMinutes, 0, 0);
 
     if (target.getTime() <= currDate.getTime()) {
@@ -329,7 +334,7 @@ export const ReminderMainView: React.FC = () => {
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-xs font-mono text-neutral-500">
-                    <span>Target: {new Date(item.trigger_at).toLocaleTimeString()}</span>
+                    <span>Target: {formatTimeInZone(item.trigger_at, timezone)}</span>
                     <span>•</span>
                     <span>by {item.sender_name}</span>
                     <span>•</span>

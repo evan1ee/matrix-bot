@@ -7,10 +7,8 @@ use crate::modules::finance::money::{
     exponent_for, format_amount, looks_like_currency, normalise_currency, parse_amount,
 };
 use crate::modules::finance::repository::FinanceRepository;
+use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
-
-/// Currency assumed when a command does not name one.
-const DEFAULT_CURRENCY: &str = "USD";
 const MAX_NOTE_LEN: usize = 500;
 const PAGE_SIZE: i64 = 25;
 
@@ -63,7 +61,14 @@ pub async fn handle_finance_command(
     }
     if rest_lower.starts_with("add") {
         let args = rest[3..].trim();
-        return handle_add(pool, room_id, sender_mxid, sender_name, direction, args).await;
+        // The user's saved currency, so `!expense add 9.99 coffee` books in the
+        // currency they actually spend in rather than a hardcoded USD.
+        let default_currency =
+            SettingsRepository::get_or_default(pool, sender_mxid).await.currency;
+        return handle_add(
+            pool, room_id, sender_mxid, sender_name, direction, args, &default_currency,
+        )
+        .await;
     }
 
     Some(format!(
@@ -91,8 +96,9 @@ fn strip_command<'a>(lower: &str, body: &'a str, name: &str) -> Option<&'a str> 
 ///
 /// The currency is optional and positional: a bare three-letter word directly
 /// after the amount is read as a currency code, anything else is the start of
-/// the note.
-fn parse_entry(args: &str) -> Result<ParsedEntry, String> {
+/// the note. When absent, `default_currency` — the sender's saved preference —
+/// stands in.
+fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String> {
     let (body, category) = match args.split_once("-c ") {
         Some((before, after)) => (before.trim(), Some(after.trim().to_string())),
         None => (args.trim(), None),
@@ -104,7 +110,7 @@ fn parse_entry(args: &str) -> Result<ParsedEntry, String> {
     let remainder: Vec<&str> = parts.collect();
     let (currency_raw, note_parts) = match remainder.first() {
         Some(first) if looks_like_currency(first) => (first.to_uppercase(), &remainder[1..]),
-        _ => (DEFAULT_CURRENCY.to_string(), &remainder[..]),
+        _ => (default_currency.to_string(), &remainder[..]),
     };
 
     let currency = normalise_currency(&currency_raw).map_err(|e| e.to_string())?;
@@ -126,8 +132,9 @@ async fn handle_add(
     sender_name: &str,
     direction: Direction,
     args: &str,
+    default_currency: &str,
 ) -> Option<String> {
-    let entry = match parse_entry(args) {
+    let entry = match parse_entry(args, default_currency) {
         Ok(entry) => entry,
         Err(err) => {
             return Some(format!(
@@ -389,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_parses_amount_currency_note_and_category() {
-        let entry = parse_entry("15.50 EUR lunch with team -c food").unwrap();
+        let entry = parse_entry("15.50 EUR lunch with team -c food", "USD").unwrap();
         assert_eq!(entry.amount_minor, 1550);
         assert_eq!(entry.currency, "EUR");
         assert_eq!(entry.note, "lunch with team");
@@ -398,9 +405,9 @@ mod tests {
 
     #[test]
     fn test_currency_is_optional() {
-        let entry = parse_entry("9.99 coffee").unwrap();
+        let entry = parse_entry("9.99 coffee", "USD").unwrap();
         assert_eq!(entry.amount_minor, 999);
-        assert_eq!(entry.currency, DEFAULT_CURRENCY);
+        assert_eq!(entry.currency, "USD");
         assert_eq!(entry.note, "coffee");
         assert!(entry.category.is_none());
     }
@@ -410,24 +417,24 @@ mod tests {
     /// drops the word from the note.
     #[test]
     fn test_three_letter_note_word_is_not_eaten_as_currency() {
-        let entry = parse_entry("3.00 tea and cake").unwrap();
-        assert_eq!(entry.currency, DEFAULT_CURRENCY);
+        let entry = parse_entry("3.00 tea and cake", "USD").unwrap();
+        assert_eq!(entry.currency, "USD");
         assert_eq!(entry.note, "tea and cake");
     }
 
     /// A real code is still recognised in either case.
     #[test]
     fn test_currency_is_recognised_upper_or_lower() {
-        assert_eq!(parse_entry("5 EUR bread").unwrap().currency, "EUR");
-        assert_eq!(parse_entry("5 eur bread").unwrap().currency, "EUR");
-        assert_eq!(parse_entry("5 eur bread").unwrap().note, "bread");
+        assert_eq!(parse_entry("5 EUR bread", "USD").unwrap().currency, "EUR");
+        assert_eq!(parse_entry("5 eur bread", "USD").unwrap().currency, "EUR");
+        assert_eq!(parse_entry("5 eur bread", "USD").unwrap().note, "bread");
         // Uppercase is honoured even for an uncommon code.
-        assert_eq!(parse_entry("5 XYZ thing").unwrap().currency, "XYZ");
+        assert_eq!(parse_entry("5 XYZ thing", "USD").unwrap().currency, "XYZ");
     }
 
     #[test]
     fn test_zero_decimal_currency() {
-        let entry = parse_entry("500 JPY ramen").unwrap();
+        let entry = parse_entry("500 JPY ramen", "USD").unwrap();
         assert_eq!(entry.amount_minor, 500);
         assert_eq!(entry.exponent, 0);
         assert_eq!(entry.currency, "JPY");
@@ -435,10 +442,10 @@ mod tests {
 
     #[test]
     fn test_rejects_bad_amounts() {
-        assert!(parse_entry("abc lunch").is_err());
-        assert!(parse_entry("15.501 EUR lunch").is_err());
-        assert!(parse_entry("-5 EUR lunch").is_err());
-        assert!(parse_entry("").is_err());
+        assert!(parse_entry("abc lunch", "USD").is_err());
+        assert!(parse_entry("15.501 EUR lunch", "USD").is_err());
+        assert!(parse_entry("-5 EUR lunch", "USD").is_err());
+        assert!(parse_entry("", "USD").is_err());
     }
 
     #[test]

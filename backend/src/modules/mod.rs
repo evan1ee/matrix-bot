@@ -4,10 +4,12 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 
 pub mod core;
 pub mod finance;
 pub mod reminder;
+pub mod settings;
 pub mod todo;
 
 /// Context passed to a module's `handle_command()` with parsed message details.
@@ -60,7 +62,17 @@ pub trait BotModule: Send + Sync {
     fn commands(&self) -> Vec<CommandHelp>;
 
     /// Attempts to handle a command. Returns `Some(html_reply)` if handled, `None` to pass.
-    async fn handle_command(&self, ctx: &CommandContext, db: &Database) -> Option<String>;
+    ///
+    /// `broadcaster` is `None` only where no event stream exists (tests). A module
+    /// that mutates state must send its `SystemEvent` through it, exactly as the
+    /// REST handlers do — otherwise a change made over Matrix leaves every open
+    /// web client showing stale data.
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        db: &Database,
+        broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String>;
 
     /// Spawns any background tasks (e.g. scheduler loops). Called once at startup.
     async fn spawn_background_workers(&self, _ctx: &ModuleContext) {}
@@ -84,9 +96,14 @@ impl ModuleRegistry {
     }
 
     /// Dispatches a command to all modules in registration order, returning the first match.
-    pub async fn dispatch(&self, ctx: &CommandContext, db: &Database) -> Option<String> {
+    pub async fn dispatch(
+        &self,
+        ctx: &CommandContext,
+        db: &Database,
+        broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
         for module in &self.modules {
-            if let Some(reply) = module.handle_command(ctx, db).await {
+            if let Some(reply) = module.handle_command(ctx, db, broadcaster).await {
                 return Some(reply);
             }
         }
@@ -114,6 +131,53 @@ mod tests {
     use super::*;
     use crate::db::Database;
 
+    /// Dispatch returns the *first* module that claims a message, so a command
+    /// can be perfectly correct in isolation and still be swallowed by a module
+    /// registered ahead of it. This walks the real registration order from
+    /// `bot/mod.rs` and asserts each entry point actually comes back.
+    #[tokio::test]
+    async fn test_every_registered_command_survives_the_real_dispatch_order() {
+        use crate::modules::core::CoreModule;
+        use crate::modules::finance::FinanceModule;
+        use crate::modules::reminder::ReminderModule;
+        use crate::modules::settings::SettingsModule;
+        use crate::modules::todo::TodoModule;
+
+        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+
+        let registry_ref = Arc::new(tokio::sync::RwLock::new(None));
+        let mut registry = ModuleRegistry::new();
+        registry.register(CoreModule::new(registry_ref.clone()));
+        registry.register(TodoModule::new());
+        registry.register(ReminderModule::new());
+        registry.register(FinanceModule::new());
+        registry.register(SettingsModule::new());
+
+        for body in [
+            "!help",
+            "!todo list",
+            "!remind list",
+            "!expense list",
+            "!settings",
+            "!settings timezone Asia/Tokyo",
+            "!settings currency CNY",
+        ] {
+            let ctx = CommandContext {
+                room_id: "!room:a".to_string(),
+                sender_mxid: "@alice:a".to_string(),
+                sender_name: "alice".to_string(),
+                command: body.split_whitespace().next().unwrap().trim_start_matches('!').to_string(),
+                raw_args: String::new(),
+                full_body: body.to_string(),
+            };
+            assert!(
+                registry.dispatch(&ctx, &db, None).await.is_some(),
+                "`{body}` reached no module"
+            );
+        }
+    }
+use crate::events::EventBroadcaster;
+
     /// A module that claims only the command it was told to claim.
     struct StubModule {
         label: &'static str,
@@ -134,7 +198,12 @@ mod tests {
             }]
         }
 
-        async fn handle_command(&self, ctx: &CommandContext, _db: &Database) -> Option<String> {
+        async fn handle_command(
+            &self,
+            ctx: &CommandContext,
+            _db: &Database,
+            _broadcaster: Option<&EventBroadcaster>,
+        ) -> Option<String> {
             (ctx.command == self.claims).then(|| format!("handled by {}", self.label))
         }
     }
@@ -163,7 +232,7 @@ mod tests {
         registry.register(StubModule { label: "first", claims: "shared" });
         registry.register(StubModule { label: "second", claims: "shared" });
 
-        let reply = registry.dispatch(&ctx_for("shared"), &db).await;
+        let reply = registry.dispatch(&ctx_for("shared"), &db, None).await;
         assert_eq!(reply.as_deref(), Some("handled by first"));
     }
 
@@ -175,7 +244,7 @@ mod tests {
         let mut registry = ModuleRegistry::new();
         registry.register(StubModule { label: "todo", claims: "todo" });
 
-        assert!(registry.dispatch(&ctx_for("nonsense"), &db).await.is_none());
+        assert!(registry.dispatch(&ctx_for("nonsense"), &db, None).await.is_none());
     }
 
     #[tokio::test]
@@ -185,7 +254,7 @@ mod tests {
         registry.register(StubModule { label: "todo", claims: "todo" });
         registry.register(StubModule { label: "finance", claims: "expense" });
 
-        let reply = registry.dispatch(&ctx_for("expense"), &db).await;
+        let reply = registry.dispatch(&ctx_for("expense"), &db, None).await;
         assert_eq!(reply.as_deref(), Some("handled by finance"));
     }
 

@@ -90,7 +90,7 @@ The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified
 
 ### Backend module plugin system
 
-`modules::BotModule` (in `backend/src/modules/mod.rs`) is the extension point. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`. Registration happens in `bot/mod.rs::new_full` — Core, Todo, Reminder. `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules (a deliberate cycle-breaking indirection; keep it if you touch help generation).
+`modules::BotModule` (in `backend/src/modules/mod.rs`) is the extension point. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`. Registration happens in `bot/mod.rs::new_full` — Core, Todo, Reminder, Finance, Settings. `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules (a deliberate cycle-breaking indirection; keep it if you touch help generation).
 
 Background work goes through `spawn_background_workers(&ModuleContext)` — that's how the reminder scheduler (5s tick loop) gets the Matrix `Client`, `Database`, and broadcaster.
 
@@ -121,6 +121,18 @@ Matrix calls go through `ApiState.matrix_identity` (`MatrixIdentityProvider`). T
 `ApiState.bot_access_token` / `bot_client` hold the **bot's** credentials: written by the bot bootstrap, read-only to request handlers. A handler must never store a caller's token there.
 
 Matrix homeserver URLs are resolved via `.well-known` discovery and memoized in `ApiState.resolved_homeserver` (`api/auth/matrix.rs::resolved_homeserver`), so a configured `MATRIX_HOMESERVER` of `https://mbm.one` can redirect to the real server without re-resolving per request.
+
+### Per-user settings (timezone, default currency)
+
+`modules/settings/` is an ordinary `BotModule` (`!settings`, `!settings timezone <IANA zone>`, `!settings currency <CODE>`; `tz`/`cur` are accepted aliases) whose data every *other* module reads — todo and reminder format timestamps against the sender's zone, finance defaults an amount's currency to it — and which `api/settings.rs` exposes to the web UI. Rows in `user_settings` are keyed by `owner_id`, the same key as `sender_mxid`, and a user has no row until they change something: `SettingsRepository::get` returns `UserSettings::default()` (UTC/USD) for a missing row, which is the normal case, not an error. The command path uses `get_or_default`, which additionally swallows a database error into the defaults — a settings lookup must never be the reason a `!todo list` reply is lost.
+
+Because it mutates state from the Matrix side, `BotModule::handle_command` takes an `Option<&EventBroadcaster>` (threaded from `bot/mod.rs` → `register_handlers` → `ModuleRegistry::dispatch`). It is `None` only in tests. The settings handler broadcasts `SettingsUpdated` on a successful save and on nothing else — a read or a rejected value announces no change. **The other modules do not yet broadcast from the Matrix path** (`due_reminder.rs` documents that gap); the parameter is there so they can, and any new mutating command should use it.
+
+`utils::format_datetime` takes a `chrono_tz::Tz` rather than assuming UTC, and `todo`/`reminder` handlers resolve the sender's zone once, *after* the command is claimed, so an unrelated room message costs no query. The finance handler's `DEFAULT_CURRENCY` constant is gone: `parse_entry` takes the sender's saved currency, so `!expense add 9.99 coffee` books in what they actually spend. An explicit code in the command still wins.
+
+Validation lives at the API boundary (`api/settings.rs`), not at render time: an unknown zone stored now would render as UTC on every later read with nothing to point at. `parse_timezone` accepts exactly the IANA names `Intl.supportedValuesOf('timeZone')` offers the picker; currency goes through the finance module's `normalise_currency`.
+
+On the frontend, `core/settings.ts` is the single source — `useSettings()` reads one shared React Query entry, so a change reformats the whole app from one cache write. Anything rendering an instant must pass the zone explicitly (`formatDateTimeInZone` and friends); a bare `toLocaleString` silently uses the browser's zone, which is exactly what the setting exists to override. The same applies in reverse for *input*: `zonedInputToUtcIso`/`utcIsoToZonedInput` convert the `DateTimePicker`'s naive `YYYY-MM-DDTHH:mm` against the chosen zone, applying the offset twice so a daylight-saving boundary cannot land the result an hour out. `DateTimePicker` itself stays zone-agnostic and takes a `now` prop purely so "today" and the "Now" button mean the right day.
 
 ### Persistence
 

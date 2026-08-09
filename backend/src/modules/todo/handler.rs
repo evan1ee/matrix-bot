@@ -1,10 +1,12 @@
 use chrono::Utc;
+use chrono_tz::Tz;
 use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
+use crate::modules::settings::SettingsRepository;
 use crate::utils::{format_datetime, html_escape, parse_reminder_args, priority_badge};
 
 /// Maximum allowed length for task description text.
@@ -23,17 +25,22 @@ pub async fn handle_todo_command(
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
-    // Catch bare "todo" or "!todo" without space
-    if clean_lower == "todo" || clean_lower == "!todo" {
+    // Bare "todo" or "!todo" without a space still claims the message.
+    let bare = clean_lower == "todo" || clean_lower == "!todo";
+    if !bare && !(clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
+        return None;
+    }
+
+    // Read after the command is claimed, so an unrelated message never costs a
+    // settings query.
+    let tz = SettingsRepository::get_or_default(pool, sender_mxid).await.tz();
+
+    if bare {
         let items = TodoRepository::list_all_user(pool, sender_mxid, PAGE_SIZE, 0)
             .await.ok().unwrap_or_default();
         return Some(format_todo_list(
-            &format!("Your Tasks ({})", html_escape(sender_name)), &items, 1,
+            &format!("Your Tasks ({})", html_escape(sender_name)), &items, 1, &tz,
         ));
-    }
-
-    if !(clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
-        return None;
     }
 
     let args_body = if clean_lower.starts_with("!todo ") {
@@ -52,13 +59,13 @@ pub async fn handle_todo_command(
     } else if args_lower.starts_with("priority") {
         handle_priority(pool, args_body).await
     } else if args_lower.starts_with("due") {
-        handle_due(pool, room_id, args_body).await
+        handle_due(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("clear") {
         handle_clear(pool, room_id, sender_mxid, sender_name, args_body).await
     } else if args_lower.starts_with("room") {
-        handle_list_room(pool, room_id, args_body).await
+        handle_list_room(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("list") || args_lower.starts_with("my") || args_lower.starts_with("all") || args_lower.starts_with("global") || args_lower.is_empty() {
-        handle_list_user(pool, sender_mxid, sender_name, args_body).await
+        handle_list_user(pool, sender_mxid, sender_name, args_body, &tz).await
     } else {
         Some("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
               <code>all</code>, <code>room</code>, <code>done</code>, <code>edit</code>, <code>priority</code>, \
@@ -233,7 +240,7 @@ const DUE_USAGE: &str = "⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt; [
                          (e.g. <code>!todo due 1 2d remind 1h</code>, or \
                          <code>!todo due 1 none</code> to clear)";
 
-async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
+async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) -> Option<String> {
     let rest = args_body[3..].trim();
     let mut parts = rest.splitn(2, ' ');
     let id_str = parts.next().unwrap_or("");
@@ -315,13 +322,13 @@ async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option
     let due_note = format!(
         "📅 Set Task <b>#{}</b> due date to <b>{}</b>",
         item.id,
-        html_escape(&format_datetime(&due_dt))
+        html_escape(&format_datetime(&due_dt, tz))
     );
 
     let reminder_note = match due_reminder::sync(pool, None, &item, room_id).await {
         Ok(due_reminder::SyncOutcome::Scheduled(at)) => format!(
             "<br/>⏰ Reminder set for <b>{}</b>.",
-            html_escape(&format_datetime(&at))
+            html_escape(&format_datetime(&at, tz))
         ),
         Ok(due_reminder::SyncOutcome::LeadTimeInPast(_)) => {
             "<br/>⚠️ That lead time is already in the past, so no reminder was set.".to_string()
@@ -366,13 +373,13 @@ async fn handle_clear(
     }
 }
 
-async fn handle_list_room(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
+async fn handle_list_room(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) -> Option<String> {
     let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
     let page: i64 = rest.parse().unwrap_or(1).max(1);
     let offset = (page - 1) * PAGE_SIZE;
 
     match TodoRepository::list_room(pool, room_id, PAGE_SIZE, offset).await {
-        Ok(items) => Some(format_todo_list("Room Tasks", &items, page)),
+        Ok(items) => Some(format_todo_list("Room Tasks", &items, page, tz)),
         Err(err) => {
             error!("Failed to fetch room todos: {:?}", err);
             Some("❌ Database error loading room tasks.".to_string())
@@ -385,6 +392,7 @@ async fn handle_list_user(
     sender_mxid: &str,
     sender_name: &str,
     args_body: &str,
+    tz: &Tz,
 ) -> Option<String> {
     let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
     let page: i64 = rest.parse().unwrap_or(1).max(1);
@@ -392,7 +400,7 @@ async fn handle_list_user(
 
     match TodoRepository::list_all_user(pool, sender_mxid, PAGE_SIZE, offset).await {
         Ok(items) => Some(format_todo_list(
-            &format!("Your Tasks ({})", html_escape(sender_name)), &items, page,
+            &format!("Your Tasks ({})", html_escape(sender_name)), &items, page, tz,
         )),
         Err(err) => {
             error!("Failed to fetch user todos: {:?}", err);
@@ -403,7 +411,7 @@ async fn handle_list_user(
 
 // --- Formatting ---
 
-fn format_todo_list(title: &str, items: &[TodoItem], page: i64) -> String {
+fn format_todo_list(title: &str, items: &[TodoItem], page: i64, tz: &Tz) -> String {
     if items.is_empty() {
         if page > 1 {
             return format!("📋 <b>{} (Page {}):</b><br/>No more tasks on this page.", title, page);
@@ -418,7 +426,7 @@ fn format_todo_list(title: &str, items: &[TodoItem], page: i64) -> String {
     for item in items {
         let badge = priority_badge(&item.priority);
         let due_note = if let Some(due) = &item.due_at {
-            format!(" 📅 <i>(Due: {})</i>", html_escape(&format_datetime(due)))
+            format!(" 📅 <i>(Due: {})</i>", html_escape(&format_datetime(due, tz)))
         } else {
             String::new()
         };

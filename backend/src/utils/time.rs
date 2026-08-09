@@ -1,5 +1,6 @@
 use std::time::Duration;
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 
 /// Formats a std::time::Duration into human readable string e.g. "10s", "5m 30s", "2h 15m"
 pub fn format_duration(d: Duration) -> String {
@@ -48,9 +49,14 @@ pub fn parse_reminder_args(input: &str) -> Option<(Duration, String)> {
     Some((Duration::from_secs(secs), reminder_msg.to_string()))
 }
 
-/// Returns a human-friendly format for Chrono DateTime<Utc>
-pub fn format_datetime(dt: &DateTime<Utc>) -> String {
-    dt.format("%Y-%m-%d %H:%M UTC").to_string()
+/// Renders an instant in the reader's own timezone.
+///
+/// Timestamps are stored in UTC; the zone is a display concern and belongs to
+/// whoever is reading, so it is passed in from that user's settings rather than
+/// baked in. The zone abbreviation is always printed — a bare `18:00` is
+/// ambiguous the moment two users in different zones share a room.
+pub fn format_datetime(dt: &DateTime<Utc>, tz: &Tz) -> String {
+    dt.with_timezone(tz).format("%Y-%m-%d %H:%M %Z").to_string()
 }
 
 #[cfg(test)]
@@ -77,5 +83,35 @@ mod tests {
 
         assert!(parse_reminder_args("9999999999999999d").is_none());
         assert!(parse_reminder_args("0s").is_none());
+    }
+
+    /// The same instant must render differently per reader, and always carry the
+    /// zone — the whole point of the setting is that two users in one room see
+    /// their own wall-clock time without either being misled about which it is.
+    #[test]
+    fn test_format_datetime_renders_in_the_readers_zone() {
+        let instant = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 9, 16, 30, 0).unwrap();
+
+        assert_eq!(format_datetime(&instant, &Tz::UTC), "2026-08-09 16:30 UTC");
+        assert_eq!(
+            format_datetime(&instant, &Tz::Asia__Shanghai),
+            "2026-08-10 00:30 CST",
+            "crossing midnight is exactly the case a UTC-only render got wrong"
+        );
+        assert_eq!(
+            format_datetime(&instant, &Tz::America__New_York),
+            "2026-08-09 12:30 EDT"
+        );
+    }
+
+    /// A zone whose offset changes across the year must be resolved against the
+    /// instant, not against today — a fixed offset would drift by an hour.
+    #[test]
+    fn test_format_datetime_honours_daylight_saving() {
+        let summer = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 7, 1, 12, 0, 0).unwrap();
+        let winter = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 1, 12, 0, 0).unwrap();
+
+        assert_eq!(format_datetime(&summer, &Tz::Europe__Berlin), "2026-07-01 14:00 CEST");
+        assert_eq!(format_datetime(&winter, &Tz::Europe__Berlin), "2026-01-01 13:00 CET");
     }
 }

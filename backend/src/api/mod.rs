@@ -23,6 +23,7 @@ pub mod openapi;
 pub mod finance;
 pub mod reminders;
 pub mod rooms;
+pub mod settings;
 pub mod sse;
 pub mod todos;
 
@@ -90,6 +91,7 @@ pub async fn start_api_server(
         .route("/auth/me", get(auth::get_current_user))
         .route("/auth/media", get(auth::media_proxy))
         .route("/rooms", get(rooms::list_rooms))
+        .route("/settings", get(settings::get_settings).put(settings::update_settings))
         .route("/events", get(sse::sse_handler))
         .route("/events/ticket", post(auth::create_sse_ticket))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))

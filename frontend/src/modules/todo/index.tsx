@@ -17,6 +17,13 @@ import {
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
+import {
+  formatDateTimeInZone,
+  nowInZone,
+  useSettings,
+  utcIsoToZonedInput,
+  zonedInputToUtcIso,
+} from '../../core/settings';
 
 export interface TodoItem {
   id: number;
@@ -52,38 +59,6 @@ const LEAD_OPTIONS = [
   { value: '10080', label: '1 week before' },
 ];
 
-/**
- * Converts a `DateTimePicker` value (`YYYY-MM-DDTHH:mm` in the viewer's own
- * zone, with no offset) into the UTC instant the API stores.
- */
-function localInputToUtcIso(value: string): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
-/**
- * The inverse of `localInputToUtcIso`: renders a stored UTC instant as the
- * `YYYY-MM-DDTHH:mm` the picker expects, in the viewer's zone.
- */
-function utcIsoToLocalInput(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
-}
-
-/** Renders a stored UTC instant in the viewer's local zone. */
-function formatDue(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
-
 function leadLabel(minutes: number): string {
   return LEAD_OPTIONS.find((o) => o.value === String(minutes))?.label ?? `${minutes} min before`;
 }
@@ -113,10 +88,11 @@ const priorityBadgeClass = (priority: string) =>
     : 'bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-900/50';
 
 const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSave }) => {
+  const { timezone } = useSettings();
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState(item.text);
   const [draftPriority, setDraftPriority] = useState(item.priority);
-  const [draftDue, setDraftDue] = useState(utcIsoToLocalInput(item.due_at));
+  const [draftDue, setDraftDue] = useState(utcIsoToZonedInput(item.due_at, timezone));
   const [draftLead, setDraftLead] = useState(
     item.remind_before_minutes ? String(item.remind_before_minutes) : ''
   );
@@ -132,7 +108,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
   const beginEdit = () => {
     setDraftText(item.text);
     setDraftPriority(item.priority);
-    setDraftDue(utcIsoToLocalInput(item.due_at));
+    setDraftDue(utcIsoToZonedInput(item.due_at, timezone));
     setDraftLead(item.remind_before_minutes ? String(item.remind_before_minutes) : '');
     setDraftRoom('');
     setRowError(null);
@@ -151,7 +127,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
       return;
     }
 
-    const dueIso = localInputToUtcIso(draftDue);
+    const dueIso = zonedInputToUtcIso(draftDue, timezone);
     const wantsReminder = draftLead !== '';
     if (wantsReminder && !dueIso) {
       setRowError('Pick a due date for the reminder to count back from.');
@@ -213,7 +189,12 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
 
           <label className="flex flex-col gap-1">
             <span className="text-[10px] uppercase font-mono text-neutral-500">Due date</span>
-            <DateTimePicker value={draftDue} onChange={setDraftDue} placeholder="No due date" />
+            <DateTimePicker
+              value={draftDue}
+              onChange={setDraftDue}
+              placeholder="No due date"
+              now={nowInZone(timezone)}
+            />
           </label>
 
           <label className="flex flex-col gap-1">
@@ -305,10 +286,10 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
                     ? 'text-rose-600 dark:text-rose-400'
                     : ''
                 }`}
-                title={`Due ${formatDue(item.due_at)}`}
+                title={`Due ${formatDateTimeInZone(item.due_at, timezone)}`}
               >
                 <CalendarClock className="w-3 h-3" />
-                {formatDue(item.due_at)}
+                {formatDateTimeInZone(item.due_at, timezone)}
               </span>
             )}
             {item.due_at && item.remind_before_minutes ? (
@@ -349,6 +330,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
 };
 
 export const TodoMainView: React.FC = () => {
+  const { timezone } = useSettings();
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
   const [priority, setPriority] = useState('medium');
@@ -445,7 +427,7 @@ export const TodoMainView: React.FC = () => {
       return;
     }
 
-    const dueIso = localInputToUtcIso(dueAt);
+    const dueIso = zonedInputToUtcIso(dueAt, timezone);
     if (wantsReminder && !dueIso) {
       setErrorMsg('Pick a due date for the reminder to count back from.');
       return;
@@ -526,7 +508,12 @@ export const TodoMainView: React.FC = () => {
               <span className="text-[10px] uppercase font-mono text-neutral-500">
                 Due date (optional)
               </span>
-              <DateTimePicker value={dueAt} onChange={setDueAt} placeholder="No due date" />
+              <DateTimePicker
+                value={dueAt}
+                onChange={setDueAt}
+                placeholder="No due date"
+                now={nowInZone(timezone)}
+              />
             </label>
 
             <label className="flex flex-col gap-1">

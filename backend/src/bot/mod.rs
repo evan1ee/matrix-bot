@@ -13,6 +13,7 @@ use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
 use crate::modules::reminder::ReminderModule;
+use crate::modules::settings::SettingsModule;
 use crate::modules::todo::TodoModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
@@ -57,11 +58,11 @@ impl MatrixBot {
         let registry_ref = Arc::new(RwLock::new(None));
         let mut registry = ModuleRegistry::new();
 
-        // Register Core, Todo, and Reminder modules
         registry.register(CoreModule::new(registry_ref.clone()));
         registry.register(TodoModule::new());
         registry.register(ReminderModule::new());
         registry.register(FinanceModule::new());
+        registry.register(SettingsModule::new());
 
         let registry_arc = Arc::new(registry);
         *registry_ref.write().await = Some(registry_arc.clone());
@@ -82,7 +83,12 @@ impl MatrixBot {
         };
 
         // Register Matrix event handlers
-        register_handlers(&self.client, self.registry.clone(), self.db.clone());
+        register_handlers(
+            &self.client,
+            self.registry.clone(),
+            self.db.clone(),
+            self.broadcaster.clone(),
+        );
 
         // Start background workers for all modules (e.g., reminder scheduler)
         self.registry.spawn_all_background_workers(&module_ctx).await;

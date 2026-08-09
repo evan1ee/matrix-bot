@@ -2,13 +2,14 @@ use axum::{response::IntoResponse, Json};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::api::{auth, finance, health, reminders, rooms, sse, todos};
+use crate::api::{auth, finance, health, reminders, rooms, settings, sse, todos};
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
     Category, CategoryTotal, CurrencySummary, Direction, Transaction,
 };
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
+use crate::modules::settings::UserSettings;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -21,6 +22,8 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         auth::create_sse_ticket,
         auth::media_proxy,
         rooms::list_rooms,
+        settings::get_settings,
+        settings::update_settings,
         todos::list_todos,
         todos::create_todo,
         todos::update_todo,
@@ -48,6 +51,8 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             auth::SseTicketResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,
+            UserSettings,
+            settings::UpdateSettingsRequest,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,

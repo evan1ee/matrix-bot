@@ -8,6 +8,7 @@ import { financeModule } from './modules/finance';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
+import { SettingsModal } from './components/SettingsModal';
 import { AUTH_EXPIRED_EVENT, getAuthToken } from './core/apiClient';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
@@ -30,6 +31,7 @@ const queryClient = new QueryClient({
 const AppContent: React.FC = () => {
   const [activeModuleId, setActiveModuleId] = useState<string>('core');
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [token, setToken] = useState<string | null>(getAuthToken());
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
 
@@ -63,6 +65,7 @@ const AppContent: React.FC = () => {
         events={events}
         isConnected={isConnected}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         userToken={token}
         currentTheme={theme}
         onThemeChange={handleThemeChange}
@@ -74,6 +77,8 @@ const AppContent: React.FC = () => {
         onSuccess={(newToken) => setToken(newToken)}
         userToken={token}
       />
+
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </>
   );
 };

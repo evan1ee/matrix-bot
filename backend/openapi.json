@@ -947,6 +947,94 @@
         ]
       }
     },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "description": "The caller's settings, or the defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "update_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown timezone or malformed currency",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/todos": {
       "get": {
         "tags": [
@@ -1933,6 +2021,24 @@
           }
         }
       },
+      "UpdateSettingsRequest": {
+        "type": "object",
+        "description": "Both preferences are always sent together — settings are saved as a whole\nrow, so there is no partial-update path to get wrong.",
+        "required": [
+          "timezone",
+          "currency"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 code, e.g. `CNY`."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA zone name, e.g. `Asia/Shanghai`."
+          }
+        }
+      },
       "UpdateTodoRequest": {
         "type": "object",
         "description": "A PATCH body.\n\nThe nullable fields are `Option<Option<T>>` so the three cases stay\ndistinguishable on the wire: absent leaves the value alone, `null` clears it,\nand a value sets it. A plain `Option<T>` would make \"clear the due date\"\nunexpressible.",
@@ -1981,6 +2087,24 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "UserSettings": {
+        "type": "object",
+        "description": "One user's display preferences, keyed by the same `owner_id` every other\nownership check uses (`AuthUser::owner_id`, the `sender_mxid` column).\n\nDeliberately shared by both front doors: the SPA renders timestamps in\n`timezone` and pre-selects `currency`, and the Matrix command handlers format\ntheir HTML replies with the same two values, so a user sees one consistent\nanswer no matter which door they came through.",
+        "required": [
+          "timezone",
+          "currency"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 code, e.g. `CNY`. Validated on write."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA zone name, e.g. `Asia/Shanghai`. Validated on write."
           }
         }
       }

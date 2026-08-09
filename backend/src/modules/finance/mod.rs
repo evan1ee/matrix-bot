@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
@@ -58,7 +59,12 @@ impl BotModule for FinanceModule {
         ]
     }
 
-    async fn handle_command(&self, ctx: &CommandContext, db: &Database) -> Option<String> {
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
         handler::handle_finance_command(
             &db.pool,
             &ctx.room_id,
@@ -112,13 +118,13 @@ mod tests {
         let module = FinanceModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!expense list"), &db).await.is_some());
-        assert!(module.handle_command(&ctx("!income list"), &db).await.is_some());
-        assert!(module.handle_command(&ctx("!category list"), &db).await.is_some());
+        assert!(module.handle_command(&ctx("!expense list"), &db, None).await.is_some());
+        assert!(module.handle_command(&ctx("!income list"), &db, None).await.is_some());
+        assert!(module.handle_command(&ctx("!category list"), &db, None).await.is_some());
 
-        assert!(module.handle_command(&ctx("!todo add milk"), &db).await.is_none());
-        assert!(module.handle_command(&ctx("!remind me later"), &db).await.is_none());
-        assert!(module.handle_command(&ctx("hello there"), &db).await.is_none());
+        assert!(module.handle_command(&ctx("!todo add milk"), &db, None).await.is_none());
+        assert!(module.handle_command(&ctx("!remind me later"), &db, None).await.is_none());
+        assert!(module.handle_command(&ctx("hello there"), &db, None).await.is_none());
     }
 
     /// An end-to-end pass through the module: log an entry, then read it back.
@@ -128,13 +134,13 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db)
+            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db, None)
             .await
             .expect("the module must answer");
         assert!(reply.contains("15.50"), "reply should confirm the amount: {reply}");
         assert!(reply.contains("EUR"));
 
-        let listed = module.handle_command(&ctx("!expense list"), &db).await.unwrap();
+        let listed = module.handle_command(&ctx("!expense list"), &db, None).await.unwrap();
         assert!(listed.contains("lunch"), "the entry should be listed: {listed}");
     }
 
@@ -146,13 +152,46 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &db)
+            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
         assert!(reply.contains("15.50"), "reply should confirm the amount: {reply}");
         assert!(reply.contains("USD"), "should fall back to the default currency: {reply}");
         assert!(reply.contains("lunch"), "should keep the note: {reply}");
+    }
+
+    /// With a preference saved, an amount typed without a currency books in the
+    /// currency the user actually spends in rather than the hardcoded USD.
+    #[tokio::test]
+    async fn test_add_without_a_currency_uses_the_senders_default() {
+        use crate::modules::settings::{SettingsRepository, UserSettings};
+
+        let module = FinanceModule::new();
+        let db = db().await;
+
+        SettingsRepository::upsert(
+            &db.pool,
+            "@alice:a",
+            &UserSettings { timezone: "UTC".to_string(), currency: "CNY".to_string() },
+        )
+        .await
+        .unwrap();
+
+        let reply = module
+            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
+            .await
+            .expect("the module must answer `!expense add 15.50 lunch`");
+
+        assert!(reply.contains("CNY"), "should use the saved currency: {reply}");
+        assert!(!reply.contains("USD"), "should not fall back to USD: {reply}");
+
+        // An explicit code still wins over the preference.
+        let explicit = module
+            .handle_command(&ctx("!expense add 9.99 EUR coffee"), &db, None)
+            .await
+            .unwrap();
+        assert!(explicit.contains("EUR"), "an explicit currency must win: {explicit}");
     }
 
     /// User text reaches an HTML message, so it has to be escaped.
@@ -162,7 +201,7 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 1.00 EUR <script>alert(1)</script>"), &db)
+            .handle_command(&ctx("!expense add 1.00 EUR <script>alert(1)</script>"), &db, None)
             .await
             .unwrap();
 

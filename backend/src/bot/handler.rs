@@ -11,12 +11,14 @@ use tracing::{error, info};
 
 use crate::bot::dispatcher::CommandParser;
 use crate::db::Database;
+use crate::events::EventBroadcaster;
 use crate::modules::ModuleRegistry;
 
 pub fn register_handlers(
     client: &Client,
     registry: Arc<ModuleRegistry>,
     db: Database,
+    broadcaster: Option<EventBroadcaster>,
 ) {
     // 1. Auto-join invite event handler
     client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move {
@@ -36,6 +38,7 @@ pub fn register_handlers(
         let own_id = bot_user_id.clone();
         let registry = registry.clone();
         let db = db.clone();
+        let broadcaster = broadcaster.clone();
 
         async move {
             if room.state() != RoomState::Joined || ev.sender == own_id {
@@ -61,7 +64,7 @@ pub fn register_handlers(
                     cmd_ctx.room_id, cmd_ctx.sender_name, cmd_ctx.command, cmd_ctx.raw_args
                 );
 
-                if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db).await {
+                if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await {
                     let plain_text = crate::utils::strip_html(&reply_html);
                     let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
                     if let Err(err) = room.send(content).await {

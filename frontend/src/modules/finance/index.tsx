@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule } from '../../core/types';
@@ -15,6 +15,13 @@ import {
   Check,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
+import {
+  CURRENCY_OPTIONS,
+  formatDateInZone,
+  nowInZone,
+  useSettings,
+  zonedInputToUtcIso,
+} from '../../core/settings';
 
 export type Direction = 'expense' | 'income';
 
@@ -64,14 +71,6 @@ interface CurrencySummary {
   categories: CategoryTotal[];
 }
 
-/** The currencies offered in the picker. */
-export const CURRENCY_OPTIONS = [
-  { value: 'CNY', label: 'CNY' },
-  { value: 'USD', label: 'USD' },
-  { value: 'EUR', label: 'EUR' },
-  { value: 'GBP', label: 'GBP' },
-];
-
 /**
  * The picker options for a given value.
  *
@@ -103,16 +102,25 @@ export function formatMinor(minor: number, exponent: number): string {
   return negative ? `-${text}` : text;
 }
 
-/** The first and last instant of the viewer's current local month, as UTC ISO. */
-function currentMonthRange(): { from: string; to: string } {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1);
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
+/**
+ * The half-open span of the current month, as UTC instants.
+ *
+ * The month boundary is resolved in the user's chosen zone: someone in
+ * Asia/Shanghai is already into the new month while UTC still says the old one,
+ * and a summary headed "this month" must agree with the dates listed under it.
+ */
+function currentMonthRange(timezone: string): { from: string; to: string } {
+  const now = nowInZone(timezone);
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthStart = (y: number, m: number) =>
+    zonedInputToUtcIso(`${y}-${String(m + 1).padStart(2, '0')}-01T00:00`, timezone) ??
+    new Date(Date.UTC(y, m, 1)).toISOString();
 
-function formatOccurred(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+  return {
+    from: monthStart(year, month),
+    to: month === 11 ? monthStart(year + 1, 0) : monthStart(year, month + 1),
+  };
 }
 
 interface LedgerEditRowProps {
@@ -252,14 +260,22 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
 
 export const FinanceMainView: React.FC = () => {
   const queryClient = useQueryClient();
+  const { timezone, currency: defaultCurrency } = useSettings();
   const [direction, setDirection] = useState<Direction>('expense');
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('CNY');
+  const [currency, setCurrency] = useState(defaultCurrency);
   const [note, setNote] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [filter, setFilter] = useState<'all' | Direction>('all');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // The first render happens before the settings query resolves, and the
+  // preference can change while this view is mounted; either way the form should
+  // show what the user actually chose.
+  useEffect(() => {
+    setCurrency(defaultCurrency);
+  }, [defaultCurrency]);
 
   const [showCategories, setShowCategories] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -275,7 +291,7 @@ export const FinanceMainView: React.FC = () => {
     queryFn: () => fetchApi<Category[]>('/finance/categories'),
   });
 
-  const month = currentMonthRange();
+  const month = currentMonthRange(timezone);
   const { data: summary } = useQuery<CurrencySummary[]>({
     queryKey: ['finance-summary', month.from, month.to],
     queryFn: () =>
@@ -614,7 +630,7 @@ export const FinanceMainView: React.FC = () => {
                         {tx.note || (isExpense ? 'Expense' : 'Income')}
                       </p>
                       <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-neutral-500">
-                        <span>{formatOccurred(tx.occurred_at)}</span>
+                        <span>{formatDateInZone(tx.occurred_at, timezone)}</span>
                         <span>{tx.category_name ?? 'Uncategorised'}</span>
                       </div>
                     </div>

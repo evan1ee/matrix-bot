@@ -19,6 +19,9 @@ interface DateTimePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** "Now" as a naive wall clock in the zone the caller works in. Defaults to
+   *  the browser's own clock. */
+  now?: Date;
 }
 
 const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -46,6 +49,12 @@ function toValue(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+/** Reads the naive `YYYY-MM-DDTHH:mm` this control exchanges.
+ *
+ * The string names a wall clock with no zone attached, and every comparison in
+ * this component is on date fields, so parsing it as browser-local is correct
+ * regardless of which zone the caller means it in. The caller converts to and
+ * from a real instant at its own boundary. */
 function parseValue(value: string): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -86,13 +95,18 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   onChange,
   placeholder = 'Pick a date…',
   className = '',
+  now,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(parseValue(value) ?? new Date()));
+  const [viewMonth, setViewMonth] = useState(() =>
+    startOfMonth(parseValue(value) ?? now ?? new Date())
+  );
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selected = parseValue(value);
-  const today = new Date();
+  // "Today" and "Now" mean the user's chosen zone, not the browser's, or the
+  // highlighted day is wrong for anyone whose setting differs from their machine.
+  const today = now ?? new Date();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -115,7 +129,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   const open = () => {
     // The value may have changed since the last time this was open (a row
     // entering edit mode reseeds it), so start from the month it names.
-    setViewMonth(startOfMonth(parseValue(value) ?? new Date()));
+    setViewMonth(startOfMonth(parseValue(value) ?? today));
     setIsOpen(true);
   };
 
@@ -256,9 +270,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const now = new Date();
-                  setViewMonth(startOfMonth(now));
-                  onChange(toValue(now));
+                  setViewMonth(startOfMonth(today));
+                  onChange(toValue(today));
                 }}
                 className="px-2 py-1 rounded-lg text-xs font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition cursor-pointer"
               >

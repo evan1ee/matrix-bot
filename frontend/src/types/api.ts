@@ -252,6 +252,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_settings"];
+        put: operations["update_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/todos": {
         parameters: {
             query?: never;
@@ -603,6 +619,16 @@ export interface components {
             room_id?: string | null;
         };
         /**
+         * @description Both preferences are always sent together — settings are saved as a whole
+         *     row, so there is no partial-update path to get wrong.
+         */
+        UpdateSettingsRequest: {
+            /** @description ISO 4217 code, e.g. `CNY`. */
+            currency: string;
+            /** @description IANA zone name, e.g. `Asia/Shanghai`. */
+            timezone: string;
+        };
+        /**
          * @description A PATCH body.
          *
          *     The nullable fields are `Option<Option<T>>` so the three cases stay
@@ -624,6 +650,21 @@ export interface components {
             avatar_url?: string | null;
             display_name?: string | null;
             username: string;
+        };
+        /**
+         * @description One user's display preferences, keyed by the same `owner_id` every other
+         *     ownership check uses (`AuthUser::owner_id`, the `sender_mxid` column).
+         *
+         *     Deliberately shared by both front doors: the SPA renders timestamps in
+         *     `timezone` and pre-selects `currency`, and the Matrix command handlers format
+         *     their HTML replies with the same two values, so a user sees one consistent
+         *     answer no matter which door they came through.
+         */
+        UserSettings: {
+            /** @description ISO 4217 code, e.g. `CNY`. Validated on write. */
+            currency: string;
+            /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
+            timezone: string;
         };
     };
     responses: never;
@@ -1301,6 +1342,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JoinedRoomInfo"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's settings, or the defaults */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
+                };
+            };
+            /** @description Unknown timezone or malformed currency */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
             /** @description Unauthorized */
