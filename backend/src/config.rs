@@ -7,6 +7,9 @@ pub struct Config {
     pub username: String,
     pub password: String,
     pub recovery_key: Option<String>,
+    /// Users permitted to complete an interactive verification with the bot.
+    /// The bot's own account is always permitted; see `bot/verification.rs`.
+    pub verification_allowlist: Vec<String>,
     pub database_url: String,
     pub api_host: String,
     pub api_port: u16,
@@ -35,6 +38,13 @@ impl Config {
             .context("MATRIX_PASSWORD environment variable is required")?;
 
         let recovery_key = env::var("MATRIX_RECOVERY_KEY").ok();
+
+        let verification_allowlist = env::var("MATRIX_VERIFICATION_ALLOWLIST")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
 
         let database_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
@@ -68,6 +78,7 @@ impl Config {
             username,
             password,
             recovery_key,
+            verification_allowlist,
             database_url,
             api_host,
             api_port,
@@ -115,6 +126,7 @@ mod tests {
             username: "bot".to_string(),
             password: "secretpassword".to_string(),
             recovery_key: None,
+            verification_allowlist: Vec::new(),
             database_url: "sqlite::memory:".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,

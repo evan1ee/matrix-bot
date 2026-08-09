@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::bot::client::BotClient;
 use crate::bot::handler::register_handlers;
+use crate::bot::verification::{register_verification_handlers, VerificationPolicy};
 use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
@@ -18,6 +19,7 @@ use crate::modules::{ModuleContext, ModuleRegistry};
 pub mod client;
 pub mod dispatcher;
 pub mod handler;
+pub mod verification;
 
 pub struct MatrixBot {
     client: Client,
@@ -39,6 +41,17 @@ impl MatrixBot {
         if let Some(ref handle) = client_handle {
             *handle.write().await = Some(client.clone());
         }
+
+        // Answer verification requests so the bot's session can be signed into
+        // another user's trust; without this its sessions stay Unverified.
+        let own_user = client
+            .user_id()
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| config.username.clone());
+        register_verification_handlers(
+            &client,
+            VerificationPolicy::new(own_user, config.verification_allowlist.clone()),
+        );
 
         let registry_ref = Arc::new(RwLock::new(None));
         let mut registry = ModuleRegistry::new();
