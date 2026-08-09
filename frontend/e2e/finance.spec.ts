@@ -1,4 +1,4 @@
-import { test, expect, gotoApp, chooseOption, selectField } from './fixtures';
+import { test, expect, gotoApp, chooseOption, chooseCurrency, selectField } from './fixtures';
 
 const ledgerRow = (page: import('@playwright/test').Page, text: string) =>
   page.getByTestId('ledger-row').filter({ hasText: text });
@@ -7,7 +7,7 @@ test('records an expense', async ({ app, api }) => {
   await gotoApp(app, 'Finance');
 
   await app.getByPlaceholder('15.50').fill('15.50');
-  await chooseOption(selectField(app, 'Currency'), 'EUR');
+  await chooseCurrency(app, 'EUR');
   await app.getByPlaceholder('What was it for?').fill('Team lunch');
   await app.getByRole('button', { name: 'Record' }).click();
 
@@ -24,7 +24,7 @@ test('records income', async ({ app, api }) => {
 
   await chooseOption(selectField(app, 'Direction'), 'Income');
   await app.getByPlaceholder('15.50').fill('2500');
-  await chooseOption(selectField(app, 'Currency'), 'EUR');
+  await chooseCurrency(app, 'EUR');
   await app.getByPlaceholder('What was it for?').fill('Salary');
   await app.getByRole('button', { name: 'Record' }).click();
 
@@ -37,7 +37,7 @@ test('an amount with cents is stored exactly', async ({ app, api }) => {
   await gotoApp(app, 'Finance');
 
   await app.getByPlaceholder('15.50').fill('0.29');
-  await chooseOption(selectField(app, 'Currency'), 'EUR');
+  await chooseCurrency(app, 'EUR');
   await app.getByPlaceholder('What was it for?').fill('Exact cents');
   await app.getByRole('button', { name: 'Record' }).click();
 
@@ -70,16 +70,21 @@ test('offers exactly the supported currencies', async ({ app }) => {
   await trigger.click();
 
   // The container holds the trigger plus the popover options, so drop the
-  // trigger to assert on the offered list alone.
+  // trigger to assert on the offered list alone. `CURRENCY_OPTIONS` (shared
+  // with the preferences modal) carries a descriptive label per code, so this
+  // checks the leading code rather than the full text.
   const options = trigger.locator('..').getByRole('button');
-  expect((await options.allInnerTexts()).slice(1)).toEqual(['CNY', 'USD', 'EUR', 'GBP']);
+  const codes = (await options.allInnerTexts()).slice(1).map((text) => text.slice(0, 3));
+  expect(codes).toEqual([
+    'CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'SGD', 'AUD', 'CAD', 'CHF', 'INR',
+  ]);
 });
 
 test('surfaces a server rejection for an over-precise amount', async ({ app, api }) => {
   await gotoApp(app, 'Finance');
 
   await app.getByPlaceholder('15.50').fill('15.501');
-  await chooseOption(selectField(app, 'Currency'), 'EUR');
+  await chooseCurrency(app, 'EUR');
   await app.getByRole('button', { name: 'Record' }).click();
 
   await expect(app.getByText(/decimal place/)).toBeVisible();
@@ -158,7 +163,7 @@ test.describe('categories', () => {
     await expect(app.getByTestId('category-manager').getByText('food')).toBeVisible();
 
     await app.getByPlaceholder('15.50').fill('12.00');
-    await chooseOption(selectField(app, 'Currency'), 'EUR');
+    await chooseCurrency(app, 'EUR');
     await app.getByPlaceholder('What was it for?').fill('Dinner');
     await chooseOption(selectField(app, 'Category'), 'food');
     await app.getByRole('button', { name: 'Record' }).click();
@@ -203,7 +208,7 @@ test.describe('categories', () => {
     await gotoApp(app, 'Finance');
 
     await app.getByPlaceholder('15.50').fill('4.00');
-    await chooseOption(selectField(app, 'Currency'), 'EUR');
+    await chooseCurrency(app, 'EUR');
     await app.getByPlaceholder('What was it for?').fill('Coffee');
     await app.getByRole('button', { name: 'Record' }).click();
 

@@ -75,6 +75,19 @@ export async function chooseOption(trigger: Locator, optionLabel: string) {
   await trigger.locator('..').getByRole('button', { name: optionLabel, exact: true }).click();
 }
 
+/**
+ * Picks a currency from a `CustomSelect` populated from `CURRENCY_OPTIONS`.
+ *
+ * Not `chooseOption`: `CURRENCY_OPTIONS` labels are `"EUR — Euro"`, not the
+ * bare code, so an exact match on the code alone never finds the option —
+ * match by prefix instead.
+ */
+export async function chooseCurrency(scope: Locator | Page, code: string) {
+  const trigger = selectField(scope, 'Currency');
+  await trigger.click();
+  await trigger.locator('..').getByRole('button', { name: new RegExp(`^${code}\\b`) }).click();
+}
+
 /** The `CustomSelect` trigger inside the field labelled `fieldLabel`. */
 export function selectField(scope: Locator | Page, fieldLabel: string): Locator {
   return scope.locator('label').filter({ hasText: fieldLabel }).first().getByRole('button').first();

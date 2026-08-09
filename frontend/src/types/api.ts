@@ -204,6 +204,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio/cash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_cash"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/cash/deposit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["deposit_cash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/cash/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["withdraw_cash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_holdings"];
+        put?: never;
+        post: operations["buy_holding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_holding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["set_note"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/{id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["set_price"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/{id}/sell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sell_holding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["portfolio_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reminders": {
         parameters: {
             query?: never;
@@ -318,6 +462,50 @@ export interface components {
             token_type: string;
             username: string;
         };
+        /**
+         * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
+         *     the same reason `finance::TransactionRequest` does: a JSON number is an
+         *     IEEE-754 double by the time most clients have parsed it.
+         */
+        BuyHoldingRequest: {
+            /** @description ISO 4217 code, e.g. `"USD"`. */
+            currency: string;
+            note?: string | null;
+            /** @description Decimal string, e.g. `"150.00"`. */
+            price: string;
+            /** @description Decimal string, e.g. `"10"` or `"0.5"`. */
+            quantity: string;
+            /** @description Ticker/symbol, e.g. `"AAPL"`. */
+            symbol: string;
+        };
+        CashAmountRequest: {
+            /** @description Decimal string, e.g. `"1000.00"`. */
+            amount: string;
+            /** @description ISO 4217 code, e.g. `"USD"`. */
+            currency: string;
+        };
+        /**
+         * @description Cash available to spend on a buy, in one currency. A missing row means a
+         *     zero balance — the same "no row until you touch it" convention as
+         *     `settings::UserSettings`.
+         */
+        CashBalance: {
+            /**
+             * Format: int64
+             * @description Never negative — enforced in `PortfolioRepository`, not the schema, the
+             *     same app-level-only convention `quantity_minor`/`avg_cost_minor` use.
+             */
+            balance_minor: number;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            id: number;
+            /** @description The sole ownership key, matching `AuthUser::owner_id()`. */
+            owner_id: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
         /** @description A user-defined spending category. */
         Category: {
             /** Format: date-time */
@@ -410,6 +598,42 @@ export interface components {
             status: string;
             version: string;
         };
+        /**
+         * @description One investment position: symbol, quantity, and weighted-average cost basis.
+         *
+         *     `quantity_minor` and `avg_cost_minor` are always positive integers, scaled at
+         *     [`QUANTITY_EXPONENT`] and `currency_exponent` respectively. `current_price_minor`
+         *     is `None` until the user records one — an unset price is a normal state, not
+         *     an error, so market value and unrealized P&L are computed only when it is set.
+         */
+        Holding: {
+            /** Format: int64 */
+            avg_cost_minor: number;
+            /** Format: date-time */
+            created_at?: string | null;
+            currency: string;
+            /**
+             * Format: int64
+             * @description Decimal places for this row's currency, stored so a later change to the
+             *     currency table cannot rewrite what this row means.
+             */
+            currency_exponent: number;
+            /** Format: int64 */
+            current_price_minor?: number | null;
+            /** Format: int64 */
+            id: number;
+            /** @description A single freeform comment, most-recent-wins — not a transaction log. */
+            note?: string | null;
+            /** @description The sole ownership key, matching `AuthUser::owner_id()`. */
+            owner_id: string;
+            /** Format: date-time */
+            price_updated_at?: string | null;
+            /** Format: int64 */
+            quantity_minor: number;
+            symbol: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
         JoinedRoomInfo: {
             name: string;
             room_id: string;
@@ -434,6 +658,38 @@ export interface components {
         MediaProxyQuery: {
             media_id: string;
             server: string;
+        };
+        /**
+         * @description Totals for one currency. Currencies are never combined — without a rate
+         *     source, adding a USD position to a JPY position produces a meaningless
+         *     number, exactly as `finance::models::CurrencySummary` documents.
+         */
+        PortfolioCurrencySummary: {
+            /**
+             * Format: int64
+             * @description Present even for a currency with no holdings at all — a deposit with
+             *     nothing bought yet must still show up here.
+             */
+            cash_minor: number;
+            /** Format: int64 */
+            cost_basis_minor: number;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /**
+             * Format: int64
+             * @description Market value of only the holdings that have a price set.
+             */
+            market_value_minor: number;
+            /** Format: int64 */
+            priced_holdings: number;
+            /** Format: int64 */
+            unpriced_holdings: number;
+            /**
+             * Format: int64
+             * @description Unrealized P&L of only the holdings that have a price set.
+             */
+            unrealized_pl_minor: number;
         };
         /**
          * @description Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
@@ -492,6 +748,24 @@ export interface components {
          * @enum {string}
          */
         ReminderStatus: "Pending" | "Triggered" | "Cancelled" | "Failed";
+        SellHoldingRequest: {
+            price: string;
+            quantity: string;
+        };
+        SellResponse: {
+            holding?: components["schemas"]["Holding"] | null;
+            /**
+             * Format: int64
+             * @description May be negative.
+             */
+            realized_pl_minor: number;
+        };
+        SetNoteRequest: {
+            note?: string | null;
+        };
+        SetPriceRequest: {
+            price: string;
+        };
         SseTicketResponse: {
             /**
              * Format: int64
@@ -1208,6 +1482,420 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    list_cash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your cash balances */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashBalance"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    deposit_cash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashAmountRequest"];
+            };
+        };
+        responses: {
+            /** @description Cash deposited */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashBalance"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    withdraw_cash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashAmountRequest"];
+            };
+        };
+        responses: {
+            /** @description Cash withdrawn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashBalance"];
+                };
+            };
+            /** @description Bad request, or insufficient funds */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_holdings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your holdings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    buy_holding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuyHoldingRequest"];
+            };
+        };
+        responses: {
+            /** @description Position opened or added to */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Bad request, or insufficient cash */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_holding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holding ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Holding removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    set_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holding ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Note updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    set_price: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holding ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPriceRequest"];
+            };
+        };
+        responses: {
+            /** @description Price updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    sell_holding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holding ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SellHoldingRequest"];
+            };
+        };
+        responses: {
+            /** @description Position reduced or closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SellResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    portfolio_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-currency totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioCurrencySummary"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };

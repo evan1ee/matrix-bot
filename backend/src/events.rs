@@ -2,6 +2,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::modules::finance::models::{Category, Transaction};
+use crate::modules::portfolio::models::Holding;
 use crate::modules::reminder::models::Reminder;
 use crate::modules::todo::models::TodoItem;
 use crate::modules::settings::UserSettings;
@@ -30,6 +31,14 @@ pub enum SystemEvent {
     /// only the two preferences — the row is keyed by owner, not identified by
     /// its contents.
     SettingsUpdated { owner_id: String, settings: UserSettings },
+    PortfolioHoldingCreated(Holding),
+    PortfolioHoldingUpdated(Holding),
+    PortfolioHoldingDeleted { id: i64, owner_id: String },
+    /// Carries `owner_id`/`currency` alongside the balance because a
+    /// `CashBalance` for a never-deposited-into currency (`id: 0`) is not a
+    /// real row to key off — the event fields are what the SSE stream and the
+    /// frontend cache actually key on.
+    PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
 }
 
 impl SystemEvent {
@@ -54,6 +63,11 @@ impl SystemEvent {
             SystemEvent::CategoryCreated(cat) => &cat.owner_id,
             SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
             SystemEvent::SettingsUpdated { owner_id, .. } => owner_id,
+            SystemEvent::PortfolioHoldingCreated(h) | SystemEvent::PortfolioHoldingUpdated(h) => {
+                &h.owner_id
+            }
+            SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
+            SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
         }
     }
 

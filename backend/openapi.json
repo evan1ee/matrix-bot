@@ -740,6 +740,564 @@
         }
       }
     },
+    "/api/v1/portfolio/cash": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "list_cash",
+        "responses": {
+          "200": {
+            "description": "Your cash balances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CashBalance"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/cash/deposit": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "deposit_cash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashAmountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cash deposited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashBalance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/cash/withdraw": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "withdraw_cash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashAmountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cash withdrawn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashBalance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request, or insufficient funds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "list_holdings",
+        "responses": {
+          "200": {
+            "description": "Your holdings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Holding"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "buy_holding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuyHoldingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Position opened or added to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request, or insufficient cash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings/{id}": {
+      "delete": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "delete_holding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holding ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Holding removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings/{id}/note": {
+      "put": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "set_note",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holding ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Note updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings/{id}/price": {
+      "put": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "set_price",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holding ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPriceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Price updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings/{id}/sell": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "sell_holding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holding ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SellHoldingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Position reduced or closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SellResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/summary": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "operationId": "portfolio_summary",
+        "responses": {
+          "200": {
+            "description": "Per-currency totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioCurrencySummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/reminders": {
       "get": {
         "tags": [
@@ -1323,6 +1881,93 @@
           }
         }
       },
+      "BuyHoldingRequest": {
+        "type": "object",
+        "description": "Amounts and quantities arrive as decimal strings, never as JSON numbers —\nthe same reason `finance::TransactionRequest` does: a JSON number is an\nIEEE-754 double by the time most clients have parsed it.",
+        "required": [
+          "symbol",
+          "quantity",
+          "price",
+          "currency"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 code, e.g. `\"USD\"`."
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "price": {
+            "type": "string",
+            "description": "Decimal string, e.g. `\"150.00\"`."
+          },
+          "quantity": {
+            "type": "string",
+            "description": "Decimal string, e.g. `\"10\"` or `\"0.5\"`."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Ticker/symbol, e.g. `\"AAPL\"`."
+          }
+        }
+      },
+      "CashAmountRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "Decimal string, e.g. `\"1000.00\"`."
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 code, e.g. `\"USD\"`."
+          }
+        }
+      },
+      "CashBalance": {
+        "type": "object",
+        "description": "Cash available to spend on a buy, in one currency. A missing row means a\nzero balance — the same \"no row until you touch it\" convention as\n`settings::UserSettings`.",
+        "required": [
+          "id",
+          "owner_id",
+          "currency",
+          "currency_exponent",
+          "balance_minor"
+        ],
+        "properties": {
+          "balance_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Never negative — enforced in `PortfolioRepository`, not the schema, the\nsame app-level-only convention `quantity_minor`/`avg_cost_minor` use."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "owner_id": {
+            "type": "string",
+            "description": "The sole ownership key, matching `AuthUser::owner_id()`."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
       "Category": {
         "type": "object",
         "description": "A user-defined spending category.",
@@ -1534,6 +2179,73 @@
           }
         }
       },
+      "Holding": {
+        "type": "object",
+        "description": "One investment position: symbol, quantity, and weighted-average cost basis.\n\n`quantity_minor` and `avg_cost_minor` are always positive integers, scaled at\n[`QUANTITY_EXPONENT`] and `currency_exponent` respectively. `current_price_minor`\nis `None` until the user records one — an unset price is a normal state, not\nan error, so market value and unrealized P&L are computed only when it is set.",
+        "required": [
+          "id",
+          "owner_id",
+          "symbol",
+          "quantity_minor",
+          "avg_cost_minor",
+          "currency",
+          "currency_exponent"
+        ],
+        "properties": {
+          "avg_cost_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Decimal places for this row's currency, stored so a later change to the\ncurrency table cannot rewrite what this row means."
+          },
+          "current_price_minor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "note": {
+            "type": "string",
+            "description": "A single freeform comment, most-recent-wins — not a transaction log.",
+            "nullable": true
+          },
+          "owner_id": {
+            "type": "string",
+            "description": "The sole ownership key, matching `AuthUser::owner_id()`."
+          },
+          "price_updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "quantity_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
       "JoinedRoomInfo": {
         "type": "object",
         "required": [
@@ -1610,6 +2322,56 @@
           },
           "server": {
             "type": "string"
+          }
+        }
+      },
+      "PortfolioCurrencySummary": {
+        "type": "object",
+        "description": "Totals for one currency. Currencies are never combined — without a rate\nsource, adding a USD position to a JPY position produces a meaningless\nnumber, exactly as `finance::models::CurrencySummary` documents.",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "cost_basis_minor",
+          "market_value_minor",
+          "unrealized_pl_minor",
+          "priced_holdings",
+          "unpriced_holdings",
+          "cash_minor"
+        ],
+        "properties": {
+          "cash_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Present even for a currency with no holdings at all — a deposit with\nnothing bought yet must still show up here."
+          },
+          "cost_basis_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "market_value_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Market value of only the holdings that have a price set."
+          },
+          "priced_holdings": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unpriced_holdings": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unrealized_pl_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unrealized P&L of only the holdings that have a price set."
           }
         }
       },
@@ -1759,6 +2521,62 @@
           "Cancelled",
           "Failed"
         ]
+      },
+      "SellHoldingRequest": {
+        "type": "object",
+        "required": [
+          "quantity",
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          }
+        }
+      },
+      "SellResponse": {
+        "type": "object",
+        "required": [
+          "realized_pl_minor"
+        ],
+        "properties": {
+          "holding": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Holding"
+              }
+            ],
+            "nullable": true
+          },
+          "realized_pl_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "May be negative."
+          }
+        }
+      },
+      "SetNoteRequest": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "SetPriceRequest": {
+        "type": "object",
+        "required": [
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "string"
+          }
+        }
       },
       "SseTicketResponse": {
         "type": "object",

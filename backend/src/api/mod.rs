@@ -21,6 +21,7 @@ pub mod auth;
 pub mod health;
 pub mod openapi;
 pub mod finance;
+pub mod portfolio;
 pub mod reminders;
 pub mod rooms;
 pub mod settings;
@@ -111,7 +112,19 @@ pub async fn start_api_server(
             "/finance/categories",
             get(finance::list_categories).post(finance::create_category),
         )
-        .route("/finance/categories/:id", delete(finance::delete_category));
+        .route("/finance/categories/:id", delete(finance::delete_category))
+        .route(
+            "/portfolio/holdings",
+            get(portfolio::list_holdings).post(portfolio::buy_holding),
+        )
+        .route("/portfolio/holdings/:id", delete(portfolio::delete_holding))
+        .route("/portfolio/holdings/:id/sell", post(portfolio::sell_holding))
+        .route("/portfolio/holdings/:id/price", put(portfolio::set_price))
+        .route("/portfolio/holdings/:id/note", put(portfolio::set_note))
+        .route("/portfolio/summary", get(portfolio::summary))
+        .route("/portfolio/cash", get(portfolio::list_cash))
+        .route("/portfolio/cash/deposit", post(portfolio::deposit_cash))
+        .route("/portfolio/cash/withdraw", post(portfolio::withdraw_cash));
 
     let web_dist = if std::path::Path::new("web/dist").exists() {
         "web/dist"

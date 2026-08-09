@@ -65,10 +65,36 @@ export interface FakeRoom {
   name: string;
 }
 
+export interface FakeCashBalance {
+  id: number;
+  owner_id: string;
+  currency: string;
+  currency_exponent: number;
+  balance_minor: number;
+  updated_at: string;
+}
+
+export interface FakeHolding {
+  id: number;
+  owner_id: string;
+  symbol: string;
+  quantity_minor: number;
+  avg_cost_minor: number;
+  currency: string;
+  currency_exponent: number;
+  current_price_minor: number | null;
+  price_updated_at: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 const OWNER = '@web-tester:api';
 const DISPLAY_NAME = 'tester';
 /** Mirrors `due_reminder::MAX_LEAD_MINUTES`. */
 const MAX_LEAD_MINUTES = 60 * 24 * 30;
+/** Mirrors `portfolio::models::QUANTITY_EXPONENT`. */
+const QUANTITY_EXPONENT = 8;
 
 export class FakeApi {
   todos: FakeTodo[] = [];
@@ -86,11 +112,17 @@ export class FakeApi {
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
+  holdings: FakeHolding[] = [];
+  cash: FakeCashBalance[] = [];
+  /** Mirrors the server default (`modules::settings::UserSettings::default`). */
+  settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
   private nextTodoId = 1;
   private nextReminderId = 1;
   private nextTxId = 1;
   private nextCategoryId = 1;
+  private nextHoldingId = 1;
+  private nextCashId = 1;
 
   seedTodo(partial: Partial<FakeTodo> = {}): FakeTodo {
     const todo: FakeTodo = {
@@ -159,6 +191,48 @@ export class FakeApi {
     };
     this.transactions.push(tx);
     return tx;
+  }
+
+  seedHolding(partial: Partial<FakeHolding> = {}): FakeHolding {
+    const holding: FakeHolding = {
+      id: this.nextHoldingId++,
+      owner_id: OWNER,
+      symbol: 'AAPL',
+      quantity_minor: 10 * 10 ** QUANTITY_EXPONENT,
+      avg_cost_minor: 15000,
+      currency: 'USD',
+      currency_exponent: 2,
+      current_price_minor: null,
+      price_updated_at: null,
+      note: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...partial,
+    };
+    this.holdings.push(holding);
+    return holding;
+  }
+
+  /** Cash on hand, so a test can fund a buy without going through the deposit
+   *  UI/route first. Adds to an existing balance for the currency if present,
+   *  mirroring the real `deposit_cash`'s upsert-and-add. */
+  seedCash(currency: string, amountMinor: number, exponent = 2): FakeCashBalance {
+    const existing = this.cash.find((c) => c.currency === currency);
+    if (existing) {
+      existing.balance_minor += amountMinor;
+      existing.updated_at = new Date().toISOString();
+      return existing;
+    }
+    const balance: FakeCashBalance = {
+      id: this.nextCashId++,
+      owner_id: OWNER,
+      currency,
+      currency_exponent: exponent,
+      balance_minor: amountMinor,
+      updated_at: new Date().toISOString(),
+    };
+    this.cash.push(balance);
+    return balance;
   }
 
   /** The pending reminder linked to a todo, mirroring `find_pending_for_todo`. */
@@ -246,6 +320,20 @@ export class FakeApi {
     }
     if (path === '/auth/me') {
       return json(route, 200, { username: DISPLAY_NAME, subject: OWNER, kind: 'Local' });
+    }
+
+    // --- settings ---
+    // Every module reads this via `useSettings()`, so it has to be mocked even
+    // though no current spec changes it — an unmocked 404 here is silent to the
+    // app (`useSettings` falls back to `DEFAULT_SETTINGS`) but still a real
+    // failed network request, and `console --errors` checks are supposed to
+    // catch exactly that.
+    if (path === '/settings' && method === 'GET') {
+      return json(route, 200, this.settings);
+    }
+    if (path === '/settings' && method === 'PUT') {
+      this.settings = { timezone: String(body?.timezone ?? 'UTC'), currency: String(body?.currency ?? 'USD') };
+      return json(route, 200, this.settings);
     }
 
     // --- infrastructure ---
@@ -517,6 +605,221 @@ export class FakeApi {
       return route.fulfill({ status: 204, body: '' });
     }
 
+    // --- portfolio ---
+    if (path === '/portfolio/holdings' && method === 'GET') {
+      return json(route, 200, this.holdings);
+    }
+    if (path === '/portfolio/holdings' && method === 'POST') {
+      const symbol = String(body?.symbol ?? '').trim().toUpperCase();
+      if (!symbol || symbol.length > 12) {
+        return json(route, 400, { error: 'Symbol must be 1–12 characters', code: 400 });
+      }
+      const currency = String(body?.currency ?? '').trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        return json(route, 400, { error: 'Currency must be a 3-letter code such as EUR or JPY', code: 400 });
+      }
+      const exponent = exponentFor(currency);
+      const price = parseDecimal(String(body?.price ?? ''), exponent);
+      if ('error' in price) return json(route, 400, { error: price.error, code: 400 });
+      const quantity = parseDecimal(String(body?.quantity ?? ''), QUANTITY_EXPONENT);
+      if ('error' in quantity) return json(route, 400, { error: quantity.error, code: 400 });
+
+      const existing = this.holdings.find((h) => h.symbol === symbol);
+      const note = typeof body?.note === 'string' && body.note.trim() ? body.note : null;
+
+      if (existing && existing.currency !== currency) {
+        return json(route, 400, {
+          error: `${symbol} is already held in ${existing.currency}`,
+          code: 400,
+        });
+      }
+
+      // Buying requires and debits sufficient cash — mirrors `PortfolioRepository::buy`,
+      // which gates the whole write on this before touching the holding at all.
+      const needed = Math.trunc((quantity.minor * price.minor) / 10 ** QUANTITY_EXPONENT);
+      const cashRow = this.cash.find((c) => c.currency === currency);
+      const available = cashRow?.balance_minor ?? 0;
+      if (needed > available) {
+        return json(route, 400, {
+          error: `Need ${formatDecimal(needed, exponent)} ${currency} but only ${formatDecimal(available, exponent)} ${currency} in cash`,
+          code: 400,
+        });
+      }
+      this.seedCash(currency, -needed, exponent);
+
+      if (!existing) {
+        const holding = this.seedHolding({
+          symbol,
+          quantity_minor: quantity.minor,
+          avg_cost_minor: price.minor,
+          currency,
+          currency_exponent: exponent,
+          note,
+        });
+        return json(route, 200, holding);
+      }
+
+      const newQty = existing.quantity_minor + quantity.minor;
+      existing.avg_cost_minor = Math.trunc(
+        (existing.quantity_minor * existing.avg_cost_minor + quantity.minor * price.minor) / newQty
+      );
+      existing.quantity_minor = newQty;
+      if (note) existing.note = note;
+      existing.updated_at = new Date().toISOString();
+      return json(route, 200, existing);
+    }
+
+    const holdingSellMatch = path.match(/^\/portfolio\/holdings\/(\d+)\/sell$/);
+    if (holdingSellMatch && method === 'POST') {
+      const id = Number(holdingSellMatch[1]);
+      const holding = this.holdings.find((h) => h.id === id);
+      if (!holding) return json(route, 404, { error: 'Holding not found or access denied', code: 404 });
+
+      const price = parseDecimal(String(body?.price ?? ''), holding.currency_exponent);
+      if ('error' in price) return json(route, 400, { error: price.error, code: 400 });
+      const quantity = parseDecimal(String(body?.quantity ?? ''), QUANTITY_EXPONENT);
+      if ('error' in quantity) return json(route, 400, { error: quantity.error, code: 400 });
+
+      if (quantity.minor > holding.quantity_minor) {
+        return json(route, 400, { error: `Only ${holding.quantity_minor} held (minor units)`, code: 400 });
+      }
+
+      const realized = Math.trunc(
+        (quantity.minor * (price.minor - holding.avg_cost_minor)) / 10 ** QUANTITY_EXPONENT
+      );
+      // Cash is credited the full gross proceeds, not just the (possibly
+      // negative) realized P&L — a losing sale still returns the principal.
+      const proceeds = Math.trunc((quantity.minor * price.minor) / 10 ** QUANTITY_EXPONENT);
+      this.seedCash(holding.currency, proceeds, holding.currency_exponent);
+
+      const remaining = holding.quantity_minor - quantity.minor;
+
+      if (remaining === 0) {
+        this.holdings = this.holdings.filter((h) => h.id !== id);
+        return json(route, 200, { holding: null, realized_pl_minor: realized });
+      }
+
+      holding.quantity_minor = remaining;
+      holding.updated_at = new Date().toISOString();
+      return json(route, 200, { holding, realized_pl_minor: realized });
+    }
+
+    const holdingPriceMatch = path.match(/^\/portfolio\/holdings\/(\d+)\/price$/);
+    if (holdingPriceMatch && method === 'PUT') {
+      const id = Number(holdingPriceMatch[1]);
+      const holding = this.holdings.find((h) => h.id === id);
+      if (!holding) return json(route, 404, { error: 'Holding not found or access denied', code: 404 });
+
+      const price = parseDecimal(String(body?.price ?? ''), holding.currency_exponent);
+      if ('error' in price) return json(route, 400, { error: price.error, code: 400 });
+
+      holding.current_price_minor = price.minor;
+      holding.price_updated_at = new Date().toISOString();
+      holding.updated_at = new Date().toISOString();
+      return json(route, 200, holding);
+    }
+
+    const holdingNoteMatch = path.match(/^\/portfolio\/holdings\/(\d+)\/note$/);
+    if (holdingNoteMatch && method === 'PUT') {
+      const id = Number(holdingNoteMatch[1]);
+      const holding = this.holdings.find((h) => h.id === id);
+      if (!holding) return json(route, 404, { error: 'Holding not found or access denied', code: 404 });
+
+      const note = typeof body?.note === 'string' && body.note.trim() ? body.note : null;
+      holding.note = note;
+      holding.updated_at = new Date().toISOString();
+      return json(route, 200, holding);
+    }
+
+    const holdingMatch = path.match(/^\/portfolio\/holdings\/(\d+)$/);
+    if (holdingMatch && method === 'DELETE') {
+      const id = Number(holdingMatch[1]);
+      if (!this.holdings.some((h) => h.id === id)) {
+        return json(route, 404, { error: 'Holding not found or access denied', code: 404 });
+      }
+      this.holdings = this.holdings.filter((h) => h.id !== id);
+      return route.fulfill({ status: 204, body: '' });
+    }
+
+    // --- portfolio cash ---
+    if (path === '/portfolio/cash' && method === 'GET') {
+      return json(route, 200, this.cash);
+    }
+    if (path === '/portfolio/cash/deposit' && method === 'POST') {
+      const currency = String(body?.currency ?? '').trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        return json(route, 400, { error: 'Currency must be a 3-letter code such as EUR or JPY', code: 400 });
+      }
+      const exponent = exponentFor(currency);
+      const amount = parseDecimal(String(body?.amount ?? ''), exponent);
+      if ('error' in amount) return json(route, 400, { error: amount.error, code: 400 });
+
+      const cash = this.seedCash(currency, amount.minor, exponent);
+      return json(route, 200, cash);
+    }
+    if (path === '/portfolio/cash/withdraw' && method === 'POST') {
+      const currency = String(body?.currency ?? '').trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        return json(route, 400, { error: 'Currency must be a 3-letter code such as EUR or JPY', code: 400 });
+      }
+      const exponent = exponentFor(currency);
+      const amount = parseDecimal(String(body?.amount ?? ''), exponent);
+      if ('error' in amount) return json(route, 400, { error: amount.error, code: 400 });
+
+      const existing = this.cash.find((c) => c.currency === currency);
+      const available = existing?.balance_minor ?? 0;
+      if (amount.minor > available) {
+        return json(route, 400, {
+          error: `Only ${formatDecimal(available, exponent)} ${currency} available`,
+          code: 400,
+        });
+      }
+      const cash = this.seedCash(currency, -amount.minor, exponent);
+      return json(route, 200, cash);
+    }
+
+    if (path === '/portfolio/summary') {
+      const byCurrency = new Map<string, any>();
+      const entryFor = (currency: string, exponent: number) => {
+        if (!byCurrency.has(currency)) {
+          byCurrency.set(currency, {
+            currency,
+            currency_exponent: exponent,
+            cost_basis_minor: 0,
+            market_value_minor: 0,
+            unrealized_pl_minor: 0,
+            priced_holdings: 0,
+            unpriced_holdings: 0,
+            cash_minor: 0,
+          });
+        }
+        return byCurrency.get(currency);
+      };
+
+      for (const h of this.holdings) {
+        const entry = entryFor(h.currency, h.currency_exponent);
+        const costBasis = Math.trunc((h.quantity_minor * h.avg_cost_minor) / 10 ** QUANTITY_EXPONENT);
+        entry.cost_basis_minor += costBasis;
+        if (h.current_price_minor != null) {
+          const marketValue = Math.trunc(
+            (h.quantity_minor * h.current_price_minor) / 10 ** QUANTITY_EXPONENT
+          );
+          entry.market_value_minor += marketValue;
+          entry.unrealized_pl_minor += marketValue - costBasis;
+          entry.priced_holdings += 1;
+        } else {
+          entry.unpriced_holdings += 1;
+        }
+      }
+      // A currency seeded only by cash (a deposit with nothing bought yet)
+      // must still appear.
+      for (const c of this.cash) {
+        entryFor(c.currency, c.currency_exponent).cash_minor = c.balance_minor;
+      }
+
+      return json(route, 200, [...byCurrency.values()]);
+    }
+
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });
   }
 
@@ -544,6 +847,43 @@ function json(route: Route, status: number, payload: unknown) {
     contentType: 'application/json',
     body: JSON.stringify(payload),
   });
+}
+
+/** Mirrors `modules::finance::money::exponent_for`. */
+function exponentFor(currency: string): number {
+  const zeroDecimal = ['JPY', 'KRW', 'VND', 'CLP', 'ISK'];
+  const threeDecimal = ['BHD', 'KWD', 'OMR', 'TND', 'JOD'];
+  return zeroDecimal.includes(currency) ? 0 : threeDecimal.includes(currency) ? 3 : 2;
+}
+
+/**
+ * Mirrors `modules::finance::money::parse_amount` — currency-agnostic, just an
+ * exponent, so `portfolio` reuses it for both price and quantity server-side;
+ * the fake mirrors that reuse rather than hand-rolling a second parser.
+ */
+function parseDecimal(raw: string, exponent: number): { minor: number } | { error: string } {
+  const cleaned = raw.trim().replace(/[$€£¥₹,\s]/g, '');
+  if (cleaned.startsWith('-')) return { error: 'Amount must be greater than zero' };
+  if (!/^\d*\.?\d*$/.test(cleaned) || cleaned === '' || cleaned === '.') {
+    return { error: 'Amount must be a number such as 15.50' };
+  }
+  const [whole, fraction = ''] = cleaned.split('.');
+  if (fraction.length > exponent) {
+    return { error: `That currency has ${exponent} decimal place(s)` };
+  }
+  const minor = Number(`${whole || '0'}${fraction.padEnd(exponent, '0')}`);
+  if (!minor) return { error: 'Amount must be greater than zero' };
+  return { minor };
+}
+
+/** The inverse of `parseDecimal` — mirrors `modules::finance::money::format_amount`,
+ *  used for error messages that state an amount back to the user. */
+function formatDecimal(minor: number, exponent: number): string {
+  if (exponent === 0) return String(minor);
+  const text = Math.abs(minor).toString().padStart(exponent + 1, '0');
+  const whole = text.slice(0, text.length - exponent);
+  const fraction = text.slice(text.length - exponent);
+  return `${minor < 0 ? '-' : ''}${whole}.${fraction}`;
 }
 
 /**

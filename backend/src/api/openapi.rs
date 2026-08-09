@@ -2,11 +2,12 @@ use axum::{response::IntoResponse, Json};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::api::{auth, finance, health, reminders, rooms, settings, sse, todos};
+use crate::api::{auth, finance, health, portfolio, reminders, rooms, settings, sse, todos};
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
     Category, CategoryTotal, CurrencySummary, Direction, Transaction,
 };
+use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::settings::UserSettings;
@@ -38,7 +39,17 @@ use crate::modules::settings::UserSettings;
         finance::summary,
         finance::list_categories,
         finance::create_category,
-        finance::delete_category
+        finance::delete_category,
+        portfolio::list_holdings,
+        portfolio::buy_holding,
+        portfolio::sell_holding,
+        portfolio::set_price,
+        portfolio::set_note,
+        portfolio::delete_holding,
+        portfolio::summary,
+        portfolio::list_cash,
+        portfolio::deposit_cash,
+        portfolio::withdraw_cash
     ),
     components(
         schemas(
@@ -75,7 +86,16 @@ use crate::modules::settings::UserSettings;
             finance::TransactionRequest,
             finance::CategoryRequest,
             finance::LedgerResponse,
-            finance::CategoryDeletedResponse
+            finance::CategoryDeletedResponse,
+            Holding,
+            PortfolioCurrencySummary,
+            CashBalance,
+            portfolio::BuyHoldingRequest,
+            portfolio::SellHoldingRequest,
+            portfolio::SetPriceRequest,
+            portfolio::SetNoteRequest,
+            portfolio::SellResponse,
+            portfolio::CashAmountRequest
         )
     ),
     modifiers(&SecurityAddon),

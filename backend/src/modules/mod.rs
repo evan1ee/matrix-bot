@@ -8,6 +8,7 @@ use crate::events::EventBroadcaster;
 
 pub mod core;
 pub mod finance;
+pub mod portfolio;
 pub mod reminder;
 pub mod settings;
 pub mod todo;
@@ -139,6 +140,7 @@ mod tests {
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
         use crate::modules::core::CoreModule;
         use crate::modules::finance::FinanceModule;
+        use crate::modules::portfolio::PortfolioModule;
         use crate::modules::reminder::ReminderModule;
         use crate::modules::settings::SettingsModule;
         use crate::modules::todo::TodoModule;
@@ -151,6 +153,7 @@ mod tests {
         registry.register(TodoModule::new());
         registry.register(ReminderModule::new());
         registry.register(FinanceModule::new());
+        registry.register(PortfolioModule::new());
         registry.register(SettingsModule::new());
 
         for body in [
@@ -158,6 +161,8 @@ mod tests {
             "!todo list",
             "!remind list",
             "!expense list",
+            "!portfolio",
+            "!portfolio buy AAPL 10 @ 150.00 USD",
             "!settings",
             "!settings timezone Asia/Tokyo",
             "!settings currency CNY",

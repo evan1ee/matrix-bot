@@ -70,6 +70,65 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Investment holdings. One row per (owner, symbol) — `quantity_minor` and
+    // `avg_cost_minor` are integers so weighted-average cost math never touches
+    // a float; `currency_exponent` is stored per row for the same reason the
+    // ledger stores it: a later change to the currency table cannot rewrite
+    // what an existing row means.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS portfolio_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            quantity_minor INTEGER NOT NULL,
+            avg_cost_minor INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            current_price_minor INTEGER,
+            price_updated_at TIMESTAMP,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_portfolio_holdings_owner_symbol \
+         ON portfolio_holdings(owner_id, symbol);",
+    )
+    .execute(pool)
+    .await?;
+
+    // Cash available to buy with, one row per (owner, currency). No CHECK
+    // constraint on `balance_minor` — nothing else in this schema uses one;
+    // non-negativity is enforced in `PortfolioRepository`, the same
+    // app-level-only convention `quantity_minor`/`avg_cost_minor` already use.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS portfolio_cash_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            balance_minor INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_portfolio_cash_owner_currency \
+         ON portfolio_cash_balances(owner_id, currency);",
+    )
+    .execute(pool)
+    .await?;
+
     // Per-user spending categories. Names are unique per owner, not globally.
     sqlx::query(
         r#"
@@ -212,6 +271,8 @@ mod tests {
         let tables = table_names(&pool).await;
         for expected in [
             "finance_categories",
+            "portfolio_cash_balances",
+            "portfolio_holdings",
             "reminders",
             "todos",
             "transactions",

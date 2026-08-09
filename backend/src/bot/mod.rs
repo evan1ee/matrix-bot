@@ -12,6 +12,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
+use crate::modules::portfolio::PortfolioModule;
 use crate::modules::reminder::ReminderModule;
 use crate::modules::settings::SettingsModule;
 use crate::modules::todo::TodoModule;
@@ -62,6 +63,7 @@ impl MatrixBot {
         registry.register(TodoModule::new());
         registry.register(ReminderModule::new());
         registry.register(FinanceModule::new());
+        registry.register(PortfolioModule::new());
         registry.register(SettingsModule::new());
 
         let registry_arc = Arc::new(registry);
