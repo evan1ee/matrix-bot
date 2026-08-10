@@ -23,7 +23,7 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
       <button
         onClick={onOpenSidebar}
         aria-label="Open navigation"
-        className="p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] transition duration-150 cursor-pointer"
+        className="min-w-11 min-h-11 flex items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] transition duration-150 cursor-pointer"
       >
         <Menu className="w-5 h-5 text-[var(--color-text-primary)]" />
       </button>

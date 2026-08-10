@@ -502,7 +502,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               <span>{createMutation.isPending ? 'Adding...' : 'Add Task'}</span>
@@ -559,9 +559,9 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
 
       {/* Task List Table View */}
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">STATUS FILTER</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 whitespace-nowrap">STATUS FILTER</span>
             <div className="flex items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded p-0.5 text-xs font-mono">
               {(['all', 'active', 'completed'] as const).map((tab) => (
                 <button
@@ -578,7 +578,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
               ))}
             </div>
           </div>
-          <span className="text-xs font-mono text-neutral-500">
+          <span className="text-xs font-mono text-neutral-500 shrink-0">
             {filteredItems.length} items
           </span>
         </div>

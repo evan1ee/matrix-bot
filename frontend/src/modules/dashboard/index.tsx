@@ -141,21 +141,21 @@ const DashboardView = ({ onNavigate }: { onNavigate?: (moduleId: string) => void
         <div className="flex flex-wrap gap-3">
           <button
             onClick={() => onNavigate?.('todo')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 min-h-11 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             Add Task
           </button>
           <button
             onClick={() => onNavigate?.('reminder')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 min-h-11 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             Set Reminder
           </button>
           <button
             onClick={() => onNavigate?.('finance')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 min-h-11 rounded-full border border-[var(--color-border-default)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             Log Expense

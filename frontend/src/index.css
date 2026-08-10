@@ -64,6 +64,15 @@
   }
 }
 
+/* iOS Safari zooms the viewport on focusing any input under 16px; the app's
+   text-sm (14px) form controls would otherwise trigger that on every tap,
+   including the Dashboard's autofocused quick actions. */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
 /* Sidebar slide-in animation for mobile */
 @keyframes sidebar-slide-in {
   from { transform: translateX(-100%); }
