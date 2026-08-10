@@ -22,9 +22,10 @@ impl RecurringBillRepository {
             INSERT INTO recurring_bills (
                 room_id, sender_mxid, sender_name, name, category,
                 amount_minor, currency, currency_exponent, frequency,
-                due_day, next_due_at, total_installments, auto_pay, notes
+                due_day, next_due_at, total_installments, auto_pay, notes,
+                remind_before_minutes, remind_room_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             "#,
         )
         .bind(room_id)
@@ -41,6 +42,8 @@ impl RecurringBillRepository {
         .bind(payload.total_installments)
         .bind(auto_pay)
         .bind(&payload.notes)
+        .bind(payload.remind_before_minutes)
+        .bind(&payload.remind_room_id)
         .execute(pool)
         .await?;
 
@@ -96,13 +99,19 @@ impl RecurringBillRepository {
         let auto_pay = payload.auto_pay.unwrap_or(existing.auto_pay);
         let status = payload.status.unwrap_or(existing.status);
         let notes = payload.notes.or(existing.notes);
+        // `Option<Option<i64>>`: absent keeps the current lead, `null` clears it.
+        let remind_before_minutes = payload
+            .remind_before_minutes
+            .unwrap_or(existing.remind_before_minutes);
+        let remind_room_id = payload.remind_room_id.or(existing.remind_room_id);
 
         sqlx::query(
             r#"
             UPDATE recurring_bills
             SET name = ?, category = ?, amount_minor = ?, currency = ?, frequency = ?,
                 due_day = ?, next_due_at = ?, total_installments = ?, paid_installments = ?,
-                auto_pay = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                auto_pay = ?, status = ?, notes = ?, remind_before_minutes = ?,
+                remind_room_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND sender_mxid = ?;
             "#,
         )
@@ -118,6 +127,8 @@ impl RecurringBillRepository {
         .bind(auto_pay)
         .bind(&status)
         .bind(&notes)
+        .bind(remind_before_minutes)
+        .bind(&remind_room_id)
         .bind(id)
         .bind(owner_id)
         .execute(pool)
@@ -228,6 +239,8 @@ mod tests {
             total_installments: None,
             auto_pay: Some(true),
             notes: Some("Standard plan".to_string()),
+            remind_before_minutes: None,
+            remind_room_id: None,
         };
 
         let created = RecurringBillRepository::create(&pool, "web", "@alice:a", "Alice", payload)

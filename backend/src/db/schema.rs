@@ -207,6 +207,8 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             auto_pay BOOLEAN NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'active',
             notes TEXT,
+            remind_before_minutes INTEGER,
+            remind_room_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -252,15 +254,41 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await;
 
-    // Links a reminder back to the todo whose due date scheduled it, so the
-    // reminder can be rescheduled or cancelled when that todo changes.
+    // Links a reminder back to the row whose due date scheduled it, so the
+    // reminder can be rescheduled or cancelled when that row changes.
+    //
+    // This started as a bare `todo_id`. Bills want the same lead-time reminder,
+    // and a second nullable foreign key per module does not scale, so the link
+    // is now `(source_kind, source_id)`: one set of repository functions serves
+    // every module that owns a due date.
     let _ = sqlx::query("ALTER TABLE reminders ADD COLUMN todo_id INTEGER;")
         .execute(pool)
         .await;
-
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_reminders_todo ON reminders(todo_id);")
+    let _ = sqlx::query("ALTER TABLE reminders ADD COLUMN source_kind TEXT;")
         .execute(pool)
-        .await?;
+        .await;
+    let _ = sqlx::query("ALTER TABLE reminders ADD COLUMN source_id INTEGER;")
+        .execute(pool)
+        .await;
+
+    // Carry existing todo links over. Guarded on `source_id IS NULL` so a
+    // re-run cannot overwrite a link that has since moved.
+    let _ = sqlx::query(
+        "UPDATE reminders SET source_kind = 'todo', source_id = todo_id \
+         WHERE todo_id IS NOT NULL AND source_id IS NULL;",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_reminders_todo;")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_reminders_source ON reminders(source_kind, source_id);",
+    )
+    .execute(pool)
+    .await?;
 
     // Migration helpers for recurring_bills columns on existing SQLite DBs
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;").execute(pool).await;
@@ -268,6 +296,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN due_day INTEGER;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN total_installments INTEGER;").execute(pool).await;
+    // Lead-time reminder, mirroring the todo columns above: minutes before
+    // `next_due_at`, and where to deliver it when the bill has no room of its
+    // own (the `web` sentinel).
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_before_minutes INTEGER;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_room_id TEXT;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN paid_installments INTEGER NOT NULL DEFAULT 0;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT 0;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN status TEXT NOT NULL DEFAULT 'active';").execute(pool).await;

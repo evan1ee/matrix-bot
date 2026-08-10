@@ -20,6 +20,10 @@ export interface RecurringBill {
   auto_pay: boolean;
   status: BillStatus | string;
   notes?: string | null;
+  /** Minutes before `next_due_at` to send a reminder; null means none. */
+  remind_before_minutes?: number | null;
+  /** Matrix room the reminder is delivered to. */
+  remind_room_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -36,6 +40,8 @@ export interface CreateBillPayload {
   total_installments?: number;
   auto_pay?: boolean;
   notes?: string;
+  remind_before_minutes?: number;
+  remind_room_id?: string;
 }
 
 export interface UpdateBillPayload {
@@ -51,4 +57,7 @@ export interface UpdateBillPayload {
   auto_pay?: boolean;
   status?: string;
   notes?: string;
+  /** `null` clears the lead time; omitting it leaves the current one alone. */
+  remind_before_minutes?: number | null;
+  remind_room_id?: string;
 }

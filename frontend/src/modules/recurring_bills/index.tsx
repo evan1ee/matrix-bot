@@ -14,6 +14,7 @@ import {
   Trash2,
   Pencil,
   Zap,
+  BellRing,
 } from 'lucide-react';
 import { BillModal } from './BillModal';
 import {
@@ -292,6 +293,14 @@ export const RecurringBillsView: React.FC = () => {
                                 <Zap className="w-3 h-3" /> Auto
                               </span>
                             )}
+                            {bill.remind_before_minutes ? (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-xs font-mono bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800"
+                                title={`Reminder ${leadLabel(bill.remind_before_minutes)}`}
+                              >
+                                <BellRing className="w-3 h-3" /> {leadLabel(bill.remind_before_minutes)}
+                              </span>
+                            ) : null}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
@@ -398,6 +407,14 @@ export const RecurringBillsView: React.FC = () => {
     </div>
   );
 };
+
+/** Short form of a lead time, matching the modal's option wording. */
+function leadLabel(minutes: number): string {
+  if (minutes % 10080 === 0) return `${minutes / 10080}w before`;
+  if (minutes % 1440 === 0) return `${minutes / 1440}d before`;
+  if (minutes % 60 === 0) return `${minutes / 60}h before`;
+  return `${minutes}m before`;
+}
 
 export const recurringBillsModule: FrontendModule = {
   id: 'recurring_bills',

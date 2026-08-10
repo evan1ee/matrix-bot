@@ -2508,6 +2508,17 @@
             "type": "string",
             "nullable": true
           },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minutes before `next_due_at` to send a reminder.",
+            "nullable": true
+          },
+          "remind_room_id": {
+            "type": "string",
+            "description": "Where to deliver that reminder. Required when the bill has no Matrix\nroom of its own.",
+            "nullable": true
+          },
           "total_installments": {
             "type": "integer",
             "format": "int32",
@@ -2921,6 +2932,17 @@
             "type": "integer",
             "format": "int32"
           },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minutes before `next_due_at` to send a reminder. `None` means no\nreminder is wanted.",
+            "nullable": true
+          },
+          "remind_room_id": {
+            "type": "string",
+            "description": "Matrix room the due reminder is delivered to. Defaults to the bill's own\nroom; required when that is the `web` sentinel.",
+            "nullable": true
+          },
           "room_id": {
             "type": "string"
           },
@@ -3006,14 +3028,19 @@
           "sender_name": {
             "type": "string"
           },
-          "status": {
-            "type": "string"
-          },
-          "todo_id": {
+          "source_id": {
             "type": "integer",
             "format": "int64",
-            "description": "Set when this reminder was scheduled from a todo's due date, so changing\nor completing that todo can reschedule or cancel it.",
+            "description": "The id of the row in that module which scheduled this reminder, so\nchanging or retiring that row can reschedule or cancel it.",
             "nullable": true
+          },
+          "source_kind": {
+            "type": "string",
+            "description": "Which module scheduled this reminder, if any — see [`ReminderSource`].",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
           },
           "trigger_at": {
             "type": "string",
@@ -3446,6 +3473,16 @@
           "paid_installments": {
             "type": "integer",
             "format": "int32",
+            "nullable": true
+          },
+          "remind_before_minutes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Absent leaves the lead time alone; `null` clears it; a value sets it.",
+            "nullable": true
+          },
+          "remind_room_id": {
+            "type": "string",
             "nullable": true
           },
           "status": {

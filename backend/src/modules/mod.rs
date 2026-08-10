@@ -7,6 +7,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 
 pub mod core;
+pub mod due_reminder;
 pub mod finance;
 pub mod portfolio;
 pub mod recurring_bills;

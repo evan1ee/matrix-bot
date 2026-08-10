@@ -4,6 +4,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod due_reminder;
 pub mod handler;
 pub mod models;
 pub mod repository;
@@ -44,6 +45,11 @@ impl BotModule for RecurringBillsModule {
                 name: "bill pay".to_string(),
                 usage: "!bill pay <id>".to_string(),
                 description: "Mark a recurring bill as paid for the current period".to_string(),
+            },
+            CommandHelp {
+                name: "bill remind".to_string(),
+                usage: "!bill remind <id> <minutes|off>".to_string(),
+                description: "Remind me this many minutes before the bill is due".to_string(),
             },
             CommandHelp {
                 name: "bill delete".to_string(),

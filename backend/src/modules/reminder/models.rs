@@ -67,6 +67,28 @@ impl ReminderStatus {
     }
 }
 
+/// Which module's due date scheduled a reminder.
+///
+/// Reminders created directly (`!remind`, the REST create) carry no source; a
+/// source is what lets a due date change reschedule or cancel the reminder it
+/// produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderSource {
+    Todo,
+    RecurringBill,
+}
+
+impl ReminderSource {
+    /// The value stored in `reminders.source_kind`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReminderSource::Todo => "todo",
+            ReminderSource::RecurringBill => "recurring_bill",
+        }
+    }
+}
+
 /// A reminder stored in the database.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
@@ -80,9 +102,11 @@ pub struct Reminder {
     pub recurrence: String,
     pub status: String,
     pub retry_count: i64,
-    /// Set when this reminder was scheduled from a todo's due date, so changing
-    /// or completing that todo can reschedule or cancel it.
-    pub todo_id: Option<i64>,
+    /// Which module scheduled this reminder, if any — see [`ReminderSource`].
+    pub source_kind: Option<String>,
+    /// The id of the row in that module which scheduled this reminder, so
+    /// changing or retiring that row can reschedule or cancel it.
+    pub source_id: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
 }
 

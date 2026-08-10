@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, RefreshCcw, X } from 'lucide-react';
+import { fetchApi } from '../../core/apiClient';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import { CURRENCY_OPTIONS, nowInZone, useSettings } from '../../core/settings';
@@ -20,6 +22,20 @@ const CATEGORY_OPTIONS = [
   { value: 'installment', label: 'Installment' },
   { value: 'recurring_transfer', label: 'Recurring Transfer' },
 ];
+
+/** Mirrors the todo module's lead options, so both features offer one vocabulary. */
+const LEAD_OPTIONS = [
+  { value: '', label: 'No reminder' },
+  { value: '60', label: '1 hour before' },
+  { value: '1440', label: '1 day before' },
+  { value: '4320', label: '3 days before' },
+  { value: '10080', label: '1 week before' },
+];
+
+interface JoinedRoomInfo {
+  room_id: string;
+  name: string;
+}
 
 const FREQUENCY_OPTIONS = [
   { value: 'monthly', label: 'Monthly' },
@@ -50,6 +66,18 @@ export const BillModal: React.FC<BillModalProps> = ({
   const [totalInstallments, setTotalInstallments] = useState('');
   const [autoPay, setAutoPay] = useState(false);
   const [notes, setNotes] = useState('');
+  const [leadMinutes, setLeadMinutes] = useState('');
+  const [remindRoomId, setRemindRoomId] = useState('');
+
+  // Rooms the bot and this account share. A bill created here carries the `web`
+  // sentinel, so a reminder has nowhere to go until one is picked.
+  const { data: rooms } = useQuery<JoinedRoomInfo[]>({
+    queryKey: ['rooms'],
+    queryFn: () => fetchApi<JoinedRoomInfo[]>('/rooms'),
+  });
+
+  const wantsReminder = leadMinutes !== '';
+  const noRoomsAvailable = wantsReminder && (rooms?.length ?? 0) === 0;
 
   useEffect(() => {
     if (initialData) {
@@ -69,12 +97,18 @@ export const BillModal: React.FC<BillModalProps> = ({
       setTotalInstallments(initialData.total_installments ? String(initialData.total_installments) : '');
       setAutoPay(initialData.auto_pay);
       setNotes(initialData.notes || '');
+      setLeadMinutes(
+        initialData.remind_before_minutes ? String(initialData.remind_before_minutes) : ''
+      );
+      setRemindRoomId(initialData.remind_room_id || '');
     } else {
       setName('');
       setAmount('');
       setCurrency(defaultCurrency);
       setCategory('subscription');
       setFrequency('monthly');
+      setLeadMinutes('');
+      setRemindRoomId('');
       
       // Default to today at 09:00
       const now = nowInZone(timezone);
@@ -124,6 +158,8 @@ export const BillModal: React.FC<BillModalProps> = ({
         total_installments: totalInstallments ? parseInt(totalInstallments, 10) : undefined,
         auto_pay: autoPay,
         notes: notes || undefined,
+        remind_before_minutes: wantsReminder ? parseInt(leadMinutes, 10) : null,
+        remind_room_id: remindRoomId || undefined,
       };
       onSubmit(payload);
     } else {
@@ -137,6 +173,8 @@ export const BillModal: React.FC<BillModalProps> = ({
         total_installments: totalInstallments ? parseInt(totalInstallments, 10) : undefined,
         auto_pay: autoPay,
         notes: notes || undefined,
+        remind_before_minutes: wantsReminder ? parseInt(leadMinutes, 10) : undefined,
+        remind_room_id: remindRoomId || undefined,
       };
       onSubmit(payload);
     }
@@ -285,6 +323,45 @@ export const BillModal: React.FC<BillModalProps> = ({
               Enable Auto-pay (Auto debit)
             </label>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-mono text-neutral-500">
+                Remind me
+              </label>
+              <CustomSelect
+                value={leadMinutes}
+                onChange={setLeadMinutes}
+                mono
+                options={LEAD_OPTIONS}
+                className="w-full"
+              />
+            </div>
+
+            {wantsReminder && (
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-mono text-neutral-500">
+                  Send to room
+                </label>
+                <CustomSelect
+                  value={remindRoomId}
+                  onChange={setRemindRoomId}
+                  mono
+                  className="w-full"
+                  options={[
+                    { value: '', label: 'Select a room…' },
+                    ...(rooms ?? []).map((r) => ({ value: r.room_id, label: r.name })),
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+
+          {noRoomsAvailable && (
+            <p className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
+              A reminder needs a Matrix room the bot is also in. Invite the bot to a room to use this.
+            </p>
+          )}
 
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-mono text-neutral-500">

@@ -600,6 +600,16 @@ export interface components {
             name: string;
             next_due_at: string;
             notes?: string | null;
+            /**
+             * Format: int64
+             * @description Minutes before `next_due_at` to send a reminder.
+             */
+            remind_before_minutes?: number | null;
+            /**
+             * @description Where to deliver that reminder. Required when the bill has no Matrix
+             *     room of its own.
+             */
+            remind_room_id?: string | null;
             /** Format: int32 */
             total_installments?: number | null;
         };
@@ -781,6 +791,17 @@ export interface components {
             notes?: string | null;
             /** Format: int32 */
             paid_installments: number;
+            /**
+             * Format: int64
+             * @description Minutes before `next_due_at` to send a reminder. `None` means no
+             *     reminder is wanted.
+             */
+            remind_before_minutes?: number | null;
+            /**
+             * @description Matrix room the due reminder is delivered to. Defaults to the bill's own
+             *     room; required when that is the `web` sentinel.
+             */
+            remind_room_id?: string | null;
             room_id: string;
             sender_mxid: string;
             sender_name: string;
@@ -807,13 +828,15 @@ export interface components {
             room_id: string;
             sender_mxid: string;
             sender_name: string;
-            status: string;
             /**
              * Format: int64
-             * @description Set when this reminder was scheduled from a todo's due date, so changing
-             *     or completing that todo can reschedule or cancel it.
+             * @description The id of the row in that module which scheduled this reminder, so
+             *     changing or retiring that row can reschedule or cancel it.
              */
-            todo_id?: number | null;
+            source_id?: number | null;
+            /** @description Which module scheduled this reminder, if any — see [`ReminderSource`]. */
+            source_kind?: string | null;
+            status: string;
             /** Format: date-time */
             trigger_at: string;
         };
@@ -1005,6 +1028,12 @@ export interface components {
             notes?: string | null;
             /** Format: int32 */
             paid_installments?: number | null;
+            /**
+             * Format: int64
+             * @description Absent leaves the lead time alone; `null` clears it; a value sets it.
+             */
+            remind_before_minutes?: number | null;
+            remind_room_id?: string | null;
             status?: string | null;
             /** Format: int32 */
             total_installments?: number | null;

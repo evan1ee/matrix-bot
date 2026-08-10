@@ -1,38 +1,21 @@
 //! Keeps a todo's lead-time reminder in step with the todo.
 //!
-//! A task with both a due date and a lead time owns at most one pending row in
-//! `reminders`, linked by `todo_id`. Every path that can change a due date, a
-//! lead time, or completion calls [`sync`], which reconciles that row: creating,
-//! rescheduling, or cancelling as needed. Reconciling from current state rather
-//! than patching per-edit means the two can never drift, whichever path made the
-//! change.
+//! The reconcile rules live in [`crate::modules::due_reminder`], shared with
+//! every other module that owns a due date. This module's job is only to say
+//! what a todo wants: when it should fire, and what it should say.
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::reminder::models::RecurrencePattern;
-use crate::modules::reminder::repository::ReminderRepository;
+use crate::events::EventBroadcaster;
+use crate::modules::due_reminder::{self, ReminderPlan};
+
+pub use crate::modules::due_reminder::SyncOutcome;
+use crate::modules::reminder::models::ReminderSource;
 use crate::modules::todo::models::TodoItem;
 
-/// Longest lead time accepted, so a typo cannot schedule a reminder years out.
-pub const MAX_LEAD_MINUTES: i64 = 60 * 24 * 30;
-
-/// What [`sync`] did, so callers can tell the user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyncOutcome {
-    /// No reminder wanted and none existed.
-    Nothing,
-    /// A reminder is now pending at this instant.
-    Scheduled(DateTime<Utc>),
-    /// The reminder was torn down — the due date, the lead time, or the task
-    /// itself went away.
-    Cancelled,
-    /// The lead time lands in the past, so nothing was scheduled. Firing
-    /// immediately would be noise, and silently ignoring it would be a lie.
-    LeadTimeInPast(DateTime<Utc>),
-}
+pub use crate::modules::due_reminder::MAX_LEAD_MINUTES;
 
 /// The instant a reminder should fire for `todo`, if it wants one at all.
 ///
@@ -50,82 +33,39 @@ pub fn wanted_trigger(todo: &TodoItem) -> Option<DateTime<Utc>> {
 /// `room_id` is where the reminder should be delivered — the originating Matrix
 /// room, or the room the web caller picked. A todo carrying the `web` sentinel
 /// has no room of its own, so the caller supplies one.
-///
-/// `broadcaster` is optional because the Matrix command path has no access to
-/// one; see the note in `modules/todo/handler.rs`.
 pub async fn sync(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     todo: &TodoItem,
     room_id: &str,
 ) -> Result<SyncOutcome> {
-    let existing = ReminderRepository::find_pending_for_todo(pool, todo.id).await?;
-    let wanted = wanted_trigger(todo);
-
-    let Some(trigger_at) = wanted else {
-        return Ok(tear_down(pool, broadcaster, todo.id).await?);
+    let plan = ReminderPlan {
+        source: ReminderSource::Todo,
+        source_id: todo.id,
+        owner_id: &todo.sender_mxid,
+        owner_name: &todo.sender_name,
+        room_id,
+        message: format!("Task #{} is due: {}", todo.id, todo.text),
+        trigger_at: wanted_trigger(todo),
     };
 
-    if trigger_at <= Utc::now() {
-        // Drop any stale reminder before reporting, so a due date pushed into
-        // the past does not leave one pending behind it.
-        tear_down(pool, broadcaster, todo.id).await?;
-        return Ok(SyncOutcome::LeadTimeInPast(trigger_at));
-    }
-
-    if let Some(current) = &existing {
-        if current.trigger_at == trigger_at && current.room_id == room_id {
-            return Ok(SyncOutcome::Scheduled(trigger_at));
-        }
-        // Time or destination moved. Replacing rather than patching keeps one
-        // creation path, so a rescheduled reminder cannot end up half-updated.
-        tear_down(pool, broadcaster, todo.id).await?;
-    }
-
-    let reminder = ReminderRepository::create(
-        pool,
-        room_id,
-        &todo.sender_mxid,
-        &todo.sender_name,
-        &format!("Task #{} is due: {}", todo.id, todo.text),
-        trigger_at,
-        RecurrencePattern::None,
-        Some(todo.id),
-    )
-    .await?;
-
-    if let Some(b) = broadcaster {
-        b.send(SystemEvent::ReminderCreated(reminder));
-    }
-
-    Ok(SyncOutcome::Scheduled(trigger_at))
+    due_reminder::sync(pool, broadcaster, &plan).await
 }
 
-/// Cancels the linked reminder if one is pending, broadcasting the change.
+/// Cancels the todo's linked reminder if one is pending.
 pub async fn tear_down(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     todo_id: i64,
 ) -> Result<SyncOutcome> {
-    let Some(cancelled) = ReminderRepository::cancel_for_todo(pool, todo_id).await? else {
-        return Ok(SyncOutcome::Nothing);
-    };
-
-    if let Some(b) = broadcaster {
-        b.send(SystemEvent::ReminderCancelled {
-            id: cancelled.id,
-            room_id: cancelled.room_id,
-            owner_id: cancelled.sender_mxid,
-        });
-    }
-
-    Ok(SyncOutcome::Cancelled)
+    due_reminder::tear_down(pool, broadcaster, ReminderSource::Todo, todo_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use crate::modules::reminder::repository::ReminderRepository;
     use crate::modules::todo::models::TodoPriority;
     use crate::modules::todo::repository::TodoRepository;
 
@@ -158,13 +98,14 @@ mod tests {
         let expected = due - Duration::minutes(60);
         assert_eq!(outcome, SyncOutcome::Scheduled(expected));
 
-        let rem = ReminderRepository::find_pending_for_todo(&pool, todo.id)
+        let rem = ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
             .await
             .unwrap()
             .expect("a reminder must be pending");
         assert_eq!(rem.trigger_at, expected);
         assert_eq!(rem.room_id, "!room:a");
-        assert_eq!(rem.todo_id, Some(todo.id));
+        assert_eq!(rem.source_kind.as_deref(), Some("todo"));
+        assert_eq!(rem.source_id, Some(todo.id));
     }
 
     #[tokio::test]
@@ -188,7 +129,7 @@ mod tests {
         let outcome = sync(&pool, None, &todo, "!room:a").await.unwrap();
 
         assert!(matches!(outcome, SyncOutcome::LeadTimeInPast(_)));
-        assert!(ReminderRepository::find_pending_for_todo(&pool, todo.id)
+        assert!(ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
             .await
             .unwrap()
             .is_none());
@@ -204,7 +145,7 @@ mod tests {
         let outcome = sync(&pool, None, &done, "!room:a").await.unwrap();
 
         assert_eq!(outcome, SyncOutcome::Cancelled);
-        assert!(ReminderRepository::find_pending_for_todo(&pool, todo.id)
+        assert!(ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
             .await
             .unwrap()
             .is_none());
@@ -226,8 +167,11 @@ mod tests {
         assert_eq!(outcome, SyncOutcome::Scheduled(moved_due - Duration::minutes(60)));
 
         let pending: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM reminders WHERE todo_id = ? AND status = 'pending'")
-                .bind(todo.id)
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ? \
+                 AND status = 'pending'",
+            )
+            .bind(todo.id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -258,8 +202,10 @@ mod tests {
         let second = sync(&pool, None, &todo, "!room:a").await.unwrap();
         assert_eq!(first, second);
 
-        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reminders WHERE todo_id = ?")
-            .bind(todo.id)
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ?",
+        )
+        .bind(todo.id)
             .fetch_one(&pool)
             .await
             .unwrap();

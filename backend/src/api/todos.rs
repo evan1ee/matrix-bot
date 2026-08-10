@@ -10,6 +10,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
+use crate::modules::reminder::models::ReminderSource;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
@@ -300,7 +301,11 @@ pub async fn update_todo(
         // caller names a new room. Without this fallback, editing just the text
         // of a web task that has a reminder would fail for want of a room the
         // caller never intended to change.
-        let current_room = ReminderRepository::find_pending_for_todo(&state.db.pool, id)
+        let current_room = ReminderRepository::find_pending_for_source(
+            &state.db.pool,
+            ReminderSource::Todo,
+            id,
+        )
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?
             .map(|r| r.room_id);
@@ -748,8 +753,9 @@ mod tests {
         assert_eq!(created.due_at.unwrap().timestamp(), due.timestamp());
         assert_eq!(created.remind_before_minutes, Some(60));
 
-        let rem = crate::modules::reminder::repository::ReminderRepository::find_pending_for_todo(
+        let rem = crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
             &state.db.pool,
+            ReminderSource::Todo,
             created.id,
         )
         .await
@@ -860,8 +866,9 @@ mod tests {
 
         assert!(cleared.due_at.is_none());
         assert!(
-            crate::modules::reminder::repository::ReminderRepository::find_pending_for_todo(
+            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
                 &state.db.pool,
+                ReminderSource::Todo,
                 created.id,
             )
             .await
@@ -906,7 +913,7 @@ mod tests {
         assert_eq!(edited.text, "Ship the release on Friday");
         assert_eq!(edited.priority, "high");
 
-        let rem = ReminderRepository::find_pending_for_todo(&state.db.pool, created.id)
+        let rem = ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, created.id)
             .await
             .unwrap()
             .expect("the reminder must survive an unrelated edit");
@@ -946,7 +953,7 @@ mod tests {
         .await
         .unwrap();
 
-        let rem = ReminderRepository::find_pending_for_todo(&state.db.pool, created.id)
+        let rem = ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, created.id)
             .await
             .unwrap()
             .unwrap();
@@ -974,8 +981,9 @@ mod tests {
         delete_todo(State(state.clone()), alice, Path(created.id)).await.unwrap();
 
         assert!(
-            crate::modules::reminder::repository::ReminderRepository::find_pending_for_todo(
+            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
                 &state.db.pool,
+                ReminderSource::Todo,
                 created.id,
             )
             .await

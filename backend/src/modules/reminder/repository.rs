@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
-use crate::modules::reminder::models::{RecurrencePattern, Reminder};
+use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderSource};
 
 /// Delivery attempts allowed before a reminder is marked `failed`.
 ///
@@ -13,7 +13,7 @@ pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 /// The `Reminder` column list. Shared by every read so a new column cannot be
 /// missed by one query.
 const COLUMNS: &str = "id, room_id, sender_mxid, sender_name, message, trigger_at, \
-                       recurrence, status, retry_count, todo_id, created_at";
+                       recurrence, status, retry_count, source_kind, source_id, created_at";
 
 pub struct ReminderRepository;
 
@@ -26,14 +26,14 @@ impl ReminderRepository {
         message: &str,
         trigger_at: DateTime<Utc>,
         recurrence: RecurrencePattern,
-        todo_id: Option<i64>,
+        source: Option<(ReminderSource, i64)>,
     ) -> Result<Reminder> {
         let rec_str = recurrence.as_str();
 
         let res = sqlx::query(
             r#"
-            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, todo_id)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?)
+            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
             "#,
         )
         .bind(room_id)
@@ -42,7 +42,8 @@ impl ReminderRepository {
         .bind(message)
         .bind(trigger_at)
         .bind(rec_str)
-        .bind(todo_id)
+        .bind(source.map(|(kind, _)| kind.as_str()))
+        .bind(source.map(|(_, id)| id))
         .execute(pool)
         .await?;
 
@@ -58,29 +59,39 @@ impl ReminderRepository {
         Ok(reminder)
     }
 
-    /// The pending reminder scheduled from `todo_id`, if there is one.
+    /// The pending reminder scheduled from this source row, if there is one.
     ///
     /// At most one exists at a time: `sync` reschedules rather than stacking a
     /// second row.
-    pub async fn find_pending_for_todo(pool: &SqlitePool, todo_id: i64) -> Result<Option<Reminder>> {
+    pub async fn find_pending_for_source(
+        pool: &SqlitePool,
+        source: ReminderSource,
+        source_id: i64,
+    ) -> Result<Option<Reminder>> {
         let reminder = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE todo_id = ? AND status = 'pending' \
-             ORDER BY id DESC LIMIT 1"
+            "SELECT {COLUMNS} FROM reminders WHERE source_kind = ? AND source_id = ? \
+             AND status = 'pending' ORDER BY id DESC LIMIT 1"
         ))
-        .bind(todo_id)
+        .bind(source.as_str())
+        .bind(source_id)
         .fetch_optional(pool)
         .await?;
 
         Ok(reminder)
     }
 
-    /// Cancels the pending reminder linked to `todo_id`, returning it so the
-    /// caller can broadcast the cancellation.
+    /// Cancels the pending reminder linked to this source row, returning it so
+    /// the caller can broadcast the cancellation.
     ///
-    /// Ownership is not re-checked here: the caller reached this todo through
-    /// an owner-scoped lookup, and the link column is not user-supplied.
-    pub async fn cancel_for_todo(pool: &SqlitePool, todo_id: i64) -> Result<Option<Reminder>> {
-        let Some(reminder) = Self::find_pending_for_todo(pool, todo_id).await? else {
+    /// Ownership is not re-checked here: the caller reached the source row
+    /// through an owner-scoped lookup, and the link columns are not
+    /// user-supplied.
+    pub async fn cancel_for_source(
+        pool: &SqlitePool,
+        source: ReminderSource,
+        source_id: i64,
+    ) -> Result<Option<Reminder>> {
+        let Some(reminder) = Self::find_pending_for_source(pool, source, source_id).await? else {
             return Ok(None);
         };
 
