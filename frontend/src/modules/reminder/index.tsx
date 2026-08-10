@@ -31,9 +31,10 @@ export interface JoinedRoomInfo {
   name: string;
 }
 
-export const ReminderMainView: React.FC = () => {
+export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) => {
   const { timezone } = useSettings();
   const queryClient = useQueryClient();
+  const messageInputRef = React.useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState('');
   const [durationValue, setDurationValue] = useState<number>(5);
   const [durationUnit, setDurationUnit] = useState<'seconds' | 'minutes' | 'hours' | 'days'>('minutes');
@@ -54,6 +55,10 @@ export const ReminderMainView: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  React.useEffect(() => {
+    if (autoFocus) messageInputRef.current?.focus();
+  }, [autoFocus]);
 
   const { data, isLoading } = useQuery<ReminderListResponse>({
     queryKey: ['reminders'],
@@ -199,6 +204,7 @@ export const ReminderMainView: React.FC = () => {
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
             <input
+              ref={messageInputRef}
               type="text"
               placeholder="Reminder message..."
               value={message}

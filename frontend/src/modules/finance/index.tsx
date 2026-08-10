@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule } from '../../core/types';
@@ -258,9 +258,10 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
   );
 };
 
-export const FinanceMainView: React.FC = () => {
+export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) => {
   const queryClient = useQueryClient();
   const { timezone, currency: defaultCurrency } = useSettings();
+  const amountInputRef = useRef<HTMLInputElement>(null);
   const [direction, setDirection] = useState<Direction>('expense');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState(defaultCurrency);
@@ -276,6 +277,10 @@ export const FinanceMainView: React.FC = () => {
   useEffect(() => {
     setCurrency(defaultCurrency);
   }, [defaultCurrency]);
+
+  useEffect(() => {
+    if (autoFocus) amountInputRef.current?.focus();
+  }, [autoFocus]);
 
   const [showCategories, setShowCategories] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -509,6 +514,7 @@ export const FinanceMainView: React.FC = () => {
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
               <input
+                ref={amountInputRef}
                 type="text"
                 inputMode="decimal"
                 placeholder="15.50"

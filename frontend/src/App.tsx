@@ -33,6 +33,9 @@ const queryClient = new QueryClient({
 
 const AppContent: React.FC = () => {
   const [activeModuleId, setActiveModuleId] = useState<string>('dashboard');
+  // Set alongside activeModuleId only by a Quick Action jump, so the target
+  // module's primary input autofocuses; any ordinary nav click clears it.
+  const [focusModuleId, setFocusModuleId] = useState<string | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [token, setToken] = useState<string | null>(getAuthToken());
@@ -60,11 +63,23 @@ const AppContent: React.FC = () => {
     setStoredTheme(newTheme);
   };
 
+  const handleSelectModule = (id: string) => {
+    setActiveModuleId(id);
+    setFocusModuleId(null);
+  };
+
+  const handleQuickNavigate = (id: string) => {
+    setActiveModuleId(id);
+    setFocusModuleId(id);
+  };
+
   return (
     <>
       <AppShell
         activeModuleId={activeModuleId}
-        onSelectModule={setActiveModuleId}
+        onSelectModule={handleSelectModule}
+        onQuickNavigate={handleQuickNavigate}
+        focusModuleId={focusModuleId}
         events={events}
         isConnected={isConnected}
         onOpenAuth={() => setIsAuthOpen(true)}

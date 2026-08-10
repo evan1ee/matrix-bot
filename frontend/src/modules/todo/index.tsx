@@ -329,9 +329,10 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
   );
 };
 
-export const TodoMainView: React.FC = () => {
+export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) => {
   const { timezone } = useSettings();
   const queryClient = useQueryClient();
+  const textInputRef = React.useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [priority, setPriority] = useState('medium');
   const [dueAt, setDueAt] = useState('');
@@ -351,6 +352,10 @@ export const TodoMainView: React.FC = () => {
     queryKey: ['rooms'],
     queryFn: () => fetchApi<JoinedRoomInfo[]>('/rooms'),
   });
+
+  React.useEffect(() => {
+    if (autoFocus) textInputRef.current?.focus();
+  }, [autoFocus]);
 
   const wantsReminder = leadMinutes !== '';
   const noRoomsAvailable = wantsReminder && (rooms?.length ?? 0) === 0;
@@ -475,6 +480,7 @@ export const TodoMainView: React.FC = () => {
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <input
+              ref={textInputRef}
               type="text"
               placeholder="What needs to be done?"
               value={text}

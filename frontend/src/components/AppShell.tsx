@@ -8,6 +8,8 @@ import { MobileTopBar } from './MobileTopBar';
 interface AppShellProps {
   activeModuleId: string;
   onSelectModule: (id: string) => void;
+  onQuickNavigate: (id: string) => void;
+  focusModuleId: string | null;
   events: SystemEvent[];
   isConnected: boolean;
   onOpenAuth: () => void;
@@ -31,6 +33,8 @@ const MODULE_LABELS: Record<string, string> = {
 export const AppShell: React.FC<AppShellProps> = ({
   activeModuleId,
   onSelectModule,
+  onQuickNavigate,
+  focusModuleId,
   events,
   isConnected,
   onOpenAuth,
@@ -99,6 +103,8 @@ export const AppShell: React.FC<AppShellProps> = ({
           {activeModule && (
             <activeModule.MainView
               {...(activeModule.id === 'core' ? { events, isConnected } : {})}
+              onNavigate={onQuickNavigate}
+              autoFocus={activeModule.id === focusModuleId}
             />
           )}
         </main>

@@ -34,6 +34,8 @@ export interface FrontendModule {
     onSelectRoom?: (roomId: string) => void;
     events?: SystemEvent[];
     isConnected?: boolean;
+    onNavigate?: (moduleId: string) => void;
+    autoFocus?: boolean;
   }>;
   
   handleSseEvent?: (event: SystemEvent, queryClient: QueryClient) => void;
