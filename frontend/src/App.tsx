@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { registry } from './core/registry';
+import { dashboardModule } from './modules/dashboard';
 import { coreModule } from './modules/core';
 import { todoModule } from './modules/todo';
 import { reminderModule } from './modules/reminder';
@@ -15,7 +16,7 @@ import { AUTH_EXPIRED_EVENT, getAuthToken } from './core/apiClient';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[coreModule, todoModule, reminderModule, financeModule, portfolioModule, recurringBillsModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, financeModule, portfolioModule, recurringBillsModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
@@ -31,7 +32,7 @@ const queryClient = new QueryClient({
 });
 
 const AppContent: React.FC = () => {
-  const [activeModuleId, setActiveModuleId] = useState<string>('core');
+  const [activeModuleId, setActiveModuleId] = useState<string>('dashboard');
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [token, setToken] = useState<string | null>(getAuthToken());
