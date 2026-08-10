@@ -15,6 +15,7 @@ interface CustomSelectProps {
   mono?: boolean;
   variant?: 'default' | 'inline';
   showCheckmark?: boolean;
+  position?: 'bottom' | 'top';
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -26,6 +27,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   mono = false,
   variant = 'default',
   showCheckmark,
+  position = 'bottom',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +53,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     };
   }, []);
 
+  const posClass = position === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5';
+
   const triggerClasses =
     variant === 'inline'
       ? 'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-neutral-900 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none transition cursor-pointer'
@@ -58,8 +62,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   const popoverClasses =
     variant === 'inline'
-      ? 'absolute left-0 top-full mt-1.5 w-auto min-w-[90px] z-50 p-1 rounded-xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-0.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100'
-      : 'absolute left-0 top-full mt-1.5 w-full min-w-[170px] z-50 p-1.5 rounded-2xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-0.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100';
+      ? `absolute left-0 ${posClass} w-auto min-w-[90px] z-50 p-1 rounded-xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-0.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100`
+      : `absolute left-0 ${posClass} w-full min-w-[170px] z-50 p-1.5 rounded-2xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-0.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100`;
 
   return (
     <div ref={containerRef} className={`relative inline-block ${className}`}>

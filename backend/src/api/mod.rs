@@ -22,6 +22,7 @@ pub mod health;
 pub mod openapi;
 pub mod finance;
 pub mod portfolio;
+pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
 pub mod settings;
@@ -124,7 +125,18 @@ pub async fn start_api_server(
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/cash", get(portfolio::list_cash))
         .route("/portfolio/cash/deposit", post(portfolio::deposit_cash))
-        .route("/portfolio/cash/withdraw", post(portfolio::withdraw_cash));
+        .route("/portfolio/cash/withdraw", post(portfolio::withdraw_cash))
+        .route(
+            "/recurring-bills",
+            get(recurring_bills::list_bills).post(recurring_bills::create_bill),
+        )
+        .route(
+            "/recurring-bills/:id",
+            get(recurring_bills::get_bill)
+                .put(recurring_bills::update_bill)
+                .delete(recurring_bills::delete_bill),
+        )
+        .route("/recurring-bills/:id/pay", post(recurring_bills::pay_bill));
 
     let web_dist = if std::path::Path::new("web/dist").exists() {
         "web/dist"

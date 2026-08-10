@@ -9,6 +9,7 @@ use crate::events::EventBroadcaster;
 pub mod core;
 pub mod finance;
 pub mod portfolio;
+pub mod recurring_bills;
 pub mod reminder;
 pub mod settings;
 pub mod todo;

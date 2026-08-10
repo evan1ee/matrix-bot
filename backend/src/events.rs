@@ -3,9 +3,10 @@ use tokio::sync::broadcast;
 
 use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::portfolio::models::Holding;
+use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::reminder::models::Reminder;
-use crate::modules::todo::models::TodoItem;
 use crate::modules::settings::UserSettings;
+use crate::modules::todo::models::TodoItem;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -39,6 +40,10 @@ pub enum SystemEvent {
     /// real row to key off — the event fields are what the SSE stream and the
     /// frontend cache actually key on.
     PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
+    RecurringBillCreated(RecurringBill),
+    RecurringBillUpdated(RecurringBill),
+    RecurringBillDeleted { id: i64, owner_id: String },
+    RecurringBillPaid { id: i64, owner_id: String, next_due_at: String },
 }
 
 impl SystemEvent {
@@ -68,9 +73,13 @@ impl SystemEvent {
             }
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
+            SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
+                &b.sender_mxid
+            }
+            SystemEvent::RecurringBillDeleted { owner_id, .. }
+            | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
         }
     }
-
 }
 
 /// Broadcasts `SystemEvent`s to all connected SSE clients via `tokio::sync::broadcast`.

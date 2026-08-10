@@ -187,6 +187,46 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS recurring_bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id TEXT NOT NULL,
+            sender_mxid TEXT NOT NULL,
+            sender_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            amount_minor INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            frequency TEXT NOT NULL DEFAULT 'monthly',
+            due_day INTEGER,
+            next_due_at TIMESTAMP NOT NULL,
+            total_installments INTEGER,
+            paid_installments INTEGER NOT NULL DEFAULT 0,
+            auto_pay BOOLEAN NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active',
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_recurring_bills_owner ON recurring_bills(sender_mxid, status);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_recurring_bills_due ON recurring_bills(sender_mxid, next_due_at);",
+    )
+    .execute(pool)
+    .await?;
+
     // Composite indexes for performance optimization
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger ON reminders(status, trigger_at);"
@@ -221,6 +261,17 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_reminders_todo ON reminders(todo_id);")
         .execute(pool)
         .await?;
+
+    // Migration helpers for recurring_bills columns on existing SQLite DBs
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN due_day INTEGER;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN total_installments INTEGER;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN paid_installments INTEGER NOT NULL DEFAULT 0;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT 0;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN status TEXT NOT NULL DEFAULT 'active';").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN notes TEXT;").execute(pool).await;
 
     // `due_at` used to hold the rendered display string (`2026-12-31 23:59 UTC`),
     // which cannot be compared or subtracted from. Rewrite legacy rows into the
@@ -273,6 +324,7 @@ mod tests {
             "finance_categories",
             "portfolio_cash_balances",
             "portfolio_holdings",
+            "recurring_bills",
             "reminders",
             "todos",
             "transactions",

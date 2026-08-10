@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 
@@ -22,6 +23,10 @@ interface DateTimePickerProps {
   /** "Now" as a naive wall clock in the zone the caller works in. Defaults to
    *  the browser's own clock. */
   now?: Date;
+  /** Position of the popover relative to the trigger. Defaults to 'bottom'. */
+  position?: 'bottom' | 'top' | 'auto';
+  /** Whether to show the time selection row. Defaults to true. */
+  showTime?: boolean;
 }
 
 const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -49,12 +54,7 @@ function toValue(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
-/** Reads the naive `YYYY-MM-DDTHH:mm` this control exchanges.
- *
- * The string names a wall clock with no zone attached, and every comparison in
- * this component is on date fields, so parsing it as browser-local is correct
- * regardless of which zone the caller means it in. The caller converts to and
- * from a real instant at its own boundary. */
+/** Reads the naive `YYYY-MM-DDTHH:mm` this control exchanges. */
 function parseValue(value: string): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -96,21 +96,24 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   placeholder = 'Pick a date…',
   className = '',
   now,
+  showTime = true,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const [viewMonth, setViewMonth] = useState(() =>
     startOfMonth(parseValue(value) ?? now ?? new Date())
   );
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selected = parseValue(value);
-  // "Today" and "Now" mean the user's chosen zone, not the browser's, or the
-  // highlighted day is wrong for anyone whose setting differs from their machine.
   const today = now ?? new Date();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        // Also check if click was inside portal popover
+        const target = e.target as HTMLElement;
+        if (target.closest('[data-testid="datetime-popover"]')) return;
         setIsOpen(false);
       }
     };
@@ -126,9 +129,46 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const updatePosition = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const popoverHeight = showTime ? 335 : 265;
+      const popoverWidth = 272;
+      const margin = 8;
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+
+      let top = rect.bottom + 6;
+      if (top + popoverHeight > vh - margin) {
+        const topUp = rect.top - popoverHeight - 6;
+        if (topUp >= margin) {
+          top = topUp;
+        } else {
+          top = Math.max(margin, Math.min(top, vh - popoverHeight - margin));
+        }
+      }
+
+      let left = rect.left;
+      if (left + popoverWidth > vw - margin) {
+        left = Math.max(margin, vw - popoverWidth - margin);
+      }
+
+      setCoords({ top, left });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen, showTime]);
+
   const open = () => {
-    // The value may have changed since the last time this was open (a row
-    // entering edit mode reseeds it), so start from the month it names.
     setViewMonth(startOfMonth(parseValue(value) ?? today));
     setIsOpen(true);
   };
@@ -137,6 +177,9 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
     const hour = selected ? selected.getHours() : DEFAULT_HOUR;
     const minute = selected ? selected.getMinutes() : 0;
     onChange(toValue(new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute)));
+    if (!showTime) {
+      setIsOpen(false);
+    }
   };
 
   const pickTime = (hour: number, minute: number) => {
@@ -145,7 +188,9 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   };
 
   const display = selected
-    ? selected.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    ? showTime
+      ? selected.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+      : selected.toLocaleString(undefined, { dateStyle: 'medium' })
     : placeholder;
 
   return (
@@ -161,10 +206,16 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
         <CalendarDays className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
       </button>
 
-      {isOpen && (
+      {isOpen && coords && createPortal(
         <div
           data-testid="datetime-popover"
-          className="absolute left-0 top-full mt-1.5 z-50 w-[272px] p-3 rounded-2xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl"
+          style={{
+            position: 'fixed',
+            top: `${coords.top}px`,
+            left: `${coords.left}px`,
+            zIndex: 99999,
+          }}
+          className="w-[272px] p-3 rounded-2xl bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-2xl font-sans animate-in fade-in zoom-in-95 duration-100"
         >
           <div className="flex items-center justify-between pb-2">
             <span
@@ -230,30 +281,34 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
             })}
           </div>
 
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
-            <span className="text-[10px] uppercase font-mono text-neutral-500">Time</span>
-            <div className="flex items-center gap-0.5 ml-auto">
-              <div data-testid="datetime-hour">
-                <CustomSelect
-                  value={String(selected ? selected.getHours() : DEFAULT_HOUR)}
-                  onChange={(h) => pickTime(Number(h), selected ? selected.getMinutes() : 0)}
-                  options={HOUR_OPTIONS}
-                  variant="inline"
-                  mono
-                />
-              </div>
-              <span className="text-xs font-mono text-neutral-400">:</span>
-              <div data-testid="datetime-minute">
-                <CustomSelect
-                  value={String(selected ? selected.getMinutes() : 0)}
-                  onChange={(m) => pickTime(selected ? selected.getHours() : DEFAULT_HOUR, Number(m))}
-                  options={MINUTE_OPTIONS}
-                  variant="inline"
-                  mono
-                />
+          {showTime && (
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Time</span>
+              <div className="flex items-center gap-0.5 ml-auto">
+                <div data-testid="datetime-hour">
+                  <CustomSelect
+                    value={String(selected ? selected.getHours() : DEFAULT_HOUR)}
+                    onChange={(h) => pickTime(Number(h), selected ? selected.getMinutes() : 0)}
+                    options={HOUR_OPTIONS}
+                    variant="inline"
+                    mono
+                    position="top"
+                  />
+                </div>
+                <span className="text-xs font-mono text-neutral-400">:</span>
+                <div data-testid="datetime-minute">
+                  <CustomSelect
+                    value={String(selected ? selected.getMinutes() : 0)}
+                    onChange={(m) => pickTime(selected ? selected.getHours() : DEFAULT_HOUR, Number(m))}
+                    options={MINUTE_OPTIONS}
+                    variant="inline"
+                    mono
+                    position="top"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center justify-between mt-3">
             <button
@@ -286,7 +341,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
