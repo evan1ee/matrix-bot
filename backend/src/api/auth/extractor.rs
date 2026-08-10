@@ -32,7 +32,7 @@ where
 
         // 1. Try Matrix Access Token validation (if starts with syt_)
         if token.starts_with("syt_") {
-            if let Some(user_id) = api_state.matrix_identity.whoami(&api_state, token).await {
+            if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
                 return Ok(AuthUser::matrix(user_id));
             } else {
                 return Err(ApiError::unauthorized("Invalid or expired Matrix access token"));
@@ -57,7 +57,7 @@ where
             }
             Err(_) => {
                 // 3. Fallback: try checking if it's a raw Matrix Access Token that doesn't start with syt_
-                if let Some(user_id) = api_state.matrix_identity.whoami(&api_state, token).await {
+                if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
                     Ok(AuthUser::matrix(user_id))
                 } else {
                     Err(ApiError::unauthorized("Invalid or expired authentication token"))

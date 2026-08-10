@@ -1,9 +1,17 @@
 use axum::extract::FromRef;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 use crate::db::Database;
+
+/// Hashes a bearer token into a cache key, so no live credential is stored.
+fn token_cache_key(token: &str) -> [u8; 32] {
+    Sha256::digest(token.as_bytes()).into()
+}
 
 /// Which identity space a caller authenticated in.
 ///
@@ -202,7 +210,37 @@ pub struct ApiState {
     pub resolved_homeserver: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
     /// How the auth layer reaches Matrix. Swapped in tests.
     pub matrix_identity: std::sync::Arc<dyn MatrixIdentityProvider>,
+    /// Access token → MXID, so repeat calls skip the `/whoami` round trip.
+    ///
+    /// Keyed by SHA-256 of the token, never the token itself: this map outlives
+    /// any single request, and a bearer token is a live credential that must not
+    /// sit in a long-lived structure where a `Debug` print or a core dump would
+    /// expose something replayable.
+    pub matrix_identity_cache:
+        std::sync::Arc<tokio::sync::RwLock<HashMap<[u8; 32], CachedIdentity>>>,
 }
+
+/// A resolved Matrix identity and the moment it stops being trusted.
+pub struct CachedIdentity {
+    user_id: String,
+    expires_at: Instant,
+}
+
+/// How long a resolved Matrix identity is reused before re-asking the
+/// homeserver.
+///
+/// This is the window in which a token revoked upstream (the user signed out of
+/// their client) still reaches the API, so it is deliberately short. The cost it
+/// removes is not one round trip but the burst: a screen that fires several
+/// requests at once previously paid a `/whoami` for each, and homeservers rate
+/// limit that endpoint.
+const MATRIX_IDENTITY_TTL: Duration = Duration::from_secs(60);
+
+/// Entries tolerated before expired ones are swept on insert.
+///
+/// The map is bounded by the number of distinct *valid* tokens — failures are
+/// never cached, so an attacker replaying garbage cannot grow it.
+const MATRIX_IDENTITY_CACHE_SWEEP_AT: usize = 512;
 
 impl ApiState {
     pub fn new(
@@ -224,7 +262,49 @@ impl ApiState {
             bot_client: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             resolved_homeserver: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             matrix_identity: std::sync::Arc::new(HomeserverIdentityProvider),
+            matrix_identity_cache: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Resolves a Matrix access token to its MXID, reusing a recent answer.
+    ///
+    /// Every Matrix-authenticated request used to spend a homeserver round trip
+    /// here, so latency was doubled and a burst of parallel requests could trip
+    /// the homeserver's rate limiter.
+    ///
+    /// Only successes are cached. A rejected token stays rejected on the fast
+    /// path guard in `looks_like_access_token`, and caching a `None` would mean
+    /// a token that becomes valid (or a homeserver blip) kept failing for the
+    /// whole TTL.
+    pub async fn resolve_matrix_identity(&self, token: &str) -> Option<String> {
+        let key = token_cache_key(token);
+
+        if let Some(hit) = self.matrix_identity_cache.read().await.get(&key) {
+            if hit.expires_at > Instant::now() {
+                return Some(hit.user_id.clone());
+            }
+        }
+
+        // Concurrent first-time requests for the same token can each miss and
+        // call out; that costs a few duplicate round trips on a cold token and
+        // is left alone deliberately — collapsing them needs per-key locking,
+        // which is more machinery than the saving justifies.
+        let user_id = self.matrix_identity.whoami(self, token).await?;
+
+        let mut cache = self.matrix_identity_cache.write().await;
+        if cache.len() >= MATRIX_IDENTITY_CACHE_SWEEP_AT {
+            let now = Instant::now();
+            cache.retain(|_, entry| entry.expires_at > now);
+        }
+        cache.insert(
+            key,
+            CachedIdentity {
+                user_id: user_id.clone(),
+                expires_at: Instant::now() + MATRIX_IDENTITY_TTL,
+            },
+        );
+
+        Some(user_id)
     }
 
     /// Replaces the Matrix identity provider, so tests can exercise the

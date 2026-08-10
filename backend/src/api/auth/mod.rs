@@ -149,6 +149,86 @@ mod tests {
         AuthUser::from_request_parts(&mut parts, state).await
     }
 
+    /// Counts how many times the homeserver was actually asked.
+    struct CountingMatrix {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl MatrixIdentityProvider for CountingMatrix {
+        async fn whoami(&self, _state: &ApiState, token: &str) -> Option<String> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (token == "syt_valid_token_value").then(|| "@evan:mbm.one".to_string())
+        }
+
+        async fn login(
+            &self,
+            _state: &ApiState,
+            _username: &str,
+            _password: &str,
+        ) -> Option<(String, String)> {
+            None
+        }
+    }
+
+    /// Repeat requests on one token must cost one `/whoami`, not one each.
+    ///
+    /// This is what makes a mobile client viable: a screen firing several calls
+    /// at once used to multiply into that many homeserver round trips, which
+    /// homeservers rate limit.
+    #[tokio::test]
+    async fn test_matrix_identity_is_cached_across_requests() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            "test_secret".to_string(),
+            None,
+            "https://mbm.one".to_string(),
+            reqwest::Client::new(),
+        )
+        .with_matrix_identity(std::sync::Arc::new(CountingMatrix {
+            calls: calls.clone(),
+        }));
+
+        for _ in 0..5 {
+            let user = extract(&state, Some("Bearer syt_valid_token_value"))
+                .await
+                .unwrap();
+            assert_eq!(user.owner_id(), "@evan:mbm.one");
+        }
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "five requests on one token must resolve the identity once"
+        );
+
+        // A rejected token is never cached, so it cannot be replayed past a
+        // revocation — and it re-asks every time.
+        for _ in 0..3 {
+            assert!(extract(&state, Some("Bearer syt_wrong_token_value"))
+                .await
+                .is_err());
+        }
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "failures must not be served from cache"
+        );
+
+        // A second, different token gets its own entry rather than the first's.
+        assert!(extract(&state, Some("Bearer syt_valid_token_value"))
+            .await
+            .is_ok());
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "the still-valid first token stays cached"
+        );
+    }
+
     /// The extractor decides which identity space a caller lands in. Every
     /// ownership check downstream trusts that decision.
     #[tokio::test]
