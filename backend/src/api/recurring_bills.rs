@@ -12,6 +12,15 @@ use crate::modules::recurring_bills::models::{
 };
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recurring-bills",
+    responses(
+        (status = 200, description = "Your recurring bills", body = Vec<RecurringBill>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_bills(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -24,6 +33,17 @@ pub async fn list_bills(
     Ok(Json(bills))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/recurring-bills",
+    request_body = CreateBillPayload,
+    responses(
+        (status = 200, description = "Bill created", body = RecurringBill),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn create_bill(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -57,6 +77,17 @@ pub async fn create_bill(
     Ok(Json(bill))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/recurring-bills/{id}",
+    params(("id" = i64, Path, description = "Recurring bill ID")),
+    responses(
+        (status = 200, description = "The bill", body = RecurringBill),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Not found", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn get_bill(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -75,6 +106,19 @@ pub async fn get_bill(
     Ok(Json(bill))
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/recurring-bills/{id}",
+    params(("id" = i64, Path, description = "Recurring bill ID")),
+    request_body = UpdateBillPayload,
+    responses(
+        (status = 200, description = "Bill updated", body = RecurringBill),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Not found", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn update_bill(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -110,6 +154,17 @@ pub async fn update_bill(
     Ok(Json(updated))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/recurring-bills/{id}",
+    params(("id" = i64, Path, description = "Recurring bill ID")),
+    responses(
+        (status = 204, description = "Bill deleted"),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Not found", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn delete_bill(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -132,6 +187,17 @@ pub async fn delete_bill(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/recurring-bills/{id}/pay",
+    params(("id" = i64, Path, description = "Recurring bill ID")),
+    responses(
+        (status = 200, description = "Bill marked paid for the period, advancing next_due_at", body = RecurringBill),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Not found", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn pay_bill(
     State(state): State<ApiState>,
     user: AuthUser,

@@ -169,6 +169,57 @@ impl ReminderRepository {
         Ok(reminders)
     }
 
+    /// Looks up a reminder that `sender_mxid` owns.
+    pub async fn find_owned(
+        pool: &SqlitePool,
+        sender_mxid: &str,
+        id: i64,
+    ) -> Result<Option<Reminder>> {
+        let reminder = sqlx::query_as::<_, Reminder>(&format!(
+            "SELECT {COLUMNS} FROM reminders WHERE id = ? AND sender_mxid = ?"
+        ))
+        .bind(id)
+        .bind(sender_mxid)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(reminder)
+    }
+
+    /// Edits a *pending* reminder's message, fire time, and recurrence.
+    ///
+    /// Restricted to `status = 'pending'` for the same reason `cancel` is: once
+    /// a reminder has fired or failed, its row is a delivery record, and moving
+    /// its `trigger_at` would either resurrect it in the scheduler's next sweep
+    /// or silently rewrite history. `retry_count` resets because a re-timed
+    /// reminder is a fresh delivery, not a continuation of the failed one.
+    pub async fn update_pending(
+        pool: &SqlitePool,
+        sender_mxid: &str,
+        id: i64,
+        message: &str,
+        trigger_at: DateTime<Utc>,
+        recurrence: RecurrencePattern,
+    ) -> Result<Option<Reminder>> {
+        let res = sqlx::query(
+            "UPDATE reminders SET message = ?, trigger_at = ?, recurrence = ?, retry_count = 0 \
+             WHERE id = ? AND sender_mxid = ? AND status = 'pending'",
+        )
+        .bind(message)
+        .bind(trigger_at)
+        .bind(recurrence.as_str())
+        .bind(id)
+        .bind(sender_mxid)
+        .execute(pool)
+        .await?;
+
+        if res.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        Self::find_owned(pool, sender_mxid, id).await
+    }
+
     pub async fn cancel(pool: &SqlitePool, sender_mxid: &str, id: i64) -> Result<bool> {
         let res = sqlx::query(
             "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND sender_mxid = ? AND status = 'pending'",
@@ -222,6 +273,64 @@ mod tests {
 
         let due_after = ReminderRepository::get_due_reminders(&pool).await.unwrap();
         assert!(due_after.is_empty());
+    }
+
+    /// An edit must be owner-scoped and must not reach an already-fired row.
+    #[tokio::test]
+    async fn test_update_pending_is_owner_scoped_and_pending_only() {
+        let pool = setup_test_db().await;
+        let later = Utc::now() + Duration::hours(1);
+
+        let rem = ReminderRepository::create(
+            &pool, "!room:a", "@bob:a", "bob", "Check oven", later, RecurrencePattern::None, None,
+        )
+        .await
+        .unwrap();
+
+        // Someone else's edit finds nothing to update.
+        let stranger = ReminderRepository::update_pending(
+            &pool,
+            "@mallory:a",
+            rem.id,
+            "Hijacked",
+            later,
+            RecurrencePattern::None,
+        )
+        .await
+        .unwrap();
+        assert!(stranger.is_none(), "a non-owner must not be able to edit");
+
+        // The owner's edit lands, and resets the retry budget.
+        let new_time = Utc::now() + Duration::hours(3);
+        let updated = ReminderRepository::update_pending(
+            &pool,
+            "@bob:a",
+            rem.id,
+            "Check oven again",
+            new_time,
+            RecurrencePattern::Daily,
+        )
+        .await
+        .unwrap()
+        .expect("the owner's edit should apply");
+
+        assert_eq!(updated.message, "Check oven again");
+        assert_eq!(updated.recurrence, RecurrencePattern::Daily.as_str());
+        assert_eq!(updated.retry_count, 0);
+
+        // Once it has fired, it is a delivery record, not an editable plan.
+        ReminderRepository::mark_triggered(&pool, rem.id).await.unwrap();
+        let after_fire = ReminderRepository::update_pending(
+            &pool,
+            "@bob:a",
+            rem.id,
+            "Too late",
+            new_time,
+            RecurrencePattern::None,
+        )
+        .await
+        .unwrap();
+        assert!(after_fire.is_none(), "a triggered reminder must not be editable");
     }
 
     /// A failed delivery must neither be dropped nor retried forever.

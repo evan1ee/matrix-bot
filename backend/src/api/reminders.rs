@@ -146,6 +146,69 @@ pub async fn create_reminder(
     Ok(Json(reminder))
 }
 
+/// Mirrors `CreateReminderRequest` rather than patching individual fields: the
+/// fire time is expressed as a delay from now, exactly as at creation, so an
+/// edit and a create mean the same thing by the same arithmetic.
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateReminderRequest {
+    pub message: String,
+    pub seconds: u64,
+    pub recurrence: Option<String>,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/reminders/{id}",
+    params(("id" = i64, Path, description = "Reminder ID")),
+    request_body = UpdateReminderRequest,
+    responses(
+        (status = 200, description = "Reminder updated", body = Reminder),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 404, description = "Reminder not found, or no longer pending", body = ApiErrorResponse)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_reminder(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateReminderRequest>,
+) -> Result<Json<Reminder>, ApiError> {
+    if payload.message.trim().is_empty() {
+        return Err(ApiError::bad_request("Message required"));
+    }
+    if payload.seconds == 0 {
+        return Err(ApiError::bad_request("Seconds must be greater than 0"));
+    }
+    if payload.message.len() > 500 {
+        return Err(ApiError::bad_request("Message exceeds 500 character limit"));
+    }
+
+    let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
+    let recurrence = payload
+        .recurrence
+        .as_deref()
+        .map(RecurrencePattern::from_str)
+        .unwrap_or(RecurrencePattern::None);
+
+    let updated = ReminderRepository::update_pending(
+        &state.db.pool,
+        &user.owner_id(),
+        id,
+        &payload.message,
+        trigger_at,
+        recurrence,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .ok_or_else(|| ApiError::not_found("Reminder not found, or is no longer pending"))?;
+
+    state.broadcaster.send(SystemEvent::ReminderUpdated(updated.clone()));
+
+    Ok(Json(updated))
+}
+
 #[utoipa::path(
     delete,
     path = "/api/v1/reminders/{id}",
@@ -244,5 +307,84 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_update_reminder_is_owner_scoped_and_validated() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            "secret".to_string(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let alice = AuthUser::local("alice");
+        let bob = AuthUser::local("bob");
+
+        let created = create_reminder(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateReminderRequest {
+                room_id: Some("!room:1".to_string()),
+                message: "Water the plants".to_string(),
+                seconds: 60,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Bob cannot edit Alice's reminder.
+        let err = update_reminder(
+            State(state.clone()),
+            bob,
+            Path(created.id),
+            Json(UpdateReminderRequest {
+                message: "Hijacked".to_string(),
+                seconds: 60,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        // An empty message is rejected before anything is written.
+        let err = update_reminder(
+            State(state.clone()),
+            alice.clone(),
+            Path(created.id),
+            Json(UpdateReminderRequest {
+                message: "   ".to_string(),
+                seconds: 60,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        // Alice's own edit lands, including the recurrence change.
+        let updated = update_reminder(
+            State(state.clone()),
+            alice,
+            Path(created.id),
+            Json(UpdateReminderRequest {
+                message: "Water the plants twice".to_string(),
+                seconds: 7200,
+                recurrence: Some("weekly".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.message, "Water the plants twice");
+        assert_eq!(updated.recurrence, "weekly");
+        assert!(
+            updated.trigger_at > created.trigger_at,
+            "the new delay should push the fire time out"
+        );
     }
 }

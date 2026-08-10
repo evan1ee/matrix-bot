@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 
 /// Represents a recurring bill, subscription, installment, or recurring transfer.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct RecurringBill {
     pub id: i64,
     pub room_id: String,
@@ -25,7 +26,7 @@ pub struct RecurringBill {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateBillPayload {
     pub name: String,
     pub category: String,
@@ -40,7 +41,7 @@ pub struct CreateBillPayload {
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateBillPayload {
     pub name: Option<String>,
     pub category: Option<String>,

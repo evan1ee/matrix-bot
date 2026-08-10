@@ -2,12 +2,17 @@ use axum::{response::IntoResponse, Json};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::api::{auth, finance, health, portfolio, reminders, rooms, settings, sse, todos};
+use crate::api::{
+    auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse, todos,
+};
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
     Category, CategoryTotal, CurrencySummary, Direction, Transaction,
 };
 use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
+use crate::modules::recurring_bills::models::{
+    CreateBillPayload, RecurringBill, UpdateBillPayload,
+};
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::settings::UserSettings;
@@ -31,6 +36,7 @@ use crate::modules::settings::UserSettings;
         todos::delete_todo,
         reminders::list_reminders,
         reminders::create_reminder,
+        reminders::update_reminder,
         reminders::delete_reminder,
         finance::list_transactions,
         finance::create_transaction,
@@ -49,7 +55,13 @@ use crate::modules::settings::UserSettings;
         portfolio::summary,
         portfolio::list_cash,
         portfolio::deposit_cash,
-        portfolio::withdraw_cash
+        portfolio::withdraw_cash,
+        recurring_bills::list_bills,
+        recurring_bills::create_bill,
+        recurring_bills::get_bill,
+        recurring_bills::update_bill,
+        recurring_bills::delete_bill,
+        recurring_bills::pay_bill
     ),
     components(
         schemas(
@@ -75,6 +87,7 @@ use crate::modules::settings::UserSettings;
             RecurrencePattern,
             reminders::ReminderQuery,
             reminders::CreateReminderRequest,
+            reminders::UpdateReminderRequest,
             reminders::ReminderListResponse,
             Transaction,
             Category,
@@ -95,7 +108,10 @@ use crate::modules::settings::UserSettings;
             portfolio::SetPriceRequest,
             portfolio::SetNoteRequest,
             portfolio::SellResponse,
-            portfolio::CashAmountRequest
+            portfolio::CashAmountRequest,
+            RecurringBill,
+            CreateBillPayload,
+            UpdateBillPayload
         )
     ),
     modifiers(&SecurityAddon),

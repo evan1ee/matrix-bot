@@ -11,6 +11,19 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
 const COLUMNS: &str = "id, room_id, sender_mxid, sender_name, text, priority, \
                        due_at, remind_before_minutes, completed, created_at";
 
+/// Extra `WHERE` predicate narrowing a listing to one completion state.
+///
+/// `completed` is inlined rather than bound because it is a `bool` the caller
+/// already decided, never user text — this keeps the bind order of the callers'
+/// remaining parameters (owner, limit, offset) fixed.
+fn completed_clause(completed: Option<bool>) -> &'static str {
+    match completed {
+        Some(true) => " AND completed = 1",
+        Some(false) => " AND completed = 0",
+        None => "",
+    }
+}
+
 pub struct TodoRepository;
 
 impl TodoRepository {
@@ -111,9 +124,17 @@ impl TodoRepository {
     /// `sender_mxid` is the sole ownership key. `sender_name` is a display field
     /// that users control and that collides across identity spaces, so it must
     /// never appear in this predicate.
-    pub async fn list_all_user(pool: &SqlitePool, owner_id: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
+    pub async fn list_all_user(
+        pool: &SqlitePool,
+        owner_id: &str,
+        completed: Option<bool>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<TodoItem>> {
+        let filter = completed_clause(completed);
         let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE sender_mxid = ? ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
+            "SELECT {COLUMNS} FROM todos WHERE sender_mxid = ?{filter} \
+             ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
         ))
         .bind(owner_id)
         .bind(limit)
@@ -129,11 +150,13 @@ impl TodoRepository {
         pool: &SqlitePool,
         room_id: &str,
         owner_id: &str,
+        completed: Option<bool>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<TodoItem>> {
+        let filter = completed_clause(completed);
         let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND sender_mxid = ? \
+            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND sender_mxid = ?{filter} \
              ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?"
         ))
         .bind(room_id)
@@ -146,10 +169,16 @@ impl TodoRepository {
         Ok(items)
     }
 
-    pub async fn count_room_user(pool: &SqlitePool, room_id: &str, owner_id: &str) -> Result<i64> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND sender_mxid = ?",
-        )
+    pub async fn count_room_user(
+        pool: &SqlitePool,
+        room_id: &str,
+        owner_id: &str,
+        completed: Option<bool>,
+    ) -> Result<i64> {
+        let filter = completed_clause(completed);
+        let count = sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND sender_mxid = ?{filter}"
+        ))
         .bind(room_id)
         .bind(owner_id)
         .fetch_one(pool)
@@ -158,11 +187,16 @@ impl TodoRepository {
         Ok(count)
     }
 
-    /// Total tasks owned by `owner_id`, for pagination metadata.
-    pub async fn count_all_user(pool: &SqlitePool, owner_id: &str) -> Result<i64> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM todos WHERE sender_mxid = ?",
-        )
+    /// Tasks owned by `owner_id` matching `completed`, for pagination metadata.
+    pub async fn count_all_user(
+        pool: &SqlitePool,
+        owner_id: &str,
+        completed: Option<bool>,
+    ) -> Result<i64> {
+        let filter = completed_clause(completed);
+        let count = sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT COUNT(*) FROM todos WHERE sender_mxid = ?{filter}"
+        ))
         .bind(owner_id)
         .fetch_one(pool)
         .await?;
@@ -310,7 +344,7 @@ mod tests {
         assert!(!item.completed);
         assert!(item.due_at.is_none());
 
-        let list = TodoRepository::list_all_user(&pool, "@alice:a", 25, 0).await.unwrap();
+        let list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0).await.unwrap();
         assert_eq!(list.len(), 1);
 
         let updated = TodoRepository::edit_text(&pool, item.id, "Buy oat milk").await.unwrap().unwrap();
@@ -329,7 +363,7 @@ mod tests {
         let cleared = TodoRepository::clear_completed_user(&pool, "@alice:a").await.unwrap();
         assert_eq!(cleared, 1);
 
-        let empty_list = TodoRepository::list_all_user(&pool, "@alice:a", 25, 0).await.unwrap();
+        let empty_list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0).await.unwrap();
         assert!(empty_list.is_empty());
     }
 

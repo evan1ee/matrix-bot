@@ -21,6 +21,7 @@ pub enum SystemEvent {
     TodoUpdated(TodoItem),
     TodoDeleted { id: i64, room_id: String, owner_id: String },
     ReminderCreated(Reminder),
+    ReminderUpdated(Reminder),
     ReminderTriggered(Reminder),
     ReminderCancelled { id: i64, room_id: String, owner_id: String },
     TransactionCreated(Transaction),
@@ -56,7 +57,9 @@ impl SystemEvent {
     pub fn owner_id(&self) -> &str {
         match self {
             SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.sender_mxid,
-            SystemEvent::ReminderCreated(rem) | SystemEvent::ReminderTriggered(rem) => {
+            SystemEvent::ReminderCreated(rem)
+            | SystemEvent::ReminderUpdated(rem)
+            | SystemEvent::ReminderTriggered(rem) => {
                 &rem.sender_mxid
             }
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,

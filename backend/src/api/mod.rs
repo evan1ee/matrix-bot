@@ -99,7 +99,10 @@ pub async fn start_api_server(
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route("/todos/:id", patch(todos::update_todo).delete(todos::delete_todo))
         .route("/reminders", get(reminders::list_reminders).post(reminders::create_reminder))
-        .route("/reminders/:id", delete(reminders::delete_reminder))
+        .route(
+            "/reminders/:id",
+            patch(reminders::update_reminder).delete(reminders::delete_reminder),
+        )
         .route(
             "/finance/transactions",
             get(finance::list_transactions).post(finance::create_transaction),

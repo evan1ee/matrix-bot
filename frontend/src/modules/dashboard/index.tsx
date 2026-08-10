@@ -70,28 +70,34 @@ const DashboardView = ({ onNavigate }: { onNavigate?: (moduleId: string) => void
     day: 'numeric',
   });
 
+  // Each key must share its root with the key the owning module invalidates,
+  // or React Query's prefix matching never reaches these cards and the tile
+  // silently shows a stale figure while the module page shows the live one.
   const { data: todosData } = useQuery<TodoListResponse>({
     queryKey: ['todos', 'dashboard'],
-    queryFn: () => fetchApi('/todos?limit=100'),
+    queryFn: () => fetchApi('/todos?completed=false&limit=1'),
   });
 
   const { data: remindersData } = useQuery<ReminderListResponse>({
     queryKey: ['reminders', 'dashboard'],
-    queryFn: () => fetchApi('/reminders?limit=100'),
+    queryFn: () => fetchApi('/reminders?limit=1'),
   });
 
   const { data: portfolioData } = useQuery<PortfolioCurrencySummary[]>({
-    queryKey: ['portfolio', 'summary', 'dashboard'],
+    queryKey: ['portfolio-summary', 'dashboard'],
     queryFn: () => fetchApi('/portfolio/summary'),
   });
 
   const { data: billsData } = useQuery<RecurringBill[]>({
-    queryKey: ['bills', 'dashboard'],
+    queryKey: ['recurring-bills', 'dashboard'],
     queryFn: () => fetchApi('/recurring-bills'),
   });
 
-  const activeTasks = todosData?.total ?? todosData?.items?.length ?? 0;
-  const activeReminders = remindersData?.total ?? remindersData?.items?.length ?? 0;
+  // `total` counts every row matching the query, not just the page fetched, so
+  // these tiles stay correct past the first page. Both queries ask for one row
+  // purely to reach that count.
+  const activeTasks = todosData?.total ?? 0;
+  const activeReminders = remindersData?.total ?? 0;
   const currenciesTracked = portfolioData?.length ?? 0;
   const activeBills = billsData?.filter((bill) => bill.status === 'active')?.length ?? 0;
 

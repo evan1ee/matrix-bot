@@ -194,6 +194,60 @@ const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell }) 
   );
 };
 
+interface NoteRowProps {
+  holding: Holding;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (note: string) => Promise<void>;
+}
+
+/// An empty note is a real value here — it clears the note — so unlike
+/// `PriceRow` this form does not reject a blank field.
+const NoteRow: React.FC<NoteRowProps> = ({ holding, saving, onCancel, onSave }) => {
+  const [note, setNote] = useState(holding.note ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await onSave(note.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save the note.');
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="flex items-center gap-2">
+      <input
+        type="text"
+        autoFocus
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Note (leave blank to clear)"
+        className="w-56 px-2 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+      />
+      <button
+        type="submit"
+        disabled={saving}
+        title="Save note"
+        className="p-1.5 rounded text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+      >
+        <Check className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        title="Cancel"
+        className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+      {error && <span className="text-[11px] font-mono text-rose-600 dark:text-rose-400">{error}</span>}
+    </form>
+  );
+};
+
 interface PriceRowProps {
   holding: Holding;
   saving: boolean;
@@ -267,6 +321,7 @@ export const PortfolioMainView: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sellingId, setSellingId] = useState<number | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
 
   const [cashAmount, setCashAmount] = useState('');
   const [cashCurrency, setCashCurrency] = useState(defaultCurrency);
@@ -331,6 +386,17 @@ export const PortfolioMainView: React.FC = () => {
       fetchApi<Holding>(`/portfolio/holdings/${id}/price`, {
         method: 'PUT',
         body: JSON.stringify({ price }),
+      }),
+    onSuccess: invalidate,
+  });
+
+  // `note: null` clears it, which is why the blank field is sent as null
+  // rather than an empty string.
+  const noteMutation = useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) =>
+      fetchApi<Holding>(`/portfolio/holdings/${id}/note`, {
+        method: 'PUT',
+        body: JSON.stringify({ note: note === '' ? null : note }),
       }),
     onSuccess: invalidate,
   });
@@ -642,8 +708,25 @@ export const PortfolioMainView: React.FC = () => {
                         {h.currency}
                       </span>
                     </div>
-                    {h.note && (
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate max-w-md">{h.note}</p>
+                    {editingNoteId === h.id ? (
+                      <NoteRow
+                        holding={h}
+                        saving={noteMutation.isPending}
+                        onCancel={() => setEditingNoteId(null)}
+                        onSave={async (newNote) => {
+                          await noteMutation.mutateAsync({ id: h.id, note: newNote });
+                          setEditingNoteId(null);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingNoteId(h.id)}
+                        className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition max-w-md"
+                      >
+                        <span className="truncate">{h.note || 'add a note'}</span>
+                        <Pencil className="w-3 h-3 shrink-0" />
+                      </button>
                     )}
                     {editingPriceId === h.id ? (
                       <PriceRow

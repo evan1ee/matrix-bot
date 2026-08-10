@@ -36,7 +36,7 @@ pub async fn handle_todo_command(
     let tz = SettingsRepository::get_or_default(pool, sender_mxid).await.tz();
 
     if bare {
-        let items = TodoRepository::list_all_user(pool, sender_mxid, PAGE_SIZE, 0)
+        let items = TodoRepository::list_all_user(pool, sender_mxid, None, PAGE_SIZE, 0)
             .await.ok().unwrap_or_default();
         return Some(format_todo_list(
             &format!("Your Tasks ({})", html_escape(sender_name)), &items, 1, &tz,
@@ -398,7 +398,7 @@ async fn handle_list_user(
     let page: i64 = rest.parse().unwrap_or(1).max(1);
     let offset = (page - 1) * PAGE_SIZE;
 
-    match TodoRepository::list_all_user(pool, sender_mxid, PAGE_SIZE, offset).await {
+    match TodoRepository::list_all_user(pool, sender_mxid, None, PAGE_SIZE, offset).await {
         Ok(items) => Some(format_todo_list(
             &format!("Your Tasks ({})", html_escape(sender_name)), &items, page, tz,
         )),

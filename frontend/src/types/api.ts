@@ -348,6 +348,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recurring-bills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_bills"];
+        put?: never;
+        post: operations["create_bill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-bills/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_bill"];
+        put: operations["update_bill"];
+        post?: never;
+        delete: operations["delete_bill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-bills/{id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["pay_bill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reminders": {
         parameters: {
             query?: never;
@@ -377,7 +425,7 @@ export interface paths {
         delete: operations["delete_reminder"];
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["update_reminder"];
         trace?: never;
     };
     "/api/v1/rooms": {
@@ -538,6 +586,23 @@ export interface components {
             /** Format: int64 */
             income_minor: number;
         };
+        CreateBillPayload: {
+            /** Format: int64 */
+            amount_minor: number;
+            auto_pay?: boolean | null;
+            category: string;
+            currency: string;
+            /** Format: int32 */
+            currency_exponent?: number | null;
+            /** Format: int32 */
+            due_day?: number | null;
+            frequency?: string | null;
+            name: string;
+            next_due_at: string;
+            notes?: string | null;
+            /** Format: int32 */
+            total_installments?: number | null;
+        };
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
@@ -696,6 +761,34 @@ export interface components {
          * @enum {string}
          */
         RecurrencePattern: "None" | "Daily" | "Weekly" | "Monthly" | "Yearly";
+        /** @description Represents a recurring bill, subscription, installment, or recurring transfer. */
+        RecurringBill: {
+            /** Format: int64 */
+            amount_minor: number;
+            auto_pay: boolean;
+            category: string;
+            created_at?: string | null;
+            currency: string;
+            /** Format: int32 */
+            currency_exponent: number;
+            /** Format: int32 */
+            due_day?: number | null;
+            frequency: string;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            next_due_at: string;
+            notes?: string | null;
+            /** Format: int32 */
+            paid_installments: number;
+            room_id: string;
+            sender_mxid: string;
+            sender_name: string;
+            status: string;
+            /** Format: int32 */
+            total_installments?: number | null;
+            updated_at?: string | null;
+        };
         RegisterPayload: {
             password: string;
             secret?: string | null;
@@ -825,6 +918,12 @@ export interface components {
         /** @enum {string} */
         TodoPriority: "Low" | "Medium" | "High";
         TodoQuery: {
+            /**
+             * @description Narrows the listing to one completion state. Omitted returns both, so
+             *     `total` counts every task — callers wanting an outstanding-work figure
+             *     must ask for `completed=false` explicitly.
+             */
+            completed?: boolean | null;
             /** Format: int64 */
             limit?: number | null;
             /** Format: int64 */
@@ -891,6 +990,35 @@ export interface components {
              */
             occurred_at?: string | null;
             room_id?: string | null;
+        };
+        UpdateBillPayload: {
+            /** Format: int64 */
+            amount_minor?: number | null;
+            auto_pay?: boolean | null;
+            category?: string | null;
+            currency?: string | null;
+            /** Format: int32 */
+            due_day?: number | null;
+            frequency?: string | null;
+            name?: string | null;
+            next_due_at?: string | null;
+            notes?: string | null;
+            /** Format: int32 */
+            paid_installments?: number | null;
+            status?: string | null;
+            /** Format: int32 */
+            total_installments?: number | null;
+        };
+        /**
+         * @description Mirrors `CreateReminderRequest` rather than patching individual fields: the
+         *     fire time is expressed as a delay from now, exactly as at creation, so an
+         *     edit and a create mean the same thing by the same arithmetic.
+         */
+        UpdateReminderRequest: {
+            message: string;
+            recurrence?: string | null;
+            /** Format: int64 */
+            seconds: number;
         };
         /**
          * @description Both preferences are always sent together — settings are saved as a whole
@@ -1900,6 +2028,252 @@ export interface operations {
             };
         };
     };
+    list_bills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your recurring bills */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringBill"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_bill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBillPayload"];
+            };
+        };
+        responses: {
+            /** @description Bill created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringBill"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_bill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recurring bill ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bill */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringBill"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_bill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recurring bill ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBillPayload"];
+            };
+        };
+        responses: {
+            /** @description Bill updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringBill"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_bill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recurring bill ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bill deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    pay_bill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recurring bill ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bill marked paid for the period, advancing next_due_at */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringBill"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     list_reminders: {
         parameters: {
             query?: {
@@ -2004,6 +2378,60 @@ export interface operations {
                 };
             };
             /** @description Reminder not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_reminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Reminder ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateReminderRequest"];
+            };
+        };
+        responses: {
+            /** @description Reminder updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reminder"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Reminder not found, or no longer pending */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -2120,6 +2548,12 @@ export interface operations {
                 room_id?: string | null;
                 page?: number | null;
                 limit?: number | null;
+                /**
+                 * @description Narrows the listing to one completion state. Omitted returns both, so
+                 *     `total` counts every task — callers wanting an outstanding-work figure
+                 *     must ask for `completed=false` explicitly.
+                 */
+                completed?: boolean | null;
             };
             header?: never;
             path?: never;

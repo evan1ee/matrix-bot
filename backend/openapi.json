@@ -1298,6 +1298,334 @@
         ]
       }
     },
+    "/api/v1/recurring-bills": {
+      "get": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "list_bills",
+        "responses": {
+          "200": {
+            "description": "Your recurring bills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecurringBill"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "create_bill",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBillPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Bill created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringBill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/recurring-bills/{id}": {
+      "get": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "get_bill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recurring bill ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringBill"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "update_bill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recurring bill ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBillPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Bill updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringBill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "delete_bill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recurring bill ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Bill deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/recurring-bills/{id}/pay": {
+      "post": {
+        "tags": [
+          "recurring_bills"
+        ],
+        "operationId": "pay_bill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recurring bill ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bill marked paid for the period, advancing next_due_at",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringBill"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/reminders": {
       "get": {
         "tags": [
@@ -1451,6 +1779,81 @@
           },
           "404": {
             "description": "Reminder not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "reminders"
+        ],
+        "operationId": "update_reminder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Reminder ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReminderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reminder updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reminder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reminder not found, or no longer pending",
             "content": {
               "application/json": {
                 "schema": {
@@ -1626,6 +2029,16 @@
             "schema": {
               "type": "integer",
               "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "completed",
+            "in": "query",
+            "description": "Narrows the listing to one completion state. Omitted returns both, so\n`total` counts every task — callers wanting an outstanding-work figure\nmust ask for `completed=false` explicitly.",
+            "required": false,
+            "schema": {
+              "type": "boolean",
               "nullable": true
             }
           }
@@ -2047,6 +2460,61 @@
           }
         }
       },
+      "CreateBillPayload": {
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "amount_minor",
+          "currency",
+          "next_due_at"
+        ],
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "auto_pay": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "category": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "due_day": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_due_at": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "total_installments": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        }
+      },
       "CreateReminderRequest": {
         "type": "object",
         "required": [
@@ -2386,6 +2854,96 @@
           "Yearly"
         ]
       },
+      "RecurringBill": {
+        "type": "object",
+        "description": "Represents a recurring bill, subscription, installment, or recurring transfer.",
+        "required": [
+          "id",
+          "room_id",
+          "sender_mxid",
+          "sender_name",
+          "name",
+          "category",
+          "amount_minor",
+          "currency",
+          "currency_exponent",
+          "frequency",
+          "next_due_at",
+          "paid_installments",
+          "auto_pay",
+          "status"
+        ],
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "auto_pay": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "due_day": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_due_at": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "paid_installments": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "sender_mxid": {
+            "type": "string"
+          },
+          "sender_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "total_installments": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "RegisterPayload": {
         "type": "object",
         "required": [
@@ -2709,6 +3267,11 @@
       "TodoQuery": {
         "type": "object",
         "properties": {
+          "completed": {
+            "type": "boolean",
+            "description": "Narrows the listing to one completion state. Omitted returns both, so\n`total` counts every task — callers wanting an outstanding-work figure\nmust ask for `completed=false` explicitly.",
+            "nullable": true
+          },
           "limit": {
             "type": "integer",
             "format": "int64",
@@ -2836,6 +3399,85 @@
           "room_id": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "UpdateBillPayload": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "auto_pay": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "due_day": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "next_due_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "paid_installments": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "total_installments": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateReminderRequest": {
+        "type": "object",
+        "description": "Mirrors `CreateReminderRequest` rather than patching individual fields: the\nfire time is expressed as a delay from now, exactly as at creation, so an\nedit and a create mean the same thing by the same arithmetic.",
+        "required": [
+          "message",
+          "seconds"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "recurrence": {
+            "type": "string",
+            "nullable": true
+          },
+          "seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },

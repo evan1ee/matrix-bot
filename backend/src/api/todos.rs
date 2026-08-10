@@ -20,6 +20,10 @@ pub struct TodoQuery {
     pub room_id: Option<String>,
     pub page: Option<i64>,
     pub limit: Option<i64>,
+    /// Narrows the listing to one completion state. Omitted returns both, so
+    /// `total` counts every task — callers wanting an outstanding-work figure
+    /// must ask for `completed=false` explicitly.
+    pub completed: Option<bool>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -129,19 +133,27 @@ pub async fn list_todos(
     let owner_id = user.owner_id();
 
     let (items, total) = if let Some(room) = &query.room_id {
-        let items = TodoRepository::list_room_user(&state.db.pool, room, &owner_id, limit, offset)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = TodoRepository::count_room_user(&state.db.pool, room, &owner_id)
+        let items = TodoRepository::list_room_user(
+            &state.db.pool,
+            room,
+            &owner_id,
+            query.completed,
+            limit,
+            offset,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total = TodoRepository::count_room_user(&state.db.pool, room, &owner_id, query.completed)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         (items, total)
     } else {
-        let items = TodoRepository::list_all_user(&state.db.pool, &owner_id, limit, offset)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = TodoRepository::count_all_user(&state.db.pool, &owner_id)
+        let items =
+            TodoRepository::list_all_user(&state.db.pool, &owner_id, query.completed, limit, offset)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total = TodoRepository::count_all_user(&state.db.pool, &owner_id, query.completed)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
         (items, total)
@@ -364,6 +376,89 @@ mod tests {
     use crate::events::EventBroadcaster;
     use sqlx::SqlitePool;
 
+    /// `total` must count only the requested completion state.
+    ///
+    /// The dashboard's outstanding-work tile reads `total` rather than the
+    /// returned page, so a filter that narrowed `items` but not the count would
+    /// show finished tasks as still to do.
+    #[tokio::test]
+    async fn test_completed_filter_narrows_both_items_and_total() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            "secret".to_string(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let alice = AuthUser::local("alice");
+
+        let mut ids = Vec::new();
+        for text in ["one", "two", "three"] {
+            let created = create_todo(
+                State(state.clone()),
+                alice.clone(),
+                Json(CreateTodoRequest {
+                    room_id: None,
+                    text: text.to_string(),
+                    priority: None,
+                    due_at: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                }),
+            )
+            .await
+            .unwrap();
+            ids.push(created.id);
+        }
+
+        // Finish one of the three.
+        update_todo(
+            State(state.clone()),
+            alice.clone(),
+            Path(ids[0]),
+            Json(UpdateTodoRequest {
+                text: None,
+                priority: None,
+                completed: Some(true),
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let list = |completed: Option<bool>| {
+            let state = state.clone();
+            let alice = alice.clone();
+            async move {
+                list_todos(
+                    State(state),
+                    alice,
+                    Query(TodoQuery { room_id: None, page: None, limit: None, completed }),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        let all = list(None).await;
+        assert_eq!(all.total, 3, "an unfiltered query still counts every task");
+        assert_eq!(all.items.len(), 3);
+
+        let outstanding = list(Some(false)).await;
+        assert_eq!(outstanding.total, 2, "only the two unfinished tasks count");
+        assert_eq!(outstanding.items.len(), 2);
+        assert!(outstanding.items.iter().all(|t| !t.completed));
+
+        let done = list(Some(true)).await;
+        assert_eq!(done.total, 1);
+        assert!(done.items.iter().all(|t| t.completed));
+    }
+
     #[tokio::test]
     async fn test_todo_api_crud_and_isolation() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -398,6 +493,7 @@ mod tests {
             room_id: None,
             page: None,
             limit: None,
+            completed: None,
         };
         let bob_list = list_todos(State(state.clone()), bob.clone(), Query(query))
             .await
@@ -501,7 +597,7 @@ mod tests {
         let listed = list_todos(
             State(state),
             alice,
-            Query(TodoQuery { room_id: None, page: None, limit: None }),
+            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
         )
         .await
         .unwrap();
@@ -551,7 +647,7 @@ mod tests {
         let listed = list_todos(
             State(state.clone()),
             impostor.clone(),
-            Query(TodoQuery { room_id: None, page: None, limit: None }),
+            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
         )
         .await
         .unwrap();
@@ -565,6 +661,7 @@ mod tests {
                 room_id: Some("!room:mbm.one".to_string()),
                 page: None,
                 limit: None,
+                completed: None,
             }),
         )
         .await
@@ -598,7 +695,7 @@ mod tests {
         let owner_view = list_todos(
             State(state),
             matrix_evan,
-            Query(TodoQuery { room_id: None, page: None, limit: None }),
+            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
         )
         .await
         .unwrap();
