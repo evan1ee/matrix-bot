@@ -126,7 +126,7 @@ pub async fn tear_down(
         b.send(SystemEvent::ReminderCancelled {
             id: cancelled.id,
             room_id: cancelled.room_id,
-            owner_id: cancelled.sender_mxid,
+            owner_id: cancelled.owner_id,
         });
     }
 

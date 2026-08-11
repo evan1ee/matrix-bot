@@ -4,6 +4,7 @@
 //! `generate-openapi` — can reuse the API types instead of the OpenAPI document
 //! being produced as a side effect of the test suite.
 
+pub mod accounts;
 pub mod api;
 pub mod bot;
 pub mod config;

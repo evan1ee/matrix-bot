@@ -8,7 +8,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
 ///
 /// Every read goes through this so adding a column cannot leave one query
 /// silently selecting a stale shape.
-const COLUMNS: &str = "id, room_id, sender_mxid, sender_name, text, priority, \
+const COLUMNS: &str = "id, room_id, owner_id, sender_name, text, priority, \
                        due_at, remind_before_minutes, completed, created_at";
 
 /// Extra `WHERE` predicate narrowing a listing to one completion state.
@@ -49,10 +49,10 @@ impl TodoRepository {
     }
 
     /// Looks up a task that `owner_id` owns, for handlers acting on a caller's
-    /// behalf. `sender_mxid` is the sole ownership key.
+    /// behalf. `owner_id` is the sole ownership key.
     pub async fn find_owned(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Option<TodoItem>> {
         let item = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE id = ? AND sender_mxid = ?"
+            "SELECT {COLUMNS} FROM todos WHERE id = ? AND owner_id = ?"
         ))
         .bind(id)
         .bind(owner_id)
@@ -65,7 +65,7 @@ impl TodoRepository {
     pub async fn add(
         pool: &SqlitePool,
         room_id: &str,
-        sender_mxid: &str,
+        owner_id: &str,
         sender_name: &str,
         text: &str,
         priority: TodoPriority,
@@ -74,12 +74,12 @@ impl TodoRepository {
     ) -> Result<TodoItem> {
         let res = sqlx::query(
             r#"
-            INSERT INTO todos (room_id, sender_mxid, sender_name, text, priority, due_at, remind_before_minutes, completed)
+            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed)
             VALUES (?, ?, ?, ?, ?, ?, ?, 0)
             "#,
         )
         .bind(room_id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .bind(sender_name)
         .bind(text)
         .bind(priority.as_str())
@@ -121,7 +121,7 @@ impl TodoRepository {
 
     /// Lists every task owned by `owner_id` across all rooms.
     ///
-    /// `sender_mxid` is the sole ownership key. `sender_name` is a display field
+    /// `owner_id` is the sole ownership key. `sender_name` is a display field
     /// that users control and that collides across identity spaces, so it must
     /// never appear in this predicate.
     pub async fn list_all_user(
@@ -133,7 +133,7 @@ impl TodoRepository {
     ) -> Result<Vec<TodoItem>> {
         let filter = completed_clause(completed);
         let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE sender_mxid = ?{filter} \
+            "SELECT {COLUMNS} FROM todos WHERE owner_id = ?{filter} \
              ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
         ))
         .bind(owner_id)
@@ -156,7 +156,7 @@ impl TodoRepository {
     ) -> Result<Vec<TodoItem>> {
         let filter = completed_clause(completed);
         let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND sender_mxid = ?{filter} \
+            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND owner_id = ?{filter} \
              ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?"
         ))
         .bind(room_id)
@@ -177,7 +177,7 @@ impl TodoRepository {
     ) -> Result<i64> {
         let filter = completed_clause(completed);
         let count = sqlx::query_scalar::<_, i64>(&format!(
-            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND sender_mxid = ?{filter}"
+            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND owner_id = ?{filter}"
         ))
         .bind(room_id)
         .bind(owner_id)
@@ -195,7 +195,7 @@ impl TodoRepository {
     ) -> Result<i64> {
         let filter = completed_clause(completed);
         let count = sqlx::query_scalar::<_, i64>(&format!(
-            "SELECT COUNT(*) FROM todos WHERE sender_mxid = ?{filter}"
+            "SELECT COUNT(*) FROM todos WHERE owner_id = ?{filter}"
         ))
         .bind(owner_id)
         .fetch_one(pool)
@@ -295,11 +295,11 @@ impl TodoRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn clear_completed_user(pool: &SqlitePool, sender_mxid: &str) -> Result<u64> {
+    pub async fn clear_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
         let result = sqlx::query(
-            "DELETE FROM todos WHERE sender_mxid = ? AND completed = 1",
+            "DELETE FROM todos WHERE owner_id = ? AND completed = 1",
         )
-        .bind(sender_mxid)
+        .bind(owner_id)
         .execute(pool)
         .await?;
 

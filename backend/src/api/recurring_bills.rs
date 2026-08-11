@@ -148,7 +148,7 @@ pub async fn get_bill(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Recurring bill not found"))?;
 
-    if bill.sender_mxid != owner_id {
+    if bill.owner_id != owner_id {
         return Err(ApiError::not_found("Recurring bill not found"));
     }
 
@@ -342,7 +342,7 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
-        let alice = AuthUser::local("alice");
+        let alice = AuthUser::local("alice", "acct_alice");
 
         let bill = create_bill(
             State(state.clone()),
@@ -436,7 +436,7 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
-        let alice = AuthUser::local("alice");
+        let alice = AuthUser::local("alice", "acct_alice");
 
         for bad in [0, -5, crate::modules::due_reminder::MAX_LEAD_MINUTES + 1] {
             let err = create_bill(
@@ -478,8 +478,8 @@ mod tests {
             reqwest::Client::new(),
         );
 
-        let alice = AuthUser::local("alice");
-        let bob = AuthUser::local("bob");
+        let alice = AuthUser::local("alice", "acct_alice");
+        let bob = AuthUser::local("bob", "acct_bob");
 
         // Create
         let req = CreateBillPayload {

@@ -78,7 +78,7 @@ pub async fn sync(
     let plan = ReminderPlan {
         source: ReminderSource::RecurringBill,
         source_id: bill.id,
-        owner_id: &bill.sender_mxid,
+        owner_id: &bill.owner_id,
         owner_name: &bill.sender_name,
         room_id,
         message: format!(

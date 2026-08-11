@@ -64,6 +64,7 @@ async fn stream_subscriber(
         return Ok(AuthUser {
             subject: decoded.claims.sub,
             kind: decoded.claims.kind,
+            account_id: decoded.claims.acct,
         });
     }
 
@@ -121,7 +122,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice");
+        let user = AuthUser::local("alice", "acct_alice");
 
         let _sse = sse_handler(State(state), Query(SseQuery { ticket: None }), Some(user))
             .await
@@ -154,6 +155,7 @@ mod tests {
         let ticket = generate_scoped_jwt(
             "@evan:mbm.one",
             AuthKind::Matrix,
+            "acct_evan",
             TokenScope::SseStream,
             chrono::Duration::seconds(30),
             &state.jwt_secret,
@@ -161,11 +163,11 @@ mod tests {
         .unwrap();
 
         let subscriber = stream_subscriber(&state, Some(ticket), None).await.unwrap();
-        assert_eq!(subscriber.owner_id(), "@evan:mbm.one");
+        assert_eq!(subscriber.owner_id(), "acct_evan");
         assert_eq!(subscriber.kind, AuthKind::Matrix);
 
         // A full-access API token presented the same way is refused.
-        let api_token = generate_jwt("@evan:mbm.one", AuthKind::Matrix, &state.jwt_secret).unwrap();
+        let api_token = generate_jwt("@evan:mbm.one", AuthKind::Matrix, "acct_evan", &state.jwt_secret).unwrap();
         let err = stream_subscriber(&state, Some(api_token), None)
             .await
             .unwrap_err();
@@ -188,10 +190,10 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let state = test_state(pool);
 
-        let subscriber = stream_subscriber(&state, None, Some(AuthUser::local("alice")))
+        let subscriber = stream_subscriber(&state, None, Some(AuthUser::local("alice", "acct_alice")))
             .await
             .unwrap();
-        assert_eq!(subscriber.owner_id(), "@web-alice:api");
+        assert_eq!(subscriber.owner_id(), "acct_alice");
     }
 
     /// The broadcast channel carries every user's events; a subscriber must only
@@ -205,7 +207,7 @@ mod tests {
             TodoItem {
                 id: 1,
                 room_id: "!room:1".to_string(),
-                sender_mxid: owner.to_string(),
+                owner_id: owner.to_string(),
                 sender_name: "evan".to_string(),
                 text: text.to_string(),
                 priority: "medium".to_string(),
@@ -217,31 +219,33 @@ mod tests {
         }
 
         let broadcaster = EventBroadcaster::default();
-        let subscriber = AuthUser::local("evan");
+        let subscriber = AuthUser::local("evan", "acct_mine");
         let owner_id = subscriber.owner_id();
-        assert_eq!(owner_id, "@web-evan:api");
+        assert_eq!(owner_id, "acct_mine");
 
         let stream = owned_events(&broadcaster, owner_id.clone());
 
-        // A Matrix user who shares the same display name, plus the subscriber.
-        broadcaster.send(SystemEvent::TodoCreated(todo_for("@evan:mbm.one", "theirs")));
-        broadcaster.send(SystemEvent::TodoCreated(todo_for("@web-evan:api", "mine")));
+        // Another account's events, interleaved with the subscriber's own.
+        // Both senders render as "evan" — a shared display name must not leak a
+        // single row, which is why the filter reads `owner_id` and nothing else.
+        broadcaster.send(SystemEvent::TodoCreated(todo_for("acct_theirs", "theirs")));
+        broadcaster.send(SystemEvent::TodoCreated(todo_for("acct_mine", "mine")));
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 2,
             room_id: "!room:1".to_string(),
-            owner_id: "@evan:mbm.one".to_string(),
+            owner_id: "acct_theirs".to_string(),
         });
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 3,
             room_id: "web".to_string(),
-            owner_id: "@web-evan:api".to_string(),
+            owner_id: "acct_mine".to_string(),
         });
         drop(broadcaster);
 
         let delivered: Vec<SystemEvent> = stream.collect().await;
 
         assert_eq!(delivered.len(), 2, "expected exactly the subscriber's own events");
-        assert!(delivered.iter().all(|e| e.owner_id() == "@web-evan:api"));
+        assert!(delivered.iter().all(|e| e.owner_id() == "acct_mine"));
         match &delivered[0] {
             SystemEvent::TodoCreated(item) => assert_eq!(item.text, "mine"),
             other => panic!("unexpected first event: {:?}", other),

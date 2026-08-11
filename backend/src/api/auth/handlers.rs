@@ -62,8 +62,18 @@ pub async fn register(
         return Err(ApiError::bad_request("Username already exists"));
     }
 
-    let token = generate_jwt(&payload.username, AuthKind::Local, &state.jwt_secret)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let account_id =
+        crate::accounts::AccountRepository::resolve_for_local_user(&state.db.pool, &payload.username)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let token = generate_jwt(
+        &payload.username,
+        AuthKind::Local,
+        &account_id,
+        &state.jwt_secret,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(AuthResponse {
         token,
@@ -95,8 +105,20 @@ pub async fn login(
 
     if let Some((stored_hash,)) = row {
         if verify(&payload.password, &stored_hash).unwrap_or(false) {
-            let token = generate_jwt(&payload.username, AuthKind::Local, &state.jwt_secret)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+            let account_id = crate::accounts::AccountRepository::resolve_for_local_user(
+                &state.db.pool,
+                &payload.username,
+            )
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+            let token = generate_jwt(
+                &payload.username,
+                AuthKind::Local,
+                &account_id,
+                &state.jwt_secret,
+            )
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
             return Ok(Json(AuthResponse {
                 token,
@@ -118,8 +140,22 @@ pub async fn login(
         .login(&state, &payload.username, &payload.password)
         .await
     {
-        let token = generate_jwt(&matrix_user_id, AuthKind::Matrix, &state.jwt_secret)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        // The MXID is proven, so it resolves to an account the same way a
+        // Matrix message from it would — provisioning one on first sight.
+        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
+            &state.db.pool,
+            &matrix_user_id,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        let token = generate_jwt(
+            &matrix_user_id,
+            AuthKind::Matrix,
+            &account_id,
+            &state.jwt_secret,
+        )
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
         return Ok(Json(AuthResponse {
             token,
@@ -209,6 +245,7 @@ pub async fn create_sse_ticket(
     let ticket = generate_scoped_jwt(
         &user.subject,
         user.kind,
+        &user.account_id,
         TokenScope::SseStream,
         chrono::Duration::seconds(SSE_TICKET_TTL_SECONDS),
         &state.jwt_secret,
@@ -394,7 +431,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice");
+        let user = AuthUser::local("alice", "acct_alice");
 
         let err = media_proxy(
             State(state.clone()),

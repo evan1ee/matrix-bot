@@ -150,7 +150,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice");
+        let user = AuthUser::local("alice", "acct_alice");
 
         let res = list_rooms(State(state), user).await.unwrap();
         assert!(res.0.is_empty());

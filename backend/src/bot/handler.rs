@@ -51,18 +51,40 @@ pub fn register_handlers(
 
             let formatted_body = text_content.formatted.as_ref().map(|f| f.body.as_str());
 
-            if let Some(cmd_ctx) = CommandParser::parse_message(
+            if let Some(parsed) = CommandParser::parse_message(
                 &text_content.body,
                 formatted_body,
                 &own_id,
                 room.room_id().as_str(),
-                ev.sender.as_str(),
                 ev.sender.localpart(),
             ) {
                 info!(
                     "Command received in [{}] from [{}]: command='{}', args='{}'",
-                    cmd_ctx.room_id, cmd_ctx.sender_name, cmd_ctx.command, cmd_ctx.raw_args
+                    parsed.room_id, parsed.sender_name, parsed.command, parsed.raw_args
                 );
+
+                // Resolve the sender to the account that will own whatever this
+                // command creates, provisioning one if this MXID has never been
+                // seen. Deliberately after the parse: an unrelated room message
+                // must not cost a query, and must not create an account for
+                // someone who only ever said hello to a room the bot is in.
+                let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
+                    &db.pool,
+                    ev.sender.as_str(),
+                )
+                .await
+                {
+                    Ok(owner_id) => owner_id,
+                    Err(err) => {
+                        error!(
+                            "Could not resolve an account for {}: {:?} — dropping the command",
+                            ev.sender, err
+                        );
+                        return;
+                    }
+                };
+
+                let cmd_ctx = parsed.for_owner(owner_id);
 
                 if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await {
                     let plain_text = crate::utils::strip_html(&reply_html);

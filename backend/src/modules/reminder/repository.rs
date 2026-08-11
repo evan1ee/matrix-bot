@@ -12,7 +12,7 @@ pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 
 /// The `Reminder` column list. Shared by every read so a new column cannot be
 /// missed by one query.
-const COLUMNS: &str = "id, room_id, sender_mxid, sender_name, message, trigger_at, \
+const COLUMNS: &str = "id, room_id, owner_id, sender_name, message, trigger_at, \
                        recurrence, status, retry_count, source_kind, source_id, created_at";
 
 pub struct ReminderRepository;
@@ -21,7 +21,7 @@ impl ReminderRepository {
     pub async fn create(
         pool: &SqlitePool,
         room_id: &str,
-        sender_mxid: &str,
+        owner_id: &str,
         sender_name: &str,
         message: &str,
         trigger_at: DateTime<Utc>,
@@ -32,12 +32,12 @@ impl ReminderRepository {
 
         let res = sqlx::query(
             r#"
-            INSERT INTO reminders (room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id)
+            INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id)
             VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
             "#,
         )
         .bind(room_id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .bind(sender_name)
         .bind(message)
         .bind(trigger_at)
@@ -103,11 +103,11 @@ impl ReminderRepository {
         Ok(Some(reminder))
     }
 
-    pub async fn count_user_pending(pool: &SqlitePool, sender_mxid: &str) -> Result<i64> {
+    pub async fn count_user_pending(pool: &SqlitePool, owner_id: &str) -> Result<i64> {
         let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM reminders WHERE sender_mxid = ? AND status = 'pending'",
+            "SELECT COUNT(*) FROM reminders WHERE owner_id = ? AND status = 'pending'",
         )
-        .bind(sender_mxid)
+        .bind(owner_id)
         .fetch_one(pool)
         .await?;
 
@@ -163,15 +163,15 @@ impl ReminderRepository {
 
     pub async fn list_user_pending(
         pool: &SqlitePool,
-        sender_mxid: &str,
+        owner_id: &str,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Reminder>> {
         let reminders = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE sender_mxid = ? AND status = 'pending' \
+            "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? AND status = 'pending' \
              ORDER BY trigger_at ASC LIMIT ? OFFSET ?"
         ))
-        .bind(sender_mxid)
+        .bind(owner_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
@@ -180,17 +180,17 @@ impl ReminderRepository {
         Ok(reminders)
     }
 
-    /// Looks up a reminder that `sender_mxid` owns.
+    /// Looks up a reminder that `owner_id` owns.
     pub async fn find_owned(
         pool: &SqlitePool,
-        sender_mxid: &str,
+        owner_id: &str,
         id: i64,
     ) -> Result<Option<Reminder>> {
         let reminder = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE id = ? AND sender_mxid = ?"
+            "SELECT {COLUMNS} FROM reminders WHERE id = ? AND owner_id = ?"
         ))
         .bind(id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .fetch_optional(pool)
         .await?;
 
@@ -206,7 +206,7 @@ impl ReminderRepository {
     /// reminder is a fresh delivery, not a continuation of the failed one.
     pub async fn update_pending(
         pool: &SqlitePool,
-        sender_mxid: &str,
+        owner_id: &str,
         id: i64,
         message: &str,
         trigger_at: DateTime<Utc>,
@@ -214,13 +214,13 @@ impl ReminderRepository {
     ) -> Result<Option<Reminder>> {
         let res = sqlx::query(
             "UPDATE reminders SET message = ?, trigger_at = ?, recurrence = ?, retry_count = 0 \
-             WHERE id = ? AND sender_mxid = ? AND status = 'pending'",
+             WHERE id = ? AND owner_id = ? AND status = 'pending'",
         )
         .bind(message)
         .bind(trigger_at)
         .bind(recurrence.as_str())
         .bind(id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .execute(pool)
         .await?;
 
@@ -228,15 +228,15 @@ impl ReminderRepository {
             return Ok(None);
         }
 
-        Self::find_owned(pool, sender_mxid, id).await
+        Self::find_owned(pool, owner_id, id).await
     }
 
-    pub async fn cancel(pool: &SqlitePool, sender_mxid: &str, id: i64) -> Result<bool> {
+    pub async fn cancel(pool: &SqlitePool, owner_id: &str, id: i64) -> Result<bool> {
         let res = sqlx::query(
-            "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND sender_mxid = ? AND status = 'pending'",
+            "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ? AND status = 'pending'",
         )
         .bind(id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .execute(pool)
         .await?;
 

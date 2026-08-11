@@ -32,7 +32,7 @@ impl TodoPriority {
 pub struct TodoItem {
     pub id: i64,
     pub room_id: String,
-    pub sender_mxid: String,
+    pub owner_id: String,
     pub sender_name: String,
     pub text: String,
     pub priority: String,

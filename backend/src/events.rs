@@ -51,21 +51,21 @@ impl SystemEvent {
     /// The owner of the row this event concerns.
     ///
     /// The SSE stream delivers an event only to that owner, so this must agree
-    /// exactly with the `sender_mxid` ownership key the REST handlers use. The
+    /// exactly with the `owner_id` ownership key the REST handlers use. The
     /// variants carrying a full row read it from the payload; the deletion
     /// variants carry it explicitly because the row is already gone.
     pub fn owner_id(&self) -> &str {
         match self {
-            SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.sender_mxid,
+            SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.owner_id,
             SystemEvent::ReminderCreated(rem)
             | SystemEvent::ReminderUpdated(rem)
             | SystemEvent::ReminderTriggered(rem) => {
-                &rem.sender_mxid
+                &rem.owner_id
             }
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
             SystemEvent::ReminderCancelled { owner_id, .. } => owner_id,
             SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
-                &tx.sender_mxid
+                &tx.owner_id
             }
             SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
             SystemEvent::CategoryCreated(cat) => &cat.owner_id,
@@ -77,7 +77,7 @@ impl SystemEvent {
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
-                &b.sender_mxid
+                &b.owner_id
             }
             SystemEvent::RecurringBillDeleted { owner_id, .. }
             | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
@@ -136,7 +136,7 @@ mod tests {
         TodoItem {
             id: 1,
             room_id: "!room:1".to_string(),
-            sender_mxid: owner.to_string(),
+            owner_id: owner.to_string(),
             sender_name: "shared-display-name".to_string(),
             text: "task".to_string(),
             priority: "medium".to_string(),
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_owner_id_reads_the_ownership_key_not_the_display_name() {
-        // Both users share `sender_name`; only `sender_mxid` decides delivery.
+        // Both users share `sender_name`; only `owner_id` decides delivery.
         let mine = SystemEvent::TodoCreated(todo_owned_by("@web-evan:api"));
         let theirs = SystemEvent::TodoUpdated(todo_owned_by("@evan:mbm.one"));
 

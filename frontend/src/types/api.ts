@@ -561,7 +561,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
-            /** @description The owning `sender_mxid`. Categories are per-user, never shared. */
+            /** @description The owning `owner_id`. Categories are per-user, never shared. */
             owner_id: string;
         };
         CategoryDeletedResponse: {
@@ -789,6 +789,7 @@ export interface components {
             name: string;
             next_due_at: string;
             notes?: string | null;
+            owner_id: string;
             /** Format: int32 */
             paid_installments: number;
             /**
@@ -803,7 +804,6 @@ export interface components {
              */
             remind_room_id?: string | null;
             room_id: string;
-            sender_mxid: string;
             sender_name: string;
             status: string;
             /** Format: int32 */
@@ -822,11 +822,11 @@ export interface components {
             /** Format: int64 */
             id: number;
             message: string;
+            owner_id: string;
             recurrence: string;
             /** Format: int64 */
             retry_count: number;
             room_id: string;
-            sender_mxid: string;
             sender_name: string;
             /**
              * Format: int64
@@ -915,6 +915,7 @@ export interface components {
             due_at?: string | null;
             /** Format: int64 */
             id: number;
+            owner_id: string;
             priority: string;
             /**
              * Format: int64
@@ -922,7 +923,6 @@ export interface components {
              */
             remind_before_minutes?: number | null;
             room_id: string;
-            sender_mxid: string;
             sender_name: string;
             text: string;
         };
@@ -985,9 +985,9 @@ export interface components {
              * @description When the money moved — not when the row was written.
              */
             occurred_at: string;
-            room_id: string;
             /** @description The sole ownership key, matching `AuthUser::owner_id()`. */
-            sender_mxid: string;
+            owner_id: string;
+            room_id: string;
             /** @description Display only — user-controlled, and collides across identity spaces. */
             sender_name: string;
         };
@@ -1084,7 +1084,7 @@ export interface components {
         };
         /**
          * @description One user's display preferences, keyed by the same `owner_id` every other
-         *     ownership check uses (`AuthUser::owner_id`, the `sender_mxid` column).
+         *     ownership check uses (`AuthUser::owner_id`, the `owner_id` column).
          *
          *     Deliberately shared by both front doors: the SPA renders timestamps in
          *     `timezone` and pre-selects `currency`, and the Matrix command handlers format

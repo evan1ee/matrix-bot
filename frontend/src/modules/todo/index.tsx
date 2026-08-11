@@ -28,7 +28,7 @@ import {
 export interface TodoItem {
   id: number;
   room_id: string;
-  sender_mxid: string;
+  owner_id: string;
   sender_name: string;
   text: string;
   priority: string;

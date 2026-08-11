@@ -95,7 +95,7 @@ impl ReminderSource {
 pub struct Reminder {
     pub id: i64,
     pub room_id: String,
-    pub sender_mxid: String,
+    pub owner_id: String,
     pub sender_name: String,
     pub message: String,
     pub trigger_at: DateTime<Utc>,

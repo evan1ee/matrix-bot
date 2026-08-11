@@ -2404,7 +2404,7 @@
           },
           "owner_id": {
             "type": "string",
-            "description": "The owning `sender_mxid`. Categories are per-user, never shared."
+            "description": "The owning `owner_id`. Categories are per-user, never shared."
           }
         }
       },
@@ -2871,7 +2871,7 @@
         "required": [
           "id",
           "room_id",
-          "sender_mxid",
+          "owner_id",
           "sender_name",
           "name",
           "category",
@@ -2928,6 +2928,9 @@
             "type": "string",
             "nullable": true
           },
+          "owner_id": {
+            "type": "string"
+          },
           "paid_installments": {
             "type": "integer",
             "format": "int32"
@@ -2944,9 +2947,6 @@
             "nullable": true
           },
           "room_id": {
-            "type": "string"
-          },
-          "sender_mxid": {
             "type": "string"
           },
           "sender_name": {
@@ -2991,7 +2991,7 @@
         "required": [
           "id",
           "room_id",
-          "sender_mxid",
+          "owner_id",
           "sender_name",
           "message",
           "trigger_at",
@@ -3012,6 +3012,9 @@
           "message": {
             "type": "string"
           },
+          "owner_id": {
+            "type": "string"
+          },
           "recurrence": {
             "type": "string"
           },
@@ -3020,9 +3023,6 @@
             "format": "int64"
           },
           "room_id": {
-            "type": "string"
-          },
-          "sender_mxid": {
             "type": "string"
           },
           "sender_name": {
@@ -3205,7 +3205,7 @@
         "required": [
           "id",
           "room_id",
-          "sender_mxid",
+          "owner_id",
           "sender_name",
           "text",
           "priority",
@@ -3230,6 +3230,9 @@
             "type": "integer",
             "format": "int64"
           },
+          "owner_id": {
+            "type": "string"
+          },
           "priority": {
             "type": "string"
           },
@@ -3240,9 +3243,6 @@
             "nullable": true
           },
           "room_id": {
-            "type": "string"
-          },
-          "sender_mxid": {
             "type": "string"
           },
           "sender_name": {
@@ -3321,7 +3321,7 @@
         "required": [
           "id",
           "room_id",
-          "sender_mxid",
+          "owner_id",
           "sender_name",
           "direction",
           "amount_minor",
@@ -3375,12 +3375,12 @@
             "format": "date-time",
             "description": "When the money moved — not when the row was written."
           },
-          "room_id": {
-            "type": "string"
-          },
-          "sender_mxid": {
+          "owner_id": {
             "type": "string",
             "description": "The sole ownership key, matching `AuthUser::owner_id()`."
+          },
+          "room_id": {
+            "type": "string"
           },
           "sender_name": {
             "type": "string",
@@ -3589,7 +3589,7 @@
       },
       "UserSettings": {
         "type": "object",
-        "description": "One user's display preferences, keyed by the same `owner_id` every other\nownership check uses (`AuthUser::owner_id`, the `sender_mxid` column).\n\nDeliberately shared by both front doors: the SPA renders timestamps in\n`timezone` and pre-selects `currency`, and the Matrix command handlers format\ntheir HTML replies with the same two values, so a user sees one consistent\nanswer no matter which door they came through.",
+        "description": "One user's display preferences, keyed by the same `owner_id` every other\nownership check uses (`AuthUser::owner_id`, the `owner_id` column).\n\nDeliberately shared by both front doors: the SPA renders timestamps in\n`timezone` and pre-selects `currency`, and the Matrix command handlers format\ntheir HTML replies with the same two values, so a user sees one consistent\nanswer no matter which door they came through.",
         "required": [
           "timezone",
           "currency"

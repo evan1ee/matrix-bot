@@ -42,7 +42,7 @@ pub async fn sync(
     let plan = ReminderPlan {
         source: ReminderSource::Todo,
         source_id: todo.id,
-        owner_id: &todo.sender_mxid,
+        owner_id: &todo.owner_id,
         owner_name: &todo.sender_name,
         room_id,
         message: format!("Task #{} is due: {}", todo.id, todo.text),

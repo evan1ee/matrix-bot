@@ -21,27 +21,48 @@ mod tests {
     #[tokio::test]
     async fn test_jwt_generation_and_validation() {
         let secret = "my_test_secret_key_12345";
-        let token = generate_jwt("alice", AuthKind::Local, secret).unwrap();
+        let token = generate_jwt("alice", AuthKind::Local, "acct_alice", secret).unwrap();
         let keys = JwtKeys::new(secret.as_bytes());
         let decoded = decode::<Claims>(&token, &keys.decoding, &Validation::default()).unwrap();
         assert_eq!(decoded.claims.sub, "alice");
         assert_eq!(decoded.claims.kind, AuthKind::Local);
+        assert_eq!(decoded.claims.acct, "acct_alice");
     }
 
     #[test]
-    fn test_identity_spaces_never_collide() {
+    fn test_ownership_reads_the_account_and_nothing_else() {
         // The bug this guards: a local account named `alice` and the Matrix user
         // `@alice:matrix.org` previously resolved to overlapping owners because
-        // ownership also matched on the display-only `sender_name` column.
-        let local = AuthUser::local("alice");
-        let matrix = AuthUser::matrix("@alice:matrix.org");
+        // ownership also matched on the display-only `sender_name` column, and
+        // later because it was *derived* from `subject`. It is now carried, not
+        // derived — `owner_id()` reads the account and has no other input.
+        let local = AuthUser::local("alice", "acct_one");
+        let matrix = AuthUser::matrix("@alice:matrix.org", "acct_two");
 
-        assert_eq!(local.owner_id(), "@web-alice:api");
-        assert_eq!(matrix.owner_id(), "@alice:matrix.org");
+        assert_eq!(local.owner_id(), "acct_one");
+        assert_eq!(matrix.owner_id(), "acct_two");
         assert_ne!(local.owner_id(), matrix.owner_id());
 
         // They share a display name, which must not imply shared ownership.
         assert_eq!(local.display_name(), matrix.display_name());
+    }
+
+    /// The point of the whole redesign: the same human signed in two different
+    /// ways is one owner. A local session and a Matrix session that resolved to
+    /// the same account must be indistinguishable to every ownership check,
+    /// even though they authenticated in different identity spaces.
+    #[test]
+    fn test_two_sign_in_routes_to_one_account_are_one_owner() {
+        let via_web = AuthUser::local("evan", "acct_shared");
+        let via_matrix = AuthUser::matrix("@evan:mbm.one", "acct_shared");
+
+        assert_ne!(via_web.kind, via_matrix.kind);
+        assert_ne!(via_web.subject, via_matrix.subject);
+        assert_eq!(
+            via_web.owner_id(),
+            via_matrix.owner_id(),
+            "linked identities must see one dataset"
+        );
     }
 
     #[test]
@@ -197,7 +218,7 @@ mod tests {
             let user = extract(&state, Some("Bearer syt_valid_token_value"))
                 .await
                 .unwrap();
-            assert_eq!(user.owner_id(), "@evan:mbm.one");
+            assert!(user.owner_id().starts_with("acct_"));
         }
         assert_eq!(
             calls.load(std::sync::atomic::Ordering::SeqCst),
@@ -237,29 +258,88 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         let state = fake_matrix_state(pool);
 
-        // A Matrix access token resolves through whoami to a Matrix identity.
+        // A Matrix access token resolves through whoami to a Matrix identity,
+        // and onto the account that MXID acts as.
         let user = extract(&state, Some("Bearer syt_valid_token_value"))
             .await
             .unwrap();
         assert_eq!(user.kind, AuthKind::Matrix);
-        assert_eq!(user.owner_id(), "@evan:mbm.one");
+        assert_eq!(user.subject, "@evan:mbm.one");
+        let matrix_account = user.owner_id();
+        assert!(matrix_account.starts_with("acct_"), "got {matrix_account}");
 
-        // A local JWT stays local, even though its subject is a bare name.
-        let local_jwt = generate_jwt("evan", AuthKind::Local, &state.jwt_secret).unwrap();
+        // Presenting the token again resolves to the same account rather than
+        // provisioning a second one.
+        let again = extract(&state, Some("Bearer syt_valid_token_value"))
+            .await
+            .unwrap();
+        assert_eq!(again.owner_id(), matrix_account);
+
+        // A local JWT stays local, even though its subject is a bare name, and
+        // carries its own account.
+        let local_jwt =
+            generate_jwt("evan", AuthKind::Local, "acct_local_evan", &state.jwt_secret).unwrap();
         let user = extract(&state, Some(&format!("Bearer {}", local_jwt)))
             .await
             .unwrap();
         assert_eq!(user.kind, AuthKind::Local);
-        assert_eq!(user.owner_id(), "@web-evan:api");
+        assert_eq!(user.owner_id(), "acct_local_evan");
+        assert_ne!(
+            user.owner_id(),
+            matrix_account,
+            "an unlinked local account and a Matrix account are different principals"
+        );
 
         // A Matrix JWT stays Matrix — the `kind` claim decides, not the subject.
-        let matrix_jwt =
-            generate_jwt("@evan:mbm.one", AuthKind::Matrix, &state.jwt_secret).unwrap();
+        let matrix_jwt = generate_jwt(
+            "@evan:mbm.one",
+            AuthKind::Matrix,
+            &matrix_account,
+            &state.jwt_secret,
+        )
+        .unwrap();
         let user = extract(&state, Some(&format!("Bearer {}", matrix_jwt)))
             .await
             .unwrap();
         assert_eq!(user.kind, AuthKind::Matrix);
-        assert_eq!(user.owner_id(), "@evan:mbm.one");
+        assert_eq!(user.owner_id(), matrix_account);
+    }
+
+    /// A token predating the `acct` claim must be refused, for the same reason
+    /// a token predating `kind` is: its holder would otherwise keep working
+    /// while pointing at an owner string that no row uses any more, so every
+    /// list would come back empty and every write would land somewhere nobody
+    /// can reach.
+    #[tokio::test]
+    async fn test_tokens_without_an_account_claim_are_rejected() {
+        #[derive(serde::Serialize)]
+        struct PreAccountClaims {
+            sub: String,
+            exp: usize,
+            kind: AuthKind,
+            scope: TokenScope,
+        }
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = fake_matrix_state(pool);
+
+        let stale = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &PreAccountClaims {
+                sub: "evan".to_string(),
+                exp: (chrono::Utc::now() + chrono::Duration::days(1)).timestamp() as usize,
+                kind: AuthKind::Local,
+                scope: TokenScope::Api,
+            },
+            &JwtKeys::new(state.jwt_secret.as_bytes()).encoding,
+        )
+        .unwrap();
+
+        let err = extract(&state, Some(&format!("Bearer {}", stale)))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
     }
 
     /// A token predating the `kind` claim must be refused outright.
@@ -311,6 +391,7 @@ mod tests {
         let ticket = generate_scoped_jwt(
             "evan",
             AuthKind::Local,
+            "acct_evan",
             TokenScope::SseStream,
             chrono::Duration::seconds(30),
             &state.jwt_secret,

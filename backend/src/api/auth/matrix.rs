@@ -212,15 +212,24 @@ pub async fn authenticate_matrix_user(
 pub fn generate_jwt(
     subject: &str,
     kind: AuthKind,
+    account_id: &str,
     secret: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
-    generate_scoped_jwt(subject, kind, TokenScope::Api, Duration::days(7), secret)
+    generate_scoped_jwt(
+        subject,
+        kind,
+        account_id,
+        TokenScope::Api,
+        Duration::days(7),
+        secret,
+    )
 }
 
 /// Issues a token limited to `scope` and `ttl`.
 pub fn generate_scoped_jwt(
     subject: &str,
     kind: AuthKind,
+    account_id: &str,
     scope: TokenScope,
     ttl: Duration,
     secret: &str,
@@ -235,6 +244,7 @@ pub fn generate_scoped_jwt(
         exp: expiration,
         kind,
         scope,
+        acct: account_id.to_string(),
     };
 
     let keys = JwtKeys::new(secret.as_bytes());

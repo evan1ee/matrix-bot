@@ -10,7 +10,7 @@ use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder
 pub async fn handle_reminder_command(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     clean_body: &str,
 ) -> Option<String> {
@@ -22,7 +22,7 @@ pub async fn handle_reminder_command(
 
     // Read after the command is claimed, so an unrelated message never costs a
     // settings query.
-    let tz = SettingsRepository::get_or_default(pool, sender_mxid).await.tz();
+    let tz = SettingsRepository::get_or_default(pool, owner_id).await.tz();
 
     // 1. !remind list [page]
     if clean_lower == "remind list"
@@ -34,7 +34,7 @@ pub async fn handle_reminder_command(
         let page: i64 = rest.parse().unwrap_or(1).max(1);
         let offset = (page - 1) * 25;
 
-        match ReminderRepository::list_user_pending(pool, sender_mxid, 25, offset).await {
+        match ReminderRepository::list_user_pending(pool, owner_id, 25, offset).await {
             Ok(reminders) => {
                 if reminders.is_empty() {
                     if page > 1 {
@@ -80,7 +80,7 @@ pub async fn handle_reminder_command(
         }
 
         if let Ok(id) = id_str.parse::<i64>() {
-            match ReminderRepository::cancel(pool, sender_mxid, id).await {
+            match ReminderRepository::cancel(pool, owner_id, id).await {
                 Ok(true) => Some(format!("🗑️ Cancelled reminder <b>#{}</b>.", id)),
                 Ok(false) => Some(format!("⚠️ Pending reminder <b>#{}</b> not found.", id)),
                 Err(err) => {
@@ -124,7 +124,7 @@ pub async fn handle_reminder_command(
             }
 
             // Quota check: max 100 pending reminders per user
-            match ReminderRepository::count_user_pending(pool, sender_mxid).await {
+            match ReminderRepository::count_user_pending(pool, owner_id).await {
                 Ok(count) if count >= 100 => {
                     return Some("⚠️ Reminder limit reached (100 pending reminders). Cancel existing reminders using <code>!remind cancel &lt;id&gt;</code>.".to_string());
                 }
@@ -143,7 +143,7 @@ pub async fn handle_reminder_command(
 
             let trigger_at = Utc::now() + dur_chrono;
 
-            match ReminderRepository::create(pool, room_id, sender_mxid, sender_name, &msg, trigger_at, recurrence.clone(), None).await {
+            match ReminderRepository::create(pool, room_id, owner_id, sender_name, &msg, trigger_at, recurrence.clone(), None).await {
                 Ok(reminder) => {
                     let rec_note = match recurrence {
                         RecurrencePattern::Daily => " 🔄 (Recurring daily)",

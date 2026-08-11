@@ -33,7 +33,8 @@ where
         // 1. Try Matrix Access Token validation (if starts with syt_)
         if token.starts_with("syt_") {
             if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
-                return Ok(AuthUser::matrix(user_id));
+                let account_id = resolve_matrix_account(&api_state, &user_id).await?;
+                return Ok(AuthUser::matrix(user_id, account_id));
             } else {
                 return Err(ApiError::unauthorized("Invalid or expired Matrix access token"));
             }
@@ -53,16 +54,33 @@ where
                 Ok(AuthUser {
                     subject: token_data.claims.sub,
                     kind: token_data.claims.kind,
+                    account_id: token_data.claims.acct,
                 })
             }
             Err(_) => {
                 // 3. Fallback: try checking if it's a raw Matrix Access Token that doesn't start with syt_
                 if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
-                    Ok(AuthUser::matrix(user_id))
+                    let account_id = resolve_matrix_account(&api_state, &user_id).await?;
+                    Ok(AuthUser::matrix(user_id, account_id))
                 } else {
                     Err(ApiError::unauthorized("Invalid or expired authentication token"))
                 }
             }
         }
     }
+}
+
+/// Maps a proven MXID onto the account it acts as.
+///
+/// Provisions one if the MXID has never been seen, exactly as the Matrix
+/// command path does — a homeserver access token proves the same thing a
+/// message from that MXID proves, so the two must not disagree about who the
+/// caller is.
+async fn resolve_matrix_account(state: &ApiState, mxid: &str) -> Result<String, ApiError> {
+    crate::accounts::AccountRepository::resolve_or_provision(&state.db.pool, mxid)
+        .await
+        .map_err(|err| {
+            tracing::error!("Could not resolve an account for {}: {:?}", mxid, err);
+            ApiError::internal("Could not resolve an account for this identity")
+        })
 }

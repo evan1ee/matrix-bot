@@ -19,7 +19,7 @@ const PAGE_SIZE: i64 = 25;
 pub async fn handle_todo_command(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     clean_body: &str,
 ) -> Option<String> {
@@ -33,10 +33,10 @@ pub async fn handle_todo_command(
 
     // Read after the command is claimed, so an unrelated message never costs a
     // settings query.
-    let tz = SettingsRepository::get_or_default(pool, sender_mxid).await.tz();
+    let tz = SettingsRepository::get_or_default(pool, owner_id).await.tz();
 
     if bare {
-        let items = TodoRepository::list_all_user(pool, sender_mxid, None, PAGE_SIZE, 0)
+        let items = TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, 0)
             .await.ok().unwrap_or_default();
         return Some(format_todo_list(
             &format!("Your Tasks ({})", html_escape(sender_name)), &items, 1, &tz,
@@ -51,7 +51,7 @@ pub async fn handle_todo_command(
     let args_lower = args_body.to_lowercase();
 
     if args_lower.starts_with("add") {
-        handle_add(pool, room_id, sender_mxid, sender_name, args_body).await
+        handle_add(pool, room_id, owner_id, sender_name, args_body).await
     } else if args_lower.starts_with("done") {
         handle_done(pool, room_id, args_body).await
     } else if args_lower.starts_with("edit") {
@@ -61,11 +61,11 @@ pub async fn handle_todo_command(
     } else if args_lower.starts_with("due") {
         handle_due(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("clear") {
-        handle_clear(pool, room_id, sender_mxid, sender_name, args_body).await
+        handle_clear(pool, room_id, owner_id, sender_name, args_body).await
     } else if args_lower.starts_with("room") {
         handle_list_room(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("list") || args_lower.starts_with("my") || args_lower.starts_with("all") || args_lower.starts_with("global") || args_lower.is_empty() {
-        handle_list_user(pool, sender_mxid, sender_name, args_body, &tz).await
+        handle_list_user(pool, owner_id, sender_name, args_body, &tz).await
     } else {
         Some("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
               <code>all</code>, <code>room</code>, <code>done</code>, <code>edit</code>, <code>priority</code>, \
@@ -78,7 +78,7 @@ pub async fn handle_todo_command(
 async fn handle_add(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     args_body: &str,
 ) -> Option<String> {
@@ -127,7 +127,7 @@ async fn handle_add(
         _ => {}
     }
 
-    match TodoRepository::add(pool, room_id, sender_mxid, sender_name, raw_text, priority, None, None).await {
+    match TodoRepository::add(pool, room_id, owner_id, sender_name, raw_text, priority, None, None).await {
         Ok(item) => Some(format!(
             "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}",
             item.id,
@@ -349,7 +349,7 @@ async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) 
 async fn handle_clear(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     args_body: &str,
 ) -> Option<String> {
@@ -363,7 +363,7 @@ async fn handle_clear(
             }
         }
     } else {
-        match TodoRepository::clear_completed_user(pool, sender_mxid).await {
+        match TodoRepository::clear_completed_user(pool, owner_id).await {
             Ok(count) => Some(format!("🗑️ Cleared <b>{}</b> of {}'s completed task(s) globally!", count, html_escape(sender_name))),
             Err(err) => {
                 error!("Failed to clear user todos: {:?}", err);
@@ -389,7 +389,7 @@ async fn handle_list_room(pool: &SqlitePool, room_id: &str, args_body: &str, tz:
 
 async fn handle_list_user(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     args_body: &str,
     tz: &Tz,
@@ -398,7 +398,7 @@ async fn handle_list_user(
     let page: i64 = rest.parse().unwrap_or(1).max(1);
     let offset = (page - 1) * PAGE_SIZE;
 
-    match TodoRepository::list_all_user(pool, sender_mxid, None, PAGE_SIZE, offset).await {
+    match TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, offset).await {
         Ok(items) => Some(format_todo_list(
             &format!("Your Tasks ({})", html_escape(sender_name)), &items, page, tz,
         )),

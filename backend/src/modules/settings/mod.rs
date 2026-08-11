@@ -63,7 +63,7 @@ impl BotModule for SettingsModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_settings_command(&db.pool, &ctx.sender_mxid, &ctx.full_body, broadcaster)
+        handler::handle_settings_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
             .await
     }
 }
@@ -76,7 +76,7 @@ mod tests {
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
-            sender_mxid: "@alice:a".to_string(),
+            owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()

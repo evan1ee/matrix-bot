@@ -9,7 +9,7 @@ impl RecurringBillRepository {
     pub async fn create(
         pool: &SqlitePool,
         room_id: &str,
-        sender_mxid: &str,
+        owner_id: &str,
         sender_name: &str,
         payload: CreateBillPayload,
     ) -> Result<RecurringBill, sqlx::Error> {
@@ -20,7 +20,7 @@ impl RecurringBillRepository {
         let res = sqlx::query(
             r#"
             INSERT INTO recurring_bills (
-                room_id, sender_mxid, sender_name, name, category,
+                room_id, owner_id, sender_name, name, category,
                 amount_minor, currency, currency_exponent, frequency,
                 due_day, next_due_at, total_installments, auto_pay, notes,
                 remind_before_minutes, remind_room_id
@@ -29,7 +29,7 @@ impl RecurringBillRepository {
             "#,
         )
         .bind(room_id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .bind(sender_name)
         .bind(&payload.name)
         .bind(&payload.category)
@@ -66,7 +66,7 @@ impl RecurringBillRepository {
         owner_id: &str,
     ) -> Result<Vec<RecurringBill>, sqlx::Error> {
         sqlx::query_as::<_, RecurringBill>(
-            "SELECT * FROM recurring_bills WHERE sender_mxid = ? ORDER BY next_due_at ASC;",
+            "SELECT * FROM recurring_bills WHERE owner_id = ? ORDER BY next_due_at ASC;",
         )
         .bind(owner_id)
         .fetch_all(pool)
@@ -83,7 +83,7 @@ impl RecurringBillRepository {
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
 
-        if existing.sender_mxid != owner_id {
+        if existing.owner_id != owner_id {
             return Err(sqlx::Error::RowNotFound);
         }
 
@@ -112,7 +112,7 @@ impl RecurringBillRepository {
                 due_day = ?, next_due_at = ?, total_installments = ?, paid_installments = ?,
                 auto_pay = ?, status = ?, notes = ?, remind_before_minutes = ?,
                 remind_room_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND sender_mxid = ?;
+            WHERE id = ? AND owner_id = ?;
             "#,
         )
         .bind(&name)
@@ -140,7 +140,7 @@ impl RecurringBillRepository {
     }
 
     pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM recurring_bills WHERE id = ? AND sender_mxid = ?;")
+        let result = sqlx::query("DELETE FROM recurring_bills WHERE id = ? AND owner_id = ?;")
             .bind(id)
             .bind(owner_id)
             .execute(pool)
@@ -158,7 +158,7 @@ impl RecurringBillRepository {
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
 
-        if bill.sender_mxid != owner_id {
+        if bill.owner_id != owner_id {
             return Err(sqlx::Error::RowNotFound);
         }
 
@@ -180,7 +180,7 @@ impl RecurringBillRepository {
             r#"
             UPDATE recurring_bills
             SET paid_installments = ?, next_due_at = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND sender_mxid = ?;
+            WHERE id = ? AND owner_id = ?;
             "#,
         )
         .bind(new_paid_installments)

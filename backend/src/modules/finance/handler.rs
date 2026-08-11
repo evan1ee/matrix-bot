@@ -24,7 +24,7 @@ struct ParsedEntry {
 pub async fn handle_finance_command(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     clean_body: &str,
 ) -> Option<String> {
@@ -42,7 +42,7 @@ pub async fn handle_finance_command(
     };
 
     if keyword == "category" {
-        return handle_category(pool, sender_mxid, rest).await;
+        return handle_category(pool, owner_id, rest).await;
     }
 
     let rest_lower = rest.to_lowercase();
@@ -50,23 +50,23 @@ pub async fn handle_finance_command(
 
     if rest_lower.is_empty() || rest_lower.starts_with("list") {
         let page = rest.split_whitespace().nth(1).and_then(|p| p.parse().ok()).unwrap_or(1).max(1);
-        return handle_list(pool, sender_mxid, sender_name, page).await;
+        return handle_list(pool, owner_id, sender_name, page).await;
     }
     if rest_lower.starts_with("summary") {
-        return handle_summary(pool, sender_mxid, sender_name).await;
+        return handle_summary(pool, owner_id, sender_name).await;
     }
     if rest_lower.starts_with("delete") || rest_lower.starts_with("remove") {
         let id_str = rest.split_whitespace().nth(1).unwrap_or("");
-        return handle_delete(pool, sender_mxid, id_str).await;
+        return handle_delete(pool, owner_id, id_str).await;
     }
     if rest_lower.starts_with("add") {
         let args = rest[3..].trim();
         // The user's saved currency, so `!expense add 9.99 coffee` books in the
         // currency they actually spend in rather than a hardcoded USD.
         let default_currency =
-            SettingsRepository::get_or_default(pool, sender_mxid).await.currency;
+            SettingsRepository::get_or_default(pool, owner_id).await.currency;
         return handle_add(
-            pool, room_id, sender_mxid, sender_name, direction, args, &default_currency,
+            pool, room_id, owner_id, sender_name, direction, args, &default_currency,
         )
         .await;
     }
@@ -128,7 +128,7 @@ fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String
 async fn handle_add(
     pool: &SqlitePool,
     room_id: &str,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     direction: Direction,
     args: &str,
@@ -147,7 +147,7 @@ async fn handle_add(
     // A named category must already exist. Creating one implicitly would let a
     // typo silently fragment a category into two.
     let category_id = match &entry.category {
-        Some(name) => match FinanceRepository::find_category_by_name(pool, sender_mxid, name).await {
+        Some(name) => match FinanceRepository::find_category_by_name(pool, owner_id, name).await {
             Ok(Some(found)) => Some(found.id),
             Ok(None) => {
                 return Some(format!(
@@ -169,7 +169,7 @@ async fn handle_add(
     match FinanceRepository::create_transaction(
         pool,
         room_id,
-        sender_mxid,
+        owner_id,
         sender_name,
         direction.as_str(),
         entry.amount_minor,
@@ -203,12 +203,12 @@ async fn handle_add(
 
 async fn handle_list(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
     page: i64,
 ) -> Option<String> {
     let offset = (page - 1) * PAGE_SIZE;
-    match FinanceRepository::list(pool, sender_mxid, None, PAGE_SIZE, offset).await {
+    match FinanceRepository::list(pool, owner_id, None, PAGE_SIZE, offset).await {
         Ok(items) if items.is_empty() => Some(format!(
             "📒 No ledger entries for {} on page {}.",
             html_escape(sender_name),
@@ -251,7 +251,7 @@ fn format_ledger(items: &[Transaction], sender_name: &str, page: i64) -> String 
 
 async fn handle_summary(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     sender_name: &str,
 ) -> Option<String> {
     let now = Utc::now();
@@ -265,7 +265,7 @@ async fn handle_summary(
         Utc.with_ymd_and_hms(now.year(), now.month() + 1, 1, 0, 0, 0).single().unwrap_or(now)
     };
 
-    match FinanceRepository::summary(pool, sender_mxid, start, end).await {
+    match FinanceRepository::summary(pool, owner_id, start, end).await {
         Ok(summaries) if summaries.is_empty() => {
             Some("📊 Nothing recorded this month.".to_string())
         }
@@ -303,13 +303,13 @@ async fn handle_summary(
     }
 }
 
-async fn handle_delete(pool: &SqlitePool, sender_mxid: &str, id_str: &str) -> Option<String> {
+async fn handle_delete(pool: &SqlitePool, owner_id: &str, id_str: &str) -> Option<String> {
     let Ok(id) = id_str.trim().parse::<i64>() else {
         return Some("⚠️ Usage: <code>!expense delete &lt;id&gt;</code>".to_string());
     };
 
     // Ownership is checked before deleting; the id alone is not authority.
-    match FinanceRepository::find_owned(pool, id, sender_mxid).await {
+    match FinanceRepository::find_owned(pool, id, owner_id).await {
         Ok(Some(_)) => match FinanceRepository::delete(pool, id).await {
             Ok(_) => Some(format!("🗑️ Removed entry <b>#{}</b>.", id)),
             Err(err) => {
@@ -325,11 +325,11 @@ async fn handle_delete(pool: &SqlitePool, sender_mxid: &str, id_str: &str) -> Op
     }
 }
 
-async fn handle_category(pool: &SqlitePool, sender_mxid: &str, rest: &str) -> Option<String> {
+async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Option<String> {
     let lower = rest.to_lowercase();
 
     if lower.is_empty() || lower.starts_with("list") {
-        return match FinanceRepository::list_categories(pool, sender_mxid).await {
+        return match FinanceRepository::list_categories(pool, owner_id).await {
             Ok(cats) if cats.is_empty() => Some(
                 "🏷️ No categories yet. Add one with <code>!category add food</code>.".to_string(),
             ),
@@ -350,7 +350,7 @@ async fn handle_category(pool: &SqlitePool, sender_mxid: &str, rest: &str) -> Op
         if name.is_empty() || name.len() > 64 {
             return Some("⚠️ A category name must be 1–64 characters.".to_string());
         }
-        return match FinanceRepository::create_category(pool, sender_mxid, name).await {
+        return match FinanceRepository::create_category(pool, owner_id, name).await {
             Ok(Some(cat)) => Some(format!("🏷️ Added category <b>{}</b>.", html_escape(&cat.name))),
             Ok(None) => {
                 Some(format!("⚠️ You already have a category named <b>{}</b>.", html_escape(name)))
@@ -364,8 +364,8 @@ async fn handle_category(pool: &SqlitePool, sender_mxid: &str, rest: &str) -> Op
 
     if let Some(name) = lower.strip_prefix("remove ").or_else(|| lower.strip_prefix("delete ")) {
         let name = rest[rest.len() - name.len()..].trim();
-        return match FinanceRepository::find_category_by_name(pool, sender_mxid, name).await {
-            Ok(Some(cat)) => match FinanceRepository::delete_category(pool, sender_mxid, cat.id).await
+        return match FinanceRepository::find_category_by_name(pool, owner_id, name).await {
+            Ok(Some(cat)) => match FinanceRepository::delete_category(pool, owner_id, cat.id).await
             {
                 Ok(Some(orphaned)) => Some(format!(
                     "🏷️ Removed <b>{}</b>. {} entr{} kept and left uncategorised.",

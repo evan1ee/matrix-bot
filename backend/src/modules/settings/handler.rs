@@ -22,7 +22,7 @@ const SUGGESTED_ZONES: &[&str] = &[
 
 pub async fn handle_settings_command(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<String> {
@@ -35,9 +35,9 @@ pub async fn handle_settings_command(
     let value = parts.next().unwrap_or("").trim();
 
     match field.as_str() {
-        "" => Some(show(pool, sender_mxid).await),
-        "timezone" | "tz" => Some(set_timezone(pool, sender_mxid, value, broadcaster).await),
-        "currency" | "cur" => Some(set_currency(pool, sender_mxid, value, broadcaster).await),
+        "" => Some(show(pool, owner_id).await),
+        "timezone" | "tz" => Some(set_timezone(pool, owner_id, value, broadcaster).await),
+        "currency" | "cur" => Some(set_currency(pool, owner_id, value, broadcaster).await),
         other => Some(format!(
             "⚠️ Unknown setting <code>{}</code>.<br/>{}",
             html_escape(other),
@@ -70,8 +70,8 @@ fn usage() -> String {
     )
 }
 
-async fn show(pool: &SqlitePool, sender_mxid: &str) -> String {
-    let settings = SettingsRepository::get_or_default(pool, sender_mxid).await;
+async fn show(pool: &SqlitePool, owner_id: &str) -> String {
+    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
     let now = format_datetime(&chrono::Utc::now(), &settings.tz());
 
     format!(
@@ -87,7 +87,7 @@ async fn show(pool: &SqlitePool, sender_mxid: &str) -> String {
 
 async fn set_timezone(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -103,13 +103,13 @@ async fn set_timezone(
         );
     };
 
-    let current = SettingsRepository::get_or_default(pool, sender_mxid).await;
+    let current = SettingsRepository::get_or_default(pool, owner_id).await;
     let updated = UserSettings {
         timezone: tz.name().to_string(),
         currency: current.currency,
     };
 
-    match save(pool, sender_mxid, updated, broadcaster).await {
+    match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
             "✅ Timezone set to <b>{}</b>. It is currently <b>{}</b>.",
             html_escape(&saved.timezone),
@@ -121,7 +121,7 @@ async fn set_timezone(
 
 async fn set_currency(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -139,10 +139,10 @@ async fn set_currency(
         }
     };
 
-    let current = SettingsRepository::get_or_default(pool, sender_mxid).await;
+    let current = SettingsRepository::get_or_default(pool, owner_id).await;
     let updated = UserSettings { timezone: current.timezone, currency };
 
-    match save(pool, sender_mxid, updated, broadcaster).await {
+    match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
             "✅ Default currency set to <b>{}</b>. \
              <code>!expense add 9.99 coffee</code> now books in {}.",
@@ -160,17 +160,17 @@ async fn set_currency(
 /// reach the SSE stream or the browser silently keeps rendering the old zone.
 async fn save(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     settings: UserSettings,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Result<UserSettings, ()> {
-    let saved = SettingsRepository::upsert(pool, sender_mxid, &settings)
+    let saved = SettingsRepository::upsert(pool, owner_id, &settings)
         .await
-        .map_err(|err| error!("Failed to save settings for {}: {:?}", sender_mxid, err))?;
+        .map_err(|err| error!("Failed to save settings for {}: {:?}", owner_id, err))?;
 
     if let Some(b) = broadcaster {
         b.send(SystemEvent::SettingsUpdated {
-            owner_id: sender_mxid.to_string(),
+            owner_id: owner_id.to_string(),
             settings: saved.clone(),
         });
     }

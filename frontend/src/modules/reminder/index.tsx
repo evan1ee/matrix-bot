@@ -9,7 +9,7 @@ import { formatTimeInZone, nowInZone, useSettings } from '../../core/settings';
 export interface ReminderItem {
   id: number;
   room_id: string;
-  sender_mxid: string;
+  owner_id: string;
   sender_name: string;
   message: string;
   trigger_at: string;

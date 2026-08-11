@@ -59,7 +59,7 @@ pub async fn list_reminders(
 
     let (items, total) = if let Some(room) = &query.room_id {
         let items = sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, sender_mxid, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
+            "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND owner_id = ? AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
         )
         .bind(room)
         .bind(&owner_id)
@@ -70,7 +70,7 @@ pub async fn list_reminders(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM reminders WHERE room_id = ? AND sender_mxid = ? AND status = 'pending'",
+            "SELECT COUNT(*) FROM reminders WHERE room_id = ? AND owner_id = ? AND status = 'pending'",
         )
         .bind(room)
         .bind(&owner_id)
@@ -227,7 +227,7 @@ pub async fn delete_reminder(
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT room_id FROM reminders WHERE id = ? AND sender_mxid = ?",
+        "SELECT room_id FROM reminders WHERE id = ? AND owner_id = ?",
     )
     .bind(id)
     .bind(&owner_id)
@@ -270,8 +270,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice");
-        let bob = AuthUser::local("bob");
+        let alice = AuthUser::local("alice", "acct_alice");
+        let bob = AuthUser::local("bob", "acct_bob");
 
         // Alice creates reminder
         let req = CreateReminderRequest {
@@ -321,8 +321,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice");
-        let bob = AuthUser::local("bob");
+        let alice = AuthUser::local("alice", "acct_alice");
+        let bob = AuthUser::local("bob", "acct_bob");
 
         let created = create_reminder(
             State(state.clone()),

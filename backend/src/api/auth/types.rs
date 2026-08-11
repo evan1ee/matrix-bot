@@ -68,6 +68,15 @@ pub struct Claims {
     /// Defaults to `Api`, matching tokens issued before scoping existed.
     #[serde(default)]
     pub scope: TokenScope,
+    /// The account this token acts as — an `accounts.id`, and the value every
+    /// ownership predicate compares against.
+    ///
+    /// Required, and deliberately not defaulted, for the same reason `kind` is
+    /// not: a token issued before accounts existed carries an owner string from
+    /// the old identity space, and silently accepting it would point its holder
+    /// at rows that no longer exist. A 401 sends them back through login, which
+    /// resolves them onto a real account.
+    pub acct: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -93,32 +102,45 @@ pub struct AuthResponse {
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     /// The MXID for [`AuthKind::Matrix`], or the account name for [`AuthKind::Local`].
+    ///
+    /// Display and provenance only — it says how the caller authenticated, not
+    /// what they own.
     pub subject: String,
     pub kind: AuthKind,
+    /// The `accounts.id` this caller acts as. The only ownership key there is.
+    pub account_id: String,
 }
 
 impl AuthUser {
-    pub fn matrix(mxid: impl Into<String>) -> Self {
-        Self { subject: mxid.into(), kind: AuthKind::Matrix }
+    pub fn matrix(mxid: impl Into<String>, account_id: impl Into<String>) -> Self {
+        Self {
+            subject: mxid.into(),
+            kind: AuthKind::Matrix,
+            account_id: account_id.into(),
+        }
     }
 
     /// Test-only: the production path builds local identities from signed JWT
     /// claims in the extractor, never from a bare username.
     #[cfg(test)]
-    pub fn local(username: impl Into<String>) -> Self {
-        Self { subject: username.into(), kind: AuthKind::Local }
+    pub fn local(username: impl Into<String>, account_id: impl Into<String>) -> Self {
+        Self {
+            subject: username.into(),
+            kind: AuthKind::Local,
+            account_id: account_id.into(),
+        }
     }
 
-    /// The single canonical owner string persisted in `sender_mxid`.
+    /// The single canonical owner string persisted in `owner_id`.
     ///
-    /// Every ownership check compares against this and nothing else. Local
-    /// accounts are namespaced into `@web-*:api`, which registration validation
-    /// guarantees a real MXID can never collide with.
+    /// Every ownership check compares against this and nothing else. It used to
+    /// be derived from `subject` — the MXID verbatim for a Matrix caller, and
+    /// `@web-<username>:api` for a local one — which is exactly what made the
+    /// same human two different owners depending on how they had signed in.
+    /// Now both paths resolve to an account before this is ever read, so the
+    /// derivation is gone and there is nothing left to get wrong.
     pub fn owner_id(&self) -> String {
-        match self.kind {
-            AuthKind::Matrix => self.subject.clone(),
-            AuthKind::Local => format!("@web-{}:api", self.subject),
-        }
+        self.account_id.clone()
     }
 
     /// The human-facing name persisted in `sender_name`. Display only — it is

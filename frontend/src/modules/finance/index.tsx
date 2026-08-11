@@ -28,7 +28,7 @@ export type Direction = 'expense' | 'income';
 export interface Transaction {
   id: number;
   room_id: string;
-  sender_mxid: string;
+  owner_id: string;
   sender_name: string;
   direction: string;
   /** Minor units — always positive; `direction` carries the sign. */

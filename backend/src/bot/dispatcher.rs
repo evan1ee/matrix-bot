@@ -1,18 +1,23 @@
 use matrix_sdk::ruma::UserId;
 
-use crate::modules::CommandContext;
+use crate::modules::ParsedCommand;
 
 pub struct CommandParser;
 
 impl CommandParser {
+    /// Recognises a command without touching the database.
+    ///
+    /// Deliberately knows nothing about accounts: resolving the sender costs a
+    /// query, and the overwhelming majority of messages the bot sees are
+    /// ordinary room chatter that this function rejects. The caller resolves an
+    /// owner only once something comes back `Some`.
     pub fn parse_message(
         body: &str,
         formatted_body: Option<&str>,
         own_id: &UserId,
         room_id: &str,
-        sender_mxid: &str,
         sender_localpart: &str,
-    ) -> Option<CommandContext> {
+    ) -> Option<ParsedCommand> {
         let body = body.trim();
         if body.is_empty() {
             return None;
@@ -67,9 +72,8 @@ impl CommandParser {
         let raw_command = parts.next().unwrap_or("").trim_start_matches('!').to_string();
         let raw_args = parts.next().unwrap_or("").trim().to_string();
 
-        Some(CommandContext {
+        Some(ParsedCommand {
             room_id: room_id.to_string(),
-            sender_mxid: sender_mxid.to_string(),
             sender_name: sender_localpart.to_string(),
             command: raw_command,
             raw_args,
@@ -90,7 +94,6 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "@alice:matrix.org",
             "alice",
         )
         .unwrap();
@@ -108,7 +111,6 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "@bob:matrix.org",
             "bob",
         )
         .unwrap();
@@ -126,7 +128,6 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "@charlie:matrix.org",
             "charlie",
         );
         assert!(res.is_none());

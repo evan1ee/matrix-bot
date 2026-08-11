@@ -37,7 +37,7 @@ impl Direction {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 pub struct Category {
     pub id: i64,
-    /// The owning `sender_mxid`. Categories are per-user, never shared.
+    /// The owning `owner_id`. Categories are per-user, never shared.
     pub owner_id: String,
     pub name: String,
     pub created_at: Option<DateTime<Utc>>,
@@ -50,7 +50,7 @@ pub struct Transaction {
     pub id: i64,
     pub room_id: String,
     /// The sole ownership key, matching `AuthUser::owner_id()`.
-    pub sender_mxid: String,
+    pub owner_id: String,
     /// Display only — user-controlled, and collides across identity spaces.
     pub sender_name: String,
     pub direction: String,

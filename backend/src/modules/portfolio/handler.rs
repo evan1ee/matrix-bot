@@ -10,7 +10,7 @@ use crate::utils::html_escape;
 
 pub async fn handle_portfolio_command(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<String> {
@@ -21,29 +21,29 @@ pub async fn handle_portfolio_command(
     let rest_lower = rest.to_lowercase();
 
     if rest_lower.is_empty() || rest_lower.starts_with("list") {
-        return Some(handle_list(pool, sender_mxid).await);
+        return Some(handle_list(pool, owner_id).await);
     }
     if rest_lower.starts_with("summary") {
-        return Some(handle_summary(pool, sender_mxid).await);
+        return Some(handle_summary(pool, owner_id).await);
     }
     if rest_lower.starts_with("cash") {
-        return Some(handle_cash(pool, sender_mxid, rest[4..].trim(), broadcaster).await);
+        return Some(handle_cash(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("buy") {
-        return Some(handle_buy(pool, sender_mxid, rest[3..].trim(), broadcaster).await);
+        return Some(handle_buy(pool, owner_id, rest[3..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("sell") {
-        return Some(handle_sell(pool, sender_mxid, rest[4..].trim(), broadcaster).await);
+        return Some(handle_sell(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("price") {
-        return Some(handle_price(pool, sender_mxid, rest[5..].trim(), broadcaster).await);
+        return Some(handle_price(pool, owner_id, rest[5..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("note") {
-        return Some(handle_note(pool, sender_mxid, rest[4..].trim(), broadcaster).await);
+        return Some(handle_note(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("remove") || rest_lower.starts_with("delete") {
         let symbol = rest.split_whitespace().nth(1).unwrap_or("");
-        return Some(handle_remove(pool, sender_mxid, symbol, broadcaster).await);
+        return Some(handle_remove(pool, owner_id, symbol, broadcaster).await);
     }
 
     Some(usage())
@@ -95,8 +95,8 @@ fn signed_amount(minor: i64, exponent: u32) -> String {
     format!("{}{}", sign, format_amount(minor.abs(), exponent))
 }
 
-async fn handle_list(pool: &SqlitePool, sender_mxid: &str) -> String {
-    match PortfolioRepository::list(pool, sender_mxid).await {
+async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
+    match PortfolioRepository::list(pool, owner_id).await {
         Ok(holdings) if holdings.is_empty() => {
             "📈 No holdings yet. Add one with <code>!portfolio buy AAPL 10 @ 150.00</code>.".to_string()
         }
@@ -146,8 +146,8 @@ fn format_holding_line(h: &Holding) -> String {
     format!("{}{}{}", base, priced, note)
 }
 
-async fn handle_summary(pool: &SqlitePool, sender_mxid: &str) -> String {
-    match PortfolioRepository::summary(pool, sender_mxid).await {
+async fn handle_summary(pool: &SqlitePool, owner_id: &str) -> String {
+    match PortfolioRepository::summary(pool, owner_id).await {
         Ok(summaries) if summaries.is_empty() => "📊 No holdings recorded yet.".to_string(),
         Ok(summaries) => {
             let mut html = "📊 <b>Portfolio summary:</b><br/>".to_string();
@@ -219,11 +219,11 @@ fn parse_buy(args: &str, default_currency: &str) -> Result<ParsedBuy, String> {
 
 async fn handle_buy(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, sender_mxid).await.currency;
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
 
     let parsed = match parse_buy(args, &default_currency) {
         Ok(p) => p,
@@ -238,7 +238,7 @@ async fn handle_buy(
     let exponent = exponent_for(&parsed.currency);
     let outcome = PortfolioRepository::buy(
         pool,
-        sender_mxid,
+        owner_id,
         &parsed.symbol,
         parsed.quantity_minor,
         parsed.price_minor,
@@ -251,7 +251,7 @@ async fn handle_buy(
     match outcome {
         Ok(BuyOutcome::Ok { holding, cash }) => {
             broadcast(broadcaster, SystemEvent::PortfolioHoldingCreated(holding.clone()));
-            broadcast(broadcaster, cash_event(sender_mxid, &cash));
+            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📈 Bought <b>{} {}</b> @ {} {}. Position: {} @ avg {} {}. Cash remaining: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -315,7 +315,7 @@ fn parse_sell(args: &str, exponent_for_symbol: impl Fn(&str) -> Option<u32>) -> 
 
 async fn handle_sell(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -325,7 +325,7 @@ async fn handle_sell(
     let symbol_raw = args.split_whitespace().next().unwrap_or("");
     let symbol_for_lookup = normalise_symbol(symbol_raw).ok();
     let existing = match &symbol_for_lookup {
-        Some(sym) => PortfolioRepository::find(pool, sender_mxid, sym).await.ok().flatten(),
+        Some(sym) => PortfolioRepository::find(pool, owner_id, sym).await.ok().flatten(),
         None => None,
     };
     let currency_exponent = existing.as_ref().map(|h| h.currency_exponent as u32);
@@ -346,7 +346,7 @@ async fn handle_sell(
 
     match PortfolioRepository::sell(
         pool,
-        sender_mxid,
+        owner_id,
         &parsed.symbol,
         parsed.quantity_minor,
         parsed.price_minor,
@@ -363,9 +363,9 @@ async fn handle_sell(
             let exp = existing.currency_exponent as u32;
             broadcast(
                 broadcaster,
-                SystemEvent::PortfolioHoldingDeleted { id: existing.id, owner_id: sender_mxid.to_string() },
+                SystemEvent::PortfolioHoldingDeleted { id: existing.id, owner_id: owner_id.to_string() },
             );
-            broadcast(broadcaster, cash_event(sender_mxid, &cash));
+            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📉 Sold <b>{} {}</b> — position closed. Realized P&amp;L: {} {}. Cash balance: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -379,7 +379,7 @@ async fn handle_sell(
         Ok(SellOutcome::Reduced { holding, realized_pl_minor, cash }) => {
             let exp = holding.currency_exponent as u32;
             broadcast(broadcaster, SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-            broadcast(broadcaster, cash_event(sender_mxid, &cash));
+            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📉 Sold <b>{} {}</b>. Remaining: {} @ avg {} {}. Realized P&amp;L: {} {}. Cash balance: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -402,7 +402,7 @@ async fn handle_sell(
 
 async fn handle_price(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -415,7 +415,7 @@ async fn handle_price(
         Err(err) => return format!("⚠️ {}.", html_escape(&err)),
     };
 
-    let Some(existing) = PortfolioRepository::find(pool, sender_mxid, &symbol).await.ok().flatten() else {
+    let Some(existing) = PortfolioRepository::find(pool, owner_id, &symbol).await.ok().flatten() else {
         return format!("⚠️ You do not hold <b>{}</b>.", html_escape(&symbol));
     };
 
@@ -428,7 +428,7 @@ async fn handle_price(
         Err(err) => return format!("⚠️ {}.", html_escape(&err.to_string())),
     };
 
-    match PortfolioRepository::set_price(pool, sender_mxid, &symbol, price_minor).await {
+    match PortfolioRepository::set_price(pool, owner_id, &symbol, price_minor).await {
         Ok(Some(holding)) => {
             broadcast(broadcaster, SystemEvent::PortfolioHoldingUpdated(holding.clone()));
             format!(
@@ -448,7 +448,7 @@ async fn handle_price(
 
 async fn handle_note(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -462,7 +462,7 @@ async fn handle_note(
     };
     let text = parts.next().map(str::trim).filter(|t| !t.is_empty());
 
-    match PortfolioRepository::set_note(pool, sender_mxid, &symbol, text).await {
+    match PortfolioRepository::set_note(pool, owner_id, &symbol, text).await {
         Ok(Some(holding)) => {
             broadcast(broadcaster, SystemEvent::PortfolioHoldingUpdated(holding));
             match text {
@@ -480,7 +480,7 @@ async fn handle_note(
 
 async fn handle_remove(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     symbol_raw: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -492,15 +492,15 @@ async fn handle_remove(
         Err(err) => return format!("⚠️ {}.", html_escape(&err)),
     };
 
-    let Some(existing) = PortfolioRepository::find(pool, sender_mxid, &symbol).await.ok().flatten() else {
+    let Some(existing) = PortfolioRepository::find(pool, owner_id, &symbol).await.ok().flatten() else {
         return format!("⚠️ You do not hold <b>{}</b>.", html_escape(&symbol));
     };
 
-    match PortfolioRepository::delete(pool, sender_mxid, &symbol).await {
+    match PortfolioRepository::delete(pool, owner_id, &symbol).await {
         Ok(true) => {
             broadcast(
                 broadcaster,
-                SystemEvent::PortfolioHoldingDeleted { id: existing.id, owner_id: sender_mxid.to_string() },
+                SystemEvent::PortfolioHoldingDeleted { id: existing.id, owner_id: owner_id.to_string() },
             );
             format!("🗑️ Removed <b>{}</b>.", html_escape(&symbol))
         }
@@ -518,9 +518,9 @@ fn broadcast(broadcaster: Option<&EventBroadcaster>, event: SystemEvent) {
     }
 }
 
-fn cash_event(sender_mxid: &str, cash: &CashBalance) -> SystemEvent {
+fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
     SystemEvent::PortfolioCashUpdated {
-        owner_id: sender_mxid.to_string(),
+        owner_id: owner_id.to_string(),
         currency: cash.currency.clone(),
         balance_minor: cash.balance_minor,
     }
@@ -543,7 +543,7 @@ fn parse_cash_amount(args: &str, default_currency: &str) -> Result<(i64, String,
 
 async fn handle_cash(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -552,9 +552,9 @@ async fn handle_cash(
     let rest = parts.next().unwrap_or("").trim();
 
     match sub.as_str() {
-        "" => show_cash(pool, sender_mxid).await,
-        "deposit" => handle_cash_deposit(pool, sender_mxid, rest, broadcaster).await,
-        "withdraw" => handle_cash_withdraw(pool, sender_mxid, rest, broadcaster).await,
+        "" => show_cash(pool, owner_id).await,
+        "deposit" => handle_cash_deposit(pool, owner_id, rest, broadcaster).await,
+        "withdraw" => handle_cash_withdraw(pool, owner_id, rest, broadcaster).await,
         _ => "⚠️ Usage: <code>!portfolio cash</code>, \
               <code>!portfolio cash deposit &lt;amount&gt; [CUR]</code>, or \
               <code>!portfolio cash withdraw &lt;amount&gt; [CUR]</code>."
@@ -562,8 +562,8 @@ async fn handle_cash(
     }
 }
 
-async fn show_cash(pool: &SqlitePool, sender_mxid: &str) -> String {
-    match PortfolioRepository::list_cash(pool, sender_mxid).await {
+async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
+    match PortfolioRepository::list_cash(pool, owner_id).await {
         Ok(balances) if balances.is_empty() => {
             "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>.".to_string()
         }
@@ -587,11 +587,11 @@ async fn show_cash(pool: &SqlitePool, sender_mxid: &str) -> String {
 
 async fn handle_cash_deposit(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, sender_mxid).await.currency;
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -602,10 +602,10 @@ async fn handle_cash_deposit(
         }
     };
 
-    match PortfolioRepository::deposit_cash(pool, sender_mxid, &currency, exponent as i64, amount_minor).await
+    match PortfolioRepository::deposit_cash(pool, owner_id, &currency, exponent as i64, amount_minor).await
     {
         Ok(cash) => {
-            broadcast(broadcaster, cash_event(sender_mxid, &cash));
+            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "✅ Deposited <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),
@@ -623,11 +623,11 @@ async fn handle_cash_deposit(
 
 async fn handle_cash_withdraw(
     pool: &SqlitePool,
-    sender_mxid: &str,
+    owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, sender_mxid).await.currency;
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -638,9 +638,9 @@ async fn handle_cash_withdraw(
         }
     };
 
-    match PortfolioRepository::withdraw_cash(pool, sender_mxid, &currency, amount_minor).await {
+    match PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
         Ok(WithdrawOutcome::Ok(cash)) => {
-            broadcast(broadcaster, cash_event(sender_mxid, &cash));
+            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "✅ Withdrew <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),

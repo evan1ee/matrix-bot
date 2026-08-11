@@ -6,7 +6,7 @@ use crate::modules::finance::models::{Category, CategoryTotal, CurrencySummary, 
 
 /// Ledger columns, joined to the category name so listing is one query rather
 /// than N+1.
-const TX_COLUMNS: &str = "t.id, t.room_id, t.sender_mxid, t.sender_name, t.direction, \
+const TX_COLUMNS: &str = "t.id, t.room_id, t.owner_id, t.sender_name, t.direction, \
                           t.amount_minor, t.currency, t.currency_exponent, t.category_id, \
                           c.name AS category_name, t.note, t.occurred_at, t.created_at";
 
@@ -97,7 +97,7 @@ impl FinanceRepository {
         }
 
         let orphaned = sqlx::query(
-            "UPDATE transactions SET category_id = NULL WHERE category_id = ? AND sender_mxid = ?",
+            "UPDATE transactions SET category_id = NULL WHERE category_id = ? AND owner_id = ?",
         )
         .bind(id)
         .bind(owner_id)
@@ -120,7 +120,7 @@ impl FinanceRepository {
     pub async fn create_transaction(
         pool: &SqlitePool,
         room_id: &str,
-        sender_mxid: &str,
+        owner_id: &str,
         sender_name: &str,
         direction: &str,
         amount_minor: i64,
@@ -133,13 +133,13 @@ impl FinanceRepository {
         let res = sqlx::query(
             r#"
             INSERT INTO transactions
-                (room_id, sender_mxid, sender_name, direction, amount_minor, currency,
+                (room_id, owner_id, sender_name, direction, amount_minor, currency,
                  currency_exponent, category_id, note, occurred_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(room_id)
-        .bind(sender_mxid)
+        .bind(owner_id)
         .bind(sender_name)
         .bind(direction)
         .bind(amount_minor)
@@ -168,7 +168,7 @@ impl FinanceRepository {
         Ok(tx)
     }
 
-    /// Looks up a transaction the caller owns. `sender_mxid` is the only key.
+    /// Looks up a transaction the caller owns. `owner_id` is the only key.
     pub async fn find_owned(
         pool: &SqlitePool,
         id: i64,
@@ -177,7 +177,7 @@ impl FinanceRepository {
         let tx = sqlx::query_as::<_, Transaction>(&format!(
             "SELECT {TX_COLUMNS} FROM transactions t \
              LEFT JOIN finance_categories c ON c.id = t.category_id \
-             WHERE t.id = ? AND t.sender_mxid = ?"
+             WHERE t.id = ? AND t.owner_id = ?"
         ))
         .bind(id)
         .bind(owner_id)
@@ -198,7 +198,7 @@ impl FinanceRepository {
         let sql = format!(
             "SELECT {TX_COLUMNS} FROM transactions t \
              LEFT JOIN finance_categories c ON c.id = t.category_id \
-             WHERE t.sender_mxid = ? {filter} \
+             WHERE t.owner_id = ? {filter} \
              ORDER BY t.occurred_at DESC, t.id DESC LIMIT ? OFFSET ?"
         );
 
@@ -214,7 +214,7 @@ impl FinanceRepository {
     pub async fn count(pool: &SqlitePool, owner_id: &str, direction: Option<&str>) -> Result<i64> {
         let filter = if direction.is_some() { "AND direction = ?" } else { "" };
         let sql =
-            format!("SELECT COUNT(*) FROM transactions WHERE sender_mxid = ? {filter}");
+            format!("SELECT COUNT(*) FROM transactions WHERE owner_id = ? {filter}");
 
         let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(owner_id);
         if let Some(dir) = direction {
@@ -284,7 +284,7 @@ impl FinanceRepository {
             SELECT t.currency, t.currency_exponent, c.name, t.direction, SUM(t.amount_minor)
             FROM transactions t
             LEFT JOIN finance_categories c ON c.id = t.category_id
-            WHERE t.sender_mxid = ? AND t.occurred_at >= ? AND t.occurred_at < ?
+            WHERE t.owner_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
             GROUP BY t.currency, t.currency_exponent, c.name, t.direction
             ORDER BY t.currency ASC
             "#,

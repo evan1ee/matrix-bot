@@ -5,7 +5,7 @@ export type BillStatus = 'active' | 'paused' | 'completed';
 export interface RecurringBill {
   id: number;
   room_id: string;
-  sender_mxid: string;
+  owner_id: string;
   sender_name: string;
   name: string;
   category: BillCategory | string;

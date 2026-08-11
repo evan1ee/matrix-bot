@@ -14,7 +14,7 @@ pub const DEFAULT_TIMEZONE: &str = "UTC";
 pub const DEFAULT_CURRENCY: &str = "USD";
 
 /// One user's display preferences, keyed by the same `owner_id` every other
-/// ownership check uses (`AuthUser::owner_id`, the `sender_mxid` column).
+/// ownership check uses (`AuthUser::owner_id`, the `owner_id` column).
 ///
 /// Deliberately shared by both front doors: the SPA renders timestamps in
 /// `timezone` and pre-selects `currency`, and the Matrix command handlers format

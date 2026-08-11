@@ -16,14 +16,57 @@ pub mod reminder;
 pub mod settings;
 pub mod todo;
 
+/// A message the parser recognised as a command, before its sender has been
+/// resolved to an account.
+///
+/// Kept separate from [`CommandContext`] so the resolver query runs *only* for
+/// a message that is actually a command. Folding the two together would mean
+/// either looking up an account for every line of unrelated room chatter, or
+/// carrying a `CommandContext` whose `owner_id` is empty until someone
+/// remembers to fill it — and an ownership key that is briefly the empty string
+/// is a key that will eventually be written to a row.
+#[derive(Clone, Debug)]
+pub struct ParsedCommand {
+    /// The Matrix room ID where the command was sent.
+    pub room_id: String,
+    /// The display name of the sender.
+    pub sender_name: String,
+    /// The parsed command keyword (e.g. `todo`, `remind`).
+    pub command: String,
+    /// The raw argument string following the command keyword.
+    pub raw_args: String,
+    /// The full original message body.
+    pub full_body: String,
+}
+
+impl ParsedCommand {
+    /// Binds this command to the account that will own anything it creates.
+    pub fn for_owner(self, owner_id: impl Into<String>) -> CommandContext {
+        CommandContext {
+            room_id: self.room_id,
+            owner_id: owner_id.into(),
+            sender_name: self.sender_name,
+            command: self.command,
+            raw_args: self.raw_args,
+            full_body: self.full_body,
+        }
+    }
+}
+
 /// Context passed to a module's `handle_command()` with parsed message details.
 #[derive(Clone, Debug)]
 pub struct CommandContext {
     /// The Matrix room ID where the command was sent.
     pub room_id: String,
-    /// The full Matrix user ID of the sender (e.g. `@alice:matrix.org`).
-    pub sender_mxid: String,
-    /// The display name of the sender.
+    /// The account that owns anything this command creates.
+    ///
+    /// An `accounts.id`, resolved from the sender's MXID through `matrix_links`
+    /// — never the MXID itself. Two MXIDs linked to the same account produce
+    /// the same value here, which is what makes a user's data follow them
+    /// across Matrix identities and the web UI alike.
+    pub owner_id: String,
+    /// The display name of the sender. Display only — it records who typed the
+    /// command in a room, and must never appear in an ownership predicate.
     pub sender_name: String,
     /// The parsed command keyword (e.g. `todo`, `remind`).
     pub command: String,
@@ -228,7 +271,7 @@ mod tests {
         ] {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
-                sender_mxid: "@alice:a".to_string(),
+                owner_id: "@alice:a".to_string(),
                 sender_name: "alice".to_string(),
                 command: body.split_whitespace().next().unwrap().trim_start_matches('!').to_string(),
                 raw_args: String::new(),
@@ -275,7 +318,7 @@ use crate::events::EventBroadcaster;
     fn ctx_for(command: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
-            sender_mxid: "@alice:a".to_string(),
+            owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: command.to_string(),
             raw_args: String::new(),
