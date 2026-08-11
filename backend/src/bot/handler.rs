@@ -19,6 +19,7 @@ pub fn register_handlers(
     registry: Arc<ModuleRegistry>,
     db: Database,
     broadcaster: Option<EventBroadcaster>,
+    pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
 ) {
     // 1. Auto-join invite event handler
     client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move {
@@ -39,6 +40,7 @@ pub fn register_handlers(
         let registry = registry.clone();
         let db = db.clone();
         let broadcaster = broadcaster.clone();
+        let pending_merges = pending_merges.clone();
 
         async move {
             if room.state() != RoomState::Joined || ev.sender == own_id {
@@ -63,6 +65,31 @@ pub fn register_handlers(
                     parsed.room_id, parsed.sender_name, parsed.command, parsed.raw_args
                 );
 
+                let is_direct = room.is_direct().await.unwrap_or(false);
+
+                // `!link` is handled *before* the sender is resolved, and that
+                // ordering is load-bearing. Resolving first would provision an
+                // empty account for an unknown MXID, and the link would then
+                // find that fresh account already attached — turning every
+                // first-time link into a pointless merge of nothing.
+                if parsed.command.eq_ignore_ascii_case("link") {
+                    let reply = crate::bot::linking::handle_link_command(
+                        &db,
+                        &parsed.raw_args,
+                        ev.sender.as_str(),
+                        is_direct,
+                        pending_merges.as_deref(),
+                    )
+                    .await;
+
+                    let plain = crate::utils::strip_html(&reply);
+                    let content = RoomMessageEventContent::text_html(&plain, &reply);
+                    if let Err(err) = room.send(content).await {
+                        error!("Failed to answer !link in {}: {:?}", room.room_id(), err);
+                    }
+                    return;
+                }
+
                 // Resolve the sender to the account that will own whatever this
                 // command creates, provisioning one if this MXID has never been
                 // seen. Deliberately after the parse: an unrelated room message
@@ -84,7 +111,7 @@ pub fn register_handlers(
                     }
                 };
 
-                let cmd_ctx = parsed.for_owner(owner_id);
+                let cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
 
                 if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await {
                     let plain_text = crate::utils::strip_html(&reply_html);

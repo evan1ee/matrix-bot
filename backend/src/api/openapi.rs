@@ -3,7 +3,8 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse, todos,
+    account, auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse,
+    todos,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -27,6 +28,20 @@ use crate::modules::settings::UserSettings;
         auth::webauthn::login_start,
         auth::webauthn::login_finish,
         auth::logout,
+        account::list_passkeys,
+        account::rename_passkey,
+        account::delete_passkey,
+        account::list_links,
+        account::start_link,
+        account::pending_merge,
+        account::confirm_merge,
+        account::unlink,
+        account::list_sessions,
+        account::revoke_other_sessions,
+        account::regenerate_recovery_codes,
+        account::recovery_status,
+        account::cancel_recovery,
+        account::list_security_events,
         auth::get_current_user,
         auth::media_proxy,
         rooms::list_rooms,
@@ -74,6 +89,16 @@ use crate::modules::settings::UserSettings;
             auth::webauthn::RegisterFinishRequest,
             auth::webauthn::LoginFinishRequest,
             auth::webauthn::SessionResponse,
+            account::PasskeySummary,
+            account::SessionSummary,
+            account::LinkCodeResponse,
+            account::UnlinkRequest,
+            account::PendingMerge,
+            account::ConfirmMergeRequest,
+            account::RecoveryCodesResponse,
+            account::RenamePasskeyRequest,
+            crate::accounts::MergePreview,
+            crate::accounts::security_events::SecurityEvent,
             auth::UserProfileResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,

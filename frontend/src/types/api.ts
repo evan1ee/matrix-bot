@@ -4,6 +4,227 @@
  */
 
 export interface paths {
+    "/api/v1/account/matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_links"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/matrix/confirm-merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["confirm_merge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/matrix/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/matrix/pending-merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether a merge is waiting on this account's confirmation.
+         * @description Set when `!link` found the MXID already attached to an unclaimed account
+         *     holding data — the user is told to come back here, where the counts can
+         *     actually be shown before they agree to move anything.
+         */
+        get: operations["pending_merge"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/matrix/unlink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["unlink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_passkeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/passkeys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["rename_passkey"];
+        post?: never;
+        delete: operations["delete_passkey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["regenerate_recovery_codes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/recovery-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["recovery_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/recovery/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stops a recovery someone started from a linked Matrix account.
+         * @description Deliberately takes [`AuthUser`], not [`VerifiedUser`]. Everything else here
+         *     is gated on a fresh passkey, but this is the *defence* against a recovery
+         *     nobody asked for — demanding a passkey to cancel would be exactly backwards
+         *     when the person cancelling may be racing a 24-hour clock on their phone.
+         */
+        post: operations["cancel_recovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/security-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_security_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revoke_other_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -616,6 +837,9 @@ export interface components {
             /** @description The raw WebAuthn options, passed to `navigator.credentials`. */
             options: Record<string, never>;
         };
+        ConfirmMergeRequest: {
+            from_account: string;
+        };
         CreateBillPayload: {
             /** Format: int64 */
             amount_minor: number;
@@ -760,6 +984,11 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LinkCodeResponse: {
+            code: string;
+            /** Format: int64 */
+            expires_in_seconds: number;
+        };
         LoginFinishRequest: {
             ceremony_id: string;
             credential: Record<string, never>;
@@ -767,6 +996,43 @@ export interface components {
         MediaProxyQuery: {
             media_id: string;
             server: string;
+        };
+        /**
+         * @description How many rows each table would contribute to a merge.
+         *
+         *     Shown to the user before they confirm, because "this will move 47 todos and
+         *     132 transactions into your account" is a decision someone should get to
+         *     make with the numbers in front of them.
+         */
+        MergePreview: {
+            /** Format: int64 */
+            finance_categories: number;
+            /** Format: int64 */
+            portfolio_cash_balances: number;
+            /** Format: int64 */
+            portfolio_holdings: number;
+            /** Format: int64 */
+            recurring_bills: number;
+            /** Format: int64 */
+            reminders: number;
+            /** Format: int64 */
+            todos: number;
+            /** Format: int64 */
+            transactions: number;
+            /** Format: int64 */
+            user_settings: number;
+        };
+        PasskeySummary: {
+            /** Format: date-time */
+            created_at?: string | null;
+            id: string;
+            label: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+        };
+        PendingMerge: {
+            from_account: string;
+            preview: components["schemas"]["MergePreview"];
         };
         /**
          * @description Totals for one currency. Currencies are never combined — without a rate
@@ -799,6 +1065,10 @@ export interface components {
              * @description Unrealized P&L of only the holdings that have a price set.
              */
             unrealized_pl_minor: number;
+        };
+        RecoveryCodesResponse: {
+            /** @description Shown exactly once. The server keeps only hashes. */
+            codes: string[];
         };
         /**
          * @description Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
@@ -906,6 +1176,17 @@ export interface components {
          * @enum {string}
          */
         ReminderStatus: "Pending" | "Triggered" | "Cancelled" | "Failed";
+        RenamePasskeyRequest: {
+            label: string;
+        };
+        SecurityEvent: {
+            /** Format: date-time */
+            created_at?: string | null;
+            detail?: string | null;
+            /** Format: int64 */
+            id: number;
+            kind: string;
+        };
         SellHoldingRequest: {
             price: string;
             quantity: string;
@@ -922,6 +1203,20 @@ export interface components {
         SessionResponse: {
             account_id: string;
             display_name: string;
+        };
+        SessionSummary: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description Whether this is the session making the request. */
+            current: boolean;
+            /**
+             * @description The session's storage key. Safe to expose — it is a hash, not the
+             *     cookie, so it cannot be replayed.
+             */
+            id: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            user_agent?: string | null;
         };
         SetNoteRequest: {
             note?: string | null;
@@ -1052,6 +1347,9 @@ export interface components {
             occurred_at?: string | null;
             room_id?: string | null;
         };
+        UnlinkRequest: {
+            mxid: string;
+        };
         UpdateBillPayload: {
             /** Format: int64 */
             amount_minor?: number | null;
@@ -1151,6 +1449,291 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_links: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    confirm_merge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmMergeRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergePreview"];
+                };
+            };
+        };
+    };
+    start_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkCodeResponse"];
+                };
+            };
+        };
+    };
+    pending_merge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingMerge"] | null;
+                };
+            };
+        };
+    };
+    unlink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnlinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Unlinked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_passkeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeySummary"][];
+                };
+            };
+        };
+    };
+    rename_passkey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenamePasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_passkey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Would lock the account out */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    regenerate_recovery_codes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodesResponse"];
+                };
+            };
+        };
+    };
+    recovery_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Codes left, and any recovery counting down */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_recovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many requests were cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_security_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityEvent"][];
+                };
+            };
+        };
+    };
+    list_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSummary"][];
+                };
+            };
+        };
+    };
+    revoke_other_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many were signed out */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;

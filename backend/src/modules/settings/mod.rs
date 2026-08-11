@@ -76,6 +76,7 @@ mod tests {
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
+            sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: body
@@ -86,6 +87,7 @@ mod tests {
                 .to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
+            is_direct: true,
         }
     }
 

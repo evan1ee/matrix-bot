@@ -22,6 +22,8 @@ use crate::modules::{ModuleContext, ModuleRegistry};
 pub mod client;
 pub mod dispatcher;
 pub mod handler;
+pub mod linking;
+pub mod notify;
 pub mod self_verify;
 pub mod verification;
 
@@ -30,6 +32,9 @@ pub struct MatrixBot {
     db: Database,
     registry: Arc<ModuleRegistry>,
     broadcaster: Option<EventBroadcaster>,
+    /// Shared with the API, so a merge confirmed in the web UI is the same one
+    /// `!link` recorded.
+    pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
 }
 
 impl MatrixBot {
@@ -39,6 +44,7 @@ impl MatrixBot {
         broadcaster: Option<EventBroadcaster>,
         token_handle: Option<Arc<RwLock<Option<String>>>>,
         client_handle: Option<Arc<RwLock<Option<Client>>>>,
+        pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
     ) -> Result<Self> {
         let client = BotClient::build_and_login_with_token_handles(config, token_handle, client_handle.clone()).await?;
 
@@ -67,6 +73,10 @@ impl MatrixBot {
         registry.register(PortfolioModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
+        registry.register(crate::modules::account::AccountModule::new(
+            client_handle.clone().unwrap_or_default(),
+            config.web_url.clone(),
+        ));
 
         let registry_arc = Arc::new(registry);
         *registry_ref.write().await = Some(registry_arc.clone());
@@ -76,6 +86,7 @@ impl MatrixBot {
             db,
             registry: registry_arc,
             broadcaster,
+            pending_merges,
         })
     }
 
@@ -92,6 +103,7 @@ impl MatrixBot {
             self.registry.clone(),
             self.db.clone(),
             self.broadcaster.clone(),
+            self.pending_merges.clone(),
         );
 
         // Start background workers for all modules (e.g., reminder scheduler).

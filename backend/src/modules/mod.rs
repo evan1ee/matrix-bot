@@ -7,6 +7,7 @@ use tracing::info;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
+pub mod account;
 pub mod core;
 pub mod due_reminder;
 pub mod finance;
@@ -41,14 +42,21 @@ pub struct ParsedCommand {
 
 impl ParsedCommand {
     /// Binds this command to the account that will own anything it creates.
-    pub fn for_owner(self, owner_id: impl Into<String>) -> CommandContext {
+    pub fn for_owner(
+        self,
+        owner_id: impl Into<String>,
+        sender_mxid: impl Into<String>,
+        is_direct: bool,
+    ) -> CommandContext {
         CommandContext {
             room_id: self.room_id,
             owner_id: owner_id.into(),
+            sender_mxid: sender_mxid.into(),
             sender_name: self.sender_name,
             command: self.command,
             raw_args: self.raw_args,
             full_body: self.full_body,
+            is_direct,
         }
     }
 }
@@ -65,6 +73,12 @@ pub struct CommandContext {
     /// the same value here, which is what makes a user's data follow them
     /// across Matrix identities and the web UI alike.
     pub owner_id: String,
+    /// The Matrix identity that sent this, for provenance and for the two
+    /// commands that act on a Matrix account rather than on data.
+    ///
+    /// Never an ownership key: two MXIDs linked to one account are the same
+    /// owner, and `owner_id` is the only thing that says so.
+    pub sender_mxid: String,
     /// The display name of the sender. Display only — it records who typed the
     /// command in a room, and must never appear in an ownership predicate.
     pub sender_name: String,
@@ -74,6 +88,11 @@ pub struct CommandContext {
     pub raw_args: String,
     /// The full original message body.
     pub full_body: String,
+    /// Whether this arrived in a one-to-one room with the bot.
+    ///
+    /// `!link` and `!recover` refuse anything else: both put a secret in the
+    /// room, and a shared room hands it to everyone present.
+    pub is_direct: bool,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -271,11 +290,13 @@ mod tests {
         ] {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
+                sender_mxid: "@tester:x".to_string(),
                 owner_id: "@alice:a".to_string(),
                 sender_name: "alice".to_string(),
                 command: body.split_whitespace().next().unwrap().trim_start_matches('!').to_string(),
                 raw_args: String::new(),
                 full_body: body.to_string(),
+                is_direct: true,
             };
             assert!(
                 registry.dispatch(&ctx, &db, None).await.is_some(),
@@ -318,11 +339,13 @@ use crate::events::EventBroadcaster;
     fn ctx_for(command: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
+            sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: command.to_string(),
             raw_args: String::new(),
             full_body: format!("!{}", command),
+            is_direct: true,
         }
     }
 

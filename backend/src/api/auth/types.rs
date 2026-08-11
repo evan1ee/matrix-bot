@@ -111,6 +111,14 @@ pub struct ApiState {
     /// The origin the SPA is served from, compared against `Origin` on every
     /// state-changing request.
     pub webauthn_origin: String,
+    /// Accounts with a merge awaiting confirmation, `into -> from`.
+    ///
+    /// Written when `!link` finds the MXID already attached to an unclaimed
+    /// account holding data, and read when the web UI asks what it should be
+    /// showing. In memory rather than a table because it is a handoff between
+    /// two halves of one flow: a stale entry should evaporate on restart rather
+    /// than linger as a standing authorisation to absorb an account.
+    pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -167,6 +175,7 @@ impl ApiState {
             webauthn_ceremonies: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cookie_secure: false,
             webauthn_origin: "http://localhost:8080".to_string(),
+            pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 

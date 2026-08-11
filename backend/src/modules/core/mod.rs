@@ -91,11 +91,13 @@ mod tests {
 
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
+            sender_mxid: "@tester:x".to_string(),
             owner_id: "@user:1".to_string(),
             sender_name: "Alice".to_string(),
             command: "hello".to_string(),
             raw_args: "".to_string(),
             full_body: "!hello".to_string(),
+            is_direct: true,
         };
 
         let dummy_db = Database {

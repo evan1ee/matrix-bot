@@ -52,6 +52,11 @@ pub struct Config {
     /// on `http://localhost`, but Safari has historically not — so development
     /// leaves it off and production always sets it.
     pub cookie_secure: bool,
+    /// Where to send someone whose command needs the web app.
+    ///
+    /// Defaults to the WebAuthn origin, which is by definition where the SPA
+    /// is served from — so it is right without being configured twice.
+    pub web_url: String,
 }
 
 impl Config {
@@ -107,6 +112,8 @@ impl Config {
 
         let cookie_secure = is_production();
 
+        let web_url = env::var("WEB_URL").unwrap_or_else(|_| webauthn_origin.clone());
+
         Ok(Self {
             homeserver,
             username,
@@ -122,6 +129,7 @@ impl Config {
             webauthn_rp_id,
             webauthn_origin,
             cookie_secure,
+            web_url,
         })
     }
 
@@ -191,6 +199,7 @@ mod tests {
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
+            web_url: "http://localhost:8080".to_string(),
         };
         assert!(valid_cfg.validate().is_ok());
 
@@ -221,6 +230,7 @@ mod tests {
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
+            web_url: "http://localhost:8080".to_string(),
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {

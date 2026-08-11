@@ -27,6 +27,7 @@ async fn run_bot_loop(
     broadcaster: EventBroadcaster,
     bot_token_handle: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
     bot_client_handle: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
+    pending_merges: std::sync::Arc<matrix_bot::bot::linking::PendingMerges>,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut backoff = RECONNECT_MIN;
@@ -40,6 +41,7 @@ async fn run_bot_loop(
             Some(broadcaster.clone()),
             Some(bot_token_handle.clone()),
             Some(bot_client_handle.clone()),
+            Some(pending_merges.clone()),
         );
 
         let bot = tokio::select! {
@@ -103,7 +105,7 @@ async fn main() -> Result<()> {
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     // 1. Start background Axum REST API & Web Server with graceful shutdown
-    let (bot_token_handle, bot_client_handle) =
+    let (bot_token_handle, bot_client_handle, pending_merges) =
         api::start_api_server(&config, db.clone(), broadcaster.clone(), shutdown_rx).await;
 
     // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
@@ -113,6 +115,7 @@ async fn main() -> Result<()> {
         broadcaster.clone(),
         bot_token_handle,
         bot_client_handle,
+        pending_merges,
         shutdown_tx.subscribe(),
     ));
 
