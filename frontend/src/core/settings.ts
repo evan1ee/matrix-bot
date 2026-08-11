@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchApi, getAuthToken } from './apiClient';
+import { fetchApi } from './apiClient';
+import { useSession } from './session';
 
 export interface UserSettings {
   /** IANA zone name, e.g. `Asia/Shanghai`. */
@@ -43,10 +44,11 @@ export const CURRENCY_OPTIONS = [
  * reformats the whole app from a single invalidation.
  */
 export function useSettings(): UserSettings {
+  const { isSignedIn } = useSession();
   const { data } = useQuery<UserSettings>({
     queryKey: SETTINGS_QUERY_KEY,
     queryFn: () => fetchApi<UserSettings>('/settings'),
-    enabled: !!getAuthToken(),
+    enabled: isSignedIn,
     // Preferences change rarely and the SSE stream announces it when they do.
     staleTime: 5 * 60 * 1000,
   });

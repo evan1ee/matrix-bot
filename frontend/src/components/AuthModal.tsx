@@ -1,249 +1,212 @@
-import React, { useState, useEffect } from 'react';
-import { fetchApi, setAuthToken, clearAuthToken, getAuthToken } from '../core/apiClient';
-import { X, Lock, User, LogOut, Copy, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { KeyRound, Loader2, ShieldCheck, X } from 'lucide-react';
+import {
+  describePasskeyError,
+  isPasskeySupported,
+  registerPasskey,
+  signInWithPasskey,
+  signOut,
+} from '../core/passkey';
+import { SessionUser } from '../core/session';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (token: string | null) => void;
-  userToken?: string | null;
+  onSuccess: () => void;
+  user: SessionUser | null;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({
-  isOpen,
-  onClose,
-  onSuccess,
-  userToken,
-}) => {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [secret, setSecret] = useState('');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+type Mode = 'signin' | 'register';
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+/**
+ * Sign-in, registration, and sign-out.
+ *
+ * There is no username field. Signing in is one button: the browser offers the
+ * passkeys it holds for this site, and the credential itself says which account
+ * it belongs to. Registration asks only for a display name, which is cosmetic —
+ * it never decides who owns anything.
+ */
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, user }) => {
+  const [mode, setMode] = useState<Mode>('signin');
+  const [displayName, setDisplayName] = useState('');
+  const [invite, setInvite] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const currentToken = userToken || getAuthToken();
+  const supported = isPasskeySupported();
 
-  const handleLogout = () => {
-    clearAuthToken();
-    onSuccess(null);
-    onClose();
-  };
-
-  const handleCopyToken = () => {
-    if (currentToken) {
-      navigator.clipboard.writeText(currentToken);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setLoading(true);
-
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
     try {
-      if (mode === 'login') {
-        const res = await fetchApi<{ token: string; username: string }>('/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ username, password }),
-        });
-        setAuthToken(res.token);
-        onSuccess(res.token);
-        onClose();
-      } else {
-        const res = await fetchApi<{ token: string; username: string }>('/auth/register', {
-          method: 'POST',
-          body: JSON.stringify({ username, password, secret: secret || undefined }),
-        });
-        setAuthToken(res.token);
-        onSuccess(res.token);
-        onClose();
-      }
-    } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed');
+      await action();
+      onSuccess();
+      onClose();
+    } catch (err) {
+      setError(describePasskeyError(err));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
-  const maskedToken = currentToken
-    ? `${currentToken.substring(0, 12)}...${currentToken.substring(currentToken.length - 8)}`
-    : '';
+  const handleSignOut = () => run(signOut);
+  const handleSignIn = () => run(signInWithPasskey);
+  const handleRegister = () => {
+    if (!displayName.trim()) {
+      setError('Choose a name to show on your account.');
+      return;
+    }
+    return run(() => registerPasskey(displayName.trim(), invite.trim() || undefined));
+  };
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="auth-modal-title"
+      aria-labelledby="auth-title"
     >
-      <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg max-w-md w-full p-6 space-y-6 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-4">
-          <div className="flex items-center gap-2">
-            {currentToken ? (
-              <User className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-            ) : (
-              <Lock className="w-4 h-4 text-neutral-700 dark:text-neutral-300" />
-            )}
-            <h3 id="auth-modal-title" className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-              {currentToken
-                ? 'Session Information'
-                : mode === 'login'
-                ? 'Authentication'
-                : 'Register Web Account'}
-            </h3>
-          </div>
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <h2 id="auth-title" className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            {user ? 'Your account' : mode === 'signin' ? 'Sign in' : 'Create an account'}
+          </h2>
           <button
+            type="button"
             onClick={onClose}
-            aria-label="Close authentication modal"
-            className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition"
+            aria-label="Close"
+            className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
           >
-            <X className="w-4 h-4" />
+            <X size={18} />
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="p-3 rounded bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/50 text-rose-800 dark:text-rose-300 text-xs font-mono">
-            {errorMsg}
-          </div>
+        {!supported && (
+          <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            This browser does not support passkeys. Use a current version of Safari,
+            Chrome, Edge or Firefox.
+          </p>
         )}
 
-        {currentToken ? (
-          /* Authenticated User View */
-          <div className="space-y-5">
-            <div className="flex items-center justify-between p-3 rounded bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-mono font-medium text-emerald-900 dark:text-emerald-300">
-                  Active Web Session
-                </span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400">JWT Token Valid</span>
-            </div>
+        {error && (
+          <p
+            role="alert"
+            className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-200"
+          >
+            {error}
+          </p>
+        )}
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-mono text-neutral-600 dark:text-neutral-400">Authorization Token</label>
-                <button
-                  type="button"
-                  onClick={handleCopyToken}
-                  className="flex items-center gap-1 text-[11px] font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 transition"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-500" />
-                      <span className="text-emerald-500">Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copy Bearer Token</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="p-3 rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 font-mono text-xs text-neutral-800 dark:text-neutral-300 break-all select-none">
-                {maskedToken}
+        {user ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3 rounded-lg bg-neutral-50 p-3 dark:bg-neutral-800">
+              <ShieldCheck size={20} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <div className="min-w-0">
+                <p className="truncate font-medium text-neutral-900 dark:text-neutral-100">
+                  {user.display_name || user.username}
+                </p>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                  {user.linked_mxids.length > 0
+                    ? user.linked_mxids.join(', ')
+                    : 'No Matrix account linked'}
+                </p>
               </div>
             </div>
 
-            <div className="pt-2 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  clearAuthToken();
-                  setMode('login');
-                  onSuccess(null);
-                }}
-                className="text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition underline"
-              >
-                Switch Account
-              </button>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={busy}
+              className="flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2.5 font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              {busy && <Loader2 size={16} className="animate-spin" />}
+              Sign out
+            </button>
+          </div>
+        ) : mode === 'signin' ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Use the passkey on this device. There is nothing to type.
+            </p>
 
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded bg-rose-600 dark:bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 transition"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Logout</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleSignIn}
+              disabled={busy || !supported}
+              className="flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2.5 font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+              Sign in
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setError(null);
+              }}
+              className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              Create an account instead
+            </button>
           </div>
         ) : (
-          /* Login / Register Form View */
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-neutral-600 dark:text-neutral-400">Username</label>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Display name
+              </span>
               <input
                 type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. alice"
-                className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-500 font-sans"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={64}
+                autoFocus
+                className="rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               />
-            </div>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                Shown on your account. Not used to sign in.
+              </span>
+            </label>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-neutral-600 dark:text-neutral-400">Password</label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Invite code
+              </span>
               <input
                 type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-500 font-sans"
+                value={invite}
+                onChange={(e) => setInvite(e.target.value)}
+                className="rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               />
-            </div>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                Leave blank if this server does not require one.
+              </span>
+            </label>
 
-            {mode === 'register' && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-mono text-neutral-600 dark:text-neutral-400">Registration Secret (Optional)</label>
-                <input
-                  type="password"
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  placeholder="Optional registration secret"
-                  className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-500 font-sans"
-                />
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={handleRegister}
+              disabled={busy || !supported}
+              className="flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2.5 font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+              Create passkey
+            </button>
 
-            <div className="pt-2 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-                className="text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition underline"
-              >
-                {mode === 'login' ? 'Need an account? Register' : 'Have an account? Login'}
-              </button>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-4 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-white transition disabled:opacity-50"
-              >
-                {loading ? 'Authenticating...' : mode === 'login' ? 'Login' : 'Register'}
-              </button>
-            </div>
-          </form>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('signin');
+                setError(null);
+              }}
+              className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              I already have an account
+            </button>
+          </div>
         )}
       </div>
     </div>

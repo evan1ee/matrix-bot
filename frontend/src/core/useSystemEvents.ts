@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { registry } from './registry';
 import { SystemEvent } from './types';
-import { fetchApi, getAuthToken } from './apiClient';
+import { fetchApi } from './apiClient';
 import {
   DEFAULT_SETTINGS,
   formatTimeInZone,
@@ -10,15 +10,13 @@ import {
   UserSettings,
 } from './settings';
 
-export function useSystemEvents(token?: string | null) {
+export function useSystemEvents(signedIn: boolean) {
   const queryClient = useQueryClient();
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
 
-  const activeToken = token !== undefined ? token : getAuthToken();
-
   useEffect(() => {
-    if (!activeToken) {
+    if (!signedIn) {
       setIsConnected(false);
       return;
     }
@@ -34,26 +32,15 @@ export function useSystemEvents(token?: string | null) {
       reconnectTimer = setTimeout(connect, delay);
     };
 
-    // EventSource cannot send an Authorization header, so the stream URL has to
-    // carry a credential. Exchange the long-lived API token for a 30-second
-    // ticket that opens nothing else, rather than putting the real token into a
-    // URL that proxies and browser history will record.
+    // `EventSource` cannot set headers, which is why this used to exchange the
+    // API token for a short-lived ticket passed through the URL. It *does* send
+    // cookies, so the session rides along on its own and the whole ticket
+    // mechanism is gone — along with the credential-in-a-URL problem it existed
+    // to contain.
     const connect = async () => {
       if (closed) return;
 
-      let ticket: string;
-      try {
-        const res = await fetchApi<{ ticket: string }>('/events/ticket', { method: 'POST' });
-        ticket = res.ticket;
-      } catch {
-        setIsConnected(false);
-        if (!closed) scheduleReconnect();
-        return;
-      }
-
-      if (closed) return;
-
-      eventSource = new EventSource(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`);
+      eventSource = new EventSource('/api/v1/events', { withCredentials: true });
 
       eventSource.onopen = () => {
         attempt = 0;
@@ -116,7 +103,7 @@ export function useSystemEvents(token?: string | null) {
       eventSource?.close();
       setIsConnected(false);
     };
-  }, [queryClient, activeToken]);
+  }, [queryClient, signedIn]);
 
   return { events, isConnected };
 }

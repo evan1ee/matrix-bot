@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/v1/auth/login": {
+    "/api/v1/auth/logout": {
         parameters: {
             query?: never;
             header?: never;
@@ -13,7 +13,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["login"];
+        post: operations["logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -52,7 +52,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/register": {
+    "/api/v1/auth/passkey/login/finish": {
         parameters: {
             query?: never;
             header?: never;
@@ -61,7 +61,55 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["register"];
+        post: operations["login_finish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/login/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["login_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/register/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["register_finish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/register/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["register_start"];
         delete?: never;
         options?: never;
         head?: never;
@@ -86,22 +134,6 @@ export interface paths {
         get: operations["sse_handler"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/events/ticket": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["create_sse_ticket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -501,15 +533,6 @@ export interface components {
             code: number;
             error: string;
         };
-        AuthPayload: {
-            password: string;
-            username: string;
-        };
-        AuthResponse: {
-            token: string;
-            token_type: string;
-            username: string;
-        };
         /**
          * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
          *     the same reason `finance::TransactionRequest` does: a JSON number is an
@@ -585,6 +608,13 @@ export interface components {
             expense_minor: number;
             /** Format: int64 */
             income_minor: number;
+        };
+        /** @description What a browser needs to begin registering a passkey. */
+        CeremonyStart: {
+            /** @description Quoted back on finish, so the server can find its half of the ceremony. */
+            ceremony_id: string;
+            /** @description The raw WebAuthn options, passed to `navigator.credentials`. */
+            options: Record<string, never>;
         };
         CreateBillPayload: {
             /** Format: int64 */
@@ -730,6 +760,10 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LoginFinishRequest: {
+            ceremony_id: string;
+            credential: Record<string, never>;
+        };
         MediaProxyQuery: {
             media_id: string;
             server: string;
@@ -810,10 +844,18 @@ export interface components {
             total_installments?: number | null;
             updated_at?: string | null;
         };
-        RegisterPayload: {
-            password: string;
-            secret?: string | null;
-            username: string;
+        RegisterFinishRequest: {
+            ceremony_id: string;
+            /** @description The authenticator's response, verbatim. */
+            credential: Record<string, never>;
+            /** @description What to call this passkey in the account's own list. */
+            label?: string | null;
+        };
+        RegisterStartRequest: {
+            /** @description The name to show on this account. Display only. */
+            display_name: string;
+            /** @description The invite secret, when the deployment requires one. */
+            invite?: string | null;
         };
         /** @description A reminder stored in the database. */
         Reminder: {
@@ -876,20 +918,16 @@ export interface components {
              */
             realized_pl_minor: number;
         };
+        /** @description Who the caller is now signed in as. */
+        SessionResponse: {
+            account_id: string;
+            display_name: string;
+        };
         SetNoteRequest: {
             note?: string | null;
         };
         SetPriceRequest: {
             price: string;
-        };
-        SseTicketResponse: {
-            /**
-             * Format: int64
-             * @description Seconds until the ticket expires.
-             */
-            expires_in: number;
-            /** @description Present this as `?ticket=` when opening `/api/v1/events`. */
-            ticket: string;
         };
         SummaryQuery: {
             /**
@@ -1078,8 +1116,15 @@ export interface components {
             text?: string | null;
         };
         UserProfileResponse: {
+            /** @description The signed-in account. The frontend keys its caches on this. */
+            account_id: string;
             avatar_url?: string | null;
             display_name?: string | null;
+            /**
+             * @description Matrix identities linked to this account, if any. An empty list is the
+             *     normal state for someone who has only ever used the web UI.
+             */
+            linked_mxids: string[];
             username: string;
         };
         /**
@@ -1106,36 +1151,21 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    login: {
+    logout: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AuthPayload"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Login successful */
-            200: {
+            /** @description Signed out */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["AuthResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorResponse"];
-                };
+                content?: never;
             };
         };
     };
@@ -1216,7 +1246,7 @@ export interface operations {
             };
         };
     };
-    register: {
+    login_finish: {
         parameters: {
             query?: never;
             header?: never;
@@ -1225,20 +1255,73 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RegisterPayload"];
+                "application/json": components["schemas"]["LoginFinishRequest"];
             };
         };
         responses: {
-            /** @description Registration successful */
+            /** @description Signed in */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthResponse"];
+                    "application/json": components["schemas"]["SessionResponse"];
                 };
             };
-            /** @description Bad request */
+            /** @description Credential rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    login_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Challenge to pass to navigator.credentials.get */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+        };
+    };
+    register_finish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterFinishRequest"];
+            };
+        };
+        responses: {
+            /** @description Account created and signed in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Ceremony expired or credential rejected */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1247,7 +1330,31 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
-            /** @description Unauthorized */
+        };
+    };
+    register_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Challenge to pass to navigator.credentials.create */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+            /** @description Invalid invite secret */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1260,10 +1367,7 @@ export interface operations {
     };
     sse_handler: {
         parameters: {
-            query?: {
-                /** @description Short-lived ticket from `POST /api/v1/events/ticket`. */
-                ticket?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1276,35 +1380,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorResponse"];
-                };
-            };
-        };
-    };
-    create_sse_ticket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Short-lived ticket for opening the SSE stream */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SseTicketResponse"];
-                };
             };
             /** @description Unauthorized */
             401: {

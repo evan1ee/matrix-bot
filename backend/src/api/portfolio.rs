@@ -95,7 +95,7 @@ fn prepare_cash_amount(payload: &CashAmountRequest) -> Result<(i64, String, i64)
         (status = 200, description = "Your holdings", body = Vec<Holding>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_holdings(
     State(state): State<ApiState>,
@@ -117,7 +117,7 @@ pub async fn list_holdings(
         (status = 400, description = "Bad request, or insufficient cash", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn buy_holding(
     State(state): State<ApiState>,
@@ -197,7 +197,7 @@ fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn sell_holding(
     State(state): State<ApiState>,
@@ -258,7 +258,7 @@ pub async fn sell_holding(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn set_price(
     State(state): State<ApiState>,
@@ -297,7 +297,7 @@ pub async fn set_price(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn set_note(
     State(state): State<ApiState>,
@@ -331,7 +331,7 @@ pub async fn set_note(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_holding(
     State(state): State<ApiState>,
@@ -364,7 +364,7 @@ pub async fn delete_holding(
         (status = 200, description = "Per-currency totals", body = Vec<PortfolioCurrencySummary>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn summary(
     State(state): State<ApiState>,
@@ -384,7 +384,7 @@ pub async fn summary(
         (status = 200, description = "Your cash balances", body = Vec<CashBalance>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_cash(
     State(state): State<ApiState>,
@@ -406,7 +406,7 @@ pub async fn list_cash(
         (status = 400, description = "Bad request", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn deposit_cash(
     State(state): State<ApiState>,
@@ -433,7 +433,7 @@ pub async fn deposit_cash(
         (status = 400, description = "Bad request, or insufficient funds", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn withdraw_cash(
     State(state): State<ApiState>,
@@ -472,7 +472,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -502,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn test_buy_stores_exact_minor_units() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let holding =
@@ -518,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_buying_more_blends_the_average_cost() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
@@ -535,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn test_buying_in_a_different_currency_is_rejected() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
         fund(&state, &alice, "EUR", 2).await;
 
@@ -554,7 +553,7 @@ mod tests {
     #[tokio::test]
     async fn test_buying_without_enough_cash_is_rejected() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let err = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
             .await
@@ -568,7 +567,7 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_bad_amounts_and_currencies() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         for (qty, price, currency) in [("-5", "150.00", "USD"), ("10", "abc", "USD"), ("10", "150.00", "EURO")]
@@ -587,8 +586,8 @@ mod tests {
     #[tokio::test]
     async fn test_holdings_are_private_to_their_owner() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -618,7 +617,7 @@ mod tests {
     #[tokio::test]
     async fn test_sell_exceeding_the_holding_is_rejected() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -640,7 +639,7 @@ mod tests {
     #[tokio::test]
     async fn test_partial_sell_returns_the_remaining_holding_and_a_realized_pl() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -665,7 +664,7 @@ mod tests {
     #[tokio::test]
     async fn test_full_sell_closes_the_position() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -694,7 +693,7 @@ mod tests {
     #[tokio::test]
     async fn test_selling_credits_cash_with_gross_proceeds() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -719,7 +718,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_price_and_note_round_trip() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let created =
@@ -761,7 +760,7 @@ mod tests {
     #[tokio::test]
     async fn test_summary_separates_currencies() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
         fund(&state, &alice, "JPY", 0).await;
 
@@ -797,7 +796,7 @@ mod tests {
     #[tokio::test]
     async fn test_summary_includes_a_cash_only_currency() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         deposit_cash(
             State(state.clone()),
@@ -816,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn test_note_exceeding_the_length_limit_is_rejected() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
         let mut request = buy("AAPL", "10", "150.00", "USD");
@@ -831,7 +830,7 @@ mod tests {
     #[tokio::test]
     async fn test_deposit_then_list() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let cash = deposit_cash(
             State(state.clone()),
@@ -851,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn test_withdraw_reduces_the_balance() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         deposit_cash(
             State(state.clone()),
             alice.clone(),
@@ -873,7 +872,7 @@ mod tests {
     #[tokio::test]
     async fn test_withdraw_exceeding_the_balance_is_rejected() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         deposit_cash(
             State(state.clone()),
             alice.clone(),
@@ -896,8 +895,8 @@ mod tests {
     #[tokio::test]
     async fn test_cash_is_private_to_its_owner() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
         deposit_cash(
             State(state.clone()),
             alice,
@@ -912,7 +911,7 @@ mod tests {
     #[tokio::test]
     async fn test_deposit_broadcasts_to_the_owner() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         let mut rx = state.broadcaster.subscribe();
 
         deposit_cash(

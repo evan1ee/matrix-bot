@@ -12,7 +12,8 @@ import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
-import { AUTH_EXPIRED_EVENT, getAuthToken } from './core/apiClient';
+import { AUTH_EXPIRED_EVENT } from './core/apiClient';
+import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
@@ -38,25 +39,28 @@ const AppContent: React.FC = () => {
   const [focusModuleId, setFocusModuleId] = useState<string | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [token, setToken] = useState<string | null>(getAuthToken());
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
 
-  const { events, isConnected } = useSystemEvents(token);
+  const { user, isSignedIn } = useSession();
+  const refreshSession = useRefreshSession();
+
+  const { events, isConnected } = useSystemEvents(isSignedIn);
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  // A rejected token has already been cleared from storage; drop it from state
-  // and open the login prompt so the session can be re-established.
+  // The server rejected the session cookie. Re-read the session — which will
+  // come back signed-out — and prompt, rather than leaving the UI showing data
+  // it can no longer refresh.
   useEffect(() => {
     const onExpired = () => {
-      setToken(null);
+      refreshSession();
       setIsAuthOpen(true);
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
-  }, []);
+  }, [refreshSession]);
 
   const handleThemeChange = (newTheme: Theme) => {
     setTheme(newTheme);
@@ -84,7 +88,7 @@ const AppContent: React.FC = () => {
         isConnected={isConnected}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        userToken={token}
+        user={user}
         currentTheme={theme}
         onThemeChange={handleThemeChange}
       />
@@ -92,8 +96,8 @@ const AppContent: React.FC = () => {
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
-        onSuccess={(newToken) => setToken(newToken)}
-        userToken={token}
+        onSuccess={refreshSession}
+        user={user}
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

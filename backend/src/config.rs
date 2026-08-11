@@ -25,7 +25,6 @@ pub struct Config {
     pub database_url: String,
     pub api_host: String,
     pub api_port: u16,
-    pub jwt_secret: String,
     pub registration_secret: Option<String>,
     pub db_max_connections: u32,
     /// Origins permitted to call the API cross-origin.
@@ -87,9 +86,6 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(8080);
 
-        let jwt_secret = env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "matrix_bot_secret_jwt_token_key_change_in_production".to_string());
-
         let registration_secret = env::var("API_REGISTRATION_SECRET").ok();
 
         let db_max_connections: u32 = env::var("DATABASE_MAX_CONNECTIONS")
@@ -120,7 +116,6 @@ impl Config {
             database_url,
             api_host,
             api_port,
-            jwt_secret,
             registration_secret,
             db_max_connections,
             cors_allowed_origins,
@@ -142,10 +137,6 @@ impl Config {
         }
 
         let is_prod = is_production();
-
-        if is_prod && self.jwt_secret == "matrix_bot_secret_jwt_token_key_change_in_production" {
-            anyhow::bail!("Insecure default JWT_SECRET used in production environment. Set a custom JWT_SECRET!");
-        }
 
         // A production deployment still on the development Relying Party would
         // mint passkeys bound to `localhost`, which no real browser would ever
@@ -174,9 +165,6 @@ impl Config {
             );
         }
 
-        if self.jwt_secret.len() < 16 {
-            tracing::warn!("JWT_SECRET is shorter than 16 characters — consider using a stronger secret in production");
-        }
 
         Ok(())
     }
@@ -197,7 +185,6 @@ mod tests {
             database_url: "sqlite::memory:".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
-            jwt_secret: "super_secret_jwt_key_12345".to_string(),
             registration_secret: None,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
@@ -228,7 +215,6 @@ mod tests {
             database_url: "sqlite::memory:".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
-            jwt_secret: "super_secret_jwt_key_12345".to_string(),
             registration_secret: None,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),

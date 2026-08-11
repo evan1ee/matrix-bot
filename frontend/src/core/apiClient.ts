@@ -1,41 +1,34 @@
 const API_BASE = '/api/v1';
 
-export function getAuthToken(): string | null {
-  return localStorage.getItem('matrix_bot_jwt');
-}
-
-export function setAuthToken(token: string | null) {
-  if (token) {
-    localStorage.setItem('matrix_bot_jwt', token);
-  } else {
-    localStorage.removeItem('matrix_bot_jwt');
-  }
-}
-
-export function clearAuthToken() {
-  localStorage.removeItem('matrix_bot_jwt');
-}
-
-/// Fired when the server rejects our credentials, so the app can drop the dead
-/// token and prompt for login instead of retrying it forever.
+/// Fired when the server rejects our session, so the app can drop its cached
+/// identity and prompt for sign-in instead of retrying forever.
 export const AUTH_EXPIRED_EVENT = 'matrixbot:auth-expired';
 
+/**
+ * Calls the API with the session cookie attached.
+ *
+ * There is no token to read or store any more. The session lives in an
+ * HttpOnly cookie the browser sends automatically, which is why `credentials:
+ * 'include'` is the whole of the auth logic here — and why an XSS on this page
+ * cannot read the credential out and use it elsewhere.
+ */
 export async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
   const url = `${API_BASE}${endpoint}`;
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    // Sends the session cookie. Also required for the browser to *store* the
+    // cookie the sign-in endpoints set.
+    credentials: 'include',
+  });
 
   if (response.status === 204) {
     return {} as T;
@@ -54,10 +47,9 @@ export async function fetchApi<T>(
     data = { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
   }
 
-  if (response.status === 401 && getAuthToken()) {
-    // The stored token is no longer usable — expired, or issued before a claim
-    // the server now requires. Keeping it only produces more 401s.
-    clearAuthToken();
+  if (response.status === 401) {
+    // The session is gone — expired, revoked, or never established. Tell the
+    // app so it can show the sign-in screen rather than looping on 401s.
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
 

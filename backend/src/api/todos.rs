@@ -121,7 +121,7 @@ pub struct TodoListResponse {
         (status = 200, description = "List todo items", body = TodoListResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_todos(
     State(state): State<ApiState>,
@@ -172,7 +172,7 @@ pub async fn list_todos(
         (status = 400, description = "Bad request", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn create_todo(
     State(state): State<ApiState>,
@@ -211,7 +211,7 @@ pub async fn create_todo(
         &state.db.pool,
         &room_id,
         &user.owner_id(),
-        &user.display_name(),
+        &user.display_name,
         &payload.text,
         priority,
         payload.due_at,
@@ -242,7 +242,7 @@ pub async fn create_todo(
         (status = 404, description = "Todo not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn update_todo(
     State(state): State<ApiState>,
@@ -342,7 +342,7 @@ pub async fn update_todo(
         (status = 404, description = "Todo not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_todo(
     State(state): State<ApiState>,
@@ -393,12 +393,11 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let mut ids = Vec::new();
         for text in ["one", "two", "three"] {
@@ -471,13 +470,12 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
 
         // Alice creates todo
         let req = CreateTodoRequest {
@@ -546,12 +544,11 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let created = create_todo(
             State(state.clone()),
@@ -621,17 +618,19 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
 
-        let matrix_evan = AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one");
-        let impostor = AuthUser::local("evan", "acct_evan");
+        // Two accounts whose users call themselves the same thing. The display
+        // name is what a room shows and what a person recognises; it has never
+        // been an ownership key, and this proves it still is not.
+        let matrix_evan = AuthUser::named("evan", "acct_from_matrix");
+        let impostor = AuthUser::named("evan", "acct_from_web");
 
-        // Both derive the same display name — that must not grant access.
-        assert_eq!(matrix_evan.display_name(), impostor.display_name());
+        assert_eq!(matrix_evan.display_name, impostor.display_name);
+        assert_ne!(matrix_evan.owner_id(), impostor.owner_id());
 
         let created = create_todo(
             State(state.clone()),
@@ -714,7 +713,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -739,7 +737,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_with_due_date_schedules_a_linked_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         let due = Utc::now() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -772,7 +770,7 @@ mod tests {
         let state = due_reminder_state().await;
         let err = create_todo(
             State(state),
-            AuthUser::local("alice", "acct_alice"),
+            AuthUser::named("alice", "acct_alice"),
             Json(create_with_due(None, Some(60), Some("!room:1"))),
         )
         .await
@@ -788,7 +786,7 @@ mod tests {
         let state = due_reminder_state().await;
         let err = create_todo(
             State(state),
-            AuthUser::local("alice", "acct_alice"),
+            AuthUser::named("alice", "acct_alice"),
             Json(create_with_due(Some(Utc::now() + chrono::Duration::hours(6)), Some(60), None)),
         )
         .await
@@ -805,7 +803,7 @@ mod tests {
         for bad in [0, -5, due_reminder::MAX_LEAD_MINUTES + 1] {
             let err = create_todo(
                 State(state.clone()),
-                AuthUser::local("alice", "acct_alice"),
+                AuthUser::named("alice", "acct_alice"),
                 Json(create_with_due(due, Some(bad), Some("!room:1"))),
             )
             .await
@@ -819,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn test_patch_null_clears_the_due_date_and_its_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         let due = Utc::now() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -883,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn test_editing_other_fields_keeps_the_reminder_and_its_room() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         let due = Utc::now() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -926,7 +924,7 @@ mod tests {
     #[tokio::test]
     async fn test_changing_the_lead_time_reschedules_in_place() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
         let due = Utc::now() + chrono::Duration::days(2);
 
         let created = create_todo(
@@ -964,7 +962,7 @@ mod tests {
     #[tokio::test]
     async fn test_deleting_a_task_cancels_its_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let created = create_todo(
             State(state.clone()),

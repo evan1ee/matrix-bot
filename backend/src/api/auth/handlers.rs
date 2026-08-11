@@ -2,169 +2,31 @@ use axum::{
     extract::{Query, State},
     Json,
 };
-use bcrypt::{hash, verify, DEFAULT_COST};
 use serde::Deserialize;
 
-use crate::api::auth::matrix::{
-    generate_jwt, generate_scoped_jwt, get_bot_matrix_access_token, resolved_homeserver,
-};
-use crate::api::auth::types::{
-    is_valid_local_username, ApiState, AuthKind, AuthPayload, AuthResponse, AuthUser,
-    MediaProxyQuery, RegisterPayload, SseTicketResponse, TokenScope, UserProfileResponse,
-};
+use crate::accounts::{AccountRepository, SessionRepository};
+use crate::api::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
+use crate::api::auth::types::{ApiState, AuthUser, MediaProxyQuery, UserProfileResponse};
 use crate::error::ApiError;
 
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/register",
-    request_body = RegisterPayload,
-    responses(
-        (status = 200, description = "Registration successful", body = AuthResponse),
-        (status = 400, description = "Bad request", body = ApiErrorResponse),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    )
+    path = "/api/v1/auth/logout",
+    responses((status = 204, description = "Signed out")),
+    security(("session_cookie" = []))
 )]
-pub async fn register(
+pub async fn logout(
     State(state): State<ApiState>,
-    Json(payload): Json<RegisterPayload>,
-) -> Result<Json<AuthResponse>, ApiError> {
-    if let Some(ref required_secret) = state.registration_secret {
-        let provided_secret = payload.secret.as_deref().unwrap_or("");
-        if required_secret != provided_secret {
-            return Err(ApiError::unauthorized("Invalid registration secret"));
-        }
-    }
-
-    if payload.password.trim().is_empty() {
-        return Err(ApiError::bad_request("Username and password required"));
-    }
-
-    // Reject anything that could be read as a Matrix user ID. Without this, an
-    // account named `@someone:matrix.org` would resolve to that MXID's owner_id
-    // and inherit their data.
-    if !is_valid_local_username(&payload.username) {
-        return Err(ApiError::bad_request(
-            "Username must be 1-64 characters of letters, digits, '.', '-' or '_'",
-        ));
-    }
-
-    let password_hash = hash(payload.password, DEFAULT_COST)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let res = sqlx::query("INSERT INTO web_users (username, password_hash) VALUES (?, ?)")
-        .bind(&payload.username)
-        .bind(&password_hash)
-        .execute(&state.db.pool)
-        .await;
-
-    if let Err(err) = res {
-        tracing::warn!("Registration failed for {}: {:?}", payload.username, err);
-        return Err(ApiError::bad_request("Username already exists"));
-    }
-
-    let account_id =
-        crate::accounts::AccountRepository::resolve_for_local_user(&state.db.pool, &payload.username)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let token = generate_jwt(
-        &payload.username,
-        AuthKind::Local,
-        &account_id,
-        &state.jwt_secret,
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(AuthResponse {
-        token,
-        token_type: "Bearer".to_string(),
-        username: payload.username,
-    }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/auth/login",
-    request_body = AuthPayload,
-    responses(
-        (status = 200, description = "Login successful", body = AuthResponse),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    )
-)]
-pub async fn login(
-    State(state): State<ApiState>,
-    Json(payload): Json<AuthPayload>,
-) -> Result<Json<AuthResponse>, ApiError> {
-    // 1. Try local database authentication first
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT password_hash FROM web_users WHERE username = ?")
-            .bind(&payload.username)
-            .fetch_optional(&state.db.pool)
-            .await
-            .map_err(ApiError::from)?;
-
-    if let Some((stored_hash,)) = row {
-        if verify(&payload.password, &stored_hash).unwrap_or(false) {
-            let account_id = crate::accounts::AccountRepository::resolve_for_local_user(
-                &state.db.pool,
-                &payload.username,
-            )
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-            let token = generate_jwt(
-                &payload.username,
-                AuthKind::Local,
-                &account_id,
-                &state.jwt_secret,
-            )
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-            return Ok(Json(AuthResponse {
-                token,
-                token_type: "Bearer".to_string(),
-                username: payload.username,
-            }));
-        }
-    }
-
-    // 2. Fallback: Authenticate directly against the Matrix Homeserver.
-    //
-    // The caller's own Matrix access token is deliberately discarded. It proved
-    // who they are, and that is all it is needed for — the JWT below is what they
-    // authenticate to this API with. Storing it in `bot_access_token` (as this
-    // once did) would hand every bot-credentialed endpoint the identity of
-    // whoever logged in most recently.
-    if let Some((matrix_user_id, _caller_access_token)) = state
-        .matrix_identity
-        .login(&state, &payload.username, &payload.password)
+    user: AuthUser,
+) -> Result<axum::response::Response, ApiError> {
+    // Revoked server-side as well as cleared client-side. Clearing the cookie
+    // alone would leave a token that still resolves, so anyone holding a copy
+    // would stay signed in — which is exactly the gap a stateless JWT had.
+    SessionRepository::revoke(&state.db.pool, &user.session_id_hash)
         .await
-    {
-        // The MXID is proven, so it resolves to an account the same way a
-        // Matrix message from it would — provisioning one on first sight.
-        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
-            &state.db.pool,
-            &matrix_user_id,
-        )
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|err| ApiError::internal(format!("could not sign out: {err}")))?;
 
-        let token = generate_jwt(
-            &matrix_user_id,
-            AuthKind::Matrix,
-            &account_id,
-            &state.jwt_secret,
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        return Ok(Json(AuthResponse {
-            token,
-            token_type: "Bearer".to_string(),
-            username: matrix_user_id,
-        }));
-    }
-
-    Err(ApiError::unauthorized("Invalid username or password"))
+    Ok(crate::api::auth::webauthn::clearing_session_cookie(state.cookie_secure))
 }
 
 #[utoipa::path(
@@ -174,7 +36,7 @@ pub async fn login(
         (status = 200, description = "Current authenticated user profile", body = UserProfileResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn get_current_user(
     State(state): State<ApiState>,
@@ -183,15 +45,22 @@ pub async fn get_current_user(
     let mut display_name = None;
     let mut avatar_url = None;
 
-    if auth_user.kind == AuthKind::Matrix {
+    // An account can have several linked Matrix identities, so there is no
+    // single "the" MXID any more. The first link supplies the avatar, purely
+    // so the UI has a picture to show; nothing here decides anything.
+    let linked = AccountRepository::linked_mxids(&state.db.pool, &auth_user.account_id)
+        .await
+        .unwrap_or_default();
+
+    if let Some(mxid) = linked.first() {
         let clean_hs = resolved_homeserver(&state).await;
-        let encoded_user = auth_user.subject.replace('@', "%40").replace(':', "%3A");
+        let encoded_user = mxid.replace('@', "%40").replace(':', "%3A");
         let profile_url = format!("{}/_matrix/client/v3/profile/{}", clean_hs, encoded_user);
 
         match state.http_client.get(&profile_url).send().await {
-            Err(err) => tracing::warn!("Profile lookup failed for {}: {:?}", auth_user.subject, err),
+            Err(err) => tracing::warn!("Profile lookup failed for {}: {:?}", mxid, err),
             Ok(res) if !res.status().is_success() => {
-                tracing::warn!("Profile lookup for {} returned {}", auth_user.subject, res.status())
+                tracing::warn!("Profile lookup for {} returned {}", mxid, res.status())
             }
             Ok(res) => {
                 #[derive(Deserialize)]
@@ -219,42 +88,13 @@ pub async fn get_current_user(
     }
 
     Ok(Json(UserProfileResponse {
-        username: auth_user.subject,
-        display_name,
+        account_id: auth_user.account_id,
+        username: auth_user.display_name.clone(),
+        // The homeserver's own display name wins when there is one, because it
+        // is what the user maintains; otherwise the account's name stands.
+        display_name: display_name.or(Some(auth_user.display_name)),
         avatar_url,
-    }))
-}
-
-/// How long a stream ticket stays usable. Long enough to open a connection,
-/// short enough that leaking it through a URL is largely inconsequential.
-const SSE_TICKET_TTL_SECONDS: i64 = 30;
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/events/ticket",
-    responses(
-        (status = 200, description = "Short-lived ticket for opening the SSE stream", body = SseTicketResponse),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("bearer_auth" = []))
-)]
-pub async fn create_sse_ticket(
-    State(state): State<ApiState>,
-    user: AuthUser,
-) -> Result<Json<SseTicketResponse>, ApiError> {
-    let ticket = generate_scoped_jwt(
-        &user.subject,
-        user.kind,
-        &user.account_id,
-        TokenScope::SseStream,
-        chrono::Duration::seconds(SSE_TICKET_TTL_SECONDS),
-        &state.jwt_secret,
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(SseTicketResponse {
-        ticket,
-        expires_in: SSE_TICKET_TTL_SECONDS,
+        linked_mxids: linked,
     }))
 }
 
@@ -312,7 +152,7 @@ async fn image_response(res: reqwest::Response) -> Option<axum::response::Respon
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Media not found", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn media_proxy(
     State(state): State<ApiState>,
@@ -426,12 +266,11 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             crate::events::EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice", "acct_alice");
+        let user = AuthUser::named("alice", "acct_alice");
 
         let err = media_proxy(
             State(state.clone()),

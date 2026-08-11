@@ -55,7 +55,7 @@ fn validate_reminder_room(lead: Option<i64>, room_id: &str, explicit: Option<&st
         (status = 200, description = "Your recurring bills", body = Vec<RecurringBill>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_bills(
     State(state): State<ApiState>,
@@ -78,7 +78,7 @@ pub async fn list_bills(
         (status = 400, description = "Bad request", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn create_bill(
     State(state): State<ApiState>,
@@ -105,7 +105,7 @@ pub async fn create_bill(
     )?;
 
     let owner_id = user.owner_id();
-    let display_name = user.display_name();
+    let display_name = user.display_name;
 
     let bill = RecurringBillRepository::create(
         &state.db.pool,
@@ -135,7 +135,7 @@ pub async fn create_bill(
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Not found", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn get_bill(
     State(state): State<ApiState>,
@@ -166,7 +166,7 @@ pub async fn get_bill(
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Not found", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn update_bill(
     State(state): State<ApiState>,
@@ -222,7 +222,7 @@ pub async fn update_bill(
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Not found", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_bill(
     State(state): State<ApiState>,
@@ -260,7 +260,7 @@ pub async fn delete_bill(
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Not found", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn pay_bill(
     State(state): State<ApiState>,
@@ -304,7 +304,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -342,7 +341,7 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let bill = create_bill(
             State(state.clone()),
@@ -436,7 +435,7 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         for bad in [0, -5, crate::modules::due_reminder::MAX_LEAD_MINUTES + 1] {
             let err = create_bill(
@@ -472,14 +471,13 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
 
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
 
         // Create
         let req = CreateBillPayload {

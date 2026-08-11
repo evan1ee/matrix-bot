@@ -25,7 +25,7 @@ pub struct UpdateSettingsRequest {
         (status = 200, description = "The caller's settings, or the defaults", body = UserSettings),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn get_settings(
     State(state): State<ApiState>,
@@ -47,7 +47,7 @@ pub async fn get_settings(
         (status = 400, description = "Unknown timezone or malformed currency", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn update_settings(
     State(state): State<ApiState>,
@@ -92,7 +92,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "test_secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -109,7 +108,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_returns_defaults_before_anything_is_saved() {
         let state = state().await;
-        let settings = get_settings(State(state), AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one"))
+        let settings = get_settings(State(state), AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"))
             .await
             .unwrap();
         assert_eq!(settings.timezone, "UTC");
@@ -119,7 +118,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_then_read_back() {
         let state = state().await;
-        let user = AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one");
+        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let saved = update_settings(
             State(state.clone()),
@@ -146,7 +145,7 @@ mod tests {
         for bad in ["GMT+8", "Mars/Olympus", "+08:00", ""] {
             let err = update_settings(
                 State(state.clone()),
-                AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one"),
+                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
                 Json(body(bad, "USD")),
             )
             .await
@@ -162,7 +161,7 @@ mod tests {
         for bad in ["EURO", "E1R", ""] {
             let err = update_settings(
                 State(state.clone()),
-                AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one"),
+                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
                 Json(body("UTC", bad)),
             )
             .await
@@ -180,7 +179,7 @@ mod tests {
 
         update_settings(
             State(state.clone()),
-            AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one"),
+            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Europe/Berlin", "EUR")),
         )
         .await
@@ -199,13 +198,13 @@ mod tests {
 
         update_settings(
             State(state.clone()),
-            AuthUser::matrix("@evan:mbm.one", "acct_@evan:mbm.one"),
+            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Asia/Shanghai", "CNY")),
         )
         .await
         .unwrap();
 
-        let local = get_settings(State(state), AuthUser::local("evan", "acct_evan")).await.unwrap();
+        let local = get_settings(State(state), AuthUser::named("evan", "acct_evan")).await.unwrap();
         assert_eq!(local.timezone, "UTC", "a local account must not inherit the MXID's settings");
     }
 }

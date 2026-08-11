@@ -380,7 +380,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             secret.map(str::to_string),
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
@@ -444,7 +443,7 @@ mod tests {
     async fn test_starting_registration_creates_no_account() {
         let state = state_with_secret(None).await;
 
-        register_start(
+        let _ = register_start(
             State(state.clone()),
             Json(RegisterStartRequest { display_name: "evan".to_string(), invite: None }),
         )

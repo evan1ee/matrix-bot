@@ -45,7 +45,7 @@ pub struct ReminderListResponse {
         (status = 200, description = "List pending reminders", body = ReminderListResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_reminders(
     State(state): State<ApiState>,
@@ -101,7 +101,7 @@ pub async fn list_reminders(
         (status = 400, description = "Bad request", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn create_reminder(
     State(state): State<ApiState>,
@@ -131,7 +131,7 @@ pub async fn create_reminder(
         &state.db.pool,
         &room_id,
         &user.owner_id(),
-        &user.display_name(),
+        &user.display_name,
         &payload.message,
         trigger_at,
         recurrence,
@@ -167,7 +167,7 @@ pub struct UpdateReminderRequest {
         (status = 401, description = "Unauthorized", body = ApiErrorResponse),
         (status = 404, description = "Reminder not found, or no longer pending", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn update_reminder(
     State(state): State<ApiState>,
@@ -218,7 +218,7 @@ pub async fn update_reminder(
         (status = 404, description = "Reminder not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_reminder(
     State(state): State<ApiState>,
@@ -265,13 +265,12 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
 
         // Alice creates reminder
         let req = CreateReminderRequest {
@@ -316,13 +315,12 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
 
         let created = create_reminder(
             State(state.clone()),

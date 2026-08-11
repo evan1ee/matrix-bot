@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-use crate::accounts::{display_name_for_mxid, Account, STATUS_ACTIVE, STATUS_UNCLAIMED};
+use crate::accounts::{display_name_for_mxid, Account, STATUS_UNCLAIMED};
 
 pub struct AccountRepository;
 
@@ -129,42 +129,12 @@ impl AccountRepository {
             .ok_or(sqlx::Error::RowNotFound)
     }
 
-    /// The account for a local web user, provisioning one if this is the first
-    /// time that user has been resolved.
-    ///
-    /// Phase 2 deletes `web_users` outright and moves the credential onto
-    /// `accounts`. Until then this keeps the existing password login working
-    /// while its rows already own data through an account id.
-    pub async fn resolve_for_local_user(
-        pool: &SqlitePool,
-        username: &str,
-    ) -> Result<String, sqlx::Error> {
-        let existing = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT account_id FROM web_users WHERE username = ?",
-        )
-        .bind(username)
-        .fetch_optional(pool)
-        .await?
-        .flatten();
-
-        if let Some(account_id) = existing {
-            return Ok(account_id);
-        }
-
-        let account_id = Self::create(pool, username, STATUS_ACTIVE).await?;
-        sqlx::query("UPDATE web_users SET account_id = ? WHERE username = ?")
-            .bind(&account_id)
-            .bind(username)
-            .execute(pool)
-            .await?;
-
-        Ok(account_id)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::STATUS_ACTIVE;
     use crate::db::schema::run_migrations;
 
     async fn db() -> SqlitePool {
@@ -287,35 +257,5 @@ mod tests {
         assert!(duplicate.is_err(), "the primary key must reject a second link");
     }
 
-    #[tokio::test]
-    async fn test_local_user_resolution_is_stable() {
-        let pool = db().await;
-        sqlx::query("INSERT INTO web_users (username, password_hash) VALUES ('demo', 'x')")
-            .execute(&pool)
-            .await
-            .unwrap();
 
-        let first = AccountRepository::resolve_for_local_user(&pool, "demo").await.unwrap();
-        let second = AccountRepository::resolve_for_local_user(&pool, "demo").await.unwrap();
-        assert_eq!(first, second);
-
-        let account = AccountRepository::find(&pool, &first).await.unwrap().unwrap();
-        assert_eq!(account.status, STATUS_ACTIVE, "a password login is a claimed account");
-    }
-
-    /// A local account and a Matrix account are different principals until
-    /// someone explicitly links them.
-    #[tokio::test]
-    async fn test_local_and_matrix_identities_do_not_collide() {
-        let pool = db().await;
-        sqlx::query("INSERT INTO web_users (username, password_hash) VALUES ('evan', 'x')")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let local = AccountRepository::resolve_for_local_user(&pool, "evan").await.unwrap();
-        let matrix = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-
-        assert_ne!(local, matrix);
-    }
 }

@@ -1,3 +1,4 @@
+import { SessionUser } from '../core/session';
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '../core/apiClient';
@@ -11,7 +12,7 @@ interface SidebarProps {
   activeModuleId: string;
   onSelectModule: (id: string) => void;
   isConnected: boolean;
-  userToken: string | null;
+  user: SessionUser | null;
   onOpenAuth: () => void;
   onOpenSettings: () => void;
   currentTheme: Theme;
@@ -53,7 +54,7 @@ const NAV_GROUPS: NavGroup[] = [
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModuleId,
   onSelectModule,
-  userToken,
+  user,
   onOpenAuth,
   onOpenSettings,
   currentTheme,
@@ -65,23 +66,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
 
-  const { data: user } = useQuery<UserProfileResponse>({
-    queryKey: ['userProfile', userToken],
-    queryFn: () => fetchApi<UserProfileResponse>('/auth/me'),
-    enabled: !!userToken,
-  });
-
   const avatarPath = user?.avatar_url || null;
 
   useEffect(() => {
-    if (!avatarPath || !userToken) {
+    if (!avatarPath || !user) {
       setAvatarObjectUrl(null);
       return;
     }
     let cancelled = false;
     let objectUrl: string | null = null;
 
-    fetch(avatarPath, { headers: { Authorization: `Bearer ${userToken}` } })
+    // The media proxy is an authenticated endpoint; the session cookie is what
+    // authenticates it now, so this is a plain fetch that opts into credentials.
+    fetch(avatarPath, { credentials: 'include' })
       .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('Avatar unavailable'))))
       .then((blob) => {
         if (cancelled) return;
@@ -94,7 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [avatarPath, userToken]);
+  }, [avatarPath, user]);
 
   const handleNav = (id: string) => {
     onSelectModule(id);
@@ -214,7 +211,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ─── Zone 3: User & Utilities ─── */}
       <div className={`border-t border-[var(--color-border-subtle)] shrink-0 w-full ${collapsed ? 'py-3 flex flex-col items-center gap-1.5' : 'px-3 py-3'}`}>
-        {userToken ? (
+        {user ? (
           collapsed ? (
             <>
               {/* Avatar */}

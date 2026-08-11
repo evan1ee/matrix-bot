@@ -1,16 +1,9 @@
-use axum::{
-    extract::{Query, State},
-    response::sse::{Event, Sse},
-};
+use axum::{extract::State, response::sse::{Event, Sse}};
 use futures_util::stream::StreamExt;
-use jsonwebtoken::{decode, Validation};
-use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
-use utoipa::IntoParams;
 
-use crate::api::auth::types::{Claims, JwtKeys, TokenScope};
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -33,44 +26,6 @@ fn owned_events(
     })
 }
 
-#[derive(Deserialize, IntoParams)]
-pub struct SseQuery {
-    /// Short-lived ticket from `POST /api/v1/events/ticket`.
-    pub ticket: Option<String>,
-}
-
-/// Resolves the subscriber, from a stream ticket or an `Authorization` header.
-///
-/// `EventSource` cannot set headers, so browsers pass a ticket; non-browser
-/// clients can still authenticate normally.
-async fn stream_subscriber(
-    state: &ApiState,
-    ticket: Option<String>,
-    header_user: Option<AuthUser>,
-) -> Result<AuthUser, ApiError> {
-    if let Some(ticket) = ticket {
-        let keys = JwtKeys::new(state.jwt_secret.as_bytes());
-        let decoded = decode::<Claims>(&ticket, &keys.decoding, &Validation::default())
-            .map_err(|_| ApiError::unauthorized("Invalid or expired stream ticket"))?;
-
-        // An API token must not be usable here: that would re-open the door to
-        // full-access credentials being passed through URLs.
-        if decoded.claims.scope != TokenScope::SseStream {
-            return Err(ApiError::unauthorized(
-                "Query parameter must be a stream ticket, not an API token",
-            ));
-        }
-
-        return Ok(AuthUser {
-            subject: decoded.claims.sub,
-            kind: decoded.claims.kind,
-            account_id: decoded.claims.acct,
-        });
-    }
-
-    header_user.ok_or_else(|| ApiError::unauthorized("Missing stream ticket or Authorization header"))
-}
-
 /// SSE endpoint streaming real-time system events to authenticated web clients.
 ///
 /// Emits unnamed event-stream messages whose body carries `type` and `payload`.
@@ -81,19 +36,16 @@ async fn stream_subscriber(
 #[utoipa::path(
     get,
     path = "/api/v1/events",
-    params(SseQuery),
     responses(
         (status = 200, description = "Server-Sent Events (SSE) live stream", content_type = "text/event-stream"),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn sse_handler(
     State(state): State<ApiState>,
-    Query(query): Query<SseQuery>,
-    header_user: Option<AuthUser>,
+    user: AuthUser,
 ) -> Result<Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let user = stream_subscriber(&state, query.ticket, header_user).await?;
 
     let stream = owned_events(&state.broadcaster, user.owner_id()).filter_map(|msg| async move {
         let json_str = serde_json::to_string(&msg).ok()?;
@@ -108,6 +60,8 @@ pub async fn sse_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::{AccountRepository, SessionRepository};
+    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use sqlx::SqlitePool;
 
@@ -117,83 +71,51 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice", "acct_alice");
+        let user = AuthUser::for_account("acct_alice");
 
-        let _sse = sse_handler(State(state), Query(SseQuery { ticket: None }), Some(user))
-            .await
-            .unwrap();
+        let _sse = sse_handler(State(state), user).await.unwrap();
     }
 
     fn test_state(pool: sqlx::SqlitePool) -> ApiState {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         )
     }
 
-    /// A stream ticket opens the stream; a full API token in the URL does not.
+    /// The stream is authenticated by the same cookie as every other route.
     ///
-    /// That asymmetry is the entire point: it keeps long-lived credentials out
-    /// of URLs, where proxies and browser history record them.
+    /// This replaces the `?ticket=` exchange entirely. `EventSource` cannot set
+    /// headers, which is why a bearer token needed a short-lived ticket smuggled
+    /// through the URL — but it *does* send cookies, so the whole mechanism went
+    /// away rather than being carried forward.
     #[tokio::test]
-    async fn test_only_a_stream_ticket_is_accepted_from_the_query_string() {
-        use crate::api::auth::matrix::{generate_jwt, generate_scoped_jwt};
-        use crate::api::auth::types::AuthKind;
-
+    async fn test_the_stream_requires_a_session() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let state = test_state(pool);
+        run_migrations(&pool).await.unwrap();
+        let state = test_state(pool.clone());
 
-        let ticket = generate_scoped_jwt(
-            "@evan:mbm.one",
-            AuthKind::Matrix,
-            "acct_evan",
-            TokenScope::SseStream,
-            chrono::Duration::seconds(30),
-            &state.jwt_secret,
-        )
-        .unwrap();
-
-        let subscriber = stream_subscriber(&state, Some(ticket), None).await.unwrap();
-        assert_eq!(subscriber.owner_id(), "acct_evan");
-        assert_eq!(subscriber.kind, AuthKind::Matrix);
-
-        // A full-access API token presented the same way is refused.
-        let api_token = generate_jwt("@evan:mbm.one", AuthKind::Matrix, "acct_evan", &state.jwt_secret).unwrap();
-        let err = stream_subscriber(&state, Some(api_token), None)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
-
-        // As is a forged one.
-        let err = stream_subscriber(&state, Some("not-a-token".to_string()), None)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
-
-        // And no credential at all.
-        let err = stream_subscriber(&state, None, None).await.unwrap_err();
-        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
-    }
-
-    /// Non-browser clients can still use a normal header.
-    #[tokio::test]
-    async fn test_header_auth_still_opens_the_stream() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let state = test_state(pool);
-
-        let subscriber = stream_subscriber(&state, None, Some(AuthUser::local("alice", "acct_alice")))
+        let account = AccountRepository::create(&pool, "evan", "active").await.unwrap();
+        let token = SessionRepository::create(&pool, &account, None, None, None)
             .await
             .unwrap();
-        assert_eq!(subscriber.owner_id(), "acct_alice");
+
+        // A live cookie resolves to the owning account.
+        let session = SessionRepository::resolve(&pool, &token).await.unwrap().unwrap();
+        assert_eq!(session.account_id, account);
+
+        // A revoked one does not, so the stream closes to it on reconnect.
+        SessionRepository::revoke(&pool, &session.id_hash).await.unwrap();
+        assert!(SessionRepository::resolve(&pool, &token).await.unwrap().is_none());
+
+        let _ = state;
     }
 
     /// The broadcast channel carries every user's events; a subscriber must only
@@ -219,7 +141,7 @@ mod tests {
         }
 
         let broadcaster = EventBroadcaster::default();
-        let subscriber = AuthUser::local("evan", "acct_mine");
+        let subscriber = AuthUser::named("evan", "acct_mine");
         let owner_id = subscriber.owner_id();
         assert_eq!(owner_id, "acct_mine");
 

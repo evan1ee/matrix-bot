@@ -9,44 +9,22 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/api/v1/auth/login": {
+    "/api/v1/auth/logout": {
       "post": {
         "tags": [
           "auth"
         ],
-        "operationId": "login",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthPayload"
-              }
-            }
-          },
-          "required": true
-        },
+        "operationId": "logout",
         "responses": {
-          "200": {
-            "description": "Login successful",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "Signed out"
           }
-        }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
       }
     },
     "/api/v1/auth/me": {
@@ -79,7 +57,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -145,22 +123,22 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
     },
-    "/api/v1/auth/register": {
+    "/api/v1/auth/passkey/login/finish": {
       "post": {
         "tags": [
-          "auth"
+          "auth::webauthn"
         ],
-        "operationId": "register",
+        "operationId": "login_finish",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RegisterPayload"
+                "$ref": "#/components/schemas/LoginFinishRequest"
               }
             }
           },
@@ -168,17 +146,17 @@
         },
         "responses": {
           "200": {
-            "description": "Registration successful",
+            "description": "Signed in",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "$ref": "#/components/schemas/SessionResponse"
                 }
               }
             }
           },
-          "400": {
-            "description": "Bad request",
+          "401": {
+            "description": "Credential rejected",
             "content": {
               "application/json": {
                 "schema": {
@@ -186,9 +164,99 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkey/login/start": {
+      "post": {
+        "tags": [
+          "auth::webauthn"
+        ],
+        "operationId": "login_start",
+        "responses": {
+          "200": {
+            "description": "Challenge to pass to navigator.credentials.get",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyStart"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkey/register/finish": {
+      "post": {
+        "tags": [
+          "auth::webauthn"
+        ],
+        "operationId": "register_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Account created and signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ceremony expired or credential rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkey/register/start": {
+      "post": {
+        "tags": [
+          "auth::webauthn"
+        ],
+        "operationId": "register_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Challenge to pass to navigator.credentials.create",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyStart"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "Invalid invite secret",
             "content": {
               "application/json": {
                 "schema": {
@@ -208,18 +276,6 @@
         "summary": "SSE endpoint streaming real-time system events to authenticated web clients.",
         "description": "Emits unnamed event-stream messages whose body carries `type` and `payload`.\n\nThe broadcast channel is process-wide, so every subscriber sees every event.\nThis handler is what narrows it back down: a client receives only events it\nowns, matching the per-owner scoping the REST endpoints enforce.",
         "operationId": "sse_handler",
-        "parameters": [
-          {
-            "name": "ticket",
-            "in": "query",
-            "description": "Short-lived ticket from `POST /api/v1/events/ticket`.",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Server-Sent Events (SSE) live stream"
@@ -237,42 +293,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/events/ticket": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "operationId": "create_sse_ticket",
-        "responses": {
-          "200": {
-            "description": "Short-lived ticket for opening the SSE stream",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SseTicketResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -310,7 +331,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -363,7 +384,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -420,7 +441,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -480,7 +501,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -547,7 +568,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -600,7 +621,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -667,7 +688,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -715,7 +736,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -773,7 +794,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -828,7 +849,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -883,7 +904,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -921,7 +942,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -974,7 +995,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1024,7 +1045,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1101,7 +1122,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1178,7 +1199,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1255,7 +1276,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1293,7 +1314,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1331,7 +1352,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1384,7 +1405,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1441,7 +1462,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1516,7 +1537,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1564,7 +1585,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1621,7 +1642,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1687,7 +1708,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1740,7 +1761,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1790,7 +1811,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1865,7 +1886,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1903,7 +1924,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -1938,7 +1959,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -1991,7 +2012,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -2067,7 +2088,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -2120,7 +2141,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -2170,7 +2191,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       },
@@ -2235,7 +2256,7 @@
         },
         "security": [
           {
-            "bearer_auth": []
+            "session_cookie": []
           }
         ]
       }
@@ -2256,40 +2277,6 @@
             "minimum": 0
           },
           "error": {
-            "type": "string"
-          }
-        }
-      },
-      "AuthPayload": {
-        "type": "object",
-        "required": [
-          "username",
-          "password"
-        ],
-        "properties": {
-          "password": {
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
-          }
-        }
-      },
-      "AuthResponse": {
-        "type": "object",
-        "required": [
-          "token",
-          "token_type",
-          "username"
-        ],
-        "properties": {
-          "token": {
-            "type": "string"
-          },
-          "token_type": {
-            "type": "string"
-          },
-          "username": {
             "type": "string"
           }
         }
@@ -2457,6 +2444,24 @@
           "income_minor": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "CeremonyStart": {
+        "type": "object",
+        "description": "What a browser needs to begin registering a passkey.",
+        "required": [
+          "ceremony_id",
+          "options"
+        ],
+        "properties": {
+          "ceremony_id": {
+            "type": "string",
+            "description": "Quoted back on finish, so the server can find its half of the ceremony."
+          },
+          "options": {
+            "type": "object",
+            "description": "The raw WebAuthn options, passed to `navigator.credentials`."
           }
         }
       },
@@ -2789,6 +2794,21 @@
           }
         }
       },
+      "LoginFinishRequest": {
+        "type": "object",
+        "required": [
+          "ceremony_id",
+          "credential"
+        ],
+        "properties": {
+          "ceremony_id": {
+            "type": "string"
+          },
+          "credential": {
+            "type": "object"
+          }
+        }
+      },
       "MediaProxyQuery": {
         "type": "object",
         "required": [
@@ -2966,22 +2986,41 @@
           }
         }
       },
-      "RegisterPayload": {
+      "RegisterFinishRequest": {
         "type": "object",
         "required": [
-          "username",
-          "password"
+          "ceremony_id",
+          "credential"
         ],
         "properties": {
-          "password": {
+          "ceremony_id": {
             "type": "string"
           },
-          "secret": {
+          "credential": {
+            "type": "object",
+            "description": "The authenticator's response, verbatim."
+          },
+          "label": {
             "type": "string",
+            "description": "What to call this passkey in the account's own list.",
             "nullable": true
+          }
+        }
+      },
+      "RegisterStartRequest": {
+        "type": "object",
+        "required": [
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "The name to show on this account. Display only."
           },
-          "username": {
-            "type": "string"
+          "invite": {
+            "type": "string",
+            "description": "The invite secret, when the deployment requires one.",
+            "nullable": true
           }
         }
       },
@@ -3143,6 +3182,22 @@
           }
         }
       },
+      "SessionResponse": {
+        "type": "object",
+        "description": "Who the caller is now signed in as.",
+        "required": [
+          "account_id",
+          "display_name"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          }
+        }
+      },
       "SetNoteRequest": {
         "type": "object",
         "properties": {
@@ -3160,24 +3215,6 @@
         "properties": {
           "price": {
             "type": "string"
-          }
-        }
-      },
-      "SseTicketResponse": {
-        "type": "object",
-        "required": [
-          "ticket",
-          "expires_in"
-        ],
-        "properties": {
-          "expires_in": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Seconds until the ticket expires."
-          },
-          "ticket": {
-            "type": "string",
-            "description": "Present this as `?ticket=` when opening `/api/v1/events`."
           }
         }
       },
@@ -3571,9 +3608,15 @@
       "UserProfileResponse": {
         "type": "object",
         "required": [
-          "username"
+          "account_id",
+          "username",
+          "linked_mxids"
         ],
         "properties": {
+          "account_id": {
+            "type": "string",
+            "description": "The signed-in account. The frontend keys its caches on this."
+          },
           "avatar_url": {
             "type": "string",
             "nullable": true
@@ -3581,6 +3624,13 @@
           "display_name": {
             "type": "string",
             "nullable": true
+          },
+          "linked_mxids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Matrix identities linked to this account, if any. An empty list is the\nnormal state for someone who has only ever used the web UI."
           },
           "username": {
             "type": "string"
@@ -3607,10 +3657,11 @@
       }
     },
     "securitySchemes": {
-      "bearer_auth": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "A local API JWT, or a Matrix access token. The SSE endpoint additionally accepts the same value as a `token` query parameter, because EventSource cannot set request headers."
+      "session_cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "mb_session",
+        "description": "Session cookie set by the passkey sign-in endpoints. HttpOnly, so it is sent by the browser automatically and is not readable by JavaScript."
       }
     }
   },

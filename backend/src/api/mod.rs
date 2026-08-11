@@ -41,7 +41,6 @@ pub async fn start_api_server(
     let state = auth::ApiState::new(
         db,
         broadcaster,
-        config.jwt_secret.clone(),
         config.registration_secret.clone(),
         config.homeserver.clone(),
         // Bound outbound calls so a stalled homeserver cannot pin a request task
@@ -55,6 +54,17 @@ pub async fn start_api_server(
             .build()
             .unwrap_or_else(|_| reqwest::Client::new()),
     );
+
+    // The Relying Party is a boot-time decision: an RP ID that does not match
+    // the origin the browser loads mints credentials no browser will return, so
+    // a bad pair must stop the process rather than surface as failed sign-ins.
+    let state = state
+        .with_webauthn(
+            &config.webauthn_rp_id,
+            &config.webauthn_origin,
+            config.cookie_secure,
+        )
+        .expect("WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN must form a valid Relying Party");
 
     let bot_access_token = state.bot_access_token.clone();
     let bot_client_handle = state.bot_client.clone();
@@ -83,19 +93,22 @@ pub async fn start_api_server(
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+        .allow_headers([header::CONTENT_TYPE])
+        .allow_credentials(true);
 
     let api_routes = Router::new()
         .route("/health", get(health::health_check))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
-        .route("/auth/register", post(auth::register))
-        .route("/auth/login", post(auth::login))
+        .route("/auth/passkey/register/start", post(auth::webauthn::register_start))
+        .route("/auth/passkey/register/finish", post(auth::webauthn::register_finish))
+        .route("/auth/passkey/login/start", post(auth::webauthn::login_start))
+        .route("/auth/passkey/login/finish", post(auth::webauthn::login_finish))
+        .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::get_current_user))
         .route("/auth/media", get(auth::media_proxy))
         .route("/rooms", get(rooms::list_rooms))
         .route("/settings", get(settings::get_settings).put(settings::update_settings))
         .route("/events", get(sse::sse_handler))
-        .route("/events/ticket", post(auth::create_sse_ticket))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route("/todos/:id", patch(todos::update_todo).delete(todos::delete_todo))
         .route("/reminders", get(reminders::list_reminders).post(reminders::create_reminder))

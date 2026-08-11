@@ -1,12 +1,29 @@
 use axum::{
     async_trait,
     extract::{FromRef, FromRequestParts},
-    http::request::Parts,
+    http::{header, request::Parts, Method},
 };
-use jsonwebtoken::{decode, Validation};
 
-use crate::api::auth::types::{ApiState, AuthUser, Claims, JwtKeys, TokenScope};
+use crate::accounts::{session::COOKIE_NAME, AccountRepository, SessionRepository};
+use crate::api::auth::types::{ApiState, AuthUser};
 use crate::error::ApiError;
+
+/// Pulls one cookie out of a `Cookie` header.
+///
+/// Hand-rolled rather than pulling in a cookie crate: there is exactly one
+/// cookie this application reads, and the header grammar for that case is a
+/// semicolon-separated list of `name=value`.
+fn cookie_value<'a>(header_value: &'a str, name: &str) -> Option<&'a str> {
+    header_value.split(';').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key.trim() == name).then(|| value.trim())
+    })
+}
+
+/// Whether a request method changes state.
+fn is_mutating(method: &Method) -> bool {
+    !matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
+}
 
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthUser
@@ -19,68 +36,142 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let api_state = ApiState::from_ref(state);
 
-        // Header only. Accepting `?token=` put a 7-day full-access credential in
-        // URLs, where it is logged by proxies and kept in browser history; the
-        // SSE stream now uses a short-lived scoped ticket instead.
+        // A session cookie rides along automatically, so a cross-site request
+        // would carry full authority if nothing stopped it. `SameSite=Strict`
+        // is the first defence and this is the second: a state-changing request
+        // must come from our own origin, and must say so.
+        //
+        // A missing `Origin` on a mutating request is refused rather than
+        // waved through. Browsers always send it on `fetch`, and since the API
+        // no longer accepts bearer tokens there is no non-browser client left
+        // whose omission would be legitimate.
+        if is_mutating(&parts.method) {
+            let origin = parts
+                .headers
+                .get(header::ORIGIN)
+                .and_then(|value| value.to_str().ok());
+
+            match origin {
+                Some(value) if value == api_state.webauthn_origin_str() => {}
+                Some(_) => {
+                    return Err(ApiError::unauthorized(
+                        "This request did not come from this site",
+                    ))
+                }
+                None => {
+                    return Err(ApiError::unauthorized(
+                        "A state-changing request must carry an Origin header",
+                    ))
+                }
+            }
+        }
+
         let token = parts
             .headers
-            .get(axum::http::header::AUTHORIZATION)
+            .get(header::COOKIE)
             .and_then(|value| value.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .map(str::trim)
-            .ok_or_else(|| ApiError::unauthorized("Missing Authorization header"))?;
+            .and_then(|cookies| cookie_value(cookies, COOKIE_NAME))
+            .ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
 
-        // 1. Try Matrix Access Token validation (if starts with syt_)
-        if token.starts_with("syt_") {
-            if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
-                let account_id = resolve_matrix_account(&api_state, &user_id).await?;
-                return Ok(AuthUser::matrix(user_id, account_id));
-            } else {
-                return Err(ApiError::unauthorized("Invalid or expired Matrix access token"));
-            }
-        }
+        let session = SessionRepository::resolve(&api_state.db.pool, token)
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not read the session: {:?}", err);
+                ApiError::internal("Could not read the session")
+            })?
+            .ok_or_else(|| ApiError::unauthorized("That session has expired"))?;
 
-        // 2. Try Local API JWT decoding. The identity space comes from the signed
-        //    `kind` claim, never from the shape of `sub`.
-        let keys = JwtKeys::new(api_state.jwt_secret.as_bytes());
-        match decode::<Claims>(token, &keys.decoding, &Validation::default()) {
-            Ok(token_data) => {
-                // A stream ticket opens the SSE endpoint and nothing else.
-                if token_data.claims.scope != TokenScope::Api {
-                    return Err(ApiError::unauthorized(
-                        "This token is not valid for the REST API",
-                    ));
-                }
-                Ok(AuthUser {
-                    subject: token_data.claims.sub,
-                    kind: token_data.claims.kind,
-                    account_id: token_data.claims.acct,
-                })
-            }
-            Err(_) => {
-                // 3. Fallback: try checking if it's a raw Matrix Access Token that doesn't start with syt_
-                if let Some(user_id) = api_state.resolve_matrix_identity(token).await {
-                    let account_id = resolve_matrix_account(&api_state, &user_id).await?;
-                    Ok(AuthUser::matrix(user_id, account_id))
-                } else {
-                    Err(ApiError::unauthorized("Invalid or expired authentication token"))
-                }
-            }
-        }
+        // The display name is read per request rather than copied into the
+        // session, so renaming an account takes effect immediately instead of
+        // on next sign-in.
+        let display_name = AccountRepository::find(&api_state.db.pool, &session.account_id)
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not read the account: {:?}", err);
+                ApiError::internal("Could not read the account")
+            })?
+            .map(|account| account.display_name)
+            // A session whose account is gone is not a session.
+            .ok_or_else(|| ApiError::unauthorized("That account no longer exists"))?;
+
+        Ok(AuthUser {
+            account_id: session.account_id,
+            display_name,
+            session_id_hash: session.id_hash,
+            last_verified_at: session.last_verified_at,
+            restricted_until: session.restricted_until,
+        })
     }
 }
 
-/// Maps a proven MXID onto the account it acts as.
+/// A caller who has proved possession of a passkey within the step-up window.
 ///
-/// Provisions one if the MXID has never been seen, exactly as the Matrix
-/// command path does — a homeserver access token proves the same thing a
-/// message from that MXID proves, so the two must not disagree about who the
-/// caller is.
-async fn resolve_matrix_account(state: &ApiState, mxid: &str) -> Result<String, ApiError> {
-    crate::accounts::AccountRepository::resolve_or_provision(&state.db.pool, mxid)
-        .await
-        .map_err(|err| {
-            tracing::error!("Could not resolve an account for {}: {:?}", mxid, err);
-            ApiError::internal("Could not resolve an account for this identity")
-        })
+/// Putting this in a handler's signature is the whole opt-in — the same
+/// ergonomic [`AuthUser`] already has. A sensitive endpoint that forgets it
+/// silently accepts an hours-old session, so §6 of the design has a
+/// table-driven test asserting every route that needs one has one.
+#[derive(Debug, Clone)]
+pub struct VerifiedUser(pub AuthUser);
+
+impl std::ops::Deref for VerifiedUser {
+    type Target = AuthUser;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for VerifiedUser
+where
+    S: Send + Sync,
+    ApiState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let user = AuthUser::from_request_parts(parts, state).await?;
+
+        if user.restricted_until.is_some_and(|until| chrono::Utc::now() < until) {
+            return Err(ApiError::forbidden(
+                "This session was created by account recovery and cannot do that yet",
+            ));
+        }
+
+        if !user.may_perform_sensitive_action(chrono::Utc::now()) {
+            return Err(ApiError::forbidden(
+                "Confirm with your passkey to continue",
+            ));
+        }
+
+        Ok(VerifiedUser(user))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cookie_parsing() {
+        assert_eq!(cookie_value("mb_session=abc", "mb_session"), Some("abc"));
+        assert_eq!(
+            cookie_value("other=1; mb_session=abc; third=2", "mb_session"),
+            Some("abc")
+        );
+        assert_eq!(cookie_value("other=1; third=2", "mb_session"), None);
+        assert_eq!(cookie_value("", "mb_session"), None);
+        assert_eq!(cookie_value("malformed", "mb_session"), None);
+    }
+
+    /// Only the safe methods skip the origin check.
+    #[test]
+    fn test_which_methods_need_an_origin() {
+        for safe in [Method::GET, Method::HEAD, Method::OPTIONS] {
+            assert!(!is_mutating(&safe), "{safe} must not require an Origin");
+        }
+        for mutating in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            assert!(is_mutating(&mutating), "{mutating} must require an Origin");
+        }
+    }
 }

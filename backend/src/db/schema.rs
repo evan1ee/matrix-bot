@@ -462,6 +462,34 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     backfill_accounts(pool).await?;
 
+    // Passwords are gone, so an account whose only credential was a `web_users`
+    // row can no longer sign in. Calling it 'active' would be a claim this
+    // schema can no longer honour: 'active' means "holds a passkey", and it
+    // holds none.
+    //
+    // Demoted rather than deleted — the rows it owns are real, and 'unclaimed'
+    // is exactly the state of "owns data, holds no credential". Linking a Matrix
+    // account to it later restores access to everything in it.
+    //
+    // Runs *after* the backfill, which is what creates these rows in the first
+    // place on a legacy database.
+    let demoted = sqlx::query(
+        "UPDATE accounts SET status = 'unclaimed' \
+         WHERE status = 'active' \
+           AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = accounts.id)",
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if demoted > 0 {
+        info!(
+            "{demoted} account(s) had only a password and now hold no credential; \
+             marked unclaimed. Their data is intact — register a passkey and link a \
+             Matrix account to reach it."
+        );
+    }
+
     info!("Database migrations applied successfully.");
     Ok(())
 }
@@ -929,20 +957,18 @@ mod tests {
             assert_eq!(stranded, 0, "{table} has rows no account owns");
         }
 
-        // Every *active* account must be reachable: 'active' asserts a
-        // credential exists, so an active account with no way in is the
-        // migration having lied about the state it created.
+        // 'active' asserts a passkey exists. An active account without one is
+        // the migration having lied about the state it created.
         let unreachable_active: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM accounts a WHERE a.status = 'active' \
-               AND NOT EXISTS (SELECT 1 FROM matrix_links m WHERE m.account_id = a.id) \
-               AND NOT EXISTS (SELECT 1 FROM web_users w WHERE w.account_id = a.id)",
+               AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = a.id)",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
             unreachable_active, 0,
-            "an account claims to be active but has no credential behind it"
+            "an account claims to be active but holds no passkey"
         );
 
         // Unclaimed accounts with no linked MXID are legacy orphans — data from

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchApi, getAuthToken } from '../../core/apiClient';
+import { fetchApi } from '../../core/apiClient';
+import { useSession } from '../../core/session';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Activity, Radio, Database, Server } from 'lucide-react';
 
@@ -15,7 +16,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
   events = [],
   isConnected = false,
 }) => {
-  const hasToken = !!getAuthToken();
+  const { isSignedIn: hasToken } = useSession();
 
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ['health'],

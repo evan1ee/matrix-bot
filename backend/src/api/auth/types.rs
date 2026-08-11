@@ -1,7 +1,5 @@
 use axum::extract::FromRef;
-use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use utoipa::ToSchema;
@@ -9,203 +7,72 @@ use utoipa::ToSchema;
 use crate::db::Database;
 use crate::error::ApiError;
 
-/// Hashes a bearer token into a cache key, so no live credential is stored.
-fn token_cache_key(token: &str) -> [u8; 32] {
-    Sha256::digest(token.as_bytes()).into()
-}
-
-/// Which identity space a caller authenticated in.
+/// An authenticated caller, resolved from the session cookie.
 ///
-/// This is recorded at authentication time rather than inferred later from the
-/// shape of the subject string: a local account name and a Matrix user ID are
-/// different namespaces, and guessing between them by looking for a leading `@`
-/// is what previously let a local account impersonate a Matrix user.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum AuthKind {
-    /// A locally registered `web_users` account.
-    #[default]
-    Local,
-    /// A Matrix user, proven either by homeserver login or by access token.
-    Matrix,
-}
-
-/// Local account names must never be mistakable for a Matrix user ID, because
-/// `@` and `:` are exactly what keeps the two identity spaces apart in
-/// [`AuthUser::owner_id`].
-pub fn is_valid_local_username(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-}
-
-/// What a token is allowed to do.
-///
-/// `EventSource` cannot set request headers, so the SSE stream has to take its
-/// credential from the URL — where it lands in browser history, proxy logs and
-/// `Referer`. Rather than put the 7-day API token there, callers exchange it for
-/// a short-lived stream ticket that opens nothing else.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TokenScope {
-    /// Full access to the REST API. Must be presented in the `Authorization` header.
-    #[default]
-    Api,
-    /// Opens the SSE stream and nothing else.
-    SseStream,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String,
-    pub exp: usize,
-    /// Required. A token issued before this field existed is **rejected**, not
-    /// defaulted: defaulting it silently reinterpreted a Matrix subject as a
-    /// local account, so the holder kept working but as a different principal —
-    /// their rows went to `@web-@user:server:api` and their real data vanished
-    /// from view. A 401 sends them back through login instead.
-    pub kind: AuthKind,
-    /// Defaults to `Api`, matching tokens issued before scoping existed.
-    #[serde(default)]
-    pub scope: TokenScope,
-    /// The account this token acts as — an `accounts.id`, and the value every
-    /// ownership predicate compares against.
-    ///
-    /// Required, and deliberately not defaulted, for the same reason `kind` is
-    /// not: a token issued before accounts existed carries an owner string from
-    /// the old identity space, and silently accepting it would point its holder
-    /// at rows that no longer exist. A 401 sends them back through login, which
-    /// resolves them onto a real account.
-    pub acct: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct AuthPayload {
-    pub username: String,
-    pub password: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct RegisterPayload {
-    pub username: String,
-    pub password: String,
-    pub secret: Option<String>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AuthResponse {
-    pub token: String,
-    pub token_type: String,
-    pub username: String,
-}
-
+/// There is one identity space now. Callers used to arrive as either a Matrix
+/// user or a local account, and `owner_id` was *derived* from whichever it was
+/// — which is precisely what made one human two owners. The extractor resolves
+/// a session to an account before any of this is read, so nothing here is
+/// derived from anything.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    /// The MXID for [`AuthKind::Matrix`], or the account name for [`AuthKind::Local`].
-    ///
-    /// Display and provenance only — it says how the caller authenticated, not
-    /// what they own.
-    pub subject: String,
-    pub kind: AuthKind,
     /// The `accounts.id` this caller acts as. The only ownership key there is.
     pub account_id: String,
+    /// The human-facing name persisted in `sender_name`. Display only — it is
+    /// never used to decide who owns a row.
+    pub display_name: String,
+    /// The session this request arrived on, so it can be revoked or stamped as
+    /// freshly verified without looking it up again.
+    pub session_id_hash: String,
+    /// When the caller last proved possession of a passkey. The step-up clock.
+    pub last_verified_at: chrono::DateTime<chrono::Utc>,
+    /// Set when this session came out of account recovery and is still inside
+    /// its restricted window.
+    pub restricted_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl AuthUser {
-    pub fn matrix(mxid: impl Into<String>, account_id: impl Into<String>) -> Self {
-        Self {
-            subject: mxid.into(),
-            kind: AuthKind::Matrix,
-            account_id: account_id.into(),
-        }
-    }
-
-    /// Test-only: the production path builds local identities from signed JWT
-    /// claims in the extractor, never from a bare username.
-    #[cfg(test)]
-    pub fn local(username: impl Into<String>, account_id: impl Into<String>) -> Self {
-        Self {
-            subject: username.into(),
-            kind: AuthKind::Local,
-            account_id: account_id.into(),
-        }
-    }
-
     /// The single canonical owner string persisted in `owner_id`.
     ///
-    /// Every ownership check compares against this and nothing else. It used to
-    /// be derived from `subject` — the MXID verbatim for a Matrix caller, and
-    /// `@web-<username>:api` for a local one — which is exactly what made the
-    /// same human two different owners depending on how they had signed in.
-    /// Now both paths resolve to an account before this is ever read, so the
-    /// derivation is gone and there is nothing left to get wrong.
+    /// Every ownership check compares against this and nothing else.
     pub fn owner_id(&self) -> String {
         self.account_id.clone()
     }
 
-    /// The human-facing name persisted in `sender_name`. Display only — it is
-    /// never used to decide who owns a row.
-    pub fn display_name(&self) -> String {
-        match self.kind {
-            AuthKind::Matrix => self
-                .subject
-                .trim_start_matches('@')
-                .split(':')
-                .next()
-                .unwrap_or(&self.subject)
-                .to_string(),
-            AuthKind::Local => self.subject.clone(),
-        }
+    /// Whether a passkey assertion happened recently enough for a sensitive
+    /// action, and this is not a restricted recovery session.
+    ///
+    /// Both conditions, not either: a recovery session is deliberately unable
+    /// to reach a sensitive action however recently it authenticated.
+    pub fn may_perform_sensitive_action(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let recent = now.signed_duration_since(self.last_verified_at)
+            < chrono::Duration::minutes(crate::accounts::session::STEP_UP_WINDOW_MINUTES);
+        let restricted = self.restricted_until.is_some_and(|until| now < until);
+
+        recent && !restricted
     }
-}
 
-pub struct JwtKeys {
-    pub encoding: EncodingKey,
-    pub decoding: DecodingKey,
-}
-
-impl JwtKeys {
-    pub fn new(secret: &[u8]) -> Self {
+    /// Test-only constructor. Production builds this from a session row.
+    #[cfg(test)]
+    pub fn for_account(account_id: impl Into<String>) -> Self {
+        let account_id = account_id.into();
         Self {
-            encoding: EncodingKey::from_secret(secret),
-            decoding: DecodingKey::from_secret(secret),
+            display_name: account_id.trim_start_matches("acct_").to_string(),
+            account_id,
+            session_id_hash: "test-session".to_string(),
+            last_verified_at: chrono::Utc::now(),
+            restricted_until: None,
         }
     }
-}
 
-/// The homeserver interactions the auth layer depends on.
-///
-/// Behind a trait purely so those paths are testable: verifying that a Matrix
-/// token yields `AuthKind::Matrix`, or that logging in leaves the bot's
-/// credentials alone, otherwise requires a live homeserver — which is exactly
-/// what kept this security boundary untested.
-#[async_trait::async_trait]
-pub trait MatrixIdentityProvider: Send + Sync {
-    /// Resolves an access token to its Matrix user ID.
-    async fn whoami(&self, state: &ApiState, token: &str) -> Option<String>;
-
-    /// Authenticates with a password, yielding `(user_id, access_token)`.
-    async fn login(&self, state: &ApiState, username: &str, password: &str)
-        -> Option<(String, String)>;
-}
-
-/// Talks to the real homeserver.
-pub struct HomeserverIdentityProvider;
-
-#[async_trait::async_trait]
-impl MatrixIdentityProvider for HomeserverIdentityProvider {
-    async fn whoami(&self, state: &ApiState, token: &str) -> Option<String> {
-        crate::api::auth::matrix::validate_matrix_access_token(state, token).await
-    }
-
-    async fn login(
-        &self,
-        state: &ApiState,
-        username: &str,
-        password: &str,
-    ) -> Option<(String, String)> {
-        crate::api::auth::matrix::authenticate_matrix_user(state, username, password).await
+    /// Test-only: a caller whose display name is set independently of the
+    /// account, so tests can prove a shared name never implies shared data.
+    #[cfg(test)]
+    pub fn named(display_name: impl Into<String>, account_id: impl Into<String>) -> Self {
+        Self {
+            display_name: display_name.into(),
+            ..Self::for_account(account_id)
+        }
     }
 }
 
@@ -213,7 +80,6 @@ impl MatrixIdentityProvider for HomeserverIdentityProvider {
 pub struct ApiState {
     pub db: Database,
     pub broadcaster: crate::events::EventBroadcaster,
-    pub jwt_secret: String,
     pub registration_secret: Option<String>,
     pub homeserver: String,
     pub http_client: reqwest::Client,
@@ -231,16 +97,6 @@ pub struct ApiState {
     /// Memoized because resolving it built a fresh `matrix_sdk::Client` — and so
     /// re-ran discovery — on every request carrying a Matrix token.
     pub resolved_homeserver: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
-    /// How the auth layer reaches Matrix. Swapped in tests.
-    pub matrix_identity: std::sync::Arc<dyn MatrixIdentityProvider>,
-    /// Access token → MXID, so repeat calls skip the `/whoami` round trip.
-    ///
-    /// Keyed by SHA-256 of the token, never the token itself: this map outlives
-    /// any single request, and a bearer token is a live credential that must not
-    /// sit in a long-lived structure where a `Debug` print or a core dump would
-    /// expose something replayable.
-    pub matrix_identity_cache:
-        std::sync::Arc<tokio::sync::RwLock<HashMap<[u8; 32], CachedIdentity>>>,
     /// The WebAuthn Relying Party. Its RP ID is baked into every credential.
     pub webauthn: std::sync::Arc<webauthn_rs::Webauthn>,
     /// WebAuthn ceremonies waiting for the browser to come back.
@@ -252,6 +108,9 @@ pub struct ApiState {
         std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,
     /// Whether the session cookie is marked `Secure`. False only in development.
     pub cookie_secure: bool,
+    /// The origin the SPA is served from, compared against `Origin` on every
+    /// state-changing request.
+    pub webauthn_origin: String,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -284,33 +143,10 @@ pub struct PendingCeremony {
 /// abandoned challenge is not sitting in memory for an afternoon.
 pub const CEREMONY_TTL: Duration = Duration::from_secs(300);
 
-/// A resolved Matrix identity and the moment it stops being trusted.
-pub struct CachedIdentity {
-    user_id: String,
-    expires_at: Instant,
-}
-
-/// How long a resolved Matrix identity is reused before re-asking the
-/// homeserver.
-///
-/// This is the window in which a token revoked upstream (the user signed out of
-/// their client) still reaches the API, so it is deliberately short. The cost it
-/// removes is not one round trip but the burst: a screen that fires several
-/// requests at once previously paid a `/whoami` for each, and homeservers rate
-/// limit that endpoint.
-const MATRIX_IDENTITY_TTL: Duration = Duration::from_secs(60);
-
-/// Entries tolerated before expired ones are swept on insert.
-///
-/// The map is bounded by the number of distinct *valid* tokens — failures are
-/// never cached, so an attacker replaying garbage cannot grow it.
-const MATRIX_IDENTITY_CACHE_SWEEP_AT: usize = 512;
-
 impl ApiState {
     pub fn new(
         db: Database,
         broadcaster: crate::events::EventBroadcaster,
-        jwt_secret: String,
         registration_secret: Option<String>,
         homeserver: String,
         http_client: reqwest::Client,
@@ -318,21 +154,19 @@ impl ApiState {
         Self {
             db,
             broadcaster,
-            jwt_secret,
             registration_secret,
             homeserver,
             http_client,
             bot_access_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             bot_client: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             resolved_homeserver: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-            matrix_identity: std::sync::Arc::new(HomeserverIdentityProvider),
-            matrix_identity_cache: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             webauthn: std::sync::Arc::new(
                 build_webauthn("localhost", "http://localhost:8080")
                     .expect("the localhost development Relying Party is always valid"),
             ),
             webauthn_ceremonies: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cookie_secure: false,
+            webauthn_origin: "http://localhost:8080".to_string(),
         }
     }
 
@@ -348,7 +182,13 @@ impl ApiState {
     ) -> anyhow::Result<Self> {
         self.webauthn = std::sync::Arc::new(build_webauthn(rp_id, origin)?);
         self.cookie_secure = cookie_secure;
+        self.webauthn_origin = origin.trim_end_matches('/').to_string();
         Ok(self)
+    }
+
+    /// The origin a request's `Origin` header must match.
+    pub fn webauthn_origin_str(&self) -> &str {
+        &self.webauthn_origin
     }
 
     /// Files a ceremony away and returns the id the browser quotes back.
@@ -381,57 +221,6 @@ impl ApiState {
         (pending.expires_at > Instant::now()).then_some(pending.ceremony)
     }
 
-    /// Resolves a Matrix access token to its MXID, reusing a recent answer.
-    ///
-    /// Every Matrix-authenticated request used to spend a homeserver round trip
-    /// here, so latency was doubled and a burst of parallel requests could trip
-    /// the homeserver's rate limiter.
-    ///
-    /// Only successes are cached. A rejected token stays rejected on the fast
-    /// path guard in `looks_like_access_token`, and caching a `None` would mean
-    /// a token that becomes valid (or a homeserver blip) kept failing for the
-    /// whole TTL.
-    pub async fn resolve_matrix_identity(&self, token: &str) -> Option<String> {
-        let key = token_cache_key(token);
-
-        if let Some(hit) = self.matrix_identity_cache.read().await.get(&key) {
-            if hit.expires_at > Instant::now() {
-                return Some(hit.user_id.clone());
-            }
-        }
-
-        // Concurrent first-time requests for the same token can each miss and
-        // call out; that costs a few duplicate round trips on a cold token and
-        // is left alone deliberately — collapsing them needs per-key locking,
-        // which is more machinery than the saving justifies.
-        let user_id = self.matrix_identity.whoami(self, token).await?;
-
-        let mut cache = self.matrix_identity_cache.write().await;
-        if cache.len() >= MATRIX_IDENTITY_CACHE_SWEEP_AT {
-            let now = Instant::now();
-            cache.retain(|_, entry| entry.expires_at > now);
-        }
-        cache.insert(
-            key,
-            CachedIdentity {
-                user_id: user_id.clone(),
-                expires_at: Instant::now() + MATRIX_IDENTITY_TTL,
-            },
-        );
-
-        Some(user_id)
-    }
-
-    /// Replaces the Matrix identity provider, so tests can exercise the
-    /// Matrix-credential paths without a homeserver.
-    #[cfg(test)]
-    pub fn with_matrix_identity(
-        mut self,
-        provider: std::sync::Arc<dyn MatrixIdentityProvider>,
-    ) -> Self {
-        self.matrix_identity = provider;
-        self
-    }
 }
 
 /// Builds the Relying Party.
@@ -465,9 +254,14 @@ pub struct SseTicketResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserProfileResponse {
+    /// The signed-in account. The frontend keys its caches on this.
+    pub account_id: String,
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// Matrix identities linked to this account, if any. An empty list is the
+    /// normal state for someone who has only ever used the web UI.
+    pub linked_mxids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]

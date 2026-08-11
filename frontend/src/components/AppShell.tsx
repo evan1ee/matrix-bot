@@ -1,3 +1,4 @@
+import { SessionUser } from '../core/session';
 import React, { useState } from 'react';
 import { registry } from '../core/registry';
 import { SystemEvent } from '../core/types';
@@ -14,7 +15,7 @@ interface AppShellProps {
   isConnected: boolean;
   onOpenAuth: () => void;
   onOpenSettings: () => void;
-  userToken: string | null;
+  user: SessionUser | null;
   currentTheme: Theme;
   onThemeChange: (theme: Theme) => void;
 }
@@ -39,7 +40,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   isConnected,
   onOpenAuth,
   onOpenSettings,
-  userToken,
+  user,
   currentTheme,
   onThemeChange,
 }) => {
@@ -56,7 +57,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         activeModuleId={activeModuleId}
         onSelectModule={onSelectModule}
         isConnected={isConnected}
-        userToken={userToken}
+        user={user}
         onOpenAuth={onOpenAuth}
         onOpenSettings={onOpenSettings}
         currentTheme={currentTheme}
@@ -73,7 +74,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         <MobileTopBar
           moduleLabel={moduleLabel}
           isConnected={isConnected}
-          userToken={userToken}
+          user={user}
           onOpenSidebar={() => setIsMobileOpen(true)}
         />
 
@@ -85,7 +86,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           <div className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-tertiary)]">
             <span
               className={`w-2 h-2 rounded-full ${
-                !userToken
+                !user
                   ? 'bg-neutral-400 dark:bg-neutral-600'
                   : isConnected
                   ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
@@ -93,7 +94,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               }`}
             />
             <span>
-              {!userToken ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting…'}
+              {!user ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting…'}
             </span>
           </div>
         </header>

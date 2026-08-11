@@ -1,10 +1,11 @@
+import { SessionUser } from '../core/session';
 import React from 'react';
 import { Menu, Bot } from 'lucide-react';
 
 interface MobileTopBarProps {
   moduleLabel: string;
   isConnected: boolean;
-  userToken: string | null;
+  user: SessionUser | null;
   onOpenSidebar: () => void;
 }
 
@@ -15,7 +16,7 @@ interface MobileTopBarProps {
 export const MobileTopBar: React.FC<MobileTopBarProps> = ({
   moduleLabel,
   isConnected,
-  userToken,
+  user,
   onOpenSidebar,
 }) => {
   return (
@@ -38,13 +39,13 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
       <div className="flex items-center">
         <span
           className={`w-2 h-2 rounded-full ${
-            !userToken
+            !user
               ? 'bg-neutral-400 dark:bg-neutral-600'
               : isConnected
               ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
               : 'bg-amber-500 dark:bg-amber-400'
           }`}
-          title={!userToken ? 'Not authenticated' : isConnected ? 'Connected' : 'Reconnecting'}
+          title={!user ? 'Not authenticated' : isConnected ? 'Connected' : 'Reconnecting'}
         />
       </div>
     </header>

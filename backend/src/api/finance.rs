@@ -120,7 +120,7 @@ async fn owned_category(
         (status = 200, description = "Ledger entries", body = LedgerResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_transactions(
     State(state): State<ApiState>,
@@ -160,7 +160,7 @@ pub async fn list_transactions(
         (status = 400, description = "Bad request", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn create_transaction(
     State(state): State<ApiState>,
@@ -175,7 +175,7 @@ pub async fn create_transaction(
         &state.db.pool,
         &payload.room_id.unwrap_or_else(|| "web".to_string()),
         &owner_id,
-        &user.display_name(),
+        &user.display_name,
         payload.direction.as_str(),
         amount_minor,
         &currency,
@@ -201,7 +201,7 @@ pub async fn create_transaction(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn update_transaction(
     State(state): State<ApiState>,
@@ -248,7 +248,7 @@ pub async fn update_transaction(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_transaction(
     State(state): State<ApiState>,
@@ -282,7 +282,7 @@ pub async fn delete_transaction(
         (status = 200, description = "Per-currency totals", body = Vec<CurrencySummary>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn summary(
     State(state): State<ApiState>,
@@ -308,7 +308,7 @@ pub async fn summary(
         (status = 200, description = "Your categories", body = Vec<Category>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_categories(
     State(state): State<ApiState>,
@@ -330,7 +330,7 @@ pub async fn list_categories(
         (status = 409, description = "Already exists", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn create_category(
     State(state): State<ApiState>,
@@ -363,7 +363,7 @@ pub async fn create_category(
         (status = 404, description = "Not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn delete_category(
     State(state): State<ApiState>,
@@ -395,7 +395,6 @@ mod tests {
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -419,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn test_amount_string_becomes_exact_minor_units() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let created = create_transaction(State(state.clone()), alice, Json(entry("15.50", "EUR", None)))
             .await
@@ -435,7 +434,7 @@ mod tests {
         let state = test_state().await;
         let created = create_transaction(
             State(state.clone()),
-            AuthUser::local("alice", "acct_alice"),
+            AuthUser::named("alice", "acct_alice"),
             Json(entry("500", "JPY", None)),
         )
         .await
@@ -448,7 +447,7 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_bad_amounts_and_currencies() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         for (amount, currency) in [("15.501", "EUR"), ("-5", "EUR"), ("abc", "EUR"), ("5", "EURO")]
         {
@@ -466,8 +465,8 @@ mod tests {
     #[tokio::test]
     async fn test_ledger_is_private_to_its_owner() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
-        let bob = AuthUser::local("bob", "acct_bob");
+        let alice = AuthUser::named("alice", "acct_alice");
+        let bob = AuthUser::named("bob", "acct_bob");
 
         let created =
             create_transaction(State(state.clone()), alice, Json(entry("10.00", "EUR", None)))
@@ -505,7 +504,7 @@ mod tests {
         let state = test_state().await;
         let bobs_category = create_category(
             State(state.clone()),
-            AuthUser::local("bob", "acct_bob"),
+            AuthUser::named("bob", "acct_bob"),
             Json(CategoryRequest { name: "food".to_string() }),
         )
         .await
@@ -513,7 +512,7 @@ mod tests {
 
         let err = create_transaction(
             State(state.clone()),
-            AuthUser::local("alice", "acct_alice"),
+            AuthUser::named("alice", "acct_alice"),
             Json(entry("10.00", "EUR", Some(bobs_category.id))),
         )
         .await
@@ -525,7 +524,7 @@ mod tests {
     #[tokio::test]
     async fn test_duplicate_category_is_a_conflict_not_a_second_row() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         create_category(
             State(state.clone()),
@@ -552,7 +551,7 @@ mod tests {
     #[tokio::test]
     async fn test_deleting_a_category_keeps_the_entries() {
         let state = test_state().await;
-        let alice = AuthUser::local("alice", "acct_alice");
+        let alice = AuthUser::named("alice", "acct_alice");
 
         let category = create_category(
             State(state.clone()),
@@ -593,7 +592,7 @@ mod tests {
 
         let err = summary(
             State(state),
-            AuthUser::local("alice", "acct_alice"),
+            AuthUser::named("alice", "acct_alice"),
             Query(SummaryQuery { from: now, to: now - chrono::Duration::days(1) }),
         )
         .await

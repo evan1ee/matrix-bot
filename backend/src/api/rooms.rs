@@ -1,12 +1,11 @@
 use axum::{extract::State, Json};
 use matrix_sdk::room::Room;
 use matrix_sdk::ruma::events::room::member::MembershipState;
-use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::{OwnedUserId, UserId};
 use serde::Serialize;
 use tracing::warn;
 use utoipa::ToSchema;
 
-use crate::api::auth::types::AuthKind;
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 
@@ -66,7 +65,7 @@ async fn describe_room(room: &Room) -> Option<JoinedRoomInfo> {
         (status = 200, description = "List Matrix rooms joined by bot", body = Vec<JoinedRoomInfo>),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
-    security(("bearer_auth" = []))
+    security(("session_cookie" = []))
 )]
 pub async fn list_rooms(
     State(state): State<ApiState>,
@@ -83,18 +82,34 @@ pub async fn list_rooms(
     // The caller must be in the room too. Without this the endpoint hands every
     // registered account the names of every room the bot belongs to, including
     // ones the caller has nothing to do with.
-    let caller = match user.kind {
-        AuthKind::Matrix => match UserId::parse(&user.subject) {
-            Ok(id) => id,
+    //
+    // An account can have several linked Matrix identities, so "the caller" is
+    // a set, not one MXID. A room qualifies if *any* of them is a joined
+    // member — the account is one person however many identities they use.
+    //
+    // An account with no linked Matrix identity shares no rooms with the bot
+    // and gets an empty list, which is the honest answer rather than an error.
+    let linked = crate::accounts::AccountRepository::linked_mxids(
+        &state.db.pool,
+        &user.account_id,
+    )
+    .await
+    .unwrap_or_default();
+
+    let callers: Vec<OwnedUserId> = linked
+        .iter()
+        .filter_map(|mxid| match UserId::parse(mxid) {
+            Ok(id) => Some(id),
             Err(_) => {
-                warn!("Authenticated Matrix subject is not a valid user ID: {}", user.subject);
-                return Ok(Json(Vec::new()));
+                warn!("Linked Matrix ID is not parseable, skipping: {}", mxid);
+                None
             }
-        },
-        // A local web account has no Matrix identity, so it shares no rooms with
-        // the bot. Log in with Matrix credentials to pick a room.
-        AuthKind::Local => return Ok(Json(Vec::new())),
-    };
+        })
+        .collect();
+
+    if callers.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
 
     // Accept pending invitations so a freshly invited room shows up here.
     for room in client.invited_rooms() {
@@ -116,7 +131,14 @@ pub async fn list_rooms(
         if !is_joined_member(&room, bot_id).await {
             continue;
         }
-        if !is_joined_member(&room, &caller).await {
+        let mut caller_is_member = false;
+        for caller in &callers {
+            if is_joined_member(&room, caller).await {
+                caller_is_member = true;
+                break;
+            }
+        }
+        if !caller_is_member {
             continue;
         }
         if let Some(info) = describe_room(&room).await {
@@ -145,12 +167,11 @@ mod tests {
         let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
-            "secret".to_string(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::local("alice", "acct_alice");
+        let user = AuthUser::for_account("acct_alice");
 
         let res = list_rooms(State(state), user).await.unwrap();
         assert!(res.0.is_empty());

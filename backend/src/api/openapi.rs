@@ -1,5 +1,5 @@
 use axum::{response::IntoResponse, Json};
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
@@ -22,10 +22,12 @@ use crate::modules::settings::UserSettings;
     paths(
         health::health_check,
         sse::sse_handler,
-        auth::register,
-        auth::login,
+        auth::webauthn::register_start,
+        auth::webauthn::register_finish,
+        auth::webauthn::login_start,
+        auth::webauthn::login_finish,
+        auth::logout,
         auth::get_current_user,
-        auth::create_sse_ticket,
         auth::media_proxy,
         rooms::list_rooms,
         settings::get_settings,
@@ -67,11 +69,12 @@ use crate::modules::settings::UserSettings;
         schemas(
             ApiErrorResponse,
             health::HealthResponse,
-            auth::AuthPayload,
-            auth::RegisterPayload,
-            auth::AuthResponse,
+            auth::webauthn::CeremonyStart,
+            auth::webauthn::RegisterStartRequest,
+            auth::webauthn::RegisterFinishRequest,
+            auth::webauthn::LoginFinishRequest,
+            auth::webauthn::SessionResponse,
             auth::UserProfileResponse,
-            auth::SseTicketResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,
             UserSettings,
@@ -121,7 +124,7 @@ use crate::modules::settings::UserSettings;
 )]
 pub struct ApiDoc;
 
-/// Defines the `bearer_auth` scheme every secured path references.
+/// Declares the `session_cookie` scheme every secured path references.
 ///
 /// Without this the generated document carries security requirements pointing
 /// at a scheme that was never declared, which generated clients cannot wire up.
@@ -134,21 +137,20 @@ impl Modify for SecurityAddon {
             .get_or_insert_with(utoipa::openapi::Components::default);
 
         components.add_security_scheme(
-            "bearer_auth",
-            SecurityScheme::Http(
-                HttpBuilder::new()
-                    .scheme(HttpAuthScheme::Bearer)
-                    .description(Some(
-                        "A local API JWT, or a Matrix access token. The SSE endpoint \
-                         additionally accepts the same value as a `token` query parameter, \
-                         because EventSource cannot set request headers.",
-                    ))
-                    .build(),
-            ),
+            "session_cookie",
+            SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Cookie(
+                utoipa::openapi::security::ApiKeyValue::with_description(
+                    crate::accounts::session::COOKIE_NAME,
+                    "Session cookie set by the passkey sign-in endpoints. HttpOnly, so \
+                     it is sent by the browser automatically and is not readable by \
+                     JavaScript.",
+                ),
+            )),
         );
     }
 }
 
+/// Serves the generated document.
 pub async fn openapi_json() -> impl IntoResponse {
     Json(ApiDoc::openapi())
 }
@@ -171,7 +173,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let schemes = &parsed["components"]["securitySchemes"];
         assert!(
-            schemes["bearer_auth"].is_object(),
+            schemes["session_cookie"].is_object(),
             "paths reference `bearer_auth`, so it must be declared"
         );
     }
