@@ -59,8 +59,8 @@ impl BotModule for ReminderModule {
         .await
     }
 
-    async fn spawn_background_workers(&self, ctx: &ModuleContext) {
-        scheduler::start_reminder_scheduler(ctx.clone());
+    async fn spawn_background_workers(&self, ctx: &ModuleContext) -> Vec<tokio::task::JoinHandle<()>> {
+        vec![scheduler::start_reminder_scheduler(ctx.clone())]
     }
 }
 

@@ -94,8 +94,12 @@ impl MatrixBot {
             self.broadcaster.clone(),
         );
 
-        // Start background workers for all modules (e.g., reminder scheduler)
-        self.registry.spawn_all_background_workers(&module_ctx).await;
+        // Start background workers for all modules (e.g., reminder scheduler).
+        // The guard stops them when this function returns, by any path: they
+        // hold this generation's client, and the caller reconnects in a loop, so
+        // leaving them detached accumulated one scheduler per reconnect and
+        // delivered every reminder once per copy.
+        let _workers = self.registry.spawn_all_background_workers(&module_ctx).await;
 
         tracing::info!("Matrix Bot is active and listening for events...");
         self.client.sync(SyncSettings::default()).await?;

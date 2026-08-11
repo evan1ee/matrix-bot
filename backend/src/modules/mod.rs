@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use matrix_sdk::Client;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use tracing::info;
 
 use crate::db::Database;
@@ -77,8 +78,15 @@ pub trait BotModule: Send + Sync {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String>;
 
-    /// Spawns any background tasks (e.g. scheduler loops). Called once at startup.
-    async fn spawn_background_workers(&self, _ctx: &ModuleContext) {}
+    /// Spawns any background tasks (e.g. scheduler loops).
+    ///
+    /// Returns their handles so the caller can stop them. A worker holds the
+    /// `ModuleContext` it was given — including that generation's Matrix client
+    /// — so it must not outlive the sync session that produced it; see
+    /// [`BackgroundWorkers`].
+    async fn spawn_background_workers(&self, _ctx: &ModuleContext) -> Vec<JoinHandle<()>> {
+        Vec::new()
+    }
 }
 
 /// Central registry holding all registered `BotModule` instances.
@@ -114,10 +122,14 @@ impl ModuleRegistry {
     }
 
     /// Spawns background workers for all registered modules.
-    pub async fn spawn_all_background_workers(&self, ctx: &ModuleContext) {
+    ///
+    /// The returned guard owns them: drop it and they stop.
+    pub async fn spawn_all_background_workers(&self, ctx: &ModuleContext) -> BackgroundWorkers {
+        let mut handles = Vec::new();
         for module in &self.modules {
-            module.spawn_background_workers(ctx).await;
+            handles.extend(module.spawn_background_workers(ctx).await);
         }
+        BackgroundWorkers { handles }
     }
 
     /// Returns help text for all modules, grouped by module name.
@@ -133,6 +145,51 @@ impl ModuleRegistry {
 mod tests {
     use super::*;
     use crate::db::Database;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Dropping the guard must actually stop the workers it owns.
+    ///
+    /// This is the invariant the reconnect loop depends on. Without it each
+    /// reconnect left its scheduler running, and a due reminder was delivered
+    /// once per surviving copy — three times, then four after another
+    /// reconnect. The guard is asserted directly rather than through the bot
+    /// because building a `ModuleContext` needs a live Matrix client.
+    #[tokio::test]
+    async fn test_dropping_the_guard_stops_its_workers() {
+        static TICKS: AtomicUsize = AtomicUsize::new(0);
+
+        let spawn_ticker = || {
+            tokio::spawn(async {
+                loop {
+                    TICKS.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+        };
+
+        let workers = BackgroundWorkers {
+            handles: vec![spawn_ticker(), spawn_ticker()],
+        };
+        assert_eq!(workers.len(), 2);
+
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        assert!(
+            TICKS.load(Ordering::SeqCst) > 0,
+            "the workers should be running before the guard is dropped"
+        );
+
+        drop(workers);
+        // Let the abort land, then take a reading and prove it stops moving.
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let after_abort = TICKS.load(Ordering::SeqCst);
+
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        assert_eq!(
+            TICKS.load(Ordering::SeqCst),
+            after_abort,
+            "a dropped guard must leave no worker still ticking"
+        );
+    }
 
     /// Dispatch returns the *first* module that claims a message, so a command
     /// can be perfectly correct in isolation and still be swallowed by a module
@@ -278,5 +335,41 @@ use crate::events::EventBroadcaster;
         assert_eq!(help[0].0, "todo");
         assert_eq!(help[1].0, "finance");
         assert!(help.iter().all(|(_, cmds)| !cmds.is_empty()));
+    }
+}
+
+/// Owns a generation of background workers and stops them when dropped.
+///
+/// The Matrix sync loop reconnects, and each reconnect builds a fresh client and
+/// calls `run()` again. Spawning detached workers there leaked one scheduler per
+/// reconnect: every surviving copy kept polling the same `reminders` table, so a
+/// single due reminder was delivered once per accumulated worker — the bug where
+/// one reminder arrived three times, then four after another reconnect.
+///
+/// Tying the workers to a guard makes the lifetime explicit: they belong to the
+/// sync session that spawned them, and they hold that session's client, so they
+/// must not outlive it. Aborting mid-delivery is safe — the row stays `pending`
+/// and the next generation redelivers it, which is the same at-least-once
+/// behaviour a crash already implied.
+pub struct BackgroundWorkers {
+    handles: Vec<JoinHandle<()>>,
+}
+
+impl BackgroundWorkers {
+    /// How many workers this guard owns.
+    pub fn len(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+}
+
+impl Drop for BackgroundWorkers {
+    fn drop(&mut self) {
+        for handle in &self.handles {
+            handle.abort();
+        }
     }
 }

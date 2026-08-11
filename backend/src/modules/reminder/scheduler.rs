@@ -149,7 +149,9 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
     }
 }
 
-pub fn start_reminder_scheduler(ctx: ModuleContext) {
+/// Starts the 5s tick loop, returning its handle so the caller controls its
+/// lifetime — see [`crate::modules::BackgroundWorkers`].
+pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("Starting persistent background reminder worker loop...");
         let mut interval = tokio::time::interval(StdDuration::from_secs(5));
@@ -192,7 +194,7 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) {
                 }
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
