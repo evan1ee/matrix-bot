@@ -128,6 +128,103 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
+    // One-time codes for claiming a Matrix account.
+    //
+    // The web UI issues one and the user DMs it to the bot from the MXID they
+    // are claiming, so proof of ownership *is* the message sender and cannot be
+    // forged. `consumed_at` makes the code single-use: a code seen in a public
+    // room is already burned by the time anyone could race it.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS matrix_link_challenges (
+            code        TEXT PRIMARY KEY,
+            account_id  TEXT NOT NULL,
+            created_at  TIMESTAMP NOT NULL,
+            expires_at  TIMESTAMP NOT NULL,
+            consumed_at TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Single-use recovery codes, bcrypt-hashed for the same reason a password
+    // would be: a leaked backup must not hand someone a way in.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS recovery_codes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id  TEXT NOT NULL,
+            code_hash   TEXT NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at     TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_recovery_codes_account ON recovery_codes(account_id);",
+    )
+    .execute(pool)
+    .await?;
+
+    // Recovery started from a linked Matrix account.
+    //
+    // `valid_after` is what makes this survivable when the Matrix account is
+    // the thing that was compromised: the request is announced immediately and
+    // does nothing for a day, during which any live session can cancel it.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS recovery_requests (
+            id            TEXT PRIMARY KEY,
+            account_id    TEXT NOT NULL,
+            code_hash     TEXT NOT NULL,
+            requested_at  TIMESTAMP NOT NULL,
+            valid_after   TIMESTAMP NOT NULL,
+            expires_at    TIMESTAMP NOT NULL,
+            cancelled_at  TIMESTAMP,
+            consumed_at   TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_recovery_requests_account \
+         ON recovery_requests(account_id);",
+    )
+    .execute(pool)
+    .await?;
+
+    // The account's own audit log.
+    //
+    // Written for every sensitive action, and readable in the web UI. This is
+    // what gives an account with no linked Matrix identity somewhere to see
+    // security notices at all — a DM needs somewhere to send to.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS security_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id  TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            detail      TEXT,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_security_events_account \
+         ON security_events(account_id, created_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS todos (

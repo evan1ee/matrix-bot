@@ -25,10 +25,18 @@
 //! steal by guessing its id.
 
 pub mod credentials;
+pub mod linking;
+pub mod merge;
+pub mod recovery;
 pub mod repository;
+pub mod security_events;
 pub mod session;
 
 pub use credentials::CredentialRepository;
+pub use linking::{LinkOutcome, LinkRepository};
+pub use merge::{MergePreview, MergeRepository};
+pub use recovery::{MaturedRecovery, RecoveryRepository};
+pub use security_events::{SecurityEventKind, SecurityEventRepository};
 pub use repository::AccountRepository;
 pub use session::{Session, SessionRepository};
 
