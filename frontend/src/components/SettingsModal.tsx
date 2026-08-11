@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Clock, Coins, Search, X } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
+import { SecurityPanel } from './SecurityPanel';
 import {
   browserTimezone,
   CURRENCY_OPTIONS,
@@ -25,6 +26,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const saved = useSettings();
   const { mutateAsync, isPending } = useUpdateSettings();
 
+  const [tab, setTab] = useState<'preferences' | 'security'>('preferences');
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
   const [filter, setFilter] = useState('');
@@ -83,14 +85,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       aria-modal="true"
       aria-labelledby="settings-modal-title"
     >
-      <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg max-w-md w-full p-6 space-y-6 shadow-2xl">
+      <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-6 shadow-2xl">
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-4">
-          <h3
-            id="settings-modal-title"
-            className="text-sm font-semibold text-neutral-900 dark:text-neutral-100"
-          >
-            Preferences
-          </h3>
+          <div className="flex items-center gap-4">
+            <h3 id="settings-modal-title" className="sr-only">
+              Settings
+            </h3>
+            {(['preferences', 'security'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                aria-current={tab === t}
+                className={`text-sm font-semibold capitalize transition ${
+                  tab === t
+                    ? 'text-neutral-900 dark:text-neutral-100'
+                    : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
           <button
             onClick={onClose}
             aria-label="Close preferences"
@@ -100,6 +116,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </button>
         </div>
 
+        {tab === 'security' ? (
+          <SecurityPanel />
+        ) : (
+        <>
         {errorMsg && (
           <div className="p-3 rounded bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/50 text-rose-800 dark:text-rose-300 text-xs font-mono">
             {errorMsg}
@@ -216,6 +236,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             {isPending ? 'Saving...' : 'Save'}
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,390 @@
+import React, { useState } from 'react';
+import {
+  AlertTriangle,
+  Copy,
+  KeyRound,
+  Link2,
+  Loader2,
+  Monitor,
+  ShieldAlert,
+  Trash2,
+} from 'lucide-react';
+import {
+  describeEvent,
+  isAlarming,
+  securityApi,
+  SECURITY_KEYS,
+  useDeviceSessions,
+  useLinkedAccounts,
+  usePasskeys,
+  usePendingMerge,
+  useRecoveryStatus,
+  useSecurityEvents,
+  useSensitiveAction,
+} from '../core/security';
+import { describePasskeyError } from '../core/passkey';
+import { formatDateTimeInZone } from '../core/settings';
+import { useSettings } from '../core/settings';
+
+const Section: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({
+  title,
+  hint,
+  children,
+}) => (
+  <section className="flex flex-col gap-3 border-t border-neutral-200 pt-5 dark:border-neutral-800">
+    <div className="flex flex-col gap-1">
+      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>
+      {hint && <p className="text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
+    </div>
+    {children}
+  </section>
+);
+
+const Button: React.FC<
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean; tone?: 'default' | 'danger' }
+> = ({ busy, tone = 'default', children, className = '', ...rest }) => (
+  <button
+    type="button"
+    {...rest}
+    disabled={rest.disabled || busy}
+    className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60 ${
+      tone === 'danger'
+        ? 'bg-red-600 text-white hover:bg-red-700'
+        : 'bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300'
+    } ${className}`}
+  >
+    {busy && <Loader2 size={14} className="animate-spin" />}
+    {children}
+  </button>
+);
+
+/**
+ * Settings → Security.
+ *
+ * Everything here is gated on a recent passkey. Rather than surfacing the
+ * server's 403 as an error, `useSensitiveAction` re-prompts and retries — so
+ * from the user's side a sensitive action sometimes asks for their passkey, and
+ * that is the whole of it.
+ */
+export const SecurityPanel: React.FC = () => {
+  const settings = useSettings();
+  const [error, setError] = useState<string | null>(null);
+  const [linkCode, setLinkCode] = useState<string | null>(null);
+  const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
+
+  const passkeys = usePasskeys();
+  const links = useLinkedAccounts();
+  const sessions = useDeviceSessions();
+  const events = useSecurityEvents();
+  const recovery = useRecoveryStatus();
+  const pendingMerge = usePendingMerge();
+
+  const fmt = (iso: string | null) =>
+    iso ? formatDateTimeInZone(iso, settings.timezone) : '—';
+
+  const run = <T,>(m: { mutateAsync: (a: T) => Promise<unknown>; isPending: boolean }, arg: T) => {
+    setError(null);
+    m.mutateAsync(arg).catch((err) => setError(describePasskeyError(err)));
+  };
+
+  const startLink = useSensitiveAction(securityApi.startLink, []);
+  const unlink = useSensitiveAction(securityApi.unlink, [SECURITY_KEYS.links, SECURITY_KEYS.events]);
+  const confirmMerge = useSensitiveAction(securityApi.confirmMerge, [
+    SECURITY_KEYS.pendingMerge,
+    SECURITY_KEYS.links,
+    SECURITY_KEYS.events,
+  ]);
+  const deletePasskey = useSensitiveAction(securityApi.deletePasskey, [
+    SECURITY_KEYS.passkeys,
+    SECURITY_KEYS.events,
+  ]);
+  const revokeOthers = useSensitiveAction(securityApi.revokeOtherSessions, [
+    SECURITY_KEYS.sessions,
+    SECURITY_KEYS.events,
+  ]);
+  const regenerate = useSensitiveAction(securityApi.regenerateRecoveryCodes, [
+    SECURITY_KEYS.recovery,
+    SECURITY_KEYS.events,
+  ]);
+  const cancelRecovery = useSensitiveAction(securityApi.cancelRecovery, [
+    SECURITY_KEYS.recovery,
+    SECURITY_KEYS.events,
+  ]);
+
+  const pendingRecovery = recovery.data?.recovery_valid_after ?? null;
+
+  return (
+    <div className="flex flex-col gap-5">
+      {error && (
+        <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
+          {error}
+        </p>
+      )}
+
+      {/* The one thing on this screen that may be an attack in progress. */}
+      {pendingRecovery && (
+        <div className="flex flex-col gap-3 rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950">
+          <div className="flex items-start gap-3">
+            <ShieldAlert size={20} className="mt-0.5 shrink-0 text-red-600 dark:text-red-400" />
+            <div className="text-sm text-red-800 dark:text-red-200">
+              <p className="font-semibold">Account recovery was requested.</p>
+              <p>
+                It takes effect {fmt(pendingRecovery)}. If this was not you, cancel it now — and
+                assume whoever asked has access to one of your linked Matrix accounts.
+              </p>
+            </div>
+          </div>
+          <Button
+            tone="danger"
+            busy={cancelRecovery.isPending}
+            onClick={() => run(cancelRecovery, undefined as void)}
+            className="self-start"
+          >
+            Cancel recovery
+          </Button>
+        </div>
+      )}
+
+      {pendingMerge.data && (
+        <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+          <div className="text-sm text-amber-900 dark:text-amber-100">
+            <p className="font-semibold">A Matrix account with existing data is waiting to link.</p>
+            <ul className="mt-2 grid grid-cols-2 gap-x-4 text-xs">
+              {Object.entries(pendingMerge.data.preview)
+                .filter(([, count]) => (count as number) > 0)
+                .map(([table, count]) => (
+                  <li key={table}>
+                    {String(count)} {table.replace(/_/g, ' ')}
+                  </li>
+                ))}
+            </ul>
+            <p className="mt-2">Confirming moves all of it into this account. Nothing is deleted.</p>
+          </div>
+          <Button
+            busy={confirmMerge.isPending}
+            onClick={() => run(confirmMerge, pendingMerge.data!.from_account)}
+            className="self-start"
+          >
+            Move it into my account
+          </Button>
+        </div>
+      )}
+
+      <Section
+        title="Passkeys"
+        hint="How you sign in. Keep at least two, on different devices."
+      >
+        <ul className="flex flex-col gap-2">
+          {passkeys.data?.map((key) => (
+            <li
+              key={key.id}
+              className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
+            >
+              <KeyRound size={16} className="shrink-0 text-neutral-500" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-neutral-900 dark:text-neutral-100">{key.label}</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Added {fmt(key.created_at)} · Last used {fmt(key.last_used_at)}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label={`Remove ${key.label}`}
+                onClick={() => run(deletePasskey, key.id)}
+                className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700"
+              >
+                <Trash2 size={15} />
+              </button>
+            </li>
+          ))}
+          {passkeys.data?.length === 1 && (
+            <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={13} />
+              This is your only passkey. It cannot be removed until you add another.
+            </li>
+          )}
+        </ul>
+      </Section>
+
+      <Section
+        title="Matrix accounts"
+        hint="Send the code to the bot in a direct message. Anything you add from Matrix lands here too."
+      >
+        <ul className="flex flex-col gap-2">
+          {links.data?.map((mxid) => (
+            <li
+              key={mxid}
+              className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
+            >
+              <Link2 size={16} className="shrink-0 text-neutral-500" />
+              <span className="min-w-0 flex-1 truncate text-sm text-neutral-900 dark:text-neutral-100">
+                {mxid}
+              </span>
+              <button
+                type="button"
+                aria-label={`Unlink ${mxid}`}
+                onClick={() => run(unlink, mxid)}
+                className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700"
+              >
+                <Trash2 size={15} />
+              </button>
+            </li>
+          ))}
+          {links.data?.length === 0 && (
+            <li className="text-xs text-neutral-500 dark:text-neutral-400">
+              No Matrix account linked yet.
+            </li>
+          )}
+        </ul>
+
+        {linkCode ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-neutral-300 p-3 dark:border-neutral-700">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Send this to the bot in a <strong>direct message</strong>:
+            </p>
+            <code className="select-all text-lg font-semibold tracking-widest text-neutral-900 dark:text-neutral-100">
+              !link {linkCode}
+            </code>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(`!link ${linkCode}`)}
+              className="inline-flex items-center gap-1.5 self-start text-xs text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
+            >
+              <Copy size={12} /> Copy
+            </button>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Expires in 5 minutes, and works once. Sending it in a shared room cancels it.
+            </p>
+          </div>
+        ) : (
+          <Button
+            busy={startLink.isPending}
+            className="self-start"
+            onClick={() => {
+              setError(null);
+              startLink
+                .mutateAsync(undefined as void)
+                .then((res: any) => setLinkCode(res.code))
+                .catch((err) => setError(describePasskeyError(err)));
+            }}
+          >
+            Link a Matrix account
+          </Button>
+        )}
+      </Section>
+
+      <Section title="Signed-in devices">
+        <ul className="flex flex-col gap-2">
+          {sessions.data?.map((session) => (
+            <li
+              key={session.id}
+              className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
+            >
+              <Monitor size={16} className="shrink-0 text-neutral-500" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-neutral-900 dark:text-neutral-100">
+                  {session.user_agent || 'Unknown device'}
+                  {session.current && (
+                    <span className="ml-2 text-xs text-emerald-600 dark:text-emerald-400">
+                      this device
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Last active {fmt(session.last_seen_at)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {(sessions.data?.length ?? 0) > 1 && (
+          <Button
+            tone="danger"
+            busy={revokeOthers.isPending}
+            className="self-start"
+            onClick={() => run(revokeOthers, undefined as void)}
+          >
+            Sign out other devices
+          </Button>
+        )}
+      </Section>
+
+      <Section
+        title="Recovery codes"
+        hint="Single-use codes that get you back in if you lose every passkey. Store them somewhere other than this device."
+      >
+        {freshCodes ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-neutral-300 p-3 dark:border-neutral-700">
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              Save these now — they are not shown again.
+            </p>
+            <ul className="grid grid-cols-2 gap-1 font-mono text-sm text-neutral-900 dark:text-neutral-100">
+              {freshCodes.map((code) => (
+                <li key={code} className="select-all">
+                  {code}
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(freshCodes.join('\n'))}
+              className="inline-flex items-center gap-1.5 self-start text-xs text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
+            >
+              <Copy size={12} /> Copy all
+            </button>
+            <Button className="self-start" onClick={() => setFreshCodes(null)}>
+              I have saved them
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              {recovery.data?.codes_remaining ?? 0} unused
+            </p>
+            <Button
+              busy={regenerate.isPending}
+              onClick={() => {
+                setError(null);
+                regenerate
+                  .mutateAsync(undefined as void)
+                  .then((res: any) => setFreshCodes(res.codes))
+                  .catch((err) => setError(describePasskeyError(err)));
+              }}
+            >
+              Generate new codes
+            </Button>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Recent activity">
+        <ul className="flex flex-col gap-1.5">
+          {events.data?.slice(0, 15).map((event) => (
+            <li key={event.id} className="flex items-baseline gap-3 text-sm">
+              <span
+                className={
+                  isAlarming(event.kind)
+                    ? 'font-medium text-red-600 dark:text-red-400'
+                    : 'text-neutral-800 dark:text-neutral-200'
+                }
+              >
+                {describeEvent(event.kind)}
+              </span>
+              {event.detail && (
+                <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                  {event.detail}
+                </span>
+              )}
+              <span className="ml-auto shrink-0 text-xs text-neutral-400">
+                {fmt(event.created_at)}
+              </span>
+            </li>
+          ))}
+          {events.data?.length === 0 && (
+            <li className="text-xs text-neutral-500 dark:text-neutral-400">Nothing yet.</li>
+          )}
+        </ul>
+      </Section>
+    </div>
+  );
+};
