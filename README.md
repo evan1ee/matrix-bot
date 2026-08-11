@@ -1,187 +1,220 @@
 # Matrix Bot (Rust) 🦀
 
-A production-ready, highly modular, multi-feature Matrix bot & REST API engine written in Rust using the official [`matrix-sdk`](https://github.org/matrix-org/matrix-rust-sdk), [`axum`](https://github.org/tokio-rs/axum), and [`sqlx`](https://github.org/launchbadge/sqlx).
+A modular Matrix bot and REST API in one binary, with a React SPA front end.
+Built on [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk),
+[`axum`](https://github.com/tokio-rs/axum), [`sqlx`](https://github.com/launchbadge/sqlx)
+and [`webauthn-rs`](https://github.com/kanidm/webauthn-rs).
+
+Every feature is reachable two ways — as a chat command, or through the web UI —
+and both land on the same data.
 
 ---
 
-## 🌟 Core Features
+## 🌟 Features
 
-- 🤖 **Core Module**: Greetings (`!hello`, `!hi`), latency ping (`!ping`), and dynamic module help (`!help`).
-- 📋 **To-Do Management Module**:
-  - Task creation with inline priority tags (`!todo add [high] Buy groceries` or `-p high`).
-  - Set task due dates (`!todo due <id> <time>`).
-  - Task editing (`!todo edit <id> <new text>`) and status toggle (`!todo done <id>`).
-  - User-specific (`!todo list`) and room-wide (`!todo room`) views with 25-item pagination.
-  - Clearing completed tasks per user or room (`!todo clear [room]`).
-- ⏰ **Persistent Reminder Module**:
-  - One-time timers (`!remind 10s check oven`, `!remind 2h meeting`).
-  - Recurring scheduled reminders (`!remind daily 8h standup`, `!remind weekly 1d report`).
-  - Persistent background worker scheduler — reminders survive bot restarts!
-  - Delivery retry logic (up to 5 retries on transient network errors) and downtime catch-up protection.
-  - List (`!remind list`) and cancel (`!remind cancel <id>`) pending timers.
-- ⚡ **Embedded Axum REST API Backend**:
-  - Full CRUD REST API for To-Dos and Reminders, enabling Web App integration.
-  - **Native Matrix Authentication**: Authenticate via Matrix Homeserver password (`POST /api/v1/auth/login` with `@user:domain`) or pass Matrix Access Tokens (`syt_...`) directly in Bearer headers. Automatic Matrix Well-Known server discovery included!
-  - **Local JWT Authentication** (`/api/v1/auth/register`, `/api/v1/auth/login`) with `bcrypt` password hashing and optional `API_REGISTRATION_SECRET` gating.
-  - **Server-Sent Events (SSE)** real-time stream (`/api/v1/events`), scoped to the authenticated user — a client receives only events for rows it owns. Messages are unnamed, carrying `{"type": "TodoCreated", "payload": {...}}` in the body, so browsers read them from `EventSource.onmessage` and discriminate on `type`.
-  - **CORS** middleware & static Single-Page Application web server built-in.
-  - Standardized JSON error response wrapper (`ApiError` with `{ "error": "...", "code": 400 }`).
-- 💾 **SQLx Persistence Layer**:
-  - SQLite default with automatic WAL mode (`journal_mode=WAL`), busy timeout, and configurable connection pool limit (`DATABASE_MAX_CONNECTIONS`).
-  - Runtime storage cleanly isolated inside the `data/` directory.
-  - Abstract repository interface ready for seamless PostgreSQL migration.
-- 🧱 **Extensible `BotModule` Architecture**:
-  - Trait-based plugin system where new features live in isolated submodules under `src/modules/`.
-  - Strict quality guarantee: **Zero source files exceed 300 lines of code** and 100% test pass rate with 0 compilation warnings.
+- 🤖 **Core** — greetings (`!hello`), latency (`!ping`), dynamic help (`!help`).
+- 📋 **To-Dos** — priorities, due dates, lead-time reminders, per-user and
+  room-wide views, pagination.
+- ⏰ **Reminders** — one-off and recurring, persisted through restarts, with
+  delivery retries and downtime catch-up.
+- 💰 **Finance** — expense/income ledger with categories and summaries. Amounts
+  are integer minor units throughout, so no total ever touches a float.
+- 📈 **Portfolio** — holdings with weighted-average cost, realised P&L, and a
+  cash balance that gates every buy. Prices are entered manually; there is no
+  price feed in this codebase.
+- 🧾 **Recurring bills** — schedules, instalments, auto-pay, advance reminders.
+- ⚙️ **Settings** — per-user timezone and default currency, read by every other
+  module so a date renders the same wherever it appears.
+- 🔐 **Accounts** — passkey sign-in, linked Matrix identities, recovery.
 
 ---
 
-## 📋 Command Quick Reference
+## 🔐 Authentication
 
-### Core Commands
-| Command | Usage | Description |
-|---|---|---|
-| `!hello` / `!hi` | `!hello [name]` or `!hi` | Get a friendly greeting |
-| `!ping` | `!ping` | Check bot status & latency |
-| `!help` | `!help` | Display dynamic help for all registered modules |
+Sign-in is **passkeys only**. There are no passwords, no bearer tokens and no
+JWTs anywhere in the system.
 
-### To-Do Commands
-| Command | Usage | Description |
-|---|---|---|
-| `!todo add` | `!todo add [[high\|low]] <task>` | Add task with optional priority (`[high]`, `[med]`, `[low]`) |
-| `!todo list` | `!todo [list\|my] [page]` | View your personal tasks (25 per page) |
-| `!todo room` | `!todo [room\|all] [page]` | View all tasks in the current room |
-| `!todo done` | `!todo done <id>` | Mark task `#id` as completed |
-| `!todo priority` | `!todo priority <id> <low\|medium\|high>` | Update task priority |
-| `!todo due` | `!todo due <id> <time>` | Set due date (e.g., `!todo due 1 2d`) |
-| `!todo edit` | `!todo edit <id> <new text>` | Edit task description |
-| `!todo clear` | `!todo clear [room]` | Remove completed tasks for user or room |
+**Local accounts own the data.** A Matrix account is something you *attach* to a
+local account, not an identity in its own right. Every todo, reminder,
+transaction, bill and holding belongs to an account; the same person signing in
+on the web and messaging the bot from Matrix is one owner with one dataset.
 
-### Reminder Commands
-| Command | Usage | Description |
-|---|---|---|
-| `!remind` | `!remind [daily\|weekly] <time> <msg>` | Set a one-time or recurring timer (e.g. `!remind 10s check oven`) |
-| `!remind list` | `!remind list [page]` | View your pending active reminders |
-| `!remind cancel` | `!remind cancel <id>` | Cancel a pending reminder `#id` |
+- **Sign in** — one button. Credentials are discoverable, so the browser offers
+  the passkey and the credential itself says which account it is. There is no
+  username field.
+- **Sessions** — an HttpOnly cookie backed by a server-side row, so signing out
+  a device takes effect on its next request. Only the hash of the cookie is
+  stored.
+- **Linking** — the web UI shows a one-time code and you send it to the bot in a
+  DM (`!link A3F9-K2QX`). Proof of ownership is the message sender, so no Matrix
+  password is ever typed into the web app. Sending the code in a shared room
+  cancels it.
+- **Merging** — linking a Matrix account that already has history reports what
+  it holds and asks before moving anything.
+- **Step-up** — linking, unlinking, managing passkeys, signing out other devices
+  and generating recovery codes all need a passkey assertion from the last five
+  minutes. Matrix commands cannot reach any of them, because Matrix has no way
+  to prompt for a passkey.
+- **Recovery** — ten single-use codes, plus `!recover` from a linked Matrix
+  account. The latter is announced immediately, waits 24 hours, can be cancelled
+  from any signed-in device, and then grants a session that may register a
+  passkey and nothing else for 72 hours.
 
----
+Every sensitive action is written to a per-account audit log and DM'd to each
+linked Matrix identity.
 
-## 🌐 REST API Endpoints
-
-| Method | Endpoint | Auth Required | Description |
-|---|---|---|---|
-| `POST` | `/api/v1/auth/register` | No (Secret if set) | Register web account & get JWT token |
-| `POST` | `/api/v1/auth/login` | No | Login via local account or Matrix Homeserver credentials (`@user:domain`) |
-| `GET` | `/api/v1/health` | No | System health, version & DB connection status |
-| `GET` | `/api/v1/rooms` | Yes (Bearer/Matrix `syt_`) | List Matrix group rooms joined by bot & user |
-| `GET` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | List tasks (query params: `room_id`, `page`, `limit`) |
-| `POST` | `/api/v1/todos` | Yes (Bearer/Matrix `syt_`) | Create new task (500 char max limit) |
-| `PATCH` | `/api/v1/todos/:id` | Yes (Bearer/Matrix `syt_`) | Update text, priority, due date, or completion |
-| `DELETE` | `/api/v1/todos/:id` | Yes (Bearer/Matrix `syt_`) | Delete task by ID |
-| `GET` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | List pending reminders (query params: `room_id`, `page`, `limit`) |
-| `POST` | `/api/v1/reminders` | Yes (Bearer/Matrix `syt_`) | Create timer in seconds (500 char max limit) |
-| `DELETE` | `/api/v1/reminders/:id` | Yes (Bearer/Matrix `syt_`) | Cancel reminder by ID |
-| `POST` | `/api/v1/events/ticket` | Yes (Bearer/Matrix `syt_`) | Exchange the API token for a 30-second SSE stream ticket |
-| `GET` | `/api/v1/events` | Yes (Bearer, or `?ticket=`) | SSE stream of the caller's own events (`type` field in the JSON body) |
+See [`docs/testing-auth-locally.md`](docs/testing-auth-locally.md) to exercise
+all of this on `localhost` with no hardware key.
 
 ---
 
-## 🛠️ Setup & Running
+## 📋 Command reference
 
-### 1. Prerequisites
-- [Rust & Cargo](https://rustup.rs/) (edition 2021+)
-- A Matrix Account on any Matrix Homeserver (e.g. `matrix.org`, `matrix.mbm.one`, Synapse, Conduit).
+| Module | Commands |
+|---|---|
+| Core | `!hello / !hi [name]`, `!ping`, `!help` |
+| To-Do | `!todo add [[high\|low]] <task>`, `!todo [list\|room] [page]`, `!todo done <id>`, `!todo priority <id> <low\|medium\|high>`, `!todo due <id> <time> [remind <lead>]`, `!todo edit <id> <new text>`, `!todo clear [room]` |
+| Reminder | `!remind [daily\|weekly] <time> <message>`, `!remind list`, `!remind cancel <id>` |
+| Finance | `!expense add <amount> [CUR] <note> [-c <category>]`, `!income add <amount> [CUR] <note> [-c <category>]`, `!expense list [page]`, `!expense summary`, `!expense delete <id>`, `!category [add\|list\|remove] <name>` |
+| Portfolio | `!portfolio [list]`, `!portfolio summary`, `!portfolio buy <symbol> <qty> @ <price> [CUR] [note]`, `!portfolio sell <symbol> <qty> @ <price>`, `!portfolio price <symbol> <price>`, `!portfolio note <symbol> [text]`, `!portfolio remove <symbol>`, `!portfolio cash [deposit\|withdraw] <amount> [CUR]` |
+| Bills | `!bill add <name> <amount> <currency> <category> [frequency]`, `!bill list`, `!bill pay <id>`, `!bill remind <id> <minutes\|off>`, `!bill delete <id>` |
+| Settings | `!settings`, `!settings timezone <IANA zone>`, `!settings currency <CODE>` |
+| Account | `!link <code>`, `!recover` |
 
-### 2. Configure Environment
+`!export`, `!unlink`, `!passkey`, `!sessions` and `!recoverycodes` are
+deliberately refused on Matrix and point at the web app — see **step-up** above.
+(`!export` reserves the name; financial export is not built yet, and when it is
+it belongs behind step-up on the web side.)
 
-Copy `.env.example` to `.env`:
+---
+
+## 🌐 REST API
+
+All endpoints live under `/api/v1`. Everything except health and the four
+passkey ceremony endpoints requires the session cookie.
+
+| Area | Endpoints |
+|---|---|
+| Health | `GET /health` |
+| Sign-in | `POST /auth/passkey/{register,login}/{start,finish}`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/media` |
+| Account | `GET/PUT/DELETE /account/passkeys[/{id}]`, `GET /account/matrix`, `POST /account/matrix/{link,unlink,confirm-merge}`, `GET /account/matrix/pending-merge`, `GET /account/sessions`, `POST /account/sessions/revoke-others`, `POST /account/recovery-codes`, `GET /account/recovery-status`, `POST /account/recovery/cancel`, `GET /account/security-events` |
+| Data | `/todos`, `/reminders`, `/finance/{transactions,categories,summary}`, `/portfolio/{holdings,cash,summary}`, `/recurring-bills`, `/settings`, `/rooms` |
+| Live | `GET /events` — SSE, scoped to the caller's own rows |
+
+`GET /api-docs/openapi.json` serves the generated document; the frontend's
+TypeScript types are generated from it.
+
+The SSE stream authenticates by cookie like everything else. Messages are
+unnamed and carry `{"type": "TodoCreated", "payload": {…}}`, so the browser
+reads them from `EventSource.onmessage` and discriminates on `type`.
+
+---
+
+## 🛠️ Setup
+
+### Prerequisites
+- [Rust & Cargo](https://rustup.rs/) (edition 2021)
+- Node 20+ for the frontend
+- A Matrix account for the bot on any homeserver
+
+### Configure
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your settings:
-
 ```env
 MATRIX_HOMESERVER=https://matrix.org
 MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
-MATRIX_RECOVERY_KEY=your_optional_e2ee_recovery_key
+MATRIX_RECOVERY_KEY=optional_e2ee_recovery_key
 DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
-DATABASE_MAX_CONNECTIONS=10
 API_HOST=0.0.0.0
 API_PORT=8080
-JWT_SECRET=matrix_bot_secret_jwt_token_key_change_in_production
-API_REGISTRATION_SECRET=optional_secret_to_gate_registration
-RUST_LOG=info,matrix_bot=debug,matrix_sdk=info
+API_REGISTRATION_SECRET=optional_secret_gating_registration
+
+# Passkeys. RP ID is a bare hostname and ignores ports; ORIGIN carries the port
+# and must match where the browser loads the page.
+WEBAUTHN_RP_ID=localhost
+WEBAUTHN_ORIGIN=http://localhost:5173
 ```
 
-### 3. Run & Test
+⚠️ **`WEBAUTHN_RP_ID` is baked into every passkey at creation.** Changing it
+invalidates every credential ever registered, so pick the production hostname
+before anyone registers. The app refuses to boot in production while these are
+still the localhost defaults.
+
+### Run
 
 ```bash
-# Run unit & integration test suite (60 tests)
-cargo test
+cargo run                        # bot + API on :8080
+npm --prefix frontend run dev    # SPA on :5173, proxying /api
+```
 
-# Launch the bot & REST API server
-cargo run
+Open <http://localhost:5173> — the port `WEBAUTHN_ORIGIN` names.
+
+### Test
+
+```bash
+cargo check                      # must be warning-free
+cargo test                       # 377 tests
+npm --prefix frontend run build
+```
+
+After changing a `#[utoipa::path]` or `ToSchema`, regenerate both artifacts:
+
+```bash
+cargo run --bin generate-openapi        # -> backend/openapi.json
+npm --prefix frontend run generate-api  # -> frontend/src/types/api.ts
 ```
 
 ---
 
-## 🚀 Future Roadmap & Planned Features
+## 🏗️ Layout
 
-We are actively expanding `matrix-bot` into a comprehensive personal assistant platform. Planned future modules include:
+Cargo workspace with one member, plus a separate npm frontend.
 
-- 📈 **Portfolio Management Module (`src/modules/portfolio/`)**:
-  - Real-time crypto & stock price tracking (`!portfolio add 1.5 BTC`, `!portfolio quote SOL`).
-  - Total net worth aggregation and price target alerts via Matrix notifications.
-- 💰 **Finance & Expense Manager (`src/modules/finance/`)**:
-  - Expense logging with categories (`!expense add $15.50 lunch -c food`).
-  - Monthly budget tracking, spending summaries, and export reports.
-- 📅 **Subscription Manager (`src/modules/subscription/`)**:
-  - Recurring subscription tracking (`!sub add Netflix $15.99/m`).
-  - Renewal advance warnings (e.g., notify 3 days before renewal date) and monthly recurring burn rate analytics.
-- 🐘 **PostgreSQL Migration Support**:
-  - Production deployment capability switching from SQLite to PostgreSQL via `DATABASE_URL` configuration.
-- 🎨 **Web Front-End SPA**:
-  - Modern React/Next.js interface consuming `/api/v1/` REST endpoints and real-time SSE stream.
+```
+backend/                      # crate `matrix-bot`: bot + embedded API, one binary
+├── openapi.json              # generated; source of the frontend's types
+└── src/
+    ├── main.rs               # boots Config, DB, API server, and the Matrix sync loop
+    ├── config.rs             # environment config and boot-time validation
+    ├── accounts/             # the ownership layer
+    │   ├── repository.rs     #   accounts + matrix_links, MXID -> account resolution
+    │   ├── credentials.rs    #   stored passkeys
+    │   ├── session.rs        #   server-side sessions, step-up clock
+    │   ├── linking.rs        #   one-time link codes, claim and unlink
+    │   ├── merge.rs          #   absorbing one account into another
+    │   ├── recovery.rs       #   recovery codes and delayed Matrix recovery
+    │   └── security_events.rs#   per-account audit log
+    ├── api/                  # axum REST layer
+    │   ├── auth/             #   passkey ceremonies, cookie extractor, step-up
+    │   ├── account.rs        #   passkeys, links, sessions, recovery, audit
+    │   └── …                 #   todos, reminders, finance, portfolio, bills, settings, sse
+    ├── bot/                  # Matrix client, dispatcher, verification
+    │   ├── linking.rs        #   !link, handled before the sender is resolved
+    │   └── notify.rs         #   security DMs to linked identities
+    ├── db/                   # pool + the single migration path
+    ├── modules/              # BotModule plugins: core, todo, reminder, finance,
+    │                         # portfolio, recurring_bills, settings, account
+    └── utils/
+frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
+data/                         # runtime SQLite + Matrix crypto store (gitignored)
+docs/                         # testing-auth-locally.md
+```
+
+`AGENTS.md` holds the development conventions; `CLAUDE.md` explains *why* the
+load-bearing parts are shaped the way they are, and is worth reading before
+changing auth, ownership or migrations.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🚀 Roadmap
 
-```
-data/                         # Runtime storage directory (ignored in git)
-├── bot_data.db               # Application SQLite database (todos, reminders, web_users)
-├── bot_data.db-wal           # SQLite Write-Ahead Log for high-concurrency WAL mode
-├── bot_data.db-shm           # SQLite shared memory file
-└── bot_store/                # Matrix SDK internal session & crypto store
-
-src/
-├── main.rs                   # Entry point bootstrapping Config validation, DB, API & Matrix loop (< 40 lines)
-├── config.rs                 # Environment configuration & runtime validation rules
-├── error.rs                  # Axum ApiError implementation with JSON error response format
-├── events.rs                 # SystemEvent enum & EventBroadcaster for SSE streaming
-├── api/                      # Axum REST API layer
-│   ├── mod.rs                # Router assembly, CORS, static file fallback & launcher
-│   ├── auth.rs               # Matrix Homeserver login, Matrix access token whoami, JWT claims & auth handlers
-│   ├── health.rs             # System health & database connectivity check endpoint
-│   ├── todos.rs              # To-Do REST CRUD handlers & input validation
-│   ├── reminders.rs          # Reminder REST CRUD handlers & input validation
-│   └── sse.rs                # Server-Sent Events stream with event type discrimination
-├── bot/                      # Matrix bot client engine
-│   ├── client.rs             # Matrix Client builder, well-known resolution & login
-│   ├── dispatcher.rs         # Mention & command parser with HTML pill stripping
-│   └── handler.rs            # Event routing for room invites and message events
-├── db/                       # Database persistence layer (SQLx)
-│   ├── pool.rs               # Connection pool manager with WAL mode & configurable max_connections
-│   └── schema.rs             # Table DDL migrations (todos, reminders, web_users)
-├── modules/                  # Extensible plugin system
-│   ├── mod.rs                # BotModule trait definition, CommandContext & ModuleRegistry
-│   ├── core/                 # Core module (!hello, !ping, !help)
-│   ├── todo/                 # To-Do module (repository, decomposed sub-handlers, models)
-│   └── reminder/             # Reminder module (repository, handler, scheduler, models, status enum)
-└── utils/                    # Shared utilities
-    ├── html.rs               # HTML escaping & strip_html notification fallback
-    └── time.rs               # Duration & date parser utilities
-```
+- **PostgreSQL** — the repository layer is already abstract; `DATABASE_URL` is
+  the switch.
+- **Live prices** for the portfolio module. Today every price is entered by hand,
+  and market value is `Option`, not zero, until one is.
+- **Conditional-UI sign-in** — passkey autofill on page load, rather than a
+  button.

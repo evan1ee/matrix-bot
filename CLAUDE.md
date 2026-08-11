@@ -26,7 +26,7 @@ Cargo workspace at the root with a single member, plus a separate npm frontend:
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `data/` — runtime SQLite DB + Matrix SDK crypto store (gitignored).
 
-Note: `README.md`'s architecture tree shows `src/` at the repo root and `api/auth.rs` as a single file. Both are stale — the crate lives at `backend/src/` and `api/auth/` is a directory (`extractor.rs`, `handlers.rs`, `matrix.rs`, `types.rs`).
+- `docs/` — `testing-auth-locally.md` covers running passkeys against `localhost` (virtual authenticator, the `!link` DM flow, SQL to skip the step-up and recovery delays).
 
 `AGENTS.md` holds the authoritative development conventions (module checklist, file-size limits, SQLx and HTML-formatting rules). Read it before adding a feature module.
 
@@ -35,11 +35,16 @@ Note: `README.md`'s architecture tree shows `src/` at the repo root and `api/aut
 ```bash
 # Backend (run from repo root — paths below are cwd-relative)
 cargo check                      # must be warning-free
-cargo test                       # 151 tests, all in-crate #[cfg(test)] modules
+cargo test                       # 377 tests, all in-crate #[cfg(test)] modules
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot's session verified?
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
 cargo run                        # starts bot + API server
+
+# Migrate a COPY of a real database and assert nothing was stranded. Run this
+# before shipping any migration that touches ownership.
+cp data/bot_data.db /tmp/copy.db
+MIGRATE_TEST_DB=/tmp/copy.db cargo test migrates_a_real_database -- --ignored
 
 # Frontend
 cd frontend
@@ -69,12 +74,12 @@ The crate is a lib (`matrix_bot`) plus two bins, so `generate-openapi` can reuse
 
 `backend/src/main.rs` boots one `Config` + one shared `Database` + one `EventBroadcaster`, then spawns:
 
-1. The Axum API server (`api::start_api_server`), which returns two shared handles — `Arc<RwLock<Option<String>>>` (bot access token) and `Arc<RwLock<Option<Client>>>` (Matrix SDK client).
+1. The Axum API server (`api::start_api_server`), which returns three shared handles — `Arc<RwLock<Option<String>>>` (bot access token), `Arc<RwLock<Option<Client>>>` (Matrix SDK client), and `Arc<PendingMerges>` (merges a `!link` recorded, waiting on web confirmation).
 2. The Matrix sync loop in a `tokio::spawn` retry loop (reconnects every 5s on error), receiving those same handles via `MatrixBot::new_full`.
 
-Those handles are the coupling point: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that require homeserver access. Shutdown is a `broadcast::channel::<()>` fanned out to both halves on Ctrl-C.
+Those handles are the coupling point, in both directions: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that need homeserver access, and the bot writes into `pending_merges` so a link begun in a Matrix DM can be finished in the web UI. Shutdown is a `broadcast::channel::<()>` fanned out to both halves on Ctrl-C.
 
-`api/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs (`room.is_direct()`), rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where either the bot or the caller is not a joined member. `bot/client.rs` treats `data/matrix_session.json` and `data/bot_store/` as **one unit**: the session is reused only when `restore_session` plus a live `whoami` both succeed, and any other path (no session file, rejected token, device deleted in a client) archives the store to `data/bot_store.orphaned-<UTC timestamp>/` before logging in fresh. Never keep the crypto store across a fresh login — its Olm account belongs to the dead device, the crypto machine believes it already published those keys, and every message the bot then encrypts shows in Element as "Encrypted by an unknown or deleted device". The store is archived rather than deleted because it may hold the only copy of room keys that never reached key backup; `MATRIX_RECOVERY_KEY` is what repopulates a fresh store (`restore_room_keys_from_backup`).
+`api/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs (`room.is_direct()`), rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where the bot is not a joined member or *none* of the caller's linked MXIDs is. An account can have several Matrix identities, so "the caller" is a set — an account with no link gets an empty list, which is the honest answer rather than an error. `bot/client.rs` treats `data/matrix_session.json` and `data/bot_store/` as **one unit**: the session is reused only when `restore_session` plus a live `whoami` both succeed, and any other path (no session file, rejected token, device deleted in a client) archives the store to `data/bot_store.orphaned-<UTC timestamp>/` before logging in fresh. Never keep the crypto store across a fresh login — its Olm account belongs to the dead device, the crypto machine believes it already published those keys, and every message the bot then encrypts shows in Element as "Encrypted by an unknown or deleted device". The store is archived rather than deleted because it may hold the only copy of room keys that never reached key backup; `MATRIX_RECOVERY_KEY` is what repopulates a fresh store (`restore_room_keys_from_backup`).
 
 A fresh login does **not** pin a device ID. It used to (`MATRIX_BOT_MAIN_DEVICE`, constant across every restart), which silently rotated that device's keys under the same ID on every restore failure — routine, not rare, since "no session file / rejected token / device deleted in a client" are the normal triggers. The homeserver accepts that re-upload without complaint, but every peer who already talked to the old device keeps encrypting *to* it using its old keys: the peer is the sender in that direction, so it never hits a decrypt error and has no trigger to rebuild its Olm session. The result is exactly what CLAUDE.md already described as the failure mode this section guards against — except it was also happening on ordinary token-rejection restarts, not just on manual device deletion. Now `client.rs::delete_stale_device` captures the outgoing device's ID before a fresh login (session file must be read *before* `restore_previous_session` deletes it on failure), logs in with **no** pinned ID so the homeserver assigns a fresh one, then deletes the old device via password-authenticated UIA once the new session is live. Every fresh login now presents as an unambiguous new device to every peer — the well-tested "new device, verify me" path — instead of an in-place key swap peers have no reliable way to notice.
 
@@ -86,7 +91,7 @@ A fresh login does **not** pin a device ID. It used to (`MATRIX_BOT_MAIN_DEVICE`
 
 Two measured facts about matrix-sdk 0.7 drive the shape of that code. `Recovery::recover` returns `Ok` even when secret storage held no self-signing key and nothing was signed (`SecretStore::import_secrets` gates signing on `has_self_signing`, and a missing secret reads as `None`, not an error). And `Device::is_cross_signed_by_owner()` on our *own* device keeps reporting false for at least a second after the signature is uploaded and re-queried, across restarts, even though `/keys/query` shows it — so the outcome is taken from `Device::verify()` returning `Ok` (the signature reached the server), never from a local re-read. Consequently the bot re-signs on most boots; that is intended and idempotent.
 
-The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified_on_the_homeserver` — `#[ignore]`d because it needs credentials, a network, and a bot that has run at least once. It reads the token the running bot saved and asks `/keys/query`, applying Element's own rule via `device_is_cross_signed`; it never logs in, because a second login on the pinned device ID would revoke the running session's token.
+The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified_on_the_homeserver` — `#[ignore]`d because it needs credentials, a network, and a bot that has run at least once. It reads the token the running bot saved and asks `/keys/query`, applying Element's own rule via `device_is_cross_signed`; it never logs in, because a second login would mint another device and leave the running session's token to be reasoned about separately.
 
 ### Backend module plugin system
 
@@ -102,29 +107,121 @@ Every state mutation — from both the Matrix command path and the REST path —
 
 The broadcast channel is process-wide. `sse::owned_events` narrows it to one owner via `SystemEvent::owner_id()`, so a client sees only its own rows. **Any new variant must return a meaningful `owner_id()`** — the deletion variants carry an explicit `owner_id` field because their row is already gone. Adding a mutation without a matching event silently breaks the live UI; adding a variant without an owner leaks it or drops it.
 
-### Auth: two identity spaces, one extractor
+### Accounts: one owner, several ways in
 
-`api/auth/extractor.rs` implements `FromRequestParts for AuthUser`, reading the token from the `Authorization: Bearer` header **only**. It tries, in order: Matrix access token (`syt_` prefix → homeserver `/whoami`), local JWT, then `/whoami` again as a fallback (gated by `looks_like_access_token` so a malformed bearer doesn't cost a network round trip).
+`accounts` is the only thing that owns a row. `owner_id` — the column on every
+data table — holds an `accounts.id` (`acct_` + 32 hex chars) and nothing else.
 
-Tokens carry a `TokenScope`. The extractor accepts only `Api`-scoped tokens. Because `EventSource` cannot set headers, SSE clients `POST /api/v1/events/ticket` to exchange their API token for a 30-second `SseStream`-scoped ticket, passed as `?ticket=`; `sse::stream_subscriber` accepts only that scope from the query string. Never reintroduce `?token=` — that put a 7-day full-access credential into URLs.
+Two access paths resolve onto it and are then indistinguishable:
 
-Matrix calls go through `ApiState.matrix_identity` (`MatrixIdentityProvider`). Tests swap in a fake via `ApiState::with_matrix_identity`, which is how the extractor and `login`'s Matrix branch are covered without a homeserver.
+- A Matrix message resolves through `matrix_links` (`bot/handler.rs` →
+  `AccountRepository::resolve_or_provision`).
+- A web session resolves directly from the session cookie.
 
-`AuthUser` is `{ subject, kind }` where `kind: AuthKind` is `Local` or `Matrix`, carried as a **signed JWT claim** — never inferred from whether `subject` starts with `@`. `AuthKind` defaults to `Local` on deserialization so pre-`kind` tokens fail closed.
+This replaced two disjoint identity spaces: `owner_id` used to hold a raw MXID
+for anything created over Matrix and `@web-<username>:api` for anything created
+through the API, so **one human using both saw two separate datasets**. Ownership
+is now carried, never derived. `AuthUser::owner_id()` returns `account_id`
+verbatim; if you ever find yourself computing an owner from a subject, that is
+the bug this design exists to remove.
 
-`AuthUser::owner_id()` is the single ownership key, matching the `sender_mxid` column and nothing else:
-- `Matrix` → the MXID verbatim
-- `Local` → `@web-<username>:api`
+An unknown MXID gets an **unclaimed** account: real data, no credential,
+reachable only through that MXID. That is what keeps the bot usable with no web
+signup. `matrix_links.mxid` is the primary key, and that alone enforces "one
+Matrix account, one local account" — schema-level, so a concurrent link cannot
+race it. `resolve_or_provision` handles the other race (the sync loop does not
+serialise event handlers) by having the loser delete the account it minted.
 
-`sender_name` is display-only and must never appear in an ownership predicate — it is user-controlled and collides across the two identity spaces. `is_valid_local_username` bans `@` and `:` at registration so a local account can never be shaped like an MXID. API-created rows default to the sentinel `room_id = "web"`.
+`accounts/merge.rs` absorbs one account into another, rewriting `OWNED_TABLES`.
+That constant is shared with the Phase 1 backfill deliberately: a table missing
+from it is a silent data leak, not a compile error. Sessions do **not** follow a
+merge — a session belongs to the credential that opened it.
 
-`ApiState.bot_access_token` / `bot_client` hold the **bot's** credentials: written by the bot bootstrap, read-only to request handlers. A handler must never store a caller's token there.
+### Auth: passkeys and cookie sessions
 
-Matrix homeserver URLs are resolved via `.well-known` discovery and memoized in `ApiState.resolved_homeserver` (`api/auth/matrix.rs::resolved_homeserver`), so a configured `MATRIX_HOMESERVER` of `https://mbm.one` can redirect to the real server without re-resolving per request.
+Passkeys are the only way in. There is no password, no bearer token, and no JWT;
+`bcrypt` survives only to hash recovery codes.
+
+`api/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the
+credential carries the account handle, so there is no username field anywhere and
+no user enumeration to defend against. `accounts::account_id_to_handle` is a
+total bijection between an account id and the WebAuthn user handle — an account
+id is `acct_` plus the 32 hex chars of 16 random bytes, which is exactly a UUID's
+simple form, so no column and no UUID generation are needed.
+
+`register/start` mints the account id but writes **no row**; the id has to travel
+inside the challenge, and an abandoned ceremony must leave nothing behind. Hence
+`create_with_id` alongside `create`.
+
+`accounts/session.rs` holds sessions server-side. Only the SHA-256 of the cookie
+is stored, so a leaked backup cannot be replayed. Both timeouts are checked on
+read rather than swept, so expiry never waits on a background job.
+
+`api/auth/extractor.rs` reads the `mb_session` cookie and enforces CSRF twice:
+`SameSite=Strict`, plus an `Origin` check on every state-changing request. A
+missing `Origin` on a mutating request is **refused** — browsers always send one
+on `fetch`, and no bearer-token client remains whose omission would be legitimate.
+
+`VerifiedUser` is the step-up boundary: it wraps `AuthUser` and rejects a session
+whose last passkey assertion is older than `STEP_UP_WINDOW_MINUTES` (5), or that
+came from account recovery and is still restricted. Putting it in a handler
+signature is the whole opt-in. **`api/mod.rs::step_up_tests` drives the real
+router** (via the extracted `api_routes()`) and fails if a sensitive route
+accepts a stale session — add a sensitive endpoint without `VerifiedUser` and CI
+catches it.
+
+`WEBAUTHN_RP_ID` is a bare hostname and ignores ports; `WEBAUTHN_ORIGIN` carries
+the port and is what the `Origin` header is compared against. Browsing the Vite
+dev server on `:5173` while `WEBAUTHN_ORIGIN` says `:8080` makes every write fail
+with "This request did not come from this site". `Config::validate` refuses to
+boot production on the localhost defaults, because passkeys minted against
+`localhost` are ones no real browser would return.
+
+### Linking, recovery, and the Matrix ceiling
+
+`!link` is handled in `bot/linking.rs` **before** the sender is resolved, and
+that ordering is load-bearing: resolving first would provision an empty account
+for the very MXID being claimed, turning every first-time link into a merge of
+nothing. Do not move it into a `BotModule`.
+
+Proof of ownership is the message sender, so no password is involved. The bot
+refuses `!link` outside a DM and burns the code — in a public room everyone can
+read it, and a bystander could send it from their own MXID. A link that finds
+existing data does not merge; it reports the count and records a pending merge in
+`ApiState.pending_merges`, which is also the *authorisation* for
+`confirm-merge` (without it, naming any account id would absorb it).
+
+Unlinking keeps every row. Data belongs to the account; unlinking revokes an
+access path, and the MXID comes back as a stranger.
+
+Recovery has two independent routes. Codes sign you straight in. `!recover` is
+fenced because it would otherwise close a circle — linking needs a recent
+passkey, and passkey recovery would need only the Matrix account: the request is
+announced immediately, does nothing for 24h, any live session can cancel it, and
+it then grants a session restricted for 72h. Cancelling deliberately takes
+`AuthUser`, not `VerifiedUser` — demanding a passkey to stop a recovery you did
+not ask for is backwards.
+
+`modules/account/mod.rs::WEB_ONLY` is the capability ceiling. Matrix cannot
+prompt for a passkey, so it gets **no** route to a privileged action; `!export`,
+`!unlink`, `!passkey`, `!sessions` and `!recoverycodes` answer with a pointer to
+the web app. That refusal is what makes the step-up rule a guarantee rather than
+a decoration.
+
+Two of those are forward-looking rather than descriptive: **there is no financial
+export feature yet**, and `SecurityEventKind::FinancialDataExported` is
+constructed nowhere. The command name and the event variant are reserved so that
+whoever builds export puts it behind `VerifiedUser` on the web side rather than
+discovering the requirement afterwards. Do not read them as evidence the feature
+exists.
+
+`bot/notify.rs` records a `security_events` row and DMs every linked identity,
+opening a DM room if none exists. Neither half can fail the action it describes —
+by the time it runs, the thing has happened.
 
 ### Per-user settings (timezone, default currency)
 
-`modules/settings/` is an ordinary `BotModule` (`!settings`, `!settings timezone <IANA zone>`, `!settings currency <CODE>`; `tz`/`cur` are accepted aliases) whose data every *other* module reads — todo and reminder format timestamps against the sender's zone, finance defaults an amount's currency to it — and which `api/settings.rs` exposes to the web UI. Rows in `user_settings` are keyed by `owner_id`, the same key as `sender_mxid`, and a user has no row until they change something: `SettingsRepository::get` returns `UserSettings::default()` (UTC/USD) for a missing row, which is the normal case, not an error. The command path uses `get_or_default`, which additionally swallows a database error into the defaults — a settings lookup must never be the reason a `!todo list` reply is lost.
+`modules/settings/` is an ordinary `BotModule` (`!settings`, `!settings timezone <IANA zone>`, `!settings currency <CODE>`; `tz`/`cur` are accepted aliases) whose data every *other* module reads — todo and reminder format timestamps against the sender's zone, finance defaults an amount's currency to it — and which `api/settings.rs` exposes to the web UI. Rows in `user_settings` are keyed by `owner_id`, the same account key every other table uses, and a user has no row until they change something: `SettingsRepository::get` returns `UserSettings::default()` (UTC/USD) for a missing row, which is the normal case, not an error. The command path uses `get_or_default`, which additionally swallows a database error into the defaults — a settings lookup must never be the reason a `!todo list` reply is lost.
 
 Because it mutates state from the Matrix side, `BotModule::handle_command` takes an `Option<&EventBroadcaster>` (threaded from `bot/mod.rs` → `register_handlers` → `ModuleRegistry::dispatch`). It is `None` only in tests. The settings handler broadcasts `SettingsUpdated` on a successful save and on nothing else — a read or a rejected value announces no change. Portfolio follows the same discipline (below). **Todo, Reminder, and Finance do not yet broadcast from the Matrix path** (`due_reminder.rs` documents that gap); the parameter is there so they can, and any new mutating command should use it.
 
@@ -146,10 +243,18 @@ Selling the full quantity held deletes the row — average cost has no meaning f
 
 ### Persistence
 
-`db/schema.rs::run_migrations` is the only migration mechanism: idempotent `CREATE TABLE IF NOT EXISTS`, best-effort `ALTER TABLE` (errors deliberately swallowed with `let _ =`), and data-fixup `UPDATE`s. There is no `sqlx migrate` directory. Use runtime-bound queries (`sqlx::query_as::<_, Model>(...).bind(...)`), never the `query!` macros — the project avoids compile-time DB connections.
+`db/schema.rs::run_migrations` is the only migration mechanism: idempotent `CREATE TABLE IF NOT EXISTS`, best-effort `ALTER TABLE` (errors deliberately swallowed with `let _ =`), and data-fixup `UPDATE`s. There is no `sqlx migrate` directory.
+
+Two one-shot conversions live there and are guarded rather than versioned, since there is no migration table. `backfill_accounts` runs only when `accounts` is empty and converts legacy `owner_id` values onto real accounts. After it, any `active` account holding no passkey is demoted to `unclaimed` — passwords are gone, so calling it active would assert something the schema can no longer honour. Ordering matters: the demotion must run *after* the backfill that creates those rows.
+
+The ownership column was renamed `sender_mxid` → `owner_id` on `todos`, `reminders`, `transactions` and `recurring_bills`. The renames run *first*, before any index or read touches the column, and are best-effort so a fresh database (no table) and an already-migrated one (already renamed) both no-op. Use runtime-bound queries (`sqlx::query_as::<_, Model>(...).bind(...)`), never the `query!` macros — the project avoids compile-time DB connections.
 
 ### Frontend module mirror
 
 The SPA mirrors the backend plugin shape: `core/registry.ts` holds `FrontendModule`s registered in `App.tsx` (`core`, `todo`, `reminder`). Each module supplies a `MainView`, optional `navTab`/`getStatItems`, and a `handleSseEvent(event, queryClient)` used to invalidate React Query caches from the live stream (`core/useSystemEvents.ts`). Adding a backend module means adding a matching `frontend/src/modules/<name>/index.tsx` and registering it in `App.tsx`.
 
-All API calls go through `core/apiClient.ts` (`fetchApi`), which attaches the token from `localStorage['matrix_bot_jwt']` and unwraps the standardized `{ "error": "...", "code": 400 }` shape produced by `backend/src/error.rs::ApiError`.
+All API calls go through `core/apiClient.ts` (`fetchApi`), which sends `credentials: 'include'` — the session is an HttpOnly cookie, so there is no token to read or store — and unwraps the standardized `{ "error": "...", "code": 400 }` shape produced by `backend/src/error.rs::ApiError`.
+
+`core/session.ts` is the single source of "who is signed in": the cookie is unreadable by the page, so only the server can answer, and `useSession()` asking `/auth/me` is that answer. There is deliberately no client-side token to inspect and nothing that can drift from the server's view.
+
+`core/security.ts::useSensitiveAction` wraps any step-up-gated call. A 403 is not an error to show someone — it is the server asking for a passkey — so it prompts, retries, and only reports a second failure.
