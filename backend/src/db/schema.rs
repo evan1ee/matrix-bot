@@ -67,6 +67,67 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Registered passkeys. `passkey_json` is the serialised `webauthn_rs`
+    // credential, which carries the public key and the signature counter — the
+    // library owns that shape, so it is stored whole rather than picked apart
+    // into columns this code would then have to keep in step with the crate.
+    //
+    // There is no secret here: a passkey's private half never leaves the
+    // authenticator, which is the entire reason this replaces `password_hash`.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS webauthn_credentials (
+            id            TEXT PRIMARY KEY,
+            account_id    TEXT NOT NULL,
+            passkey_json  TEXT NOT NULL,
+            label         TEXT NOT NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used_at  TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_account \
+         ON webauthn_credentials(account_id);",
+    )
+    .execute(pool)
+    .await?;
+
+    // Live sessions.
+    //
+    // `id_hash` is the SHA-256 of the cookie value, never the value itself: a
+    // read of this table must not yield credentials that can be replayed. That
+    // mirrors how `api/auth/types.rs` already keys its token cache.
+    //
+    // `last_verified_at` is the step-up clock — a sensitive action requires a
+    // passkey assertion newer than a few minutes, and this is what that is
+    // measured against. `restricted_until` marks a session created by account
+    // recovery, which may register a passkey and nothing else.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sessions (
+            id_hash          TEXT PRIMARY KEY,
+            account_id       TEXT NOT NULL,
+            created_at       TIMESTAMP NOT NULL,
+            last_seen_at     TIMESTAMP NOT NULL,
+            last_verified_at TIMESTAMP NOT NULL,
+            restricted_until TIMESTAMP,
+            user_agent       TEXT,
+            ip               TEXT,
+            revoked_at       TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);")
+        .execute(pool)
+        .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS todos (

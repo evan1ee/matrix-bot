@@ -24,9 +24,13 @@
 //! It has no credential, so there is nothing to authenticate as, and nothing to
 //! steal by guessing its id.
 
+pub mod credentials;
 pub mod repository;
+pub mod session;
 
+pub use credentials::CredentialRepository;
 pub use repository::AccountRepository;
+pub use session::{Session, SessionRepository};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -78,6 +82,26 @@ pub struct MatrixLink {
     pub linked_at: Option<DateTime<Utc>>,
 }
 
+/// The account id as the UUID WebAuthn calls a "user handle".
+///
+/// No extra column and no UUID dependency: an account id is `acct_` followed
+/// by exactly the 32 hex characters of 16 random bytes, which is the same
+/// shape a UUID's simple form has. The two representations are the same
+/// number, so this is a total, reversible mapping rather than a lookup that
+/// could go stale.
+///
+/// The handle is stored inside the credential on the authenticator, so this
+/// bijection is what lets a discoverable login identify an account with no
+/// username typed and no server-side guess.
+pub fn account_id_to_handle(account_id: &str) -> Option<uuid::Uuid> {
+    uuid::Uuid::parse_str(account_id.strip_prefix("acct_")?).ok()
+}
+
+/// The inverse of [`account_id_to_handle`].
+pub fn handle_to_account_id(handle: &uuid::Uuid) -> String {
+    format!("acct_{}", handle.simple())
+}
+
 /// The display name to give an account provisioned for `mxid`.
 ///
 /// Purely cosmetic — the localpart is what a human recognises, and nothing
@@ -108,6 +132,31 @@ mod tests {
         assert_eq!(display_name_for_mxid("nonsense"), "nonsense");
         assert_eq!(display_name_for_mxid("@"), "@");
         assert_eq!(display_name_for_mxid("@:server"), "@:server");
+    }
+
+    /// A passkey stores the handle, so this mapping has to survive a round trip
+    /// exactly — a lossy one would let a login resolve to the wrong account, or
+    /// to none at all.
+    #[test]
+    fn test_account_handle_round_trips() {
+        let id = "acct_26ab01c0f4c19b7d854f46dca154ee89";
+        let handle = account_id_to_handle(id).expect("a real account id must map to a handle");
+        assert_eq!(handle_to_account_id(&handle), id);
+    }
+
+    /// Anything that is not a real account id must fail closed rather than
+    /// producing some other account's handle.
+    #[test]
+    fn test_malformed_account_ids_have_no_handle() {
+        for bad in [
+            "26ab01c0f4c19b7d854f46dca154ee89", // no prefix
+            "acct_",                            // no body
+            "acct_notactuallyhex",
+            "@evan:mbm.one", // a legacy owner string
+            "",
+        ] {
+            assert!(account_id_to_handle(bad).is_none(), "{bad} must not map to a handle");
+        }
     }
 
     /// The merge in Phase 3 and the backfill in Phase 1 must agree on the list

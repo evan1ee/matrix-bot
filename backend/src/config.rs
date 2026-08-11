@@ -1,6 +1,18 @@
 use anyhow::{Context, Result};
 use std::env;
 
+/// Whether this process is running as a production deployment.
+///
+/// Read in two places — the `Secure` cookie flag and the boot-time refusal to
+/// run on development WebAuthn settings — which must never disagree, so it is
+/// one function rather than two copies of the same expression.
+fn is_production() -> bool {
+    env::var("ENVIRONMENT")
+        .map(|v| v.to_lowercase() == "production")
+        .unwrap_or(false)
+        || cfg!(not(debug_assertions))
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -22,6 +34,25 @@ pub struct Config {
     /// server proxies `/api`, so neither needs cross-origin access. Set
     /// `CORS_ALLOWED_ORIGINS` only for a genuinely separate front-end host.
     pub cors_allowed_origins: Vec<String>,
+    /// The WebAuthn Relying Party ID — a bare hostname, never a URL or a port.
+    ///
+    /// Baked into every credential at creation: change it and every passkey
+    /// ever registered stops working. Ports are not part of it, which is why
+    /// one value of `localhost` covers the SPA on `:5173` and the API on
+    /// `:8080` with no special casing.
+    pub webauthn_rp_id: String,
+    /// The full origin the browser loads the page from, port included.
+    ///
+    /// Unlike the RP ID this *does* carry the scheme and port, and WebAuthn
+    /// checks it exactly.
+    pub webauthn_origin: String,
+    /// Whether to mark the session cookie `Secure`.
+    ///
+    /// Derived from `ENVIRONMENT` rather than configured separately, because
+    /// the two must never disagree. Chrome and Firefox accept `Secure` cookies
+    /// on `http://localhost`, but Safari has historically not — so development
+    /// leaves it off and production always sets it.
+    pub cookie_secure: bool,
 }
 
 impl Config {
@@ -73,6 +104,13 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let webauthn_rp_id = env::var("WEBAUTHN_RP_ID").unwrap_or_else(|_| "localhost".to_string());
+
+        let webauthn_origin = env::var("WEBAUTHN_ORIGIN")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+        let cookie_secure = is_production();
+
         Ok(Self {
             homeserver,
             username,
@@ -86,6 +124,9 @@ impl Config {
             registration_secret,
             db_max_connections,
             cors_allowed_origins,
+            webauthn_rp_id,
+            webauthn_origin,
+            cookie_secure,
         })
     }
 
@@ -100,11 +141,37 @@ impl Config {
             anyhow::bail!("MATRIX_PASSWORD cannot be empty");
         }
 
-        let is_prod = env::var("ENVIRONMENT").map(|v| v.to_lowercase() == "production").unwrap_or(false)
-            || cfg!(not(debug_assertions));
+        let is_prod = is_production();
 
         if is_prod && self.jwt_secret == "matrix_bot_secret_jwt_token_key_change_in_production" {
             anyhow::bail!("Insecure default JWT_SECRET used in production environment. Set a custom JWT_SECRET!");
+        }
+
+        // A production deployment still on the development Relying Party would
+        // mint passkeys bound to `localhost`, which no real browser would ever
+        // send back to it — every registration would appear to succeed and
+        // every subsequent login would fail. Refuse to boot instead.
+        if is_prod && (self.webauthn_rp_id == "localhost" || self.webauthn_origin.contains("localhost"))
+        {
+            anyhow::bail!(
+                "WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN are still the localhost defaults in production. \
+                 Set them to the real host — they are baked into every passkey and cannot be \
+                 changed later without invalidating all of them."
+            );
+        }
+
+        if self.webauthn_rp_id.contains("://") || self.webauthn_rp_id.contains(':') {
+            anyhow::bail!(
+                "WEBAUTHN_RP_ID must be a bare hostname with no scheme or port (got '{}')",
+                self.webauthn_rp_id
+            );
+        }
+
+        if !self.webauthn_origin.contains("://") {
+            anyhow::bail!(
+                "WEBAUTHN_ORIGIN must be a full origin including the scheme (got '{}')",
+                self.webauthn_origin
+            );
         }
 
         if self.jwt_secret.len() < 16 {
@@ -134,6 +201,9 @@ mod tests {
             registration_secret: None,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
+            webauthn_rp_id: "localhost".to_string(),
+            webauthn_origin: "http://localhost:8080".to_string(),
+            cookie_secure: false,
         };
         assert!(valid_cfg.validate().is_ok());
 
@@ -142,5 +212,43 @@ mod tests {
             ..valid_cfg.clone()
         };
         assert!(invalid_cfg.validate().is_err());
+    }
+
+    /// The RP ID is a hostname. A URL or a port here mints credentials that no
+    /// browser will ever return, and the failure only shows up at login — long
+    /// after registration appeared to succeed.
+    #[test]
+    fn test_rp_id_must_be_a_bare_hostname() {
+        let base = Config {
+            homeserver: "https://mbm.one".to_string(),
+            username: "bot".to_string(),
+            password: "secretpassword".to_string(),
+            recovery_key: None,
+            verification_allowlist: Vec::new(),
+            database_url: "sqlite::memory:".to_string(),
+            api_host: "127.0.0.1".to_string(),
+            api_port: 8080,
+            jwt_secret: "super_secret_jwt_key_12345".to_string(),
+            registration_secret: None,
+            db_max_connections: 5,
+            cors_allowed_origins: Vec::new(),
+            webauthn_rp_id: "localhost".to_string(),
+            webauthn_origin: "http://localhost:8080".to_string(),
+            cookie_secure: false,
+        };
+
+        for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {
+            let cfg = Config { webauthn_rp_id: bad.to_string(), ..base.clone() };
+            assert!(cfg.validate().is_err(), "'{bad}' must be rejected as an RP ID");
+        }
+
+        for good in ["localhost", "mbm.one", "bot.mbm.one"] {
+            let cfg = Config { webauthn_rp_id: good.to_string(), ..base.clone() };
+            assert!(cfg.validate().is_ok(), "'{good}' is a valid RP ID");
+        }
+
+        // The origin is the other half of the pair and does carry a scheme.
+        let cfg = Config { webauthn_origin: "mbm.one".to_string(), ..base.clone() };
+        assert!(cfg.validate().is_err(), "an origin without a scheme must be rejected");
     }
 }
