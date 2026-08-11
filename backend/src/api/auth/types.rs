@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 use crate::db::Database;
+use crate::error::ApiError;
 
 /// Hashes a bearer token into a cache key, so no live credential is stored.
 fn token_cache_key(token: &str) -> [u8; 32] {
@@ -240,7 +241,48 @@ pub struct ApiState {
     /// expose something replayable.
     pub matrix_identity_cache:
         std::sync::Arc<tokio::sync::RwLock<HashMap<[u8; 32], CachedIdentity>>>,
+    /// The WebAuthn Relying Party. Its RP ID is baked into every credential.
+    pub webauthn: std::sync::Arc<webauthn_rs::Webauthn>,
+    /// WebAuthn ceremonies waiting for the browser to come back.
+    ///
+    /// In memory, not in SQLite: a ceremony lives for seconds and is worthless
+    /// afterwards, so durability would buy nothing and cost a table to sweep.
+    /// This mirrors how `matrix_identity_cache` above is held.
+    pub webauthn_ceremonies:
+        std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,
+    /// Whether the session cookie is marked `Secure`. False only in development.
+    pub cookie_secure: bool,
 }
+
+/// A WebAuthn ceremony in flight.
+pub enum Ceremony {
+    /// Registering the first passkey for an account that does not exist yet.
+    ///
+    /// The account id is minted at `start` because it *is* the WebAuthn user
+    /// handle and has to be inside the challenge, but the row is not written
+    /// until `finish` — so an abandoned registration leaves nothing behind.
+    Registration {
+        account_id: String,
+        display_name: String,
+        state: webauthn_rs::prelude::PasskeyRegistration,
+    },
+    /// A usernameless login. Nobody is identified yet; the credential itself
+    /// carries the handle that says which account is signing in.
+    Authentication {
+        state: webauthn_rs::prelude::DiscoverableAuthentication,
+    },
+}
+
+pub struct PendingCeremony {
+    pub ceremony: Ceremony,
+    pub expires_at: Instant,
+}
+
+/// How long a browser has to complete a ceremony it started.
+///
+/// Long enough to find a security key in a drawer, short enough that an
+/// abandoned challenge is not sitting in memory for an afternoon.
+pub const CEREMONY_TTL: Duration = Duration::from_secs(300);
 
 /// A resolved Matrix identity and the moment it stops being trusted.
 pub struct CachedIdentity {
@@ -285,7 +327,58 @@ impl ApiState {
             resolved_homeserver: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             matrix_identity: std::sync::Arc::new(HomeserverIdentityProvider),
             matrix_identity_cache: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            webauthn: std::sync::Arc::new(
+                build_webauthn("localhost", "http://localhost:8080")
+                    .expect("the localhost development Relying Party is always valid"),
+            ),
+            webauthn_ceremonies: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            cookie_secure: false,
         }
+    }
+
+    /// Points this state at the configured Relying Party.
+    ///
+    /// Separate from `new` so the many test call sites keep working against the
+    /// localhost default, exactly as `with_matrix_identity` does.
+    pub fn with_webauthn(
+        mut self,
+        rp_id: &str,
+        origin: &str,
+        cookie_secure: bool,
+    ) -> anyhow::Result<Self> {
+        self.webauthn = std::sync::Arc::new(build_webauthn(rp_id, origin)?);
+        self.cookie_secure = cookie_secure;
+        Ok(self)
+    }
+
+    /// Files a ceremony away and returns the id the browser quotes back.
+    ///
+    /// Expired entries are swept here rather than by a timer: ceremonies only
+    /// accumulate when someone starts one, so the work belongs on that path.
+    pub async fn stash_ceremony(&self, ceremony: Ceremony) -> Result<String, ApiError> {
+        let id = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(16)))")
+            .fetch_one(&self.db.pool)
+            .await
+            .map_err(|err| ApiError::internal(format!("could not start a ceremony: {err}")))?;
+
+        let now = Instant::now();
+        let mut ceremonies = self.webauthn_ceremonies.write().await;
+        ceremonies.retain(|_, pending| pending.expires_at > now);
+        ceremonies.insert(
+            id.clone(),
+            PendingCeremony { ceremony, expires_at: now + CEREMONY_TTL },
+        );
+
+        Ok(id)
+    }
+
+    /// Takes a ceremony back out, consuming it.
+    ///
+    /// Removal is unconditional: a challenge is single-use, so a failed finish
+    /// must not leave it replayable.
+    pub async fn take_ceremony(&self, id: &str) -> Option<Ceremony> {
+        let pending = self.webauthn_ceremonies.write().await.remove(id)?;
+        (pending.expires_at > Instant::now()).then_some(pending.ceremony)
     }
 
     /// Resolves a Matrix access token to its MXID, reusing a recent answer.
@@ -339,6 +432,21 @@ impl ApiState {
         self.matrix_identity = provider;
         self
     }
+}
+
+/// Builds the Relying Party.
+///
+/// Subdomain matching is deliberately left off. Allowing it would let a
+/// credential minted for the bot's host be presented from any sibling
+/// subdomain, and the origin binding it would loosen is precisely what makes a
+/// passkey unphishable.
+pub fn build_webauthn(rp_id: &str, origin: &str) -> anyhow::Result<webauthn_rs::Webauthn> {
+    let parsed = url::Url::parse(origin)
+        .map_err(|err| anyhow::anyhow!("WEBAUTHN_ORIGIN '{origin}' is not a URL: {err}"))?;
+
+    Ok(webauthn_rs::WebauthnBuilder::new(rp_id, &parsed)?
+        .rp_name("Matrix Bot")
+        .build()?)
 }
 
 impl FromRef<ApiState> for Database {

@@ -1,4 +1,5 @@
 pub mod extractor;
+pub mod webauthn;
 pub mod handlers;
 pub mod matrix;
 pub mod types;

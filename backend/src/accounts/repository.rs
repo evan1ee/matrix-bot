@@ -28,6 +28,27 @@ impl AccountRepository {
         .await
     }
 
+    /// Creates an account under an id the caller already holds.
+    ///
+    /// Passkey registration needs this: the account id *is* the WebAuthn user
+    /// handle, so it has to exist before the challenge is issued — but the row
+    /// must not, or an abandoned registration would leave an account nobody can
+    /// ever sign in to.
+    pub async fn create_with_id(
+        pool: &SqlitePool,
+        account_id: &str,
+        display_name: &str,
+        status: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)")
+            .bind(account_id)
+            .bind(display_name)
+            .bind(status)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn find(pool: &SqlitePool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
         sqlx::query_as::<_, Account>(
             "SELECT id, display_name, status, created_at FROM accounts WHERE id = ?",
