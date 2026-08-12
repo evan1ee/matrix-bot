@@ -94,13 +94,13 @@ async fn handle_add(
     if raw_text.starts_with('[') {
         if let Some(end_idx) = raw_text.find(']') {
             let prio_tag = &raw_text[1..end_idx];
-            priority = TodoPriority::from_str(prio_tag);
+            priority = TodoPriority::from_str_or_default(prio_tag);
             raw_text = raw_text[end_idx + 1..].trim();
         }
     } else if let Some(idx) = raw_text.find("-p ") {
         let (task_part, prio_part) = raw_text.split_at(idx);
         let prio_tag = prio_part.trim_start_matches("-p ").trim();
-        priority = TodoPriority::from_str(prio_tag);
+        priority = TodoPriority::from_str_or_default(prio_tag);
         raw_text = task_part.trim();
     }
 
@@ -219,7 +219,7 @@ async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
     }
 
     if let Ok(id) = id_str.parse::<i64>() {
-        let prio = TodoPriority::from_str(prio_str);
+        let prio = TodoPriority::from_str_or_default(prio_str);
         match TodoRepository::set_priority(pool, id, prio.clone()).await {
             Ok(Some(item)) => Some(format!(
                 "🏷️ Set Task <b>#{}</b> priority to {}",

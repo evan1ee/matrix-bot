@@ -18,6 +18,11 @@ const COLUMNS: &str = "id, room_id, owner_id, sender_name, message, trigger_at, 
 pub struct ReminderRepository;
 
 impl ReminderRepository {
+    // One parameter per column, which is what an INSERT is. Clippy's threshold is 7
+    // and this is a row; collapsing them into a struct would spell the row type a
+    // second time, minus the fields the database fills in, and every caller would
+    // build that struct inline at the call site instead. No clarity is gained.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         pool: &SqlitePool,
         room_id: &str,

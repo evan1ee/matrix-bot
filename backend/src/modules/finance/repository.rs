@@ -224,6 +224,11 @@ impl FinanceRepository {
         Ok(query.fetch_one(pool).await?)
     }
 
+    // One parameter per column, which is what an INSERT is. Clippy's threshold is 7
+    // and this is a row; collapsing them into a struct would spell the row type a
+    // second time, minus the fields the database fills in, and every caller would
+    // build that struct inline at the call site instead. No clarity is gained.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update(
         pool: &SqlitePool,
         id: i64,
@@ -340,7 +345,7 @@ impl FinanceRepository {
             entry.net_minor = entry.income_minor - entry.expense_minor;
             entry
                 .categories
-                .sort_by(|a, b| b.expense_minor.cmp(&a.expense_minor));
+                .sort_by_key(|c| std::cmp::Reverse(c.expense_minor));
         }
 
         Ok(summaries)
@@ -359,6 +364,9 @@ mod tests {
         pool
     }
 
+    // Mirrors `create_transaction`, so it carries the same column-per-argument
+    // shape for the same reason.
+    #[allow(clippy::too_many_arguments)]
     async fn log(
         pool: &SqlitePool,
         owner: &str,

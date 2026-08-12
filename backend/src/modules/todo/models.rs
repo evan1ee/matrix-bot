@@ -18,7 +18,7 @@ impl TodoPriority {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_str_or_default(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "high" | "h" => TodoPriority::High,
             "low" | "l" => TodoPriority::Low,
@@ -51,12 +51,12 @@ mod tests {
 
     #[test]
     fn test_todo_priority_conversion() {
-        assert_eq!(TodoPriority::from_str("high"), TodoPriority::High);
-        assert_eq!(TodoPriority::from_str("h"), TodoPriority::High);
-        assert_eq!(TodoPriority::from_str("low"), TodoPriority::Low);
-        assert_eq!(TodoPriority::from_str("l"), TodoPriority::Low);
-        assert_eq!(TodoPriority::from_str("medium"), TodoPriority::Medium);
-        assert_eq!(TodoPriority::from_str("anything_else"), TodoPriority::Medium);
+        assert_eq!(TodoPriority::from_str_or_default("high"), TodoPriority::High);
+        assert_eq!(TodoPriority::from_str_or_default("h"), TodoPriority::High);
+        assert_eq!(TodoPriority::from_str_or_default("low"), TodoPriority::Low);
+        assert_eq!(TodoPriority::from_str_or_default("l"), TodoPriority::Low);
+        assert_eq!(TodoPriority::from_str_or_default("medium"), TodoPriority::Medium);
+        assert_eq!(TodoPriority::from_str_or_default("anything_else"), TodoPriority::Medium);
 
         assert_eq!(TodoPriority::High.as_str(), "high");
         assert_eq!(TodoPriority::Medium.as_str(), "medium");

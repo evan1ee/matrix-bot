@@ -11,6 +11,12 @@ pub mod repository;
 
 pub struct TodoModule;
 
+impl Default for TodoModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TodoModule {
     pub fn new() -> Self {
         Self

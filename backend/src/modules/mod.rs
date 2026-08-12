@@ -203,6 +203,42 @@ impl ModuleRegistry {
     }
 }
 
+/// Owns a generation of background workers and stops them when dropped.
+///
+/// The Matrix sync loop reconnects, and each reconnect builds a fresh client and
+/// calls `run()` again. Spawning detached workers there leaked one scheduler per
+/// reconnect: every surviving copy kept polling the same `reminders` table, so a
+/// single due reminder was delivered once per accumulated worker — the bug where
+/// one reminder arrived three times, then four after another reconnect.
+///
+/// Tying the workers to a guard makes the lifetime explicit: they belong to the
+/// sync session that spawned them, and they hold that session's client, so they
+/// must not outlive it. Aborting mid-delivery is safe — the row stays `pending`
+/// and the next generation redelivers it, which is the same at-least-once
+/// behaviour a crash already implied.
+pub struct BackgroundWorkers {
+    handles: Vec<JoinHandle<()>>,
+}
+
+impl BackgroundWorkers {
+    /// How many workers this guard owns.
+    pub fn len(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+}
+
+impl Drop for BackgroundWorkers {
+    fn drop(&mut self) {
+        for handle in &self.handles {
+            handle.abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,41 +437,5 @@ use crate::events::EventBroadcaster;
         assert_eq!(help[0].0, "todo");
         assert_eq!(help[1].0, "finance");
         assert!(help.iter().all(|(_, cmds)| !cmds.is_empty()));
-    }
-}
-
-/// Owns a generation of background workers and stops them when dropped.
-///
-/// The Matrix sync loop reconnects, and each reconnect builds a fresh client and
-/// calls `run()` again. Spawning detached workers there leaked one scheduler per
-/// reconnect: every surviving copy kept polling the same `reminders` table, so a
-/// single due reminder was delivered once per accumulated worker — the bug where
-/// one reminder arrived three times, then four after another reconnect.
-///
-/// Tying the workers to a guard makes the lifetime explicit: they belong to the
-/// sync session that spawned them, and they hold that session's client, so they
-/// must not outlive it. Aborting mid-delivery is safe — the row stays `pending`
-/// and the next generation redelivers it, which is the same at-least-once
-/// behaviour a crash already implied.
-pub struct BackgroundWorkers {
-    handles: Vec<JoinHandle<()>>,
-}
-
-impl BackgroundWorkers {
-    /// How many workers this guard owns.
-    pub fn len(&self) -> usize {
-        self.handles.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.handles.is_empty()
-    }
-}
-
-impl Drop for BackgroundWorkers {
-    fn drop(&mut self) {
-        for handle in &self.handles {
-            handle.abort();
-        }
     }
 }

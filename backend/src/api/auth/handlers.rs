@@ -71,8 +71,7 @@ pub async fn get_current_user(
                 if let Ok(profile) = res.json::<MatrixProfile>().await {
                     display_name = profile.displayname;
                     if let Some(mxc) = profile.avatar_url {
-                        if mxc.starts_with("mxc://") {
-                            let mxc_trim = &mxc[6..];
+                        if let Some(mxc_trim) = mxc.strip_prefix("mxc://") {
                             let mut parts = mxc_trim.splitn(2, '/');
                             if let (Some(server), Some(media_id)) = (parts.next(), parts.next()) {
                                 avatar_url = Some(format!(

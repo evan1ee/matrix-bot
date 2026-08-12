@@ -18,6 +18,12 @@ pub mod view;
 
 pub struct PortfolioModule;
 
+impl Default for PortfolioModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PortfolioModule {
     pub fn new() -> Self {
         Self
@@ -254,7 +260,8 @@ mod tests {
                 crate::events::SystemEvent::PortfolioHoldingCreated(_) => saw_holding = true,
                 crate::events::SystemEvent::PortfolioCashUpdated { balance_minor, .. } => {
                     saw_cash = true;
-                    assert_eq!(balance_minor, 100000_00 - 1500_00);
+                    // 100,000.00 deposited, less the 1,500.00 the buy cost.
+                    assert_eq!(balance_minor, 10_000_000 - 150_000);
                 }
                 _ => {}
             }

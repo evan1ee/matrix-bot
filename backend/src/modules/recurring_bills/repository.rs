@@ -163,10 +163,8 @@ impl RecurringBillRepository {
         }
 
         let new_paid_installments = bill.paid_installments + 1;
-        let is_completed = match bill.total_installments {
-            Some(total) if new_paid_installments >= total => true,
-            _ => false,
-        };
+        let is_completed =
+            matches!(bill.total_installments, Some(total) if new_paid_installments >= total);
 
         let new_status = if is_completed {
             "completed".to_string()

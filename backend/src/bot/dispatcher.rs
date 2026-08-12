@@ -64,7 +64,7 @@ impl CommandParser {
         }
 
         clean_body = clean_body
-            .trim_start_matches(|c: char| c == ':' || c == ',' || c == '@' || c == ' ')
+            .trim_start_matches([':', ',', '@', ' '])
             .trim()
             .to_string();
 

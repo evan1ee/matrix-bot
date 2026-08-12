@@ -11,6 +11,12 @@ pub mod scheduler;
 
 pub struct ReminderModule;
 
+impl Default for ReminderModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReminderModule {
     pub fn new() -> Self {
         Self

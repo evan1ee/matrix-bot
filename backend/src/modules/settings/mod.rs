@@ -21,6 +21,12 @@ pub use repository::SettingsRepository;
 
 pub struct SettingsModule;
 
+impl Default for SettingsModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettingsModule {
     pub fn new() -> Self {
         Self

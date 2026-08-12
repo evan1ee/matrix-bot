@@ -190,7 +190,7 @@ pub async fn create_todo(
     let priority = payload
         .priority
         .as_deref()
-        .map(TodoPriority::from_str)
+        .map(TodoPriority::from_str_or_default)
         .unwrap_or(TodoPriority::Medium);
 
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
@@ -266,7 +266,7 @@ pub async fn update_todo(
     }
 
     if let Some(prio) = payload.priority {
-        TodoRepository::set_priority(&state.db.pool, id, TodoPriority::from_str(&prio))
+        TodoRepository::set_priority(&state.db.pool, id, TodoPriority::from_str_or_default(&prio))
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
@@ -419,7 +419,7 @@ mod tests {
         }
 
         // Finish one of the three.
-        update_todo(
+        let _ = update_todo(
             State(state.clone()),
             alice.clone(),
             Path(ids[0]),
@@ -935,7 +935,7 @@ mod tests {
         .await
         .unwrap();
 
-        update_todo(
+        let _ = update_todo(
             State(state.clone()),
             alice,
             Path(created.id),

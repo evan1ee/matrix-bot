@@ -11,6 +11,12 @@ pub mod repository;
 
 pub struct FinanceModule;
 
+impl Default for FinanceModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FinanceModule {
     pub fn new() -> Self {
         Self

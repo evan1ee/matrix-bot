@@ -15,6 +15,12 @@ const CASH_COLUMNS: &str = "id, owner_id, currency, currency_exponent, balance_m
 /// rather than guessed at — exactly like `finance` never sums two currencies
 /// together, there is no rate source to reconcile a position priced in two of
 /// them. A buy that would take cash negative is rejected the same way.
+// 272 bytes in the success variant against a `String` in the rejections.
+// Boxing would shrink the enum and complicate every `match` that reads a
+// holding back — and this is returned once per `!portfolio buy`, on a path that
+// has just done several database round trips. The stack bytes are not the cost
+// that matters here.
+#[allow(clippy::large_enum_variant)]
 pub enum BuyOutcome {
     Ok { holding: Holding, cash: CashBalance },
     CurrencyMismatch { existing_currency: String },

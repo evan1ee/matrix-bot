@@ -35,10 +35,9 @@ pub async fn handle_finance_command(
         ("expense", rest)
     } else if let Some(rest) = strip_command(&lower, body, "income") {
         ("income", rest)
-    } else if let Some(rest) = strip_command(&lower, body, "category") {
-        ("category", rest)
     } else {
-        return None;
+        let rest = strip_command(&lower, body, "category")?;
+        ("category", rest)
     };
 
     if keyword == "category" {

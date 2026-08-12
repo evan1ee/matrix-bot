@@ -122,7 +122,7 @@ pub async fn create_reminder(
     let recurrence = payload
         .recurrence
         .as_deref()
-        .map(RecurrencePattern::from_str)
+        .map(RecurrencePattern::from_str_or_default)
         .unwrap_or(RecurrencePattern::None);
 
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
@@ -189,7 +189,7 @@ pub async fn update_reminder(
     let recurrence = payload
         .recurrence
         .as_deref()
-        .map(RecurrencePattern::from_str)
+        .map(RecurrencePattern::from_str_or_default)
         .unwrap_or(RecurrencePattern::None);
 
     let updated = ReminderRepository::update_pending(

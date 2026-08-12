@@ -212,7 +212,7 @@ mod tests {
     /// original purchase price.
     #[test]
     fn test_weighted_avg_cost_across_three_buys() {
-        let one = 1 * 10i64.pow(QUANTITY_EXPONENT);
+        let one = 10i64.pow(QUANTITY_EXPONENT);
         let avg_after_two = weighted_avg_cost_minor(0, 0, one, 10000);
         let avg_after_two = weighted_avg_cost_minor(one, avg_after_two, one, 20000);
         assert_eq!(avg_after_two, 15000);

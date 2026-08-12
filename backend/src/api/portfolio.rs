@@ -520,7 +520,7 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
+        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
             .await
             .unwrap();
         let holding =
@@ -538,7 +538,7 @@ mod tests {
         fund(&state, &alice, "USD", 2).await;
         fund(&state, &alice, "EUR", 2).await;
 
-        buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
+        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
             .await
             .unwrap();
 
@@ -701,7 +701,7 @@ mod tests {
                 .await
                 .unwrap();
         // 100_000_000 - 150000 (cost) spent so far.
-        sell_holding(
+        let _ = sell_holding(
             State(state.clone()),
             alice.clone(),
             Path(created.id),
@@ -768,10 +768,10 @@ mod tests {
             buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
                 .await
                 .unwrap();
-        buy_holding(State(state.clone()), alice.clone(), Json(buy("SONY", "100", "2000", "JPY")))
+        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("SONY", "100", "2000", "JPY")))
             .await
             .unwrap();
-        set_price(
+        let _ = set_price(
             State(state.clone()),
             alice.clone(),
             Path(aapl.id),
@@ -798,7 +798,7 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
 
-        deposit_cash(
+        let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
             Json(CashAmountRequest { amount: "500.00".to_string(), currency: "GBP".to_string() }),
@@ -851,7 +851,7 @@ mod tests {
     async fn test_withdraw_reduces_the_balance() {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
-        deposit_cash(
+        let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
             Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),
@@ -873,7 +873,7 @@ mod tests {
     async fn test_withdraw_exceeding_the_balance_is_rejected() {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
-        deposit_cash(
+        let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
             Json(CashAmountRequest { amount: "100.00".to_string(), currency: "USD".to_string() }),
@@ -897,7 +897,7 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
         let bob = AuthUser::named("bob", "acct_bob");
-        deposit_cash(
+        let _ = deposit_cash(
             State(state.clone()),
             alice,
             Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),
@@ -914,7 +914,7 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         let mut rx = state.broadcaster.subscribe();
 
-        deposit_cash(
+        let _ = deposit_cash(
             State(state),
             alice,
             Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),

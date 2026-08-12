@@ -526,7 +526,7 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
 
-        create_category(
+        let _ = create_category(
             State(state.clone()),
             alice.clone(),
             Json(CategoryRequest { name: "food".to_string() }),
@@ -561,7 +561,7 @@ mod tests {
         .await
         .unwrap();
 
-        create_transaction(
+        let _ = create_transaction(
             State(state.clone()),
             alice.clone(),
             Json(entry("10.00", "EUR", Some(category.id))),

@@ -177,7 +177,7 @@ mod tests {
         let state = state().await;
         let mut rx = state.broadcaster.subscribe();
 
-        update_settings(
+        let _ = update_settings(
             State(state.clone()),
             AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Europe/Berlin", "EUR")),
@@ -196,7 +196,7 @@ mod tests {
     async fn test_local_and_matrix_identities_keep_separate_settings() {
         let state = state().await;
 
-        update_settings(
+        let _ = update_settings(
             State(state.clone()),
             AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Asia/Shanghai", "CNY")),
