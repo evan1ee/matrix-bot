@@ -14,7 +14,16 @@ export const AUTH_EXPIRED_EVENT = 'matrixbot:auth-expired';
  */
 export async function fetchApi<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit & {
+    /**
+     * Suppresses {@link AUTH_EXPIRED_EVENT} on a 401.
+     *
+     * Set by the session probe. Without it a signed-out page loops: the probe
+     * 401s, the event invalidates the session query, the query refetches the
+     * probe, and it 401s again — several requests a second, forever.
+     */
+    suppressAuthEvent?: boolean;
+  } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -47,7 +56,7 @@ export async function fetchApi<T>(
     data = { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 && !options.suppressAuthEvent) {
     // The session is gone — expired, revoked, or never established. Tell the
     // app so it can show the sign-in screen rather than looping on 401s.
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));

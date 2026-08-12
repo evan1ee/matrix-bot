@@ -41,7 +41,7 @@ const AppContent: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
 
-  const { user, isSignedIn } = useSession();
+  const { user, isSignedIn, isLoading } = useSession();
   const refreshSession = useRefreshSession();
 
   const { events, isConnected } = useSystemEvents(isSignedIn);
@@ -50,13 +50,19 @@ const AppContent: React.FC = () => {
     applyTheme(theme);
   }, [theme]);
 
-  // The server rejected the session cookie. Re-read the session — which will
-  // come back signed-out — and prompt, rather than leaving the UI showing data
-  // it can no longer refresh.
+  // Signed out is a state, not an event: derive the prompt from the session
+  // itself so it appears on a cold load as well as on an expiry, and so it
+  // closes on its own once a session exists.
+  useEffect(() => {
+    if (!isLoading) setIsAuthOpen(!isSignedIn);
+  }, [isLoading, isSignedIn]);
+
+  // The server rejected the session cookie on some *other* call. Re-read the
+  // session so the rest of the UI stops showing data it can no longer refresh;
+  // the effect above turns that into a prompt.
   useEffect(() => {
     const onExpired = () => {
       refreshSession();
-      setIsAuthOpen(true);
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);

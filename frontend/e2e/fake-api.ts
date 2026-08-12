@@ -89,7 +89,7 @@ export interface FakeHolding {
   updated_at: string;
 }
 
-const OWNER = '@web-tester:api';
+const OWNER = 'acct_00000000000000000000000000000001';
 const DISPLAY_NAME = 'tester';
 /** Mirrors `due_reminder::MAX_LEAD_MINUTES`. */
 const MAX_LEAD_MINUTES = 60 * 24 * 30;
@@ -109,6 +109,41 @@ export class FakeApi {
 
   /** Set to make the next matching call fail, for error-path tests. */
   failNext: { path: RegExp; status: number; error: string } | null = null;
+
+  /**
+   * Whether `/auth/me` answers.
+   *
+   * This is the whole of "am I signed in?" now. The real session is an HttpOnly
+   * cookie the page cannot read, so the app asks the server and believes the
+   * answer — there is no client-side token for a test to plant.
+   */
+  signedIn = true;
+
+  /** Passkeys the account holds, as Settings -> Security lists them. */
+  passkeys: { id: string; label: string; created_at: string; last_used_at: string | null }[] = [
+    { id: 'cred_1', label: 'MacBook Touch ID', created_at: '2026-01-01T10:00:00Z', last_used_at: '2026-08-01T09:00:00Z' },
+  ];
+
+  /** Matrix identities linked to the account. */
+  linkedMxids: string[] = [];
+
+  /** Signed-in devices. */
+  sessions: { id: string; created_at: string; last_seen_at: string; user_agent: string | null; current: boolean }[] = [
+    { id: 'sess_current', created_at: '2026-08-01T10:00:00Z', last_seen_at: '2026-08-12T09:00:00Z', user_agent: 'Chrome on macOS', current: true },
+  ];
+
+  /** Entries for the account's own audit log. */
+  securityEvents: { id: number; kind: string; detail: string | null; created_at: string }[] = [
+    { id: 1, kind: 'signed_in', detail: null, created_at: '2026-08-12T09:00:00Z' },
+  ];
+
+  recoveryStatus: { codes_remaining: number; recovery_valid_after: string | null } = {
+    codes_remaining: 10,
+    recovery_valid_after: null,
+  };
+
+  /** A merge waiting on confirmation, as `!link` would have recorded. */
+  pendingMerge: { from_account: string; preview: Record<string, number> } | null = null;
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
@@ -306,20 +341,104 @@ export class FakeApi {
     body: Record<string, any> | null
   ) {
     // --- auth ---
-    if (path === '/auth/login' && method === 'POST') {
-      if (body?.password === 'wrong') {
-        return json(route, 401, { error: 'Invalid username or password', code: 401 });
-      }
-      return json(route, 200, { token: 'fake-jwt-token', username: body?.username ?? DISPLAY_NAME });
+    // The passkey ceremonies are answered with canned challenges. A real
+    // authenticator (Playwright's CDP virtual one) still runs, so what these
+    // specs exercise is the browser half: the base64url conversions, the
+    // options mapping, and how the UI reacts. Verifying an assertion is the
+    // server's job and is covered by the Rust tests.
+    if (path === '/auth/passkey/register/start' && method === 'POST') {
+      return json(route, 200, {
+        ceremony_id: 'ceremony_register',
+        options: { publicKey: registrationOptions(String(body?.display_name ?? DISPLAY_NAME)) },
+      });
     }
-    if (path === '/auth/register' && method === 'POST') {
-      if (String(body?.username ?? '').includes('@')) {
-        return json(route, 400, { error: 'Username cannot contain @ or :', code: 400 });
-      }
-      return json(route, 200, { token: 'fake-jwt-token', username: body?.username ?? DISPLAY_NAME });
+    if (path === '/auth/passkey/register/finish' && method === 'POST') {
+      this.signedIn = true;
+      return json(route, 200, { account_id: OWNER, display_name: DISPLAY_NAME });
+    }
+    if (path === '/auth/passkey/login/start' && method === 'POST') {
+      return json(route, 200, {
+        ceremony_id: 'ceremony_login',
+        options: { publicKey: authenticationOptions() },
+      });
+    }
+    if (path === '/auth/passkey/login/finish' && method === 'POST') {
+      this.signedIn = true;
+      return json(route, 200, { account_id: OWNER, display_name: DISPLAY_NAME });
+    }
+    if (path === '/auth/logout' && method === 'POST') {
+      this.signedIn = false;
+      return route.fulfill({ status: 204, body: '' });
     }
     if (path === '/auth/me') {
-      return json(route, 200, { username: DISPLAY_NAME, subject: OWNER, kind: 'Local' });
+      if (!this.signedIn) {
+        return json(route, 401, { error: 'Not signed in', code: 401 });
+      }
+      return json(route, 200, {
+        account_id: OWNER,
+        username: DISPLAY_NAME,
+        display_name: DISPLAY_NAME,
+        avatar_url: null,
+        linked_mxids: this.linkedMxids,
+      });
+    }
+
+    // --- account management ---
+    if (path === '/account/passkeys' && method === 'GET') {
+      return json(route, 200, this.passkeys);
+    }
+    if (path.startsWith('/account/passkeys/') && method === 'DELETE') {
+      const id = path.split('/').pop()!;
+      if (this.passkeys.length <= 1) {
+        return json(route, 409, {
+          error: 'That is your only passkey. Add another before removing this one.',
+          code: 409,
+        });
+      }
+      this.passkeys = this.passkeys.filter((k) => k.id !== id);
+      return route.fulfill({ status: 204, body: '' });
+    }
+    if (path === '/account/matrix' && method === 'GET') {
+      return json(route, 200, this.linkedMxids);
+    }
+    if (path === '/account/matrix/link' && method === 'POST') {
+      return json(route, 200, { code: 'A3F9-K2QX', expires_in_seconds: 300 });
+    }
+    if (path === '/account/matrix/unlink' && method === 'POST') {
+      this.linkedMxids = this.linkedMxids.filter((m) => m !== body?.mxid);
+      return route.fulfill({ status: 204, body: '' });
+    }
+    if (path === '/account/matrix/pending-merge' && method === 'GET') {
+      return json(route, 200, this.pendingMerge);
+    }
+    if (path === '/account/matrix/confirm-merge' && method === 'POST') {
+      const preview = this.pendingMerge?.preview ?? {};
+      this.pendingMerge = null;
+      return json(route, 200, preview);
+    }
+    if (path === '/account/sessions' && method === 'GET') {
+      return json(route, 200, this.sessions);
+    }
+    if (path === '/account/sessions/revoke-others' && method === 'POST') {
+      const revoked = this.sessions.filter((x) => !x.current).length;
+      this.sessions = this.sessions.filter((x) => x.current);
+      return json(route, 200, revoked);
+    }
+    if (path === '/account/recovery-codes' && method === 'POST') {
+      this.recoveryStatus = { ...this.recoveryStatus, codes_remaining: 10 };
+      return json(route, 200, {
+        codes: Array.from({ length: 10 }, (_, i) => `CODE${i}-ABCDE`),
+      });
+    }
+    if (path === '/account/recovery-status' && method === 'GET') {
+      return json(route, 200, this.recoveryStatus);
+    }
+    if (path === '/account/recovery/cancel' && method === 'POST') {
+      this.recoveryStatus = { ...this.recoveryStatus, recovery_valid_after: null };
+      return json(route, 200, 1);
+    }
+    if (path === '/account/security-events' && method === 'GET') {
+      return json(route, 200, this.securityEvents);
     }
 
     // --- settings ---
@@ -918,4 +1037,50 @@ function parseAmount(
   if (!minor) return { error: 'Amount must be greater than zero' };
 
   return { minor, currency, exponent };
+}
+
+/**
+ * How long the browser waits for an authenticator, in the canned challenges.
+ *
+ * Production sends 300s. Here a ceremony that cannot complete would otherwise
+ * hang a worker for five minutes and look like a stuck suite rather than a
+ * failing test.
+ */
+const CEREMONY_TIMEOUT_MS = 10_000;
+
+/**
+ * A base64url string of `length` bytes, which is how WebAuthn carries binary
+ * over JSON. The bytes themselves are arbitrary — nothing verifies them here.
+ */
+function randomB64Url(length: number): string {
+  const bytes = Array.from({ length }, (_, i) => (i * 37) % 251);
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Mirrors what `webauthn-rs` sends for `start_passkey_registration`. */
+function registrationOptions(displayName: string) {
+  return {
+    rp: { name: 'Matrix Bot', id: 'localhost' },
+    user: { id: randomB64Url(16), name: displayName, displayName },
+    challenge: randomB64Url(32),
+    pubKeyCredParams: [
+      { type: 'public-key', alg: -7 },
+      { type: 'public-key', alg: -257 },
+    ],
+    timeout: CEREMONY_TIMEOUT_MS,
+    excludeCredentials: [],
+    authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+    attestation: 'none',
+  };
+}
+
+/** Mirrors `start_discoverable_authentication`: no `allowCredentials`. */
+function authenticationOptions() {
+  return {
+    challenge: randomB64Url(32),
+    timeout: CEREMONY_TIMEOUT_MS,
+    rpId: 'localhost',
+    allowCredentials: [],
+    userVerification: 'required',
+  };
 }

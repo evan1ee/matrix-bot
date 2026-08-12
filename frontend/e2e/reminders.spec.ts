@@ -1,16 +1,16 @@
-import { test, expect, gotoApp } from './fixtures';
+import { test, expect, gotoApp, TAB } from './fixtures';
 
 test('lists pending reminders', async ({ app, api }) => {
   api.seedReminder({ message: 'Water the plants' });
   api.seedReminder({ message: 'Stand-up call' });
-  await gotoApp(app, 'Reminders');
+  await gotoApp(app, TAB.reminder);
 
   await expect(app.getByText('Water the plants')).toBeVisible();
   await expect(app.getByText('Stand-up call')).toBeVisible();
 });
 
 test('creates a reminder', async ({ app, api }) => {
-  await gotoApp(app, 'Reminders');
+  await gotoApp(app, TAB.reminder);
 
   await app.getByPlaceholder('Reminder message...').fill('Call the bank');
   await app.getByRole('button', { name: 'Set Reminder' }).click();
@@ -20,7 +20,7 @@ test('creates a reminder', async ({ app, api }) => {
 });
 
 test('will not create an empty reminder', async ({ app, api }) => {
-  await gotoApp(app, 'Reminders');
+  await gotoApp(app, TAB.reminder);
 
   await app.getByRole('button', { name: 'Set Reminder' }).click();
 
@@ -29,7 +29,7 @@ test('will not create an empty reminder', async ({ app, api }) => {
 
 test('cancels a reminder', async ({ app, api }) => {
   api.seedReminder({ message: 'Cancel me' });
-  await gotoApp(app, 'Reminders');
+  await gotoApp(app, TAB.reminder);
 
   await app.getByTitle('Cancel reminder').first().click();
 
@@ -48,7 +48,7 @@ test('a reminder scheduled from a todo shows up in the reminders list', async ({
     message: `Task #${todo.id} is due: ${todo.text}`,
     room_id: '!ops:mbm.one',
   });
-  await gotoApp(app, 'Reminders');
+  await gotoApp(app, TAB.reminder);
 
   await expect(app.getByText(`Task #${todo.id} is due: Ship the thing`)).toBeVisible();
 });

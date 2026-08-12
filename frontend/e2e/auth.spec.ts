@@ -1,86 +1,212 @@
-import { test, expect } from './fixtures';
+import { test, expect, DASHBOARD_READY } from './fixtures';
+import type { Page } from '@playwright/test';
 
-/** The login/register modal's own submit button. */
-const submit = (name: RegExp) => ({ name });
+/**
+ * Sign-in is passkeys only, so these drive a **real** WebAuthn ceremony through
+ * Chrome's virtual authenticator rather than stubbing `navigator.credentials`.
+ *
+ * That distinction is the point of the file. The server half — verifying an
+ * assertion, checking the origin, minting a session — is covered by the Rust
+ * tests and cannot be exercised here anyway, because the fake API answers with
+ * canned challenges. What is *only* testable here is the browser half:
+ * `core/passkey.ts` converting base64url to `ArrayBuffer` and back, mapping the
+ * server's options onto what `navigator.credentials` expects, and how the UI
+ * reacts. Stubbing the browser API would test none of it.
+ *
+ * The authenticator sets `hasResidentKey` and `isUserVerified` because sign-in
+ * is usernameless: without a discoverable credential the browser has nothing to
+ * offer and `navigator.credentials.get` finds no match.
+ */
+async function addVirtualAuthenticator(page: Page): Promise<void> {
+  const client = await page.context().newCDPSession(page);
+  await client.send('WebAuthn.enable');
+  await client.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+}
 
-test('signs in and stores the session token', async ({ anonApp, api }) => {
+/**
+ * Brings up the auth dialog.
+ *
+ * Signed out, the app opens it on its own — `AUTH_EXPIRED_EVENT` fires as soon
+ * as `/auth/me` comes back 401 — and its overlay swallows clicks aimed at the
+ * sidebar behind it. Clicking unconditionally therefore retries until the test
+ * times out, which reads as a hung suite rather than a failing assertion.
+ */
+async function openAuthModal(page: Page) {
+  const dialog = page.getByRole('dialog');
+
+  // It opens on its own once `/auth/me` answers 401, which is a network round
+  // trip after load — so this waits rather than sampling `isVisible()` once and
+  // racing it.
+  const openedItself = await dialog
+    .waitFor({ state: 'visible', timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  if (openedItself) return dialog;
+
+  // Targeted by `title`, which the sidebar sets deliberately and which does not
+  // change with collapsed/expanded state or display name. A name regex matched
+  // whichever button happened to come first and opened the wrong view.
+  // `:visible` because the shell renders a desktop and a mobile sidebar, only
+  // one of which is on screen — `.first()` alone picks the hidden one.
+  await page
+    .locator('button[title="Sign In"]:visible, button[title^="Logged in as"]:visible')
+    .first()
+    .click();
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function registerPasskey(page: Page, name = 'tester') {
+  const dialog = await openAuthModal(page);
+  await dialog.getByRole('button', { name: /create an account instead/i }).click();
+  await page.getByLabel('Display name').fill(name);
+  await dialog.getByRole('button', { name: /create passkey/i }).click();
+  await expectSignedIn(page);
+}
+
+/**
+ * Waits for the session to actually exist.
+ *
+ * Deliberately *not* the dashboard: the shell and its stat tiles render while
+ * signed out too, with the auth dialog on top. Asserting on them passes
+ * instantly and lets the rest of a test run before the ceremony has finished —
+ * which is exactly the race that made this file look like it was hanging.
+ * The dialog closing is the first thing that only happens once signed in.
+ */
+async function expectSignedIn(page: Page) {
+  await expect(page.getByRole('dialog')).toBeHidden();
+}
+
+/** Waits until the app has stopped believing there is a session. */
+async function expectSignedOut(page: Page) {
+  await expect(page.locator('button[title="Sign In"]:visible').first()).toBeVisible();
+}
+
+test('registers an account with a passkey and lands signed in', async ({ anonApp, api }) => {
+  await addVirtualAuthenticator(anonApp);
   await anonApp.goto('/');
 
-  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
-  await anonApp.getByPlaceholder('e.g. alice').fill('tester');
-  await anonApp.getByPlaceholder('••••••••').fill('hunter2');
-  await anonApp.getByRole('button', { name: 'Login', exact: true }).click();
+  await registerPasskey(anonApp);
+  await expect(anonApp.getByText(DASHBOARD_READY)).toBeVisible();
 
-  await expect
-    .poll(() => anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
-    .toBe('fake-jwt-token');
+  // Both halves of the ceremony ran, in order.
+  const ceremony = api.requests.filter((r) => r.url.startsWith('/auth/passkey/register/'));
+  expect(ceremony.map((r) => r.url)).toEqual([
+    '/auth/passkey/register/start',
+    '/auth/passkey/register/finish',
+  ]);
 
-  expect(api.requests.some((r) => r.url === '/auth/login' && r.method === 'POST')).toBe(true);
+  // The credential the browser produced was forwarded in the shape the server
+  // parses. A conversion bug in `core/passkey.ts` surfaces right here.
+  const finish = ceremony[1].body as any;
+  expect(finish.ceremony_id).toBe('ceremony_register');
+  expect(finish.credential.id).toBeTruthy();
+  expect(finish.credential.type).toBe('public-key');
+  expect(finish.credential.response.attestationObject).toBeTruthy();
+  expect(finish.credential.response.clientDataJSON).toBeTruthy();
 });
 
-test('shows the server error for bad credentials and stores nothing', async ({ anonApp }) => {
+test('signs in with no username typed', async ({ anonApp, api }) => {
+  await addVirtualAuthenticator(anonApp);
   await anonApp.goto('/');
 
-  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
-  await anonApp.getByPlaceholder('e.g. alice').fill('tester');
-  await anonApp.getByPlaceholder('••••••••').fill('wrong');
-  await anonApp.getByRole('button', { name: 'Login', exact: true }).click();
+  // Register first, so the authenticator holds a discoverable credential.
+  await registerPasskey(anonApp);
 
-  await expect(anonApp.getByText('Invalid username or password')).toBeVisible();
-  expect(await anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt'))).toBeNull();
+  const account = await openAuthModal(anonApp);
+  await account.getByRole('button', { name: /sign out/i }).click();
+
+  // Wait for the session to actually be gone before reopening. Signing out
+  // invalidates a cached query, so for a moment the app still believes it is
+  // signed in and the dialog would come back showing the account view.
+  await expectSignedOut(anonApp);
+
+  const dialog = await openAuthModal(anonApp);
+  // The whole claim of this design: there is nothing to type.
+  await expect(dialog.getByRole('textbox')).toHaveCount(0);
+  await dialog.getByRole('button', { name: /^sign in$/i }).click();
+  await expectSignedIn(anonApp);
+
+  const finish = api.requests.find((r) => r.url === '/auth/passkey/login/finish')?.body as any;
+  expect(finish.credential.response.signature).toBeTruthy();
+  expect(finish.credential.response.authenticatorData).toBeTruthy();
 });
 
-test('a rejected token is dropped and the login prompt reopens', async ({ app, api }) => {
+test('signing out ends the session server-side, not just in the page', async ({ app, api }) => {
   await app.goto('/');
-  await expect(app.getByText('TOTAL TASKS')).toBeVisible();
+  await expect(app.getByText(DASHBOARD_READY)).toBeVisible();
 
-  // The stored token stops being accepted — the app must not keep retrying it.
-  api.failNext = { path: /^\/todos$/, status: 401, error: 'Invalid or expired token' };
+  const dialog = await openAuthModal(app);
+  await dialog.getByRole('button', { name: /sign out/i }).click();
+
+  // The app must ask the server to revoke: the cookie it cannot read *is* the
+  // credential, so clearing something client-side would leave a live session.
+  expect(api.requests.some((r) => r.url === '/auth/logout' && r.method === 'POST')).toBe(true);
+
+  await app.reload();
+  await expect(app.getByRole('dialog')).toBeVisible();
+});
+
+test('a rejected session reopens the prompt instead of retrying forever', async ({ app, api }) => {
+  await app.goto('/');
+  await expect(app.getByText(DASHBOARD_READY)).toBeVisible();
+
+  // The session stops being accepted mid-visit — expired, or revoked from
+  // another device.
+  api.signedIn = false;
+  api.failNext = { path: /^\/todos$/, status: 401, error: 'That session has expired' };
   await app.reload();
 
-  await expect
-    .poll(() => app.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
-    .toBeNull();
+  await expect(app.getByRole('dialog')).toBeVisible();
 });
 
-test('signs out and clears the stored token', async ({ app }) => {
+test('a rejected sign-in is explained rather than swallowed', async ({ anonApp, api }) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/');
+
+  // The server refuses the assertion — an unknown credential, or one whose
+  // signature did not verify. Deliberately driven from the server rather than
+  // by dismissing the real prompt: Chrome reports a dismissal only after the
+  // ceremony times out, which would hang the suite rather than test anything.
+  api.failNext = { path: /passkey\/login\/start/, status: 401, error: 'Sign-in failed' };
+
+  await openAuthModal(anonApp);
+  await anonApp.getByRole('dialog').getByRole('button', { name: /^sign in$/i }).click();
+
+  await expect(anonApp.getByRole('alert')).toBeVisible();
+  await expect(anonApp.getByRole('alert')).toContainText(/sign-in failed/i);
+
+  // And it stays on the prompt rather than pretending to have worked.
+  await expect(anonApp.getByRole('dialog')).toBeVisible();
+});
+
+test('the page never holds the session where a script could read it', async ({ app }) => {
   await app.goto('/');
-  await expect(app.getByText('TOTAL TASKS')).toBeVisible();
+  await expect(app.getByText(DASHBOARD_READY)).toBeVisible();
 
-  await app.getByRole('button', { name: /sign in|account|session|tester/i }).first().click();
-  await app.getByRole('button', { name: /log ?out|sign out/i }).click();
+  // The whole reason the session moved to an HttpOnly cookie: an XSS on this
+  // page must find nothing worth stealing. `document.cookie` is checked too —
+  // a cookie missing HttpOnly would show up there.
+  const exposed = await app.evaluate(() => ({
+    local: Object.entries(window.localStorage).filter(([k, v]) =>
+      /token|jwt|session|bearer/i.test(String(k) + String(v))
+    ),
+    session: Object.entries(window.sessionStorage).filter(([k, v]) =>
+      /token|jwt|session|bearer/i.test(String(k) + String(v))
+    ),
+    cookie: document.cookie,
+  }));
 
-  await expect
-    .poll(() => app.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
-    .toBeNull();
-});
-
-test('registers a new account and keeps the session', async ({ anonApp, api }) => {
-  await anonApp.goto('/');
-
-  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
-  await anonApp.getByRole('button', { name: /need an account\? register/i }).click();
-  await anonApp.getByPlaceholder('e.g. alice').fill('newcomer');
-  await anonApp.getByPlaceholder('••••••••').fill('hunter2');
-  await anonApp.getByRole('button', { name: 'Register', exact: true }).click();
-
-  await expect
-    .poll(() => anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt')))
-    .toBe('fake-jwt-token');
-  expect(api.requests.some((r) => r.url === '/auth/register')).toBe(true);
-});
-
-// Local usernames may never be shaped like an MXID, or the two identity spaces
-// collide — the server rejects it and the UI must show why.
-test('rejects an MXID-shaped username at registration', async ({ anonApp }) => {
-  await anonApp.goto('/');
-
-  await anonApp.getByRole('button', { name: /sign in|login|connect/i }).first().click();
-  await anonApp.getByRole('button', { name: /need an account\? register/i }).click();
-  await anonApp.getByPlaceholder('e.g. alice').fill('@alice:matrix.org');
-  await anonApp.getByPlaceholder('••••••••').fill('hunter2');
-  await anonApp.getByRole('button', { name: 'Register', exact: true }).click();
-
-  await expect(anonApp.getByText(/cannot contain/i)).toBeVisible();
-  expect(await anonApp.evaluate(() => window.localStorage.getItem('matrix_bot_jwt'))).toBeNull();
+  expect(exposed.local).toEqual([]);
+  expect(exposed.session).toEqual([]);
+  expect(exposed.cookie).not.toContain('mb_session');
 });

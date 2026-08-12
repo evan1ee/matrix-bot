@@ -18,7 +18,11 @@ export default defineConfig({
   reporter: process.env.CI ? 'list' : [['list'], ['html', { open: 'never' }]],
 
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    // `localhost`, not `127.0.0.1`: WebAuthn requires the Relying Party ID to
+    // match the origin's host, and an IP literal is not a valid RP ID. This is
+    // also what `WEBAUTHN_RP_ID` is set to in development, so the specs run
+    // against the same Relying Party the app really uses.
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
     // The app stores timestamps in UTC and renders them in the viewer's zone.
     // Pinning both keeps date assertions stable wherever the suite runs.
@@ -34,8 +38,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173',
-    url: 'http://127.0.0.1:5173',
+    command: 'npm run dev -- --host localhost --port 5173',
+    url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     stdout: 'ignore',
     stderr: 'pipe',

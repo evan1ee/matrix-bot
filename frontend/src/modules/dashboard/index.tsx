@@ -43,6 +43,11 @@ const StatCard = ({
   <button
     type="button"
     onClick={onClick}
+    // A stable hook for tests, matching `todo-row` and `datetime-picker`
+    // elsewhere. The card is a <button>, so tests that walked up to an ancestor
+    // <div> by class name silently matched nothing.
+    data-testid="stat-card"
+    data-stat={label}
     className="text-left bg-[var(--color-surface-card)] border border-[var(--color-border-subtle)] rounded-lg p-5 flex flex-col justify-between cursor-pointer transition duration-150 hover:border-[var(--color-border-default)] hover:bg-[var(--color-surface-hover)]"
   >
     <div className="flex justify-between items-start mb-4">

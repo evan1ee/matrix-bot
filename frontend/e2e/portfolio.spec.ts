@@ -1,9 +1,9 @@
-import { test, expect, gotoApp, chooseCurrency } from './fixtures';
+import { test, expect, gotoApp, chooseCurrency, TAB } from './fixtures';
 
 const holdingRow = (page: import('@playwright/test').Page, text: string) =>
   page.getByTestId('holding-row').filter({ hasText: text });
 
-const gotoPortfolio = (page: import('@playwright/test').Page) => gotoApp(page, 'Portfolio');
+const gotoPortfolio = (page: import('@playwright/test').Page) => gotoApp(page, TAB.portfolio);
 
 /** Comfortably more cash than any single test spends. */
 const AMPLE_CASH = 100_000_00;
