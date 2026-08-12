@@ -213,7 +213,6 @@ pub enum RecoveryRejection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::recovery::RECOVERY_DELAY_HOURS;
 use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
     use sqlx::SqlitePool;

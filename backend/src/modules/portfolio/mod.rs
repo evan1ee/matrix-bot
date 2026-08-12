@@ -10,9 +10,11 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod cash;
 pub mod handler;
 pub mod models;
 pub mod repository;
+pub mod view;
 
 pub struct PortfolioModule;
 

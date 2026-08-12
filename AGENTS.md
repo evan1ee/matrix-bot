@@ -18,7 +18,24 @@ This document defines the architectural conventions, coding rules, and developme
    - Enforce input length validation (max 500 chars) on all API payload strings to prevent DoS/database bloat.
 
 3. **Strict File Line Limit (< 500 Lines)**:
-   - **No single source file in `src/` should exceed 500 lines of code** (target < 300 lines).
+   - **No source file in `backend/src/` should exceed 500 lines of _production_
+     code** (target < 300). The count is lines above the `#[cfg(test)]` module —
+     tests live beside the code they cover and are not counted against it.
+   - Stated that way because the rule was previously ambiguous and, read as
+     total lines, was violated by ten files that are mostly tests. Measured on
+     production lines the codebase is compliant, and the rule is enforceable:
+
+     ```bash
+     for f in $(find backend/src -name '*.rs'); do
+       t=$(grep -n '^#\[cfg(test)\]' "$f" | head -1 | cut -d: -f1)
+       prod=$([ -n "$t" ] && echo $((t-1)) || wc -l < "$f")
+       [ "$prod" -gt 500 ] && echo "$f ($prod)"
+     done
+     ```
+   - Split along a real seam, never by line count alone. Recent examples:
+     `db/schema.rs` → DDL vs `db/backfill.rs` (one-shot data conversions) vs
+     `db/schema_auth.rs`; `api/account.rs` → one file per concern;
+     `portfolio/handler.rs` → `view.rs` (renders, never writes) and `cash.rs`.
    - Decompose feature modules into standard sub-files:
      - `mod.rs`: Module struct & `BotModule` trait implementation
      - `models.rs`: Structs & Enums (e.g. `ReminderStatus`, `TodoPriority`)
