@@ -142,6 +142,15 @@ export class FakeApi {
     recovery_valid_after: null,
   };
 
+  /**
+   * Events waiting to be delivered on the next `/events` connection.
+   *
+   * The stream is the only way the app learns about a change it did not make
+   * itself — a Matrix command, or another device — so this is what lets a test
+   * drive that path.
+   */
+  pendingEvents: unknown[] = [];
+
   /** A merge waiting on confirmation, as `!link` would have recorded. */
   pendingMerge: { from_account: string; preview: Record<string, number> } | null = null;
 
@@ -309,6 +318,18 @@ export class FakeApi {
     });
   }
 
+  /**
+   * Queues a `SystemEvent` for the next stream connection.
+   *
+   * The shape matters: the server sends *unnamed* messages whose body carries
+   * `type` and `payload`, and the frontend discriminates on `type`. Getting
+   * that wrong is silent — the browser fires `onmessage`, the app finds no
+   * matching handler, and nothing happens.
+   */
+  pushEvent(type: string, payload: unknown) {
+    this.pendingEvents.push({ type, payload });
+  }
+
   async install(page: Page) {
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
@@ -459,13 +480,23 @@ export class FakeApi {
     if (path === '/health') {
       return json(route, 200, { status: 'ok', database: 'connected', version: '0.1.0' });
     }
-    if (path === '/events/ticket' && method === 'POST') {
-      return json(route, 200, { ticket: 'fake-ticket' });
-    }
     if (path === '/events') {
-      // Terminate immediately rather than holding a stream open: the app
-      // reconnects with backoff, which keeps tests deterministic.
-      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+      // Frames queued by `pushEvent` before the stream opened are delivered,
+      // then the response ends. `EventSource` reconnects with backoff, so a
+      // test that queues an event and waits will get it on the next connect —
+      // deterministic, without holding a socket open for the run.
+      //
+      // This used to answer with an empty body and nothing else, which meant
+      // every live-update path in the app went permanently untested and the UI
+      // sat in "Reconnecting…" for the whole suite.
+      const frames = this.pendingEvents.splice(0).map(
+        (e) => `data: ${JSON.stringify(e)}\n\n`
+      );
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: frames.join(''),
+      });
     }
     if (path === '/rooms') {
       return json(route, 200, this.rooms);
