@@ -89,6 +89,37 @@ export interface FakeHolding {
   updated_at: string;
 }
 
+export interface FakeWebhook {
+  id: string;
+  owner_id: string;
+  name: string;
+  token_prefix: string;
+  default_room_id: string;
+  is_active: boolean;
+  total_delivered_count: number;
+  failure_count: number;
+  last_triggered_at: string | null;
+  created_at: string;
+}
+
+export interface FakeWebhookOutboxItem {
+  id: string;
+  webhook_id: string;
+  owner_id: string;
+  room_id: string;
+  severity: string;
+  title: string | null;
+  html_body: string;
+  plain_body: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  last_error: string | null;
+  created_at: string;
+  delivered_at: string | null;
+}
+
 const OWNER = 'acct_00000000000000000000000000000001';
 const DISPLAY_NAME = 'tester';
 /** Mirrors `due_reminder::MAX_LEAD_MINUTES`. */
@@ -99,6 +130,10 @@ const QUANTITY_EXPONENT = 8;
 export class FakeApi {
   todos: FakeTodo[] = [];
   reminders: FakeReminder[] = [];
+  webhooks: FakeWebhook[] = [];
+  webhookLogs: FakeWebhookOutboxItem[] = [];
+  nextWebhookId = 1;
+  nextLogId = 1;
   rooms: FakeRoom[] = [
     { room_id: '!general:mbm.one', name: 'General' },
     { room_id: '!ops:mbm.one', name: 'Ops' },
@@ -203,6 +238,49 @@ export class FakeApi {
     };
     this.reminders.push(reminder);
     return reminder;
+  }
+
+  seedWebhook(partial: Partial<FakeWebhook> = {}): FakeWebhook {
+    const id = `whk_${this.nextWebhookId++}`;
+    const webhook: FakeWebhook = {
+      id,
+      owner_id: OWNER,
+      name: 'Seeded Webhook',
+      token_prefix: 'whk_a1b2c3',
+      default_room_id: '!general:mbm.one',
+      is_active: true,
+      total_delivered_count: 0,
+      failure_count: 0,
+      last_triggered_at: null,
+      created_at: new Date().toISOString(),
+      ...partial,
+    };
+    this.webhooks.push(webhook);
+    return webhook;
+  }
+
+  seedWebhookLog(webhookId: string, partial: Partial<FakeWebhookOutboxItem> = {}): FakeWebhookOutboxItem {
+    const id = `outbox_${this.nextLogId++}`;
+    const log: FakeWebhookOutboxItem = {
+      id,
+      webhook_id: webhookId,
+      owner_id: OWNER,
+      room_id: '!general:mbm.one',
+      severity: 'info',
+      title: 'Alert Title',
+      html_body: '<b>Alert Title</b><br/>Alert details here',
+      plain_body: 'Alert details here',
+      status: 'delivered',
+      attempts: 1,
+      max_attempts: 10,
+      next_attempt_at: new Date().toISOString(),
+      last_error: null,
+      created_at: new Date().toISOString(),
+      delivered_at: new Date().toISOString(),
+      ...partial,
+    };
+    this.webhookLogs.push(log);
+    return log;
   }
 
   seedCategory(name: string): FakeCategory {
@@ -968,6 +1046,83 @@ export class FakeApi {
       }
 
       return json(route, 200, [...byCurrency.values()]);
+    }
+
+    // --- webhooks ---
+    if (path === '/account/webhooks' && method === 'GET') {
+      return json(route, 200, this.webhooks);
+    }
+    if (path === '/account/webhooks' && method === 'POST') {
+      const name = String(body?.name ?? '').trim();
+      const roomId = String(body?.default_room_id ?? '').trim();
+      if (!name) return json(route, 400, { error: 'Webhook name is required', code: 400 });
+      if (!roomId) return json(route, 400, { error: 'Target room ID cannot be empty', code: 400 });
+      const webhook = this.seedWebhook({ name, default_room_id: roomId });
+      const rawToken = 'whk_fake_secret_token_1234567890abcdef';
+      return json(route, 201, {
+        webhook,
+        raw_token: rawToken,
+        example_curl_json: `curl -X POST https://localhost:8080/api/v1/webhooks/${rawToken} -H "Content-Type: application/json" -d '{"title":"Alert","message":"Server is down","level":"critical"}'`,
+        example_curl_telegram: `curl -X POST https://localhost:8080/bot${rawToken}/sendMessage -d "text=Server alert"`,
+      });
+    }
+    const webhookMatch = path.match(/^\/account\/webhooks\/([^/]+)$/);
+    if (webhookMatch) {
+      const id = webhookMatch[1];
+      const hook = this.webhooks.find((w) => w.id === id);
+      if (!hook) return json(route, 404, { error: 'Webhook not found', code: 404 });
+
+      if (method === 'PATCH') {
+        if (body?.name !== undefined) hook.name = String(body.name);
+        if (body?.default_room_id !== undefined) hook.default_room_id = String(body.default_room_id);
+        if (body?.is_active !== undefined) hook.is_active = Boolean(body.is_active);
+        return json(route, 200, hook);
+      }
+      if (method === 'DELETE') {
+        this.webhooks = this.webhooks.filter((w) => w.id !== id);
+        return route.fulfill({ status: 204, body: '' });
+      }
+    }
+    const rotateMatch = path.match(/^\/account\/webhooks\/([^/]+)\/rotate$/);
+    if (rotateMatch && method === 'POST') {
+      const id = rotateMatch[1];
+      const hook = this.webhooks.find((w) => w.id === id);
+      if (!hook) return json(route, 404, { error: 'Webhook not found', code: 404 });
+      const rawToken = 'whk_rotated_secret_token_9876543210fedcba';
+      return json(route, 200, {
+        webhook: hook,
+        raw_token: rawToken,
+        example_curl_json: `curl -X POST https://localhost:8080/api/v1/webhooks/${rawToken} -H "Content-Type: application/json" -d '{"title":"Alert","message":"Server is down","level":"critical"}'`,
+        example_curl_telegram: `curl -X POST https://localhost:8080/bot${rawToken}/sendMessage -d "text=Server alert"`,
+      });
+    }
+    const testHookMatch = path.match(/^\/account\/webhooks\/([^/]+)\/test$/);
+    if (testHookMatch && method === 'POST') {
+      const id = testHookMatch[1];
+      const hook = this.webhooks.find((w) => w.id === id);
+      if (!hook) return json(route, 404, { error: 'Webhook not found', code: 404 });
+      hook.total_delivered_count += 1;
+      hook.last_triggered_at = new Date().toISOString();
+      this.seedWebhookLog(id, {
+        title: 'Test Webhook Alert',
+        plain_body: 'This is a synthetic test alert dispatched from the Web UI.',
+        html_body: '<b>Test Webhook Alert</b><br/>This is a synthetic test alert dispatched from the Web UI.',
+        severity: 'info',
+        status: 'delivered',
+      });
+      return json(route, 202, { status: 'queued', outbox_id: 'outbox_test_123' });
+    }
+
+    const logsMatch = path.match(/^\/account\/webhooks\/([^/]+)\/logs$/);
+    if (logsMatch && method === 'GET') {
+      const id = logsMatch[1];
+      const items = this.webhookLogs.filter((l) => l.webhook_id === id);
+      return json(route, 200, {
+        items,
+        total: items.length,
+        limit: 50,
+        offset: 0,
+      });
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

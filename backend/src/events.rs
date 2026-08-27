@@ -7,6 +7,7 @@ use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::reminder::models::Reminder;
 use crate::modules::settings::UserSettings;
 use crate::modules::todo::models::TodoItem;
+use crate::modules::webhook::models::Webhook;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -45,6 +46,10 @@ pub enum SystemEvent {
     RecurringBillUpdated(RecurringBill),
     RecurringBillDeleted { id: i64, owner_id: String },
     RecurringBillPaid { id: i64, owner_id: String, next_due_at: String },
+    WebhookCreated(Webhook),
+    WebhookUpdated(Webhook),
+    WebhookDeleted { id: String, owner_id: String },
+    WebhookTriggered { id: String, owner_id: String, outbox_id: String, room_id: String, severity: String },
 }
 
 impl SystemEvent {
@@ -81,6 +86,9 @@ impl SystemEvent {
             }
             SystemEvent::RecurringBillDeleted { owner_id, .. }
             | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
+            SystemEvent::WebhookCreated(w) | SystemEvent::WebhookUpdated(w) => &w.owner_id,
+            SystemEvent::WebhookDeleted { owner_id, .. }
+            | SystemEvent::WebhookTriggered { owner_id, .. } => owner_id,
         }
     }
 }

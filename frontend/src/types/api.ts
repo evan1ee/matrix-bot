@@ -225,6 +225,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_webhooks"];
+        put?: never;
+        post: operations["create_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_webhook"];
+        options?: never;
+        head?: never;
+        patch: operations["update_webhook"];
+        trace?: never;
+    };
+    "/api/v1/account/webhooks/{id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_webhook_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/webhooks/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rotate_webhook_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/webhooks/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["test_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -745,6 +825,22 @@ export interface paths {
         patch: operations["update_todo"];
         trace?: never;
     };
+    "/api/v1/webhooks/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inbound_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -894,6 +990,16 @@ export interface components {
             room_id?: string | null;
             text: string;
         };
+        CreateWebhookInput: {
+            default_room_id: string;
+            name: string;
+        };
+        CreatedWebhookResponse: {
+            example_curl_json: string;
+            example_curl_telegram: string;
+            raw_token: string;
+            webhook: components["schemas"]["Webhook"];
+        };
         /**
          * @description Totals for one currency. Currencies are never combined — without a rate
          *     source, adding EUR to JPY would produce a meaningless number.
@@ -962,6 +1068,19 @@ export interface components {
             symbol: string;
             /** Format: date-time */
             updated_at?: string | null;
+        };
+        InboundAcceptedResponse: {
+            outbox_id: string;
+            status: string;
+        };
+        InboundPayload: {
+            chat_id?: string | null;
+            format?: string | null;
+            level?: string | null;
+            message?: string | null;
+            room_id?: string | null;
+            text?: string | null;
+            title?: string | null;
         };
         JoinedRoomInfo: {
             name: string;
@@ -1413,6 +1532,11 @@ export interface components {
             remind_room_id?: string | null;
             text?: string | null;
         };
+        UpdateWebhookInput: {
+            default_room_id?: string | null;
+            is_active?: boolean | null;
+            name?: string | null;
+        };
         UserProfileResponse: {
             /** @description The signed-in account. The frontend keys its caches on this. */
             account_id: string;
@@ -1440,6 +1564,55 @@ export interface components {
             /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
             timezone: string;
         };
+        Webhook: {
+            /** Format: date-time */
+            created_at: string;
+            default_room_id: string;
+            /** Format: int64 */
+            failure_count: number;
+            id: string;
+            is_active: boolean;
+            /** Format: date-time */
+            last_triggered_at?: string | null;
+            name: string;
+            owner_id: string;
+            token_prefix: string;
+            /** Format: int64 */
+            total_delivered_count: number;
+        };
+        WebhookLogsResponse: {
+            items: components["schemas"]["WebhookOutboxItem"][];
+            /** Format: int64 */
+            limit: number;
+            /** Format: int64 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
+        WebhookOutboxItem: {
+            /** Format: int64 */
+            attempts: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            delivered_at?: string | null;
+            html_body: string;
+            id: string;
+            last_error?: string | null;
+            /** Format: int64 */
+            max_attempts: number;
+            /** Format: date-time */
+            next_attempt_at: string;
+            owner_id: string;
+            plain_body: string;
+            room_id: string;
+            severity: string;
+            status: string;
+            title?: string | null;
+            webhook_id: string;
+        };
+        /** @enum {string} */
+        WebhookSeverity: "critical" | "warning" | "info" | "success" | "default";
     };
     responses: never;
     parameters: never;
@@ -1731,6 +1904,161 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_webhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"][];
+                };
+            };
+        };
+    };
+    create_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWebhookInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedWebhookResponse"];
+                };
+            };
+        };
+    };
+    delete_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWebhookInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+        };
+    };
+    get_webhook_logs: {
+        parameters: {
+            query?: {
+                /** @description Max entries to return (default 50) */
+                limit?: number | null;
+                /** @description Offset for pagination (default 0) */
+                offset?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description Webhook ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookLogsResponse"];
+                };
+            };
+        };
+    };
+    rotate_webhook_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedWebhookResponse"];
+                };
+            };
+        };
+    };
+    test_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundAcceptedResponse"];
+                };
             };
         };
     };
@@ -3385,6 +3713,47 @@ export interface operations {
             };
             /** @description Todo not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    inbound_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundAcceptedResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

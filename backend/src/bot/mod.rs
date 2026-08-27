@@ -17,6 +17,7 @@ use crate::modules::recurring_bills::RecurringBillsModule;
 use crate::modules::reminder::ReminderModule;
 use crate::modules::settings::SettingsModule;
 use crate::modules::todo::TodoModule;
+use crate::modules::webhook::WebhookModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
 pub mod client;
@@ -73,6 +74,7 @@ impl MatrixBot {
         registry.register(PortfolioModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
+        registry.register(WebhookModule::new());
         registry.register(crate::modules::account::AccountModule::new(
             client_handle.clone().unwrap_or_default(),
             config.web_url.clone(),

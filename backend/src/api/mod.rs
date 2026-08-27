@@ -29,6 +29,7 @@ pub mod rooms;
 pub mod settings;
 pub mod sse;
 pub mod todos;
+pub mod webhooks;
 
 /// The API route table.
 ///
@@ -109,6 +110,25 @@ pub fn api_routes() -> Router<auth::ApiState> {
                 .delete(recurring_bills::delete_bill),
         )
         .route("/recurring-bills/:id/pay", post(recurring_bills::pay_bill))
+        .route("/webhooks/:token", post(webhooks::inbound_webhook))
+        .route(
+            "/bot:token/sendMessage",
+            get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
+        )
+        .route(
+            "/account/webhooks",
+            get(webhooks::list_webhooks).post(webhooks::create_webhook),
+        )
+        .route(
+            "/account/webhooks/:id",
+            patch(webhooks::update_webhook).delete(webhooks::delete_webhook),
+        )
+        .route(
+            "/account/webhooks/:id/rotate",
+            post(webhooks::rotate_webhook_token),
+        )
+        .route("/account/webhooks/:id/test", post(webhooks::test_webhook))
+        .route("/account/webhooks/:id/logs", get(webhooks::get_webhook_logs))
 }
 
 pub async fn start_api_server(
@@ -192,6 +212,11 @@ pub async fn start_api_server(
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        .route(
+            "/bot:token/sendMessage",
+            get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
+        )
+        .route("/webhooks/:token", post(webhooks::inbound_webhook))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         .fallback_service(ServeDir::new(web_dist))
         .layer(cors)

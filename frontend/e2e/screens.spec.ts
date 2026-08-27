@@ -41,6 +41,20 @@ test('@screens the module views', async ({ app, api }) => {
   api.seedTodo({ text: 'Renew passport', priority: 'high' });
   api.seedTodo({ text: 'Book dentist' });
   api.seedReminder({ message: 'Stand-up' });
+  api.seedWebhook({
+    name: 'Production VPS Health',
+    default_room_id: '!ops:mbm.one',
+    total_delivered_count: 42,
+    failure_count: 0,
+    last_triggered_at: '2026-08-27T03:00:00Z',
+  });
+  api.seedWebhook({
+    name: 'GitHub CI/CD Alerts',
+    default_room_id: '!general:mbm.one',
+    total_delivered_count: 15,
+    failure_count: 1,
+    last_triggered_at: '2026-08-27T02:30:00Z',
+  });
 
   await gotoApp(app);
   await expect(app.getByText(DASHBOARD_READY)).toBeVisible();
@@ -52,10 +66,49 @@ test('@screens the module views', async ({ app, api }) => {
     ['06-expenses', TAB.finance],
     ['07-portfolio', TAB.portfolio],
     ['08-bills', TAB.bills],
+    ['09-webhooks', TAB.webhooks],
   ] as const) {
     await app.getByRole('button', { name: tab, exact: true }).click();
     await shot(app, n);
   }
+});
+
+test('@screens webhook create and secret modal', async ({ app }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
+  await app.getByRole('button', { name: /create webhook/i }).first().click();
+  await app.locator('input[placeholder*="VPS Health Monitor"]').fill('Production VPS Alerts');
+  await app.getByRole('button', { name: 'Generate Webhook' }).click();
+  await expect(app.getByText('Webhook Secret Generated')).toBeVisible();
+  await shot(app, '10-webhook-secret-modal');
+});
+
+test('@screens webhook delivery logs viewer', async ({ app, api }) => {
+  const hook = api.seedWebhook({ name: 'Production VPS Health' });
+  api.seedWebhookLog(hook.id, {
+    title: 'High CPU Usage Alert',
+    plain_body: 'CPU load average exceeded 90% (current: 96.4%) on node vps-prod-01 for 5m.',
+    severity: 'critical',
+    status: 'delivered',
+  });
+  api.seedWebhookLog(hook.id, {
+    title: 'Nightly Database Backup',
+    plain_body: 'Backup database archived: snapshot-2026-08-27.tar.gz (size: 4.2GB).',
+    severity: 'success',
+    status: 'delivered',
+  });
+  api.seedWebhookLog(hook.id, {
+    title: 'Deployment Warning',
+    plain_body: 'Slow database query detected: SELECT * FROM transactions WHERE ... (took 3200ms)',
+    severity: 'warning',
+    status: 'delivered',
+  });
+
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
+  await app.getByRole('button', { name: /history/i }).first().click();
+  await expect(app.getByText(/Delivery Logs:/i)).toBeVisible();
+  await shot(app, '11-webhook-logs-history');
 });
 
 test('@screens settings, both tabs', async ({ app }) => {

@@ -4,7 +4,7 @@ use utoipa::{Modify, OpenApi};
 
 use crate::api::{
     account, auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse,
-    todos,
+    todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -78,7 +78,15 @@ use crate::modules::settings::UserSettings;
         recurring_bills::get_bill,
         recurring_bills::update_bill,
         recurring_bills::delete_bill,
-        recurring_bills::pay_bill
+        recurring_bills::pay_bill,
+        webhooks::inbound_webhook,
+        webhooks::list_webhooks,
+        webhooks::create_webhook,
+        webhooks::update_webhook,
+        webhooks::rotate_webhook_token,
+        webhooks::test_webhook,
+        webhooks::delete_webhook,
+        webhooks::get_webhook_logs
     ),
     components(
         schemas(
@@ -139,7 +147,16 @@ use crate::modules::settings::UserSettings;
             portfolio::CashAmountRequest,
             RecurringBill,
             CreateBillPayload,
-            UpdateBillPayload
+            UpdateBillPayload,
+            crate::modules::webhook::models::Webhook,
+            crate::modules::webhook::models::WebhookOutboxItem,
+            crate::modules::webhook::models::WebhookSeverity,
+            crate::modules::webhook::models::CreatedWebhookResponse,
+            crate::modules::webhook::models::CreateWebhookInput,
+            crate::modules::webhook::models::UpdateWebhookInput,
+            crate::modules::webhook::models::InboundPayload,
+            crate::modules::webhook::models::InboundAcceptedResponse,
+            crate::modules::webhook::models::WebhookLogsResponse
         )
     ),
     modifiers(&SecurityAddon),

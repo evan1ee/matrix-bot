@@ -27,6 +27,7 @@ export const TAB = {
   finance: 'Expenses',
   portfolio: 'Portfolio',
   bills: 'Bills',
+  webhooks: 'Webhooks',
 } as const;
 
 interface Fixtures {

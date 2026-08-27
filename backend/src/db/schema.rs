@@ -24,6 +24,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     crate::db::schema_auth::create_tables(pool).await?;
+    crate::db::schema_webhooks::create_tables(pool).await?;
 
     sqlx::query(
         r#"
