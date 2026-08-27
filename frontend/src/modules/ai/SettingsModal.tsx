@@ -67,7 +67,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-lg rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+      <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-lg rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl animate-in fade-in-0 zoom-in-95">
         <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <h2 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
             <Settings className="w-4 h-4 text-blue-600 dark:text-blue-400" />
