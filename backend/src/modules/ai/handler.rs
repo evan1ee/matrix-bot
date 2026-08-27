@@ -134,7 +134,8 @@ pub async fn run_ai_turn(
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
         format!(
             "You are an intelligent, helpful AI assistant integrated into Matrix. \
-             You have read-only tools to check the user's tasks, reminders, recurring bills, and financial ledger. \
+             You have tools to check and manage the user's tasks, reminders, recurring bills, portfolio, and financial ledger. \
+             You can both query information and execute actions on the user's behalf (such as adding tasks, completing tasks, recording expenses, setting reminders, depositing cash, and buying investments) when requested. \
              The current user's ID is '{}'. Keep answers concise, clear, and nicely formatted with Markdown.",
             owner_id
         )
@@ -211,7 +212,9 @@ pub async fn run_ai_turn(
 
                             let result_str = match ToolRegistry::execute_tool(
                                 pool,
+                                broadcaster,
                                 owner_id,
+                                room_id,
                                 &func_name,
                                 &tool_call.function.arguments,
                             )
@@ -530,5 +533,87 @@ mod tests {
             result.message.contains("Deploy Matrix Bot") || result.message.contains("Audit cryptographic"),
             "Response should mention tasks"
         );
+    }
+
+    #[tokio::test]
+    #[ignore] // Live integration test with real xAI API for natural language mutations
+    async fn test_live_xai_grok_mutation_tools() {
+        if std::env::var("https_proxy").is_err() {
+            std::env::set_var("https_proxy", "http://127.0.0.1:7897");
+            std::env::set_var("http_proxy", "http://127.0.0.1:7897");
+        }
+
+        let (db, owner) = setup_test().await;
+
+        let api_key = match std::env::var("XAI_API_KEY") {
+            Ok(k) if !k.trim().is_empty() => k,
+            _ => return,
+        };
+
+        let input = crate::modules::ai::models::UpdateAiConfigInput {
+            api_base_url: Some("https://api.x.ai/v1".to_string()),
+            api_key: Some(api_key),
+            model_name: Some("grok-4.6".to_string()),
+            system_prompt: None,
+            temperature: Some(0.7),
+            max_tokens: Some(1024),
+        };
+
+        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+            .await
+            .unwrap();
+
+        // 1. Test Natural Language Task Creation
+        let task_result = run_ai_turn(
+            &db.pool,
+            None,
+            &owner,
+            "!room:mbm.one",
+            None,
+            "Please add a high priority todo for me: Prepare slide deck for Friday demo",
+        )
+        .await
+        .expect("Natural language add_todo should succeed");
+
+        println!("\n=== Live xAI Grok Add Todo Result ===");
+        println!("Tools Executed: {:?}", task_result.tool_calls_executed);
+        println!("Response:\n{}", task_result.message);
+
+        assert!(task_result.tool_calls_executed.contains(&"add_todo".to_string()));
+
+        // Verify task in SQLite DB
+        let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(&db.pool, &owner, None, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].text.contains("Prepare slide deck"));
+        assert_eq!(tasks[0].priority, "high");
+
+        // 2. Test Natural Language Expense Recording
+        let exp_result = run_ai_turn(
+            &db.pool,
+            None,
+            &owner,
+            "!room:mbm.one",
+            None,
+            "Record an expense of 18.50 USD for team lunch in the Food category",
+        )
+        .await
+        .expect("Natural language record_finance_entry should succeed");
+
+        println!("\n=== Live xAI Grok Record Expense Result ===");
+        println!("Tools Executed: {:?}", exp_result.tool_calls_executed);
+        println!("Response:\n{}", exp_result.message);
+
+        assert!(exp_result.tool_calls_executed.contains(&"record_finance_entry".to_string()));
+
+        // Verify transaction in SQLite DB
+        let from = chrono::Utc::now() - chrono::Duration::days(1);
+        let to = chrono::Utc::now() + chrono::Duration::days(1);
+        let summary = crate::modules::finance::repository::FinanceRepository::summary(&db.pool, &owner, from, to)
+            .await
+            .unwrap();
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].expense_minor, 1850);
     }
 }

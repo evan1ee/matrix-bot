@@ -223,6 +223,42 @@ The LLM is provided with the following JSON schema tool definitions:
 
 ---
 
+## 8. Action & Mutation Toolset Specification ✍️
+
+The AI assistant also has access to write tools allowing users to command natural language mutations:
+
+### 7. `add_todo`
+* **Description**: Adds a task / to-do with optional priority, relative/absolute due dates, and lead-time reminders.
+* **Parameters**: `text` (required), `priority` (optional), `due_in_minutes` (optional), `due_at` (optional), `remind_before_minutes` (optional).
+* **Execution**: Calls `TodoRepository::add(...)` and broadcasts `SystemEvent::TodoCreated`.
+
+### 8. `complete_todo`
+* **Description**: Marks a task as completed by ID or substring search.
+* **Parameters**: `id` (optional), `text_search` (optional).
+* **Execution**: Calls `TodoRepository::set_completed(...)` and broadcasts `SystemEvent::TodoUpdated`.
+
+### 9. `record_finance_entry`
+* **Description**: Records an expense or income transaction in the ledger.
+* **Parameters**: `amount` (required), `direction` (required: "expense" or "income"), `note` (required), `currency` (optional), `category` (optional).
+* **Execution**: Minor unit conversion, auto category creation, calls `FinanceRepository::create_transaction(...)`, and broadcasts `SystemEvent::TransactionCreated`.
+
+### 10. `set_reminder`
+* **Description**: Schedules a reminder with relative minutes or timestamp, and optional recurrence pattern.
+* **Parameters**: `message` (required), `in_minutes` (optional), `trigger_at` (optional), `recurrence` (optional).
+* **Execution**: Calls `ReminderRepository::create(...)` and broadcasts `SystemEvent::ReminderCreated`.
+
+### 11. `deposit_portfolio_cash`
+* **Description**: Deposits uninvested cash into the user's portfolio.
+* **Parameters**: `amount` (required), `currency` (optional).
+* **Execution**: Calls `PortfolioRepository::deposit_cash(...)` and broadcasts `SystemEvent::PortfolioCashUpdated`.
+
+### 12. `buy_portfolio_holding`
+* **Description**: Records purchase of an investment position, validating sufficient cash balance.
+* **Parameters**: `symbol` (required), `quantity` (required), `price` (required), `currency` (optional).
+* **Execution**: Calls `PortfolioRepository::buy(...)` and broadcasts `SystemEvent::PortfolioHoldingUpdated` & `SystemEvent::PortfolioCashUpdated`.
+
+---
+
 ## 8. REST & Web API Specification
 
 | Method | Path | Auth | Description |
