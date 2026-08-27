@@ -120,6 +120,36 @@ export interface FakeWebhookOutboxItem {
   delivered_at: string | null;
 }
 
+export interface FakeAiConfig {
+  owner_id: string;
+  api_base_url: string | null;
+  api_key: string | null;
+  model_name: string | null;
+  system_prompt: string | null;
+  temperature: number | null;
+  max_tokens: number | null;
+  updated_at: string;
+  has_api_key?: boolean;
+}
+
+export interface FakeAiConversation {
+  id: string;
+  owner_id: string;
+  room_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FakeAiMessage {
+  id: string;
+  conversation_id: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  tool_call_id: string | null;
+  tool_name: string | null;
+  created_at: string;
+}
+
 const OWNER = 'acct_00000000000000000000000000000001';
 const DISPLAY_NAME = 'tester';
 /** Mirrors `due_reminder::MAX_LEAD_MINUTES`. */
@@ -132,8 +162,22 @@ export class FakeApi {
   reminders: FakeReminder[] = [];
   webhooks: FakeWebhook[] = [];
   webhookLogs: FakeWebhookOutboxItem[] = [];
+  aiConfig: FakeAiConfig = {
+    owner_id: OWNER,
+    api_base_url: 'http://localhost:11434/v1',
+    api_key: null,
+    model_name: 'llama3.2',
+    system_prompt: null,
+    temperature: 0.7,
+    max_tokens: 2048,
+    updated_at: new Date().toISOString(),
+  };
+  aiConversations: FakeAiConversation[] = [];
+  aiMessages: FakeAiMessage[] = [];
   nextWebhookId = 1;
   nextLogId = 1;
+  nextAiConvId = 1;
+  nextAiMsgId = 1;
   rooms: FakeRoom[] = [
     { room_id: '!general:mbm.one', name: 'General' },
     { room_id: '!ops:mbm.one', name: 'Ops' },
@@ -1123,6 +1167,121 @@ export class FakeApi {
         limit: 50,
         offset: 0,
       });
+    }
+
+    if (path === '/account/ai-config') {
+      if (method === 'GET') {
+        const redacted = {
+          ...this.aiConfig,
+          has_api_key: !!this.aiConfig.api_key && this.aiConfig.api_key.trim().length > 0,
+          api_key: null,
+        };
+        return json(route, 200, redacted);
+      }
+      if (method === 'PUT') {
+        this.aiConfig = {
+          ...this.aiConfig,
+          ...body,
+          updated_at: new Date().toISOString(),
+        };
+        const redacted = {
+          ...this.aiConfig,
+          has_api_key: !!this.aiConfig.api_key && this.aiConfig.api_key.trim().length > 0,
+          api_key: null,
+        };
+        return json(route, 200, redacted);
+      }
+    }
+
+    if (path === '/ai/chat' && method === 'POST') {
+      let conv = this.aiConversations.find((c) => c.id === body?.conversation_id);
+      if (!conv) {
+        conv = {
+          id: `conv_${this.nextAiConvId++}`,
+          owner_id: OWNER,
+          room_id: String(body?.room_id || 'web_chat'),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.aiConversations.push(conv);
+      }
+      conv.updated_at = new Date().toISOString();
+
+      const userMsg: FakeAiMessage = {
+        id: `msg_${this.nextAiMsgId++}`,
+        conversation_id: conv.id,
+        role: 'user',
+        content: String(body?.prompt || ''),
+        tool_call_id: null,
+        tool_name: null,
+        created_at: new Date().toISOString(),
+      };
+      this.aiMessages.push(userMsg);
+
+      const isTaskQuestion = body?.prompt?.toLowerCase().includes('task');
+      const toolCalls = isTaskQuestion ? ['get_my_tasks'] : [];
+
+      if (isTaskQuestion) {
+        this.aiMessages.push({
+          id: `msg_${this.nextAiMsgId++}`,
+          conversation_id: conv.id,
+          role: 'tool',
+          content: JSON.stringify(
+            this.todos.map((t) => ({
+              id: t.id,
+              text: t.text,
+              priority: t.priority,
+              completed: t.completed,
+            })),
+            null,
+            2
+          ),
+          tool_call_id: 'call_123',
+          tool_name: 'get_my_tasks',
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      const botReply = isTaskQuestion
+        ? `You have ${this.todos.length} task(s) currently recorded in your list.`
+        : `I received your prompt: "${body?.prompt}". How can I help further?`;
+
+      const assistantMsg: FakeAiMessage = {
+        id: `msg_${this.nextAiMsgId++}`,
+        conversation_id: conv.id,
+        role: 'assistant',
+        content: botReply,
+        tool_call_id: null,
+        tool_name: null,
+        created_at: new Date().toISOString(),
+      };
+      this.aiMessages.push(assistantMsg);
+
+      return json(route, 200, {
+        conversation_id: conv.id,
+        message: botReply,
+        model_used: this.aiConfig.model_name || 'llama3.2',
+        tool_calls_executed: toolCalls,
+      });
+    }
+
+    if (path === '/ai/conversations' && method === 'GET') {
+      return json(route, 200, this.aiConversations);
+    }
+
+    const aiConvMatch = path.match(/^\/ai\/conversations\/([^/]+)$/);
+    if (aiConvMatch && method === 'DELETE') {
+      const id = aiConvMatch[1];
+      this.aiConversations = this.aiConversations.filter((c) => c.id !== id);
+      this.aiMessages = this.aiMessages.filter((m) => m.conversation_id !== id);
+      return route.fulfill({ status: 204, body: '' });
+    }
+
+    const aiMsgMatch = path.match(/^\/ai\/conversations\/([^/]+)\/messages$/);
+    if (aiMsgMatch && method === 'GET') {
+      const id = aiMsgMatch[1];
+      const msgs = this.aiMessages.filter((m) => m.conversation_id === id);
+      return json(route, 200, msgs);
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

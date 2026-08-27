@@ -18,6 +18,7 @@ const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub mod account;
+pub mod ai;
 pub mod auth;
 pub mod health;
 pub mod openapi;
@@ -129,6 +130,20 @@ pub fn api_routes() -> Router<auth::ApiState> {
         )
         .route("/account/webhooks/:id/test", post(webhooks::test_webhook))
         .route("/account/webhooks/:id/logs", get(webhooks::get_webhook_logs))
+        .route("/ai/chat", post(ai::chat))
+        .route("/ai/conversations", get(ai::list_conversations))
+        .route(
+            "/ai/conversations/:id",
+            delete(ai::delete_conversation),
+        )
+        .route(
+            "/ai/conversations/:id/messages",
+            get(ai::get_conversation_messages),
+        )
+        .route(
+            "/account/ai-config",
+            get(ai::get_ai_config).put(ai::update_ai_config),
+        )
 }
 
 pub async fn start_api_server(

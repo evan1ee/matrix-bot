@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/account/ai-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_ai_config"];
+        put: operations["update_ai_config"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/matrix": {
         parameters: {
             query?: never;
@@ -299,6 +315,70 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["test_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_conversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_conversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_conversation_messages"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -845,6 +925,46 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AiChatRequest: {
+            conversation_id?: string | null;
+            prompt: string;
+            room_id?: string | null;
+        };
+        AiChatResponse: {
+            conversation_id: string;
+            message: string;
+            model_used: string;
+            tool_calls_executed: string[];
+        };
+        AiConversation: {
+            created_at: string;
+            id: string;
+            owner_id: string;
+            room_id: string;
+            updated_at: string;
+        };
+        AiMessage: {
+            content: string;
+            conversation_id: string;
+            created_at: string;
+            id: string;
+            role: string;
+            tool_call_id?: string | null;
+            tool_name?: string | null;
+        };
+        AiUserConfig: {
+            api_base_url?: string | null;
+            api_key?: string | null;
+            has_api_key: boolean;
+            /** Format: int64 */
+            max_tokens?: number | null;
+            model_name?: string | null;
+            owner_id: string;
+            system_prompt?: string | null;
+            /** Format: double */
+            temperature?: number | null;
+            updated_at: string;
+        };
         ApiErrorResponse: {
             /** Format: int32 */
             code: number;
@@ -1469,6 +1589,16 @@ export interface components {
         UnlinkRequest: {
             mxid: string;
         };
+        UpdateAiConfigInput: {
+            api_base_url?: string | null;
+            api_key?: string | null;
+            /** Format: int64 */
+            max_tokens?: number | null;
+            model_name?: string | null;
+            system_prompt?: string | null;
+            /** Format: double */
+            temperature?: number | null;
+        };
         UpdateBillPayload: {
             /** Format: int64 */
             amount_minor?: number | null;
@@ -1622,6 +1752,48 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_ai_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiUserConfig"];
+                };
+            };
+        };
+    };
+    update_ai_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAiConfigInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiUserConfig"];
+                };
+            };
+        };
+    };
     list_links: {
         parameters: {
             query?: never;
@@ -2058,6 +2230,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundAcceptedResponse"];
+                };
+            };
+        };
+    };
+    chat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiChatRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiChatResponse"];
+                };
+            };
+        };
+    };
+    list_conversations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversation"][];
+                };
+            };
+        };
+    };
+    delete_conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_conversation_messages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiMessage"][];
                 };
             };
         };

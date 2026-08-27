@@ -28,6 +28,7 @@ export const TAB = {
   portfolio: 'Portfolio',
   bills: 'Bills',
   webhooks: 'Webhooks',
+  ai: 'AI Assistant',
 } as const;
 
 interface Fixtures {

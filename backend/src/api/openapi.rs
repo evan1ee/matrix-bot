@@ -3,7 +3,7 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse,
+    account, ai, auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse,
     todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
@@ -86,7 +86,13 @@ use crate::modules::settings::UserSettings;
         webhooks::rotate_webhook_token,
         webhooks::test_webhook,
         webhooks::delete_webhook,
-        webhooks::get_webhook_logs
+        webhooks::get_webhook_logs,
+        ai::chat,
+        ai::list_conversations,
+        ai::get_conversation_messages,
+        ai::delete_conversation,
+        ai::get_ai_config,
+        ai::update_ai_config
     ),
     components(
         schemas(
@@ -156,7 +162,13 @@ use crate::modules::settings::UserSettings;
             crate::modules::webhook::models::UpdateWebhookInput,
             crate::modules::webhook::models::InboundPayload,
             crate::modules::webhook::models::InboundAcceptedResponse,
-            crate::modules::webhook::models::WebhookLogsResponse
+            crate::modules::webhook::models::WebhookLogsResponse,
+            crate::modules::ai::models::AiUserConfig,
+            crate::modules::ai::models::UpdateAiConfigInput,
+            crate::modules::ai::models::AiConversation,
+            crate::modules::ai::models::AiMessage,
+            crate::modules::ai::models::AiChatRequest,
+            crate::modules::ai::models::AiChatResponse
         )
     ),
     modifiers(&SecurityAddon),

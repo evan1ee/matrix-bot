@@ -67,6 +67,7 @@ test('@screens the module views', async ({ app, api }) => {
     ['07-portfolio', TAB.portfolio],
     ['08-bills', TAB.bills],
     ['09-webhooks', TAB.webhooks],
+    ['12-ai-assistant', TAB.ai],
   ] as const) {
     await app.getByRole('button', { name: tab, exact: true }).click();
     await shot(app, n);
@@ -109,6 +110,23 @@ test('@screens webhook delivery logs viewer', async ({ app, api }) => {
   await app.getByRole('button', { name: /history/i }).first().click();
   await expect(app.getByText(/Delivery Logs:/i)).toBeVisible();
   await shot(app, '11-webhook-logs-history');
+});
+
+test('@screens ai assistant chat thread and settings modal', async ({ app, api }) => {
+  api.seedTodo({ text: 'Audit cryptographic recovery keys' });
+  api.seedTodo({ text: 'Deploy Matrix Bot to staging' });
+
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+
+  await app.getByPlaceholder(/Ask AI assistant/i).fill('What tasks do I have due?');
+  await app.locator('form button[type="submit"]').click();
+  await expect(app.getByText(/Tool Result:/i)).toBeVisible();
+  await shot(app, '13-ai-chat-thread');
+
+  await app.locator('button[title="Configure AI model & API keys"]').click();
+  await expect(app.getByText('AI Assistant Settings')).toBeVisible();
+  await shot(app, '14-ai-settings-modal');
 });
 
 test('@screens settings, both tabs', async ({ app }) => {

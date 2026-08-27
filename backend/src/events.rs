@@ -50,6 +50,9 @@ pub enum SystemEvent {
     WebhookUpdated(Webhook),
     WebhookDeleted { id: String, owner_id: String },
     WebhookTriggered { id: String, owner_id: String, outbox_id: String, room_id: String, severity: String },
+    AiConversationUpdated { id: String, owner_id: String },
+    AiConversationDeleted { id: String, owner_id: String },
+    AiConfigUpdated { owner_id: String },
 }
 
 impl SystemEvent {
@@ -89,6 +92,9 @@ impl SystemEvent {
             SystemEvent::WebhookCreated(w) | SystemEvent::WebhookUpdated(w) => &w.owner_id,
             SystemEvent::WebhookDeleted { owner_id, .. }
             | SystemEvent::WebhookTriggered { owner_id, .. } => owner_id,
+            SystemEvent::AiConversationUpdated { owner_id, .. }
+            | SystemEvent::AiConversationDeleted { owner_id, .. }
+            | SystemEvent::AiConfigUpdated { owner_id } => owner_id,
         }
     }
 }

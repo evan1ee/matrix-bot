@@ -5,7 +5,7 @@ import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
   Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock,
-  Wallet, TrendingUp, Receipt, Webhook, Settings, LogIn, Sun, Moon, LucideIcon
+  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Settings, LogIn, Sun, Moon, LucideIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -39,6 +39,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'todo', label: 'Tasks', icon: CheckSquare },
       { id: 'reminder', label: 'Reminders', icon: Clock },
+      { id: 'ai', label: 'AI Assistant', icon: Sparkles },
     ],
   },
   {
