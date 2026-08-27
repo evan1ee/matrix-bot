@@ -134,20 +134,20 @@ const AiAssistantView: React.FC<{
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-border pb-4">
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-4">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+          <div className="w-9 h-9 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
             <Sparkles className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
               AI Assistant
-              <span className="font-mono text-[11px] font-normal px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+              <span className="font-mono text-[11px] font-normal px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
                 {config?.model_name || 'llama3.2'}
               </span>
             </h1>
-            <p className="text-xs text-muted-foreground">
-              Conversational assistant with read-only access to your tasks, reminders, bills, and finances.
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Conversational assistant with access to your tasks, reminders, bills, portfolio, and finances.
             </p>
           </div>
         </div>
@@ -158,9 +158,9 @@ const AiAssistantView: React.FC<{
               onClick={() => resetMutation.mutate(activeConversationId)}
               disabled={resetMutation.isPending}
               title="Reset current conversation"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
+              <Trash2 className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
               New Chat
             </button>
           )}
@@ -168,7 +168,7 @@ const AiAssistantView: React.FC<{
           <button
             onClick={() => setIsSettingsOpen(true)}
             title="Configure AI model & API keys"
-            className="p-2 text-muted-foreground hover:text-foreground bg-muted/60 hover:bg-muted rounded-lg transition-colors cursor-pointer"
+            className="p-2 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -176,18 +176,18 @@ const AiAssistantView: React.FC<{
       </div>
 
       {/* Messages Thread Container */}
-      <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card/40 p-4 sm:p-6 space-y-5">
+      <div className="flex-1 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 p-4 sm:p-6 space-y-5">
         {isLoadingMessages ? (
-          <div className="py-20 text-center text-sm text-muted-foreground">Loading conversation...</div>
+          <div className="py-20 text-center text-sm text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
         ) : messages.length === 0 ? (
           <div className="py-16 text-center max-w-lg mx-auto space-y-6">
-            <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
+            <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
               <Bot className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-foreground">How can I help you today?</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Ask questions, explore ideas, or ask me to check your tasks, reminders, bills, and financial ledger.
+              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">How can I help you today?</h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                Ask questions, explore ideas, or ask me to manage your tasks, reminders, bills, portfolio, and financial ledger.
               </p>
             </div>
 
@@ -199,10 +199,10 @@ const AiAssistantView: React.FC<{
                     setPrompt(s);
                     chatMutation.mutate(s);
                   }}
-                  className="p-3 rounded-lg border border-border bg-background hover:bg-muted/60 text-xs text-foreground transition-colors flex items-center justify-between group cursor-pointer"
+                  className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 text-xs text-neutral-800 dark:text-neutral-200 transition-colors flex items-center justify-between group cursor-pointer shadow-2xs"
                 >
                   <span className="line-clamp-2">{s}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary shrink-0 ml-1.5" />
+                  <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0 ml-1.5 transition-colors" />
                 </button>
               ))}
             </div>
@@ -218,7 +218,7 @@ const AiAssistantView: React.FC<{
                 }`}
               >
                 {m.role !== 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
                     <Bot className="w-4 h-4" />
                   </div>
                 )}
@@ -262,19 +262,19 @@ const AiAssistantView: React.FC<{
 
         {chatMutation.isPending && (
           <div className="flex gap-3 max-w-3xl mr-auto justify-start animate-in fade-in-0">
-            <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0 mt-0.5">
+            <div className="w-8 h-8 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
               <Bot className="w-4 h-4" />
             </div>
-            <div className="p-4 rounded-xl text-sm bg-card border border-border text-card-foreground rounded-tl-none shadow-2xs flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-              <span className="text-xs text-muted-foreground">Thinking and querying tools...</span>
+            <div className="p-4 rounded-xl text-sm bg-white dark:bg-neutral-850 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-tl-none shadow-2xs flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">Thinking and querying tools...</span>
             </div>
           </div>
         )}
 
         {chatMutation.error && (
-          <div className="p-3.5 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-xs flex items-start gap-2 max-w-2xl mx-auto">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg text-red-800 dark:text-red-300 text-xs flex items-start gap-2 max-w-2xl mx-auto">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
             <div>
               <strong>Generation failed:</strong> {(chatMutation.error as Error).message}
             </div>
@@ -293,12 +293,12 @@ const AiAssistantView: React.FC<{
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask AI assistant... (Enter to send, Shift+Enter for newline)"
-          className="w-full px-4 py-3 pr-14 bg-card border border-input rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-primary/40 resize-none"
+          className="w-full px-4 py-3 pr-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none shadow-xs"
         />
         <button
           type="submit"
           disabled={!prompt.trim() || chatMutation.isPending}
-          className="absolute right-3 bottom-3 p-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-40 cursor-pointer"
+          className="absolute right-3 bottom-3 p-2 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors disabled:opacity-40 cursor-pointer"
         >
           <Send className="w-4 h-4" />
         </button>

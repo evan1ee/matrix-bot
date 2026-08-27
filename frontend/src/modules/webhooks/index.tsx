@@ -263,13 +263,13 @@ const WebhooksView: React.FC<{
   return (
     <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <WebhookIcon className="w-6 h-6 text-primary" />
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <WebhookIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             Inbound Webhooks
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
             Trigger Matrix notifications from external servers, monitoring daemons, cron jobs, or Telegram bots.
           </p>
         </div>
@@ -281,7 +281,7 @@ const WebhooksView: React.FC<{
               setNewRoomId(rooms[0].room_id);
             }
           }}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-medium text-sm rounded-lg hover:bg-primary/90 transition-colors shadow-sm cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-sm rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-sm cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Create Webhook
@@ -290,18 +290,18 @@ const WebhooksView: React.FC<{
 
       {/* Main List Content */}
       {isLoadingWebhooks ? (
-        <div className="py-12 text-center text-muted-foreground text-sm">Loading webhooks...</div>
+        <div className="py-12 text-center text-neutral-500 dark:text-neutral-400 text-sm">Loading webhooks...</div>
       ) : webhooksError ? (
-        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+        <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg text-red-800 dark:text-red-300 text-sm">
           Failed to load webhooks: {(webhooksError as Error).message}
         </div>
       ) : webhooks.length === 0 ? (
-        <div className="text-center py-16 px-4 border border-dashed border-border rounded-xl bg-card/40">
-          <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
+        <div className="text-center py-16 px-4 border border-dashed border-neutral-300 dark:border-neutral-800 rounded-xl bg-neutral-50/50 dark:bg-neutral-900/40">
+          <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4">
             <Globe className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-semibold text-foreground">No inbound webhooks configured</h3>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto mt-1 mb-6">
+          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">No inbound webhooks configured</h3>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-md mx-auto mt-1 mb-6">
             Create an inbound webhook endpoint to send server alerts, CI/CD statuses, and monitoring events directly into your Matrix rooms.
           </p>
           <button
@@ -311,7 +311,7 @@ const WebhooksView: React.FC<{
                 setNewRoomId(rooms[0].room_id);
               }
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-medium text-sm rounded-lg hover:bg-primary/90 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-sm rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Create Your First Webhook
@@ -324,48 +324,48 @@ const WebhooksView: React.FC<{
               key={hook.id}
               className={`p-5 rounded-xl border transition-all ${
                 hook.is_active
-                  ? 'bg-card border-border shadow-xs'
-                  : 'bg-muted/30 border-border/60 opacity-75'
+                  ? 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 shadow-xs'
+                  : 'bg-neutral-50 dark:bg-neutral-900/40 border-neutral-200/60 dark:border-neutral-800/60 opacity-75'
               }`}
             >
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div className="space-y-1.5 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <h3 className="font-semibold text-base text-foreground truncate">{hook.name}</h3>
+                    <h3 className="font-semibold text-base text-neutral-900 dark:text-neutral-100 truncate">{hook.name}</h3>
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${
                         hook.is_active
                           ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                          : 'bg-muted text-muted-foreground border border-border'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700'
                       }`}
                     >
                       <Radio className={`w-3 h-3 ${hook.is_active ? 'animate-pulse text-emerald-500' : ''}`} />
                       {hook.is_active ? 'Active' : 'Disabled'}
                     </span>
-                    <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-md border border-border/80">
+                    <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700">
                       {hook.token_prefix}...
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-neutral-500 dark:text-neutral-400">
                     <div>
                       Target Room:{' '}
-                      <span className="font-medium text-foreground">{getRoomName(hook.default_room_id)}</span>
+                      <span className="font-medium text-neutral-800 dark:text-neutral-200">{getRoomName(hook.default_room_id)}</span>
                     </div>
                     <div>&bull;</div>
                     <div>
-                      Delivered: <span className="font-semibold text-foreground">{hook.total_delivered_count}</span>
+                      Delivered: <span className="font-semibold text-neutral-800 dark:text-neutral-200">{hook.total_delivered_count}</span>
                     </div>
                     <div>&bull;</div>
                     <div>
-                      Failures: <span className="font-semibold text-foreground">{hook.failure_count}</span>
+                      Failures: <span className="font-semibold text-neutral-800 dark:text-neutral-200">{hook.failure_count}</span>
                     </div>
                     {hook.last_triggered_at && (
                       <>
                         <div>&bull;</div>
                         <div>
                           Last Triggered:{' '}
-                          <span className="text-foreground">
+                          <span className="text-neutral-800 dark:text-neutral-200">
                             {new Date(hook.last_triggered_at).toLocaleString()}
                           </span>
                         </div>
@@ -379,9 +379,9 @@ const WebhooksView: React.FC<{
                   <button
                     onClick={() => setActiveLogsWebhook(hook)}
                     title="View message history and delivery logs"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
                   >
-                    <History className="w-3.5 h-3.5 text-primary" />
+                    <History className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     History ({hook.total_delivered_count + hook.failure_count})
                   </button>
 
@@ -389,7 +389,7 @@ const WebhooksView: React.FC<{
                     onClick={() => testMutation.mutate(hook.id)}
                     disabled={testMutation.isPending || !hook.is_active}
                     title="Send synthetic test alert"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                   >
                     <Send className="w-3.5 h-3.5" />
                     Test Ping
@@ -403,7 +403,7 @@ const WebhooksView: React.FC<{
                     }}
                     disabled={rotateMutation.isPending}
                     title="Regenerate secret token"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${rotateMutation.isPending ? 'animate-spin' : ''}`} />
                     Rotate Secret
@@ -412,7 +412,7 @@ const WebhooksView: React.FC<{
                   <button
                     onClick={() => toggleActiveMutation.mutate({ id: hook.id, is_active: !hook.is_active })}
                     title={hook.is_active ? 'Disable webhook' : 'Enable webhook'}
-                    className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/60 hover:bg-muted rounded-lg transition-colors cursor-pointer"
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 bg-neutral-100/60 hover:bg-neutral-100 dark:bg-neutral-800/60 dark:hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
                   >
                     {hook.is_active ? 'Disable' : 'Enable'}
                   </button>
@@ -424,7 +424,7 @@ const WebhooksView: React.FC<{
                       }
                     }}
                     title="Delete webhook"
-                    className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -436,7 +436,7 @@ const WebhooksView: React.FC<{
                   className={`mt-3 p-2.5 rounded-lg text-xs flex items-center gap-2 ${
                     testStatus.ok
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                      : 'bg-destructive/10 text-destructive border border-destructive/20'
+                      : 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800/50'
                   }`}
                 >
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -450,16 +450,16 @@ const WebhooksView: React.FC<{
 
       {/* Message History & Delivery Logs Drawer Modal */}
       {activeLogsWebhook && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-card text-card-foreground w-full max-w-3xl rounded-xl border border-border shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 max-h-[88vh] flex flex-col">
-            <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between gap-3 bg-muted/30">
+        <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true">
+          <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-3xl rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 max-h-[88vh] flex flex-col">
+            <div className="p-4 sm:p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 bg-neutral-50 dark:bg-neutral-900/50">
               <div className="flex items-center gap-2.5 min-w-0">
-                <History className="w-5 h-5 text-primary shrink-0" />
+                <History className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
                 <div className="min-w-0">
-                  <h2 className="text-base font-bold text-foreground truncate">
+                  <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100 truncate">
                     Delivery Logs: {activeLogsWebhook.name}
                   </h2>
-                  <p className="text-xs text-muted-foreground truncate">
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
                     Target Room: {getRoomName(activeLogsWebhook.default_room_id)} &bull; {logsData?.total ?? 0} total events
                   </p>
                 </div>
@@ -468,14 +468,14 @@ const WebhooksView: React.FC<{
                 <button
                   onClick={() => refetchLogs()}
                   title="Refresh logs"
-                  className="p-1.5 text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer"
+                  className="p-1.5 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
                 >
                   <RefreshCw className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
                 </button>
                 <button
                   onClick={() => setActiveLogsWebhook(null)}
                   title="Close logs"
-                  className="p-1.5 text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer"
+                  className="p-1.5 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -484,11 +484,11 @@ const WebhooksView: React.FC<{
 
             <div className="p-4 sm:p-6 overflow-y-auto space-y-3.5 flex-1">
               {isLoadingLogs ? (
-                <div className="py-12 text-center text-sm text-muted-foreground">Loading message history...</div>
+                <div className="py-12 text-center text-sm text-neutral-500 dark:text-neutral-400">Loading message history...</div>
               ) : !logsData || logsData.items.length === 0 ? (
-                <div className="py-12 text-center text-muted-foreground space-y-2">
-                  <FileText className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                  <p className="text-sm font-medium text-foreground">No messages received yet</p>
+                <div className="py-12 text-center text-neutral-500 dark:text-neutral-400 space-y-2">
+                  <FileText className="w-8 h-8 mx-auto text-neutral-400 dark:text-neutral-600" />
+                  <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">No messages received yet</p>
                   <p className="text-xs max-w-sm mx-auto">
                     Messages and alerts sent to this webhook will be saved and displayed here.
                   </p>
@@ -497,29 +497,29 @@ const WebhooksView: React.FC<{
                 logsData.items.map((item) => (
                   <div
                     key={item.id}
-                    className="p-4 rounded-lg border border-border bg-background/80 space-y-2.5 shadow-2xs"
+                    className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-900/80 space-y-2.5 shadow-2xs"
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2 flex-wrap">
                         {getStatusBadge(item.status)}
                         {getSeverityBadge(item.severity)}
                         {item.title && (
-                          <span className="font-semibold text-xs text-foreground">{item.title}</span>
+                          <span className="font-semibold text-xs text-neutral-900 dark:text-neutral-100">{item.title}</span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {new Date(item.created_at).toLocaleString()}
                       </div>
                     </div>
 
-                    <div className="p-2.5 bg-muted/40 rounded-md text-xs font-mono text-foreground whitespace-pre-wrap break-words border border-border/50 max-h-48 overflow-y-auto">
+                    <div className="p-2.5 bg-white dark:bg-neutral-950 rounded-md text-xs font-mono text-neutral-900 dark:text-neutral-100 whitespace-pre-wrap break-words border border-neutral-200 dark:border-neutral-800 max-h-48 overflow-y-auto">
                       {item.plain_body}
                     </div>
 
                     {item.last_error && (
-                      <div className="p-2.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-start gap-2">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <div className="p-2.5 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300 text-xs flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
                         <div>
                           <strong>Error (Attempt {item.attempts}/{item.max_attempts}):</strong> {item.last_error}
                         </div>
@@ -530,10 +530,10 @@ const WebhooksView: React.FC<{
               )}
             </div>
 
-            <div className="p-3.5 border-t border-border bg-card flex justify-end">
+            <div className="p-3.5 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 flex justify-end">
               <button
                 onClick={() => setActiveLogsWebhook(null)}
-                className="px-4 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors cursor-pointer"
+                className="px-4 py-1.5 text-xs font-medium bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
               >
                 Close
               </button>
@@ -544,25 +544,25 @@ const WebhooksView: React.FC<{
 
       {/* Create Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card text-card-foreground w-full max-w-lg rounded-xl border border-border shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95">
-            <div className="p-6 border-b border-border">
-              <h2 className="text-lg font-bold text-foreground">Create Inbound Webhook</h2>
-              <p className="text-xs text-muted-foreground mt-1">
+        <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-lg rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+            <div className="p-6 border-b border-neutral-200 dark:border-neutral-800">
+              <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">Create Inbound Webhook</h2>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                 Generates a secure endpoint for external scripts and alert integrations.
               </p>
             </div>
 
             <form onSubmit={handleCreateSubmit} className="p-6 space-y-4">
               {formError && (
-                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-xs">
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg text-red-800 dark:text-red-300 text-xs font-mono">
                   {formError}
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5">
-                  Webhook Name <span className="text-destructive">*</span>
+                <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+                  Webhook Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -570,37 +570,38 @@ const WebhooksView: React.FC<{
                   placeholder="e.g. VPS Health Monitor, GitHub Actions, Uptime Kuma"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+                  className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5">
-                  Target Matrix Room <span className="text-destructive">*</span>
+                <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+                  Target Matrix Room <span className="text-red-500">*</span>
                 </label>
                 <CustomSelect
                   options={roomOptions}
                   value={newRoomId || (rooms.length > 0 ? rooms[0].room_id : '')}
                   onChange={(val) => setNewRoomId(val)}
                   placeholder="Select destination room..."
+                  className="w-full"
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
                   Incoming alerts sent to this webhook will be delivered to this room by default.
                 </p>
               </div>
 
-              <div className="pt-4 border-t border-border flex justify-end gap-2.5">
+              <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 flex justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer"
+                  className="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-100 dark:bg-neutral-850 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={createMutation.isPending}
-                  className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 text-sm font-medium bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {createMutation.isPending ? 'Generating...' : 'Generate Webhook'}
                 </button>
@@ -612,14 +613,14 @@ const WebhooksView: React.FC<{
 
       {/* Secret Token Display Modal (Displayed once) */}
       {secretModalData && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card text-card-foreground w-full max-w-2xl rounded-xl border border-border shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-border bg-emerald-500/5">
+        <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-2xl rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-neutral-200 dark:border-neutral-800 bg-emerald-500/5">
               <div className="flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400 font-semibold text-base">
                 <ShieldCheck className="w-5 h-5" />
                 Webhook Secret Generated
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                 Your webhook <strong>{secretModalData.webhook.name}</strong> is ready.
               </p>
             </div>
@@ -633,7 +634,7 @@ const WebhooksView: React.FC<{
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wider">
+                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5 uppercase tracking-wider">
                   Secret Token
                 </label>
                 <div className="flex items-center gap-2">
@@ -641,11 +642,11 @@ const WebhooksView: React.FC<{
                     type="text"
                     readOnly
                     value={secretModalData.raw_token}
-                    className="w-full font-mono text-xs px-3 py-2.5 bg-muted/60 border border-input rounded-lg text-foreground select-all"
+                    className="w-full font-mono text-xs px-3 py-2.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-900 dark:text-neutral-100 select-all"
                   />
                   <button
                     onClick={() => handleCopy(secretModalData.raw_token, 'token')}
-                    className="inline-flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg transition-colors shrink-0 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 rounded-lg transition-colors shrink-0 cursor-pointer"
                   >
                     {copiedType === 'token' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                     {copiedType === 'token' ? 'Copied' : 'Copy'}
@@ -655,47 +656,47 @@ const WebhooksView: React.FC<{
 
               {/* Sample Commands */}
               <div className="space-y-3 pt-2">
-                <div className="text-xs font-semibold text-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                  <Terminal className="w-3.5 h-3.5 text-primary" />
+                <div className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5 uppercase tracking-wider">
+                  <Terminal className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   Example Integrations
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-medium text-muted-foreground flex justify-between">
+                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 flex justify-between">
                     <span>1. Standard JSON Webhook (Alertmanager / Cron / Python)</span>
                     <button
                       onClick={() => handleCopy(secretModalData.example_curl_json, 'json')}
-                      className="text-primary hover:underline text-[11px] cursor-pointer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline text-[11px] cursor-pointer"
                     >
                       {copiedType === 'json' ? 'Copied' : 'Copy curl'}
                     </button>
                   </div>
-                  <pre className="p-3 bg-zinc-950 text-zinc-100 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                  <pre className="p-3 bg-neutral-950 text-neutral-100 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap border border-neutral-800">
                     {secretModalData.example_curl_json}
                   </pre>
                 </div>
 
                 <div className="space-y-1.5 pt-1">
-                  <div className="text-[11px] font-medium text-muted-foreground flex justify-between">
+                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 flex justify-between">
                     <span>2. Telegram Bot API Drop-in Emulation</span>
                     <button
                       onClick={() => handleCopy(secretModalData.example_curl_telegram, 'tg')}
-                      className="text-primary hover:underline text-[11px] cursor-pointer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline text-[11px] cursor-pointer"
                     >
                       {copiedType === 'tg' ? 'Copied' : 'Copy curl'}
                     </button>
                   </div>
-                  <pre className="p-3 bg-zinc-950 text-zinc-100 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                  <pre className="p-3 bg-neutral-950 text-neutral-100 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap border border-neutral-800">
                     {secretModalData.example_curl_telegram}
                   </pre>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 border-t border-border bg-card flex justify-end">
+            <div className="p-4 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 flex justify-end">
               <button
                 onClick={() => setSecretModalData(null)}
-                className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg transition-colors cursor-pointer"
+                className="px-5 py-2 text-sm font-medium bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 rounded-lg transition-colors cursor-pointer"
               >
                 I Have Saved My Secret
               </button>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, AlertCircle } from 'lucide-react';
+import { Settings, AlertCircle, X } from 'lucide-react';
 import { AiUserConfig } from './types';
 
 interface AiSettingsModalProps {
@@ -60,35 +60,37 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-card text-card-foreground w-full max-w-lg rounded-xl border border-border shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95">
-        <div className="p-5 border-b border-border flex items-center justify-between">
-          <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-            <Settings className="w-4 h-4 text-primary" />
+      <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-lg rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+        <div className="p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <Settings className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             AI Assistant Settings
           </h2>
           <button
             onClick={onClose}
-            className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+            className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition cursor-pointer"
           >
-            Close
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {error && (
-          <div className="mx-5 mt-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+          <div className="mx-5 mt-4 p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300 text-xs flex items-center gap-2 font-mono">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
             <span>{error}</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1">
+            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
               API Endpoint Base URL
             </label>
             <input
@@ -96,29 +98,29 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
               placeholder="http://localhost:11434/v1 (Ollama) or https://api.openai.com/v1"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-xs font-mono select-all"
+              className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs font-mono text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 select-all"
             />
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
               Compatible with Ollama, LocalAI, vLLM, OpenAI, Groq, DeepSeek, and OpenRouter.
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1">
-              API Key {config?.has_api_key && <span className="text-emerald-500 font-normal ml-1">✓ Saved</span>}
+            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+              API Key {config?.has_api_key && <span className="text-emerald-600 dark:text-emerald-400 font-normal ml-1">✓ Saved</span>}
             </label>
             <input
               type="password"
               placeholder={config?.has_api_key ? '•••••••• (Enter new key to replace)' : 'sk-...'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-xs font-mono"
+              className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs font-mono text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-foreground mb-1">
+              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                 Model Name
               </label>
               <input
@@ -126,11 +128,11 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
                 placeholder="llama3.2, gpt-4o-mini, deepseek-chat"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="w-full px-3 py-2 bg-background border border-input rounded-lg text-xs font-mono"
+                className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs font-mono text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-foreground mb-1">
+              <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                 Temperature ({temperature})
               </label>
               <input
@@ -140,13 +142,13 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
                 step="0.1"
                 value={temperature}
                 onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                className="w-full mt-2"
+                className="w-full mt-2 accent-blue-600 dark:accent-blue-400"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1">
+            <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
               Custom System Prompt (Optional)
             </label>
             <textarea
@@ -154,22 +156,22 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
               placeholder="You are an assistant who answers concisely..."
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-xs"
+              className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500"
             />
           </div>
 
-          <div className="pt-3 border-t border-border flex justify-end gap-2">
+          <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-100 dark:bg-neutral-850 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="px-4 py-2 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 text-xs font-medium bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isSaving ? 'Saving...' : 'Save Settings'}
             </button>
