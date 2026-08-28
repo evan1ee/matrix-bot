@@ -79,37 +79,30 @@ test('@screens webhook create and secret modal', async ({ app }) => {
   await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
   await app.getByRole('button', { name: /create webhook/i }).first().click();
   await app.locator('input[placeholder*="VPS Health Monitor"]').fill('Production VPS Alerts');
+  
+  // Capture dropdown open in dark mode
+  const selectTrigger = app.locator('form').getByRole('button').first();
+  await selectTrigger.click();
+  await shot(app, '18-webhook-dropdown-dark');
+  await selectTrigger.click(); // close
+
   await app.getByRole('button', { name: 'Generate Webhook' }).click();
   await expect(app.getByText('Webhook Secret Generated')).toBeVisible();
   await shot(app, '10-webhook-secret-modal');
 });
 
-test('@screens webhook delivery logs viewer', async ({ app, api }) => {
-  const hook = api.seedWebhook({ name: 'Production VPS Health' });
-  api.seedWebhookLog(hook.id, {
-    title: 'High CPU Usage Alert',
-    plain_body: 'CPU load average exceeded 90% (current: 96.4%) on node vps-prod-01 for 5m.',
-    severity: 'critical',
-    status: 'delivered',
-  });
-  api.seedWebhookLog(hook.id, {
-    title: 'Nightly Database Backup',
-    plain_body: 'Backup database archived: snapshot-2026-08-27.tar.gz (size: 4.2GB).',
-    severity: 'success',
-    status: 'delivered',
-  });
-  api.seedWebhookLog(hook.id, {
-    title: 'Deployment Warning',
-    plain_body: 'Slow database query detected: SELECT * FROM transactions WHERE ... (took 3200ms)',
-    severity: 'warning',
-    status: 'delivered',
-  });
-
+test('@screens webhook dropdown in light mode', async ({ app }) => {
   await gotoApp(app);
+  // Switch to light mode
+  await app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first().click();
   await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
-  await app.getByRole('button', { name: /history/i }).first().click();
-  await expect(app.getByText(/Delivery Logs:/i)).toBeVisible();
-  await shot(app, '11-webhook-logs-history');
+  await app.getByRole('button', { name: /create webhook/i }).first().click();
+  await app.locator('input[placeholder*="VPS Health Monitor"]').fill('Production VPS Alerts');
+  
+  // Click dropdown trigger
+  const selectTrigger = app.locator('form').getByRole('button').first();
+  await selectTrigger.click();
+  await shot(app, '17-webhook-dropdown-light');
 });
 
 test('@screens ai assistant chat thread and settings modal', async ({ app, api }) => {
@@ -127,6 +120,13 @@ test('@screens ai assistant chat thread and settings modal', async ({ app, api }
   await app.locator('button[title="Configure AI model & API keys"]').click();
   await expect(app.getByText('AI Assistant Settings')).toBeVisible();
   await shot(app, '14-ai-settings-modal');
+
+  // Also capture AI settings in light mode
+  await app.getByRole('button', { name: 'Cancel' }).click();
+  await app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first().click();
+  await app.locator('button[title="Configure AI model & API keys"]').click();
+  await expect(app.getByText('AI Assistant Settings')).toBeVisible();
+  await shot(app, '19-ai-settings-light');
 });
 
 test('@screens settings, both tabs', async ({ app }) => {

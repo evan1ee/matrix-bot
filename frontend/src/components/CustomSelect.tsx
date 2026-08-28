@@ -43,9 +43,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         setEffectivePosition('bottom');
       } else {
         const rect = containerRef.current.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const spaceAbove = rect.top;
-        if (spaceBelow < 230 && spaceAbove > spaceBelow) {
+        const dialog = containerRef.current.closest('[role="dialog"], form');
+        const limitBottom = dialog ? dialog.getBoundingClientRect().bottom : window.innerHeight;
+        const limitTop = dialog ? dialog.getBoundingClientRect().top : 0;
+        const spaceBelow = limitBottom - rect.bottom;
+        const spaceAbove = rect.top - limitTop;
+        if (spaceBelow < 180 && spaceAbove > spaceBelow) {
           setEffectivePosition('top');
         } else {
           setEffectivePosition('bottom');
