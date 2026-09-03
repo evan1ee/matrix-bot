@@ -152,7 +152,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Append-only, immutable audit log for all portfolio activity (buy, sell, deposit, withdraw, record).
+    // Append-only, cryptographically linked immutable audit log for all portfolio activity.
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS portfolio_audit_log (
@@ -167,6 +167,8 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             currency_exponent INTEGER NOT NULL DEFAULT 2,
             realized_pl_minor INTEGER,
             note TEXT,
+            prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+            entry_hash TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         "#,
@@ -177,6 +179,30 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_portfolio_audit_log_owner \
          ON portfolio_audit_log(owner_id, created_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_update
+        BEFORE UPDATE ON portfolio_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit log entries are immutable and cannot be updated');
+        END;
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_delete
+        BEFORE DELETE ON portfolio_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit log entries cannot be deleted');
+        END;
+        "#,
     )
     .execute(pool)
     .await?;
@@ -385,6 +411,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // `web_users` entirely and moves the credential onto `accounts`; this
     // column is what keeps password login working in the meantime.
     let _ = sqlx::query("ALTER TABLE web_users ADD COLUMN account_id TEXT;")
+        .execute(pool)
+        .await;
+
+    let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000';")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT '';")
         .execute(pool)
         .await;
 

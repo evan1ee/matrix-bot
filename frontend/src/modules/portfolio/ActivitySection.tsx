@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
-import { PortfolioAuditEntry } from './types';
+import { PortfolioAuditEntry, AuditVerificationResult } from './types';
 import {
   History,
   ArrowDownLeft,
@@ -11,6 +11,8 @@ import {
   Minus,
   ShieldCheck,
   Filter,
+  AlertCircle,
+  Hash,
 } from 'lucide-react';
 
 interface ActivitySectionProps {
@@ -64,10 +66,18 @@ type FilterType = 'all' | 'buy' | 'sell' | 'cash' | 'record';
 
 export const ActivitySection: React.FC<ActivitySectionProps> = () => {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const [verificationResult, setVerificationResult] = useState<AuditVerificationResult | null>(null);
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ['portfolio', 'activity'],
     queryFn: () => fetchApi<PortfolioAuditEntry[]>('/portfolio/activity?limit=100'),
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: () => fetchApi<AuditVerificationResult>('/portfolio/activity/verify'),
+    onSuccess: (res) => {
+      setVerificationResult(res);
+    },
   });
 
   const filteredEntries = (entries ?? []).filter((entry) => {
@@ -129,18 +139,28 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
     <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3 flex-wrap gap-3">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <History className="w-4 h-4 text-neutral-500" />
           <span className="text-xs font-mono font-medium text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">
             Audit Activity Log
           </span>
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
             <ShieldCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-            Immutable
+            SHA-256 Chained
           </span>
           <span className="text-xs font-mono text-neutral-500">
             ({filteredEntries.length} records)
           </span>
+
+          <button
+            onClick={() => verifyMutation.mutate()}
+            disabled={verifyMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition cursor-pointer disabled:opacity-50"
+            title="Cryptographically verify SHA-256 hash chain from genesis to head"
+          >
+            <ShieldCheck className={`w-3.5 h-3.5 ${verifyMutation.isPending ? 'animate-spin' : ''}`} />
+            <span>{verifyMutation.isPending ? 'Verifying...' : 'Verify Chain Integrity'}</span>
+          </button>
         </div>
 
         {/* Filter Pills */}
@@ -161,6 +181,45 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
           ))}
         </div>
       </div>
+
+      {/* Verification Status Banner */}
+      {verificationResult && (
+        <div
+          className={`p-3 rounded-lg border text-xs font-mono flex items-start justify-between gap-3 ${
+            verificationResult.is_valid
+              ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+          }`}
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 font-bold">
+              {verificationResult.is_valid ? (
+                <>
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>Cryptographic Integrity Verified: 100% Intact</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>Tampering or Chain Break Detected!</span>
+                </>
+              )}
+            </div>
+            <p className="text-[11px] opacity-90">{verificationResult.message}</p>
+            {verificationResult.head_hash && (
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate max-w-xl">
+                Ledger Head: <span className="font-mono">{verificationResult.head_hash}</span>
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setVerificationResult(null)}
+            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 p-1 text-sm leading-none cursor-pointer"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (
@@ -186,6 +245,7 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
                 <th className="pb-2 font-normal text-right">EXECUTION PRICE</th>
                 <th className="pb-2 font-normal text-right">TOTAL AMOUNT</th>
                 <th className="pb-2 font-normal text-right">REALIZED P&L</th>
+                <th className="pb-2 font-normal">HASH (SHA-256)</th>
                 <th className="pb-2 font-normal">NOTE / MEMO</th>
                 <th className="pb-2 font-normal text-right">TIMESTAMP</th>
               </tr>
@@ -250,6 +310,17 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
                     ) : (
                       <span className="text-neutral-400">—</span>
                     )}
+                  </td>
+
+                  {/* Hash Chain Fingerprint */}
+                  <td className="py-2.5 px-3 align-middle">
+                    <div
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-200/70 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 cursor-help"
+                      title={`Cryptographic SHA-256 Linkage:\n• Entry Hash: ${entry.entry_hash || 'Legacy'}\n• Prev Hash: ${entry.prev_hash || 'GENESIS'}`}
+                    >
+                      <Hash className="w-2.5 h-2.5 opacity-50" />
+                      <span>{entry.entry_hash ? entry.entry_hash.slice(0, 8) : 'legacy'}</span>
+                    </div>
                   </td>
 
                   {/* Note / Memo */}

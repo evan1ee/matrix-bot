@@ -229,6 +229,29 @@ pub async fn update_holding_symbol(
     }
 }
 
+/// Verifies the cryptographic SHA-256 hash chain of the user's audit log.
+#[utoipa::path(
+    get,
+    path = "/api/v1/portfolio/activity/verify",
+    tag = "portfolio",
+    responses(
+        (status = 200, description = "Cryptographic verification report", body = crate::modules::portfolio::audit::AuditVerificationResult),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn verify_portfolio_activity_chain(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<crate::modules::portfolio::audit::AuditVerificationResult>, ApiError> {
+    let owner_id = user.owner_id();
+    let report = crate::modules::portfolio::audit::verify_audit_chain(&state.db.pool, &owner_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(report))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -57,7 +57,18 @@ export interface PortfolioAuditEntry {
   currency_exponent: number;
   realized_pl_minor?: number | null;
   note?: string | null;
+  prev_hash: string;
+  entry_hash: string;
   created_at?: string | null;
+}
+
+export interface AuditVerificationResult {
+  is_valid: boolean;
+  total_verified: number;
+  genesis_hash: string;
+  head_hash?: string | null;
+  broken_entry_id?: number | null;
+  message: string;
 }
 
 export interface TickerSearchResult {
