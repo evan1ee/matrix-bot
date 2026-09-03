@@ -31,12 +31,14 @@ pub struct BuyHoldingRequest {
     /// ISO 4217 code, e.g. `"USD"`.
     pub currency: String,
     pub note: Option<String>,
+    pub executed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct SellHoldingRequest {
     pub quantity: String,
     pub price: String,
+    pub executed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -55,6 +57,7 @@ pub struct CashAmountRequest {
     pub amount: String,
     /// ISO 4217 code, e.g. `"USD"`.
     pub currency: String,
+    pub executed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -136,7 +139,7 @@ pub async fn buy_holding(
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let note = note_or_reject(&payload.note)?;
 
-    let outcome = PortfolioRepository::buy(
+    let outcome = PortfolioRepository::buy_at(
         &state.db.pool,
         &owner_id,
         &symbol,
@@ -145,6 +148,7 @@ pub async fn buy_holding(
         &currency,
         exponent as i64,
         note,
+        payload.executed_at,
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -218,12 +222,13 @@ pub async fn sell_holding(
     let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let outcome = PortfolioRepository::sell(
+    let outcome = PortfolioRepository::sell_at(
         &state.db.pool,
         &owner_id,
         &existing.symbol,
         quantity_minor,
         price_minor,
+        payload.executed_at,
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -416,7 +421,7 @@ pub async fn deposit_cash(
     let owner_id = user.owner_id();
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    let cash = PortfolioRepository::deposit_cash(&state.db.pool, &owner_id, &currency, exponent, amount_minor)
+    let cash = PortfolioRepository::deposit_cash_at(&state.db.pool, &owner_id, &currency, exponent, amount_minor, payload.executed_at)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -443,7 +448,7 @@ pub async fn withdraw_cash(
     let owner_id = user.owner_id();
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    match PortfolioRepository::withdraw_cash(&state.db.pool, &owner_id, &currency, amount_minor)
+    match PortfolioRepository::withdraw_cash_at(&state.db.pool, &owner_id, &currency, amount_minor, payload.executed_at)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
     {
@@ -493,6 +498,23 @@ mod tests {
             price: price.to_string(),
             currency: currency.to_string(),
             note: None,
+            executed_at: None,
+        }
+    }
+
+    fn sell(qty: &str, price: &str) -> SellHoldingRequest {
+        SellHoldingRequest {
+            quantity: qty.to_string(),
+            price: price.to_string(),
+            executed_at: None,
+        }
+    }
+
+    fn cash(amount: &str, currency: &str) -> CashAmountRequest {
+        CashAmountRequest {
+            amount: amount.to_string(),
+            currency: currency.to_string(),
+            executed_at: None,
         }
     }
 
@@ -607,7 +629,7 @@ mod tests {
             State(state),
             bob,
             Path(created.id),
-            Json(SellHoldingRequest { quantity: "1".to_string(), price: "160.00".to_string() }),
+            Json(sell("1", "160.00")),
         )
         .await
         .unwrap_err();
@@ -629,7 +651,7 @@ mod tests {
             State(state),
             alice,
             Path(created.id),
-            Json(SellHoldingRequest { quantity: "11".to_string(), price: "180.00".to_string() }),
+            Json(sell("11", "180.00")),
         )
         .await
         .unwrap_err();
@@ -651,7 +673,7 @@ mod tests {
             State(state),
             alice,
             Path(created.id),
-            Json(SellHoldingRequest { quantity: "4".to_string(), price: "180.00".to_string() }),
+            Json(sell("4", "180.00")),
         )
         .await
         .unwrap();
@@ -676,7 +698,7 @@ mod tests {
             State(state.clone()),
             alice.clone(),
             Path(created.id),
-            Json(SellHoldingRequest { quantity: "10".to_string(), price: "180.00".to_string() }),
+            Json(sell("10", "180.00")),
         )
         .await
         .unwrap();
@@ -705,7 +727,7 @@ mod tests {
             State(state.clone()),
             alice.clone(),
             Path(created.id),
-            Json(SellHoldingRequest { quantity: "10".to_string(), price: "180.00".to_string() }),
+            Json(sell("10", "180.00")),
         )
         .await
         .unwrap();
@@ -801,7 +823,7 @@ mod tests {
         let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
-            Json(CashAmountRequest { amount: "500.00".to_string(), currency: "GBP".to_string() }),
+            Json(cash("500.00", "GBP")),
         )
         .await
         .unwrap();
@@ -835,7 +857,7 @@ mod tests {
         let cash = deposit_cash(
             State(state.clone()),
             alice.clone(),
-            Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "usd".to_string() }),
+            Json(cash("1000.00", "usd")),
         )
         .await
         .unwrap();
@@ -854,7 +876,7 @@ mod tests {
         let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
-            Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),
+            Json(cash("1000.00", "USD")),
         )
         .await
         .unwrap();
@@ -862,7 +884,7 @@ mod tests {
         let cash = withdraw_cash(
             State(state),
             alice,
-            Json(CashAmountRequest { amount: "400.00".to_string(), currency: "USD".to_string() }),
+            Json(cash("400.00", "USD")),
         )
         .await
         .unwrap();
@@ -876,7 +898,7 @@ mod tests {
         let _ = deposit_cash(
             State(state.clone()),
             alice.clone(),
-            Json(CashAmountRequest { amount: "100.00".to_string(), currency: "USD".to_string() }),
+            Json(cash("100.00", "USD")),
         )
         .await
         .unwrap();
@@ -884,7 +906,7 @@ mod tests {
         let err = withdraw_cash(
             State(state),
             alice,
-            Json(CashAmountRequest { amount: "100.01".to_string(), currency: "USD".to_string() }),
+            Json(cash("100.01", "USD")),
         )
         .await
         .unwrap_err();
@@ -900,7 +922,7 @@ mod tests {
         let _ = deposit_cash(
             State(state.clone()),
             alice,
-            Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),
+            Json(cash("1000.00", "USD")),
         )
         .await
         .unwrap();
@@ -917,7 +939,7 @@ mod tests {
         let _ = deposit_cash(
             State(state),
             alice,
-            Json(CashAmountRequest { amount: "1000.00".to_string(), currency: "USD".to_string() }),
+            Json(cash("1000.00", "USD")),
         )
         .await
         .unwrap();

@@ -56,12 +56,7 @@ impl PortfolioRepository {
     /// The caller's cash balance in one currency, or a zero balance if they
     /// have never deposited into it — the same "no row until you touch it"
     /// convention as `settings::UserSettings`.
-    pub async fn get_cash_or_zero(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-    ) -> Result<CashBalance> {
+    pub async fn get_cash_or_zero(pool: &SqlitePool, owner_id: &str, currency: &str, currency_exponent: i64) -> Result<CashBalance> {
         crate::modules::portfolio::cash_repo::get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
     }
 
@@ -69,42 +64,28 @@ impl PortfolioRepository {
         crate::modules::portfolio::cash_repo::list_cash(pool, owner_id).await
     }
 
-    pub async fn credit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-        amount_minor: i64,
-    ) -> Result<CashBalance> {
+    pub async fn credit_cash(pool: &SqlitePool, owner_id: &str, currency: &str, currency_exponent: i64, amount_minor: i64) -> Result<CashBalance> {
         crate::modules::portfolio::cash_repo::credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await
     }
 
-    pub async fn deposit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-        amount_minor: i64,
-    ) -> Result<CashBalance> {
-        crate::modules::portfolio::cash_repo::deposit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await
+    pub async fn deposit_cash(pool: &SqlitePool, owner_id: &str, currency: &str, currency_exponent: i64, amount_minor: i64) -> Result<CashBalance> {
+        Self::deposit_cash_at(pool, owner_id, currency, currency_exponent, amount_minor, None).await
     }
 
-    pub async fn debit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        amount_minor: i64,
-    ) -> Result<WithdrawOutcome> {
+    pub async fn deposit_cash_at(pool: &SqlitePool, owner_id: &str, currency: &str, currency_exponent: i64, amount_minor: i64, executed_at: Option<chrono::DateTime<chrono::Utc>>) -> Result<CashBalance> {
+        crate::modules::portfolio::cash_repo::deposit_cash_at(pool, owner_id, currency, currency_exponent, amount_minor, executed_at).await
+    }
+
+    pub async fn debit_cash(pool: &SqlitePool, owner_id: &str, currency: &str, amount_minor: i64) -> Result<WithdrawOutcome> {
         crate::modules::portfolio::cash_repo::debit_cash(pool, owner_id, currency, amount_minor).await
     }
 
-    pub async fn withdraw_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        amount_minor: i64,
-    ) -> Result<WithdrawOutcome> {
-        crate::modules::portfolio::cash_repo::withdraw_cash(pool, owner_id, currency, amount_minor).await
+    pub async fn withdraw_cash(pool: &SqlitePool, owner_id: &str, currency: &str, amount_minor: i64) -> Result<WithdrawOutcome> {
+        Self::withdraw_cash_at(pool, owner_id, currency, amount_minor, None).await
+    }
+
+    pub async fn withdraw_cash_at(pool: &SqlitePool, owner_id: &str, currency: &str, amount_minor: i64, executed_at: Option<chrono::DateTime<chrono::Utc>>) -> Result<WithdrawOutcome> {
+        crate::modules::portfolio::cash_repo::withdraw_cash_at(pool, owner_id, currency, amount_minor, executed_at).await
     }
 
     // ---- holdings ----------------------------------------------------------
@@ -120,7 +101,12 @@ impl PortfolioRepository {
     /// note (if any) is left untouched — a routine top-up must not silently
     /// wipe a note the user wrote earlier.
     #[allow(clippy::too_many_arguments)]
-    pub async fn buy(
+    pub async fn buy(pool: &SqlitePool, owner_id: &str, symbol: &str, quantity_minor: i64, price_minor: i64, currency: &str, currency_exponent: i64, note: Option<&str>) -> Result<BuyOutcome> {
+        Self::buy_at(pool, owner_id, symbol, quantity_minor, price_minor, currency, currency_exponent, note, None).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn buy_at(
         pool: &SqlitePool,
         owner_id: &str,
         symbol: &str,
@@ -129,6 +115,7 @@ impl PortfolioRepository {
         currency: &str,
         currency_exponent: i64,
         note: Option<&str>,
+        executed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<BuyOutcome> {
         let existing = Self::find(pool, owner_id, symbol).await?;
 
@@ -156,6 +143,7 @@ impl PortfolioRepository {
             currency_exponent,
             note,
             "buy",
+            executed_at,
         )
         .await?
         {
@@ -169,7 +157,12 @@ impl PortfolioRepository {
 
     /// Records an existing position without checking or debiting cash balances.
     #[allow(clippy::too_many_arguments)]
-    pub async fn record_holding(
+    pub async fn record_holding(pool: &SqlitePool, owner_id: &str, symbol: &str, quantity_minor: i64, price_minor: i64, currency: &str, currency_exponent: i64, note: Option<&str>) -> Result<Result<Holding, String>> {
+        Self::record_holding_at(pool, owner_id, symbol, quantity_minor, price_minor, currency, currency_exponent, note, None).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_holding_at(
         pool: &SqlitePool,
         owner_id: &str,
         symbol: &str,
@@ -178,6 +171,7 @@ impl PortfolioRepository {
         currency: &str,
         currency_exponent: i64,
         note: Option<&str>,
+        executed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Result<Holding, String>> {
         Self::record_holding_action(
             pool,
@@ -189,6 +183,7 @@ impl PortfolioRepository {
             currency_exponent,
             note,
             "record",
+            executed_at,
         )
         .await
     }
@@ -205,6 +200,7 @@ impl PortfolioRepository {
         currency_exponent: i64,
         note: Option<&str>,
         action: &str,
+        executed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Result<Holding, String>> {
         let existing = Self::find(pool, owner_id, symbol).await?;
 
@@ -217,12 +213,13 @@ impl PortfolioRepository {
         let total_val = cost_of(quantity_minor, price_minor);
 
         let Some(existing) = existing else {
+            let created_at = executed_at.unwrap_or_else(chrono::Utc::now);
             sqlx::query(
                 "INSERT INTO portfolio_holdings \
-                 (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                 (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
             )
-            .bind(owner_id).bind(symbol).bind(quantity_minor).bind(price_minor).bind(currency).bind(currency_exponent).bind(note)
+            .bind(owner_id).bind(symbol).bind(quantity_minor).bind(price_minor).bind(currency).bind(currency_exponent).bind(note).bind(created_at)
             .execute(pool).await?;
 
             let holding = Self::find(pool, owner_id, symbol).await?
@@ -230,7 +227,7 @@ impl PortfolioRepository {
 
             let _ = crate::modules::portfolio::audit::record_audit_entry(
                 pool, owner_id, action, Some(symbol), Some(quantity_minor), Some(price_minor),
-                total_val, currency, currency_exponent, None, note,
+                total_val, currency, currency_exponent, None, note, executed_at,
             ).await;
 
             return Ok(Ok(holding));
@@ -264,7 +261,7 @@ impl PortfolioRepository {
 
         let _ = crate::modules::portfolio::audit::record_audit_entry(
             pool, owner_id, action, Some(symbol), Some(quantity_minor), Some(price_minor),
-            total_val, currency, currency_exponent, None, note,
+            total_val, currency, currency_exponent, None, note, executed_at,
         ).await;
 
         Ok(Ok(holding))
@@ -277,12 +274,17 @@ impl PortfolioRepository {
     ///
     /// Selling the full quantity held deletes the row — average cost has no
     /// meaning for a position of zero.
-    pub async fn sell(
+    pub async fn sell(pool: &SqlitePool, owner_id: &str, symbol: &str, quantity_minor: i64, sell_price_minor: i64) -> Result<SellOutcome> {
+        Self::sell_at(pool, owner_id, symbol, quantity_minor, sell_price_minor, None).await
+    }
+
+    pub async fn sell_at(
         pool: &SqlitePool,
         owner_id: &str,
         symbol: &str,
         quantity_minor: i64,
         sell_price_minor: i64,
+        executed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<SellOutcome> {
         let Some(existing) = Self::find(pool, owner_id, symbol).await? else {
             return Ok(SellOutcome::NotFound);
@@ -310,6 +312,7 @@ impl PortfolioRepository {
             existing.currency_exponent,
             Some(realized),
             None,
+            executed_at,
         )
         .await;
 

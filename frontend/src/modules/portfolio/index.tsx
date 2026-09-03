@@ -19,7 +19,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
-import { CURRENCY_OPTIONS, useSettings } from '../../core/settings';
+import { DateTimePicker } from '../../components/DateTimePicker';
+import { CURRENCY_OPTIONS, useSettings, zonedInputToUtcIso, nowInZone } from '../../core/settings';
 import { AllocationCard } from './AllocationCard';
 import { ActivitySection } from './ActivitySection';
 import { TickerSearchInput } from './TickerSearchInput';
@@ -83,12 +84,14 @@ interface SellRowProps {
   holding: Holding;
   saving: boolean;
   onCancel: () => void;
-  onSell: (quantity: string, price: string) => Promise<void>;
+  onSell: (quantity: string, price: string, executedAt?: string) => Promise<void>;
+  timezone: string;
 }
 
-const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell }) => {
+const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell, timezone }) => {
   const [quantity, setQuantity] = useState('');
   const [price, setPrice] = useState('');
+  const [sellDate, setSellDate] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
@@ -99,7 +102,8 @@ const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell }) 
     }
     setError(null);
     try {
-      await onSell(quantity.trim(), price.trim());
+      const executedAt = sellDate ? zonedInputToUtcIso(sellDate, timezone) ?? undefined : undefined;
+      await onSell(quantity.trim(), price.trim(), executedAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record the sale.');
     }
@@ -111,20 +115,40 @@ const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell }) 
       data-testid="sell-row"
       className="py-3 px-2 space-y-3 bg-neutral-100/60 dark:bg-neutral-900/30 rounded"
     >
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase font-mono text-neutral-500">
-            Sell quantity (of {formatQuantity(holding.quantity_minor)})
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            placeholder="e.g. 5"
-            className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
-          />
-        </label>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-mono text-neutral-500">
+              Sell quantity (of {formatQuantity(holding.quantity_minor)})
+            </span>
+            <button
+              type="button"
+              onClick={() => setQuantity(formatQuantity(holding.quantity_minor))}
+              className="text-[10px] font-mono text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 underline decoration-dotted cursor-pointer"
+              title="Click to fill max available quantity"
+            >
+              MAX
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="e.g. 5"
+              className="w-full pl-3 pr-14 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => setQuantity(formatQuantity(holding.quantity_minor))}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-neutral-100 transition cursor-pointer"
+              title={`Fill max quantity: ${formatQuantity(holding.quantity_minor)}`}
+            >
+              MAX
+            </button>
+          </div>
+        </div>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase font-mono text-neutral-500">
             Sale price ({holding.currency})
@@ -136,6 +160,17 @@ const SellRow: React.FC<SellRowProps> = ({ holding, saving, onCancel, onSell }) 
             onChange={(e) => setPrice(e.target.value)}
             placeholder="e.g. 180.00"
             className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase font-mono text-neutral-500">
+            Sale Date / Time (Optional)
+          </span>
+          <DateTimePicker
+            value={sellDate}
+            onChange={setSellDate}
+            placeholder="Now (current time)"
+            now={nowInZone(timezone)}
           />
         </label>
         <div className="flex items-end gap-2">
@@ -284,13 +319,14 @@ const PriceRow: React.FC<PriceRowProps> = ({ holding, saving, onCancel, onSave }
 
 export const PortfolioMainView: React.FC = () => {
   const queryClient = useQueryClient();
-  const { currency: defaultCurrency } = useSettings();
+  const { currency: defaultCurrency, timezone } = useSettings();
 
   const [symbol, setSymbol] = useState('');
   const [quantity, setQuantity] = useState('');
   const [price, setPrice] = useState('');
   const [currency, setCurrency] = useState(defaultCurrency);
   const [note, setNote] = useState('');
+  const [transactionDate, setTransactionDate] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sellingId, setSellingId] = useState<number | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
@@ -298,6 +334,7 @@ export const PortfolioMainView: React.FC = () => {
 
   const [cashAmount, setCashAmount] = useState('');
   const [cashCurrency, setCashCurrency] = useState(defaultCurrency);
+  const [cashDate, setCashDate] = useState('');
   const [cashError, setCashError] = useState<string | null>(null);
 
   // The first render happens before the settings query resolves, and the
@@ -339,6 +376,7 @@ export const PortfolioMainView: React.FC = () => {
   const [newSymbolInput, setNewSymbolInput] = useState('');
   const [symbolError, setSymbolError] = useState<string | null>(null);
   const [refreshingHoldingId, setRefreshingHoldingId] = useState<number | null>(null);
+  const [removingHolding, setRemovingHolding] = useState<Holding | null>(null);
 
   const refreshPricesMutation = useMutation({
     mutationFn: () => fetchApi<RefreshSummary>('/portfolio/refresh-prices', { method: 'POST' }),
@@ -421,6 +459,7 @@ export const PortfolioMainView: React.FC = () => {
       setQuantity('');
       setPrice('');
       setNote('');
+      setTransactionDate('');
       setErrorMsg(null);
       invalidate();
     },
@@ -435,6 +474,7 @@ export const PortfolioMainView: React.FC = () => {
       setQuantity('');
       setPrice('');
       setNote('');
+      setTransactionDate('');
       setErrorMsg(null);
       invalidate();
     },
@@ -442,7 +482,7 @@ export const PortfolioMainView: React.FC = () => {
   });
 
   const sellMutation = useMutation({
-    mutationFn: ({ id, ...body }: { id: number; quantity: string; price: string }) =>
+    mutationFn: ({ id, ...body }: { id: number; quantity: string; price: string; executed_at?: string }) =>
       fetchApi<SellResponse>(`/portfolio/holdings/${id}/sell`, {
         method: 'POST',
         body: JSON.stringify(body),
@@ -476,10 +516,11 @@ export const PortfolioMainView: React.FC = () => {
   });
 
   const depositMutation = useMutation({
-    mutationFn: (body: { amount: string; currency: string }) =>
+    mutationFn: (body: { amount: string; currency: string; executed_at?: string }) =>
       fetchApi<CashBalance>('/portfolio/cash/deposit', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       setCashAmount('');
+      setCashDate('');
       setCashError(null);
       invalidate();
     },
@@ -487,10 +528,11 @@ export const PortfolioMainView: React.FC = () => {
   });
 
   const withdrawMutation = useMutation({
-    mutationFn: (body: { amount: string; currency: string }) =>
+    mutationFn: (body: { amount: string; currency: string; executed_at?: string }) =>
       fetchApi<CashBalance>('/portfolio/cash/withdraw', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       setCashAmount('');
+      setCashDate('');
       setCashError(null);
       invalidate();
     },
@@ -502,7 +544,12 @@ export const PortfolioMainView: React.FC = () => {
       setCashError('Enter an amount.');
       return;
     }
-    const body = { amount: cashAmount.trim(), currency: cashCurrency.trim().toUpperCase() };
+    const executed_at = cashDate ? zonedInputToUtcIso(cashDate, timezone) ?? undefined : undefined;
+    const body = {
+      amount: cashAmount.trim(),
+      currency: cashCurrency.trim().toUpperCase(),
+      executed_at,
+    };
     if (action === 'deposit') {
       depositMutation.mutate(body);
     } else {
@@ -516,6 +563,7 @@ export const PortfolioMainView: React.FC = () => {
       setErrorMsg('Enter a symbol, quantity, and price.');
       return;
     }
+    const executed_at = transactionDate ? zonedInputToUtcIso(transactionDate, timezone) ?? undefined : undefined;
     buyMutation.mutate({
       symbol: symbol.trim().toUpperCase(),
       // Sent as strings: a JSON number would be a double by the time it
@@ -525,6 +573,7 @@ export const PortfolioMainView: React.FC = () => {
       price: price.trim(),
       currency: currency.trim().toUpperCase(),
       note: note.trim() || null,
+      executed_at,
     });
   };
 
@@ -534,12 +583,14 @@ export const PortfolioMainView: React.FC = () => {
       setErrorMsg('Enter a symbol, quantity, and cost price.');
       return;
     }
+    const executed_at = transactionDate ? zonedInputToUtcIso(transactionDate, timezone) ?? undefined : undefined;
     recordMutation.mutate({
       symbol: symbol.trim().toUpperCase(),
       quantity: quantity.trim(),
       price: price.trim(),
       currency: currency.trim().toUpperCase(),
       note: note.trim() || null,
+      executed_at,
     });
   };
 
@@ -606,8 +657,8 @@ export const PortfolioMainView: React.FC = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-          <label className="flex flex-col gap-1 sm:col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+          <label className="flex flex-col gap-1 sm:col-span-4">
             <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
             <input
               type="text"
@@ -618,7 +669,7 @@ export const PortfolioMainView: React.FC = () => {
               className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
             />
           </label>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 sm:col-span-2">
             <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
             <CustomSelect
               value={cashCurrency}
@@ -627,7 +678,16 @@ export const PortfolioMainView: React.FC = () => {
               options={currencyOptionsFor(cashCurrency)}
             />
           </label>
-          <div className="flex gap-2">
+          <label className="flex flex-col gap-1 sm:col-span-3">
+            <span className="text-[10px] uppercase font-mono text-neutral-500">Date / Time (Optional)</span>
+            <DateTimePicker
+              value={cashDate}
+              onChange={setCashDate}
+              placeholder="Now (current time)"
+              now={nowInZone(timezone)}
+            />
+          </label>
+          <div className="flex gap-2 sm:col-span-3">
             <button
               type="button"
               onClick={() => submitCash('deposit')}
@@ -671,8 +731,8 @@ export const PortfolioMainView: React.FC = () => {
         )}
 
         <form onSubmit={handleBuy} className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <label className="flex flex-col gap-1">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+            <div className="flex flex-col gap-1 sm:col-span-3">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Symbol</span>
               <TickerSearchInput
                 value={symbol}
@@ -680,9 +740,9 @@ export const PortfolioMainView: React.FC = () => {
                 placeholder="e.g. AAPL, BTC, VOO"
                 className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono uppercase"
               />
-            </label>
+            </div>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Quantity</span>
               <input
                 type="text"
@@ -694,7 +754,7 @@ export const PortfolioMainView: React.FC = () => {
               />
             </label>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Price</span>
               <input
                 type="text"
@@ -706,13 +766,23 @@ export const PortfolioMainView: React.FC = () => {
               />
             </label>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
               <CustomSelect
                 value={currency}
                 onChange={setCurrency}
                 mono
                 options={currencyOptionsFor(currency)}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 sm:col-span-3">
+              <span className="text-[10px] uppercase font-mono text-neutral-500">Date / Time (Optional)</span>
+              <DateTimePicker
+                value={transactionDate}
+                onChange={setTransactionDate}
+                placeholder="Now (current time)"
+                now={nowInZone(timezone)}
               />
             </label>
           </div>
@@ -802,10 +872,16 @@ export const PortfolioMainView: React.FC = () => {
                   <SellRow
                     key={h.id}
                     holding={h}
+                    timezone={timezone}
                     saving={sellMutation.isPending}
                     onCancel={() => setSellingId(null)}
-                    onSell={async (qty, sellPrice) => {
-                      await sellMutation.mutateAsync({ id: h.id, quantity: qty, price: sellPrice });
+                    onSell={async (qty, sellPrice, executedAt) => {
+                      await sellMutation.mutateAsync({
+                        id: h.id,
+                        quantity: qty,
+                        price: sellPrice,
+                        executed_at: executedAt,
+                      });
                       setSellingId(null);
                     }}
                   />
@@ -932,9 +1008,9 @@ export const PortfolioMainView: React.FC = () => {
                       <ArrowDownRight className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => deleteMutation.mutate(h.id)}
+                      onClick={() => setRemovingHolding(h)}
                       title="Remove holding"
-                      className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+                      className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -1003,6 +1079,51 @@ export const PortfolioMainView: React.FC = () => {
                 className="px-3.5 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
               >
                 {updateSymbolMutation.isPending ? 'Saving...' : 'Save Symbol'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Holding Confirmation Modal */}
+      {removingHolding && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-800 p-5 max-w-sm w-full space-y-4 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Remove {removingHolding.symbol}?
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                  This will delete this position from your active portfolio. This action is for administrative corrections and <span className="font-semibold text-neutral-800 dark:text-neutral-200">will not credit your cash balance</span>.
+                </p>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 pt-1">
+                  To sell your shares and receive cash proceeds, click <span className="font-medium text-neutral-700 dark:text-neutral-300">Sell (↘)</span> instead.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setRemovingHolding(null)}
+                className="px-3 py-1.5 rounded text-xs text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={async () => {
+                  await deleteMutation.mutateAsync(removingHolding.id);
+                  setRemovingHolding(null);
+                }}
+                className="px-3.5 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium transition disabled:opacity-50 cursor-pointer"
+              >
+                {deleteMutation.isPending ? 'Removing...' : 'Remove Position'}
               </button>
             </div>
           </div>

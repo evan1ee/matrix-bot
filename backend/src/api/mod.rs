@@ -105,6 +105,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         )
         .route("/portfolio/holdings/record", post(portfolio_prices::record_holding_position))
         .route("/portfolio/search", get(portfolio_prices::search_ticker_symbols))
+        .route("/portfolio/quote", get(portfolio_prices::get_symbol_quote))
         .route("/portfolio/activity", get(portfolio_prices::get_portfolio_activity))
         .route("/portfolio/activity/verify", get(portfolio_prices::verify_portfolio_activity_chain))
         .route("/portfolio/summary", get(portfolio::summary))
@@ -202,7 +203,7 @@ pub async fn start_api_server(
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
     // an explicit allowlist keeps that surface to hosts the operator names.
-    let allowed_origins: Vec<HeaderValue> = config
+    let mut allowed_origins: Vec<HeaderValue> = config
         .cors_allowed_origins
         .iter()
         .filter_map(|origin| match origin.parse::<HeaderValue>() {
@@ -214,10 +215,20 @@ pub async fn start_api_server(
         })
         .collect();
 
+    if allowed_origins.is_empty()
+        && (config.webauthn_rp_id == "localhost" || config.webauthn_origin.contains("localhost"))
+    {
+        for origin in &["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173", "http://127.0.0.1:8080"] {
+            if let Ok(val) = origin.parse::<HeaderValue>() {
+                allowed_origins.push(val);
+            }
+        }
+    }
+
     if allowed_origins.is_empty() {
         info!("CORS: same-origin only (set CORS_ALLOWED_ORIGINS to permit others)");
     } else {
-        info!("CORS: allowing origins {:?}", config.cors_allowed_origins);
+        info!("CORS: allowing origins {:?}", allowed_origins);
     }
 
     let cors = CorsLayer::new()

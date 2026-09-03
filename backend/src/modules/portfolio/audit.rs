@@ -96,8 +96,9 @@ pub async fn record_audit_entry(
     currency_exponent: i64,
     realized_pl_minor: Option<i64>,
     note: Option<&str>,
+    custom_timestamp: Option<DateTime<Utc>>,
 ) -> Result<PortfolioAuditEntry> {
-    let now = Utc::now();
+    let now = custom_timestamp.unwrap_or_else(Utc::now);
     let epoch_ms = now.timestamp_millis();
 
     let prev_hash = sqlx::query_scalar::<_, String>(
@@ -295,7 +296,7 @@ mod tests {
         let owner = "acct_alice";
 
         let e1 = record_audit_entry(
-            &pool, owner, "deposit", None, None, None, 500000, "USD", 2, None, Some("wire deposit"),
+            &pool, owner, "deposit", None, None, None, 500000, "USD", 2, None, Some("wire deposit"), None,
         )
         .await
         .unwrap();
@@ -315,6 +316,7 @@ mod tests {
             2,
             None,
             Some("initial buy"),
+            None,
         )
         .await
         .unwrap();
@@ -345,6 +347,7 @@ mod tests {
                 2,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -362,7 +365,7 @@ mod tests {
         let owner = "acct_charlie";
 
         let e = record_audit_entry(
-            &pool, owner, "deposit", None, None, None, 50000, "USD", 2, None, None,
+            &pool, owner, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
@@ -380,5 +383,35 @@ mod tests {
             .execute(&pool)
             .await;
         assert!(delete_res.is_err(), "Trigger must abort DELETE");
+    }
+
+    #[tokio::test]
+    async fn test_custom_timestamp_audit_chain() {
+        let pool = pool().await;
+        let owner = "acct_dave";
+
+        let past_time = Utc::now() - chrono::Duration::days(7);
+        let e = record_audit_entry(
+            &pool,
+            owner,
+            "buy",
+            Some("AAPL"),
+            Some(10_00000000),
+            Some(15000),
+            150000,
+            "USD",
+            2,
+            None,
+            Some("bought a week ago"),
+            Some(past_time),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(e.created_at.unwrap().timestamp_millis(), past_time.timestamp_millis());
+
+        let report = verify_audit_chain(&pool, owner).await.unwrap();
+        assert!(report.is_valid);
+        assert_eq!(report.total_verified, 1);
     }
 }

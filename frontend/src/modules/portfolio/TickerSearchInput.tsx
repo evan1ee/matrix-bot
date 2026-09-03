@@ -46,7 +46,8 @@ export const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
           `/portfolio/search?q=${encodeURIComponent(trimmed)}`
         );
         setResults(data || []);
-      } catch {
+      } catch (err) {
+        console.error('Ticker search failed:', err);
         setResults([]);
       } finally {
         setIsLoading(false);

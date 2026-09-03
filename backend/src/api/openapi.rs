@@ -79,6 +79,7 @@ use crate::modules::settings::UserSettings;
         portfolio_prices::get_portfolio_activity,
         portfolio_prices::verify_portfolio_activity_chain,
         portfolio_prices::search_ticker_symbols,
+        portfolio_prices::get_symbol_quote,
         portfolio_prices::update_holding_symbol,
         recurring_bills::list_bills,
         recurring_bills::create_bill,

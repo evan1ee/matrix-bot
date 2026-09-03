@@ -74,9 +74,20 @@ pub async fn deposit_cash(
     currency_exponent: i64,
     amount_minor: i64,
 ) -> Result<CashBalance> {
+    deposit_cash_at(pool, owner_id, currency, currency_exponent, amount_minor, None).await
+}
+
+pub async fn deposit_cash_at(
+    pool: &SqlitePool,
+    owner_id: &str,
+    currency: &str,
+    currency_exponent: i64,
+    amount_minor: i64,
+    executed_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<CashBalance> {
     let cash = credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await?;
     let _ = crate::modules::portfolio::audit::record_audit_entry(
-        pool, owner_id, "deposit", None, None, None, amount_minor, currency, currency_exponent, None, None,
+        pool, owner_id, "deposit", None, None, None, amount_minor, currency, currency_exponent, None, None, executed_at,
     )
     .await;
     Ok(cash)
@@ -129,10 +140,20 @@ pub async fn withdraw_cash(
     currency: &str,
     amount_minor: i64,
 ) -> Result<WithdrawOutcome> {
+    withdraw_cash_at(pool, owner_id, currency, amount_minor, None).await
+}
+
+pub async fn withdraw_cash_at(
+    pool: &SqlitePool,
+    owner_id: &str,
+    currency: &str,
+    amount_minor: i64,
+    executed_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<WithdrawOutcome> {
     let outcome = debit_cash(pool, owner_id, currency, amount_minor).await?;
     if let WithdrawOutcome::Ok(ref cash) = outcome {
         let _ = crate::modules::portfolio::audit::record_audit_entry(
-            pool, owner_id, "withdraw", None, None, None, amount_minor, currency, cash.currency_exponent, None, None,
+            pool, owner_id, "withdraw", None, None, None, amount_minor, currency, cash.currency_exponent, None, None, executed_at,
         )
         .await;
     }

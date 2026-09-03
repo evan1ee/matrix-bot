@@ -108,7 +108,7 @@ pub async fn record_holding_position(
         None => None,
     };
 
-    match PortfolioRepository::record_holding(
+    match PortfolioRepository::record_holding_at(
         &state.db.pool,
         &owner_id,
         &symbol,
@@ -117,6 +117,7 @@ pub async fn record_holding_position(
         &currency,
         exponent as i64,
         note,
+        payload.executed_at,
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?
@@ -175,21 +176,53 @@ pub struct SearchQuery {
     path = "/api/v1/portfolio/search",
     params(SearchQuery),
     responses(
-        (status = 200, description = "Ticker symbol search results", body = Vec<TickerSearchResult>),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("session_cookie" = []))
+        (status = 200, description = "Ticker symbol search results", body = Vec<TickerSearchResult>)
+    )
 )]
 pub async fn search_ticker_symbols(
     State(_state): State<ApiState>,
-    _user: AuthUser,
     axum::extract::Query(params): axum::extract::Query<SearchQuery>,
 ) -> Result<Json<Vec<crate::modules::portfolio::price_feed::TickerSearchResult>>, ApiError> {
     let results = crate::modules::portfolio::price_feed::search_symbols(&params.q)
         .await
-        .map_err(ApiError::bad_request)?;
+        .unwrap_or_default();
 
     Ok(Json(results))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct QuoteQuery {
+    pub symbol: String,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct SymbolQuoteResponse {
+    pub symbol: String,
+    pub price: f64,
+    pub currency: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/portfolio/quote",
+    params(QuoteQuery),
+    responses(
+        (status = 200, description = "Current market quote for symbol", body = SymbolQuoteResponse),
+        (status = 400, description = "Failed to fetch quote", body = ApiErrorResponse)
+    )
+)]
+pub async fn get_symbol_quote(
+    axum::extract::Query(params): axum::extract::Query<QuoteQuery>,
+) -> Result<Json<SymbolQuoteResponse>, ApiError> {
+    let fetched = crate::modules::portfolio::price_feed::fetch_latest_price(&params.symbol)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    Ok(Json(SymbolQuoteResponse {
+        symbol: params.symbol.to_uppercase(),
+        price: fetched.price,
+        currency: fetched.currency,
+    }))
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
@@ -306,6 +339,7 @@ mod tests {
                 price: "150.00".to_string(),
                 currency: "USD".to_string(),
                 note: None,
+                executed_at: None,
             }),
         )
         .await

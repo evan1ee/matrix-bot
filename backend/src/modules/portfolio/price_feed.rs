@@ -317,19 +317,56 @@ pub async fn search_symbols(query: &str) -> Result<Vec<TickerSearchResult>, Stri
     }
 
     let client = get_client();
-    let resp = client
-        .get("https://query2.finance.yahoo.com/v1/finance/search")
-        .query(&[("q", q), ("quotesCount", "8")])
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let query_params = [("q", q), ("quotesCount", "8"), ("newsCount", "0")];
 
-    if !resp.status().is_success() {
-        return Err(format!("Yahoo Search returned HTTP {}", resp.status()));
+    let endpoints = [
+        "https://query2.finance.yahoo.com/v1/finance/search",
+        "https://query1.finance.yahoo.com/v1/finance/search",
+    ];
+
+    for endpoint in endpoints {
+        if let Ok(resp) = client.get(endpoint).query(&query_params).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(results) = parse_yahoo_search_json(&text) {
+                        if !results.is_empty() {
+                            return Ok(results);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    parse_yahoo_search_json(&text)
+    // Static fallback for popular symbols if network is offline or blocked
+    let popular = [
+        ("AAPL", "Apple Inc.", "NASDAQ", "Equity"),
+        ("MSFT", "Microsoft Corporation", "NASDAQ", "Equity"),
+        ("NVDA", "NVIDIA Corporation", "NASDAQ", "Equity"),
+        ("GOOGL", "Alphabet Inc.", "NASDAQ", "Equity"),
+        ("AMZN", "Amazon.com, Inc.", "NASDAQ", "Equity"),
+        ("TSLA", "Tesla, Inc.", "NASDAQ", "Equity"),
+        ("META", "Meta Platforms, Inc.", "NASDAQ", "Equity"),
+        ("BTC-USD", "Bitcoin USD", "CCC", "Cryptocurrency"),
+        ("ETH-USD", "Ethereum USD", "CCC", "Cryptocurrency"),
+        ("SOL-USD", "Solana USD", "CCC", "Cryptocurrency"),
+        ("SPY", "SPDR S&P 500 ETF Trust", "NYSE", "ETF"),
+        ("VOO", "Vanguard S&P 500 ETF", "NYSE", "ETF"),
+        ("QQQ", "Invesco QQQ Trust", "NASDAQ", "ETF"),
+    ];
+    let q_upper = q.to_uppercase();
+    let matches: Vec<TickerSearchResult> = popular
+        .iter()
+        .filter(|(sym, name, _, _)| sym.contains(&q_upper) || name.to_uppercase().contains(&q_upper))
+        .map(|(sym, name, exch, qt)| TickerSearchResult {
+            symbol: sym.to_string(),
+            name: name.to_string(),
+            exchange: Some(exch.to_string()),
+            quote_type: Some(qt.to_string()),
+        })
+        .collect();
+
+    Ok(matches)
 }
 
 #[cfg(test)]
