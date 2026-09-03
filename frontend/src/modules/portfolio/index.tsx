@@ -15,6 +15,7 @@ import {
   ArrowUpRight,
   Wallet,
   RefreshCw,
+  BookmarkPlus,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { CURRENCY_OPTIONS, useSettings } from '../../core/settings';
@@ -362,6 +363,20 @@ export const PortfolioMainView: React.FC = () => {
     onError: (err: Error) => setErrorMsg(err.message),
   });
 
+  const recordMutation = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      fetchApi<Holding>('/portfolio/holdings/record', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      setSymbol('');
+      setQuantity('');
+      setPrice('');
+      setNote('');
+      setErrorMsg(null);
+      invalidate();
+    },
+    onError: (err: Error) => setErrorMsg(err.message),
+  });
+
   const sellMutation = useMutation({
     mutationFn: ({ id, ...body }: { id: number; quantity: string; price: string }) =>
       fetchApi<SellResponse>(`/portfolio/holdings/${id}/sell`, {
@@ -442,6 +457,21 @@ export const PortfolioMainView: React.FC = () => {
       // Sent as strings: a JSON number would be a double by the time it
       // reaches the server, and neither a fractional quantity nor a price
       // survives that exactly.
+      quantity: quantity.trim(),
+      price: price.trim(),
+      currency: currency.trim().toUpperCase(),
+      note: note.trim() || null,
+    });
+  };
+
+  const handleRecord = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!symbol.trim() || !quantity.trim() || !price.trim()) {
+      setErrorMsg('Enter a symbol, quantity, and cost price.');
+      return;
+    }
+    recordMutation.mutate({
+      symbol: symbol.trim().toUpperCase(),
       quantity: quantity.trim(),
       price: price.trim(),
       currency: currency.trim().toUpperCase(),
@@ -624,21 +654,32 @@ export const PortfolioMainView: React.FC = () => {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
             <input
               type="text"
               placeholder="Note (optional)"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="sm:col-span-3 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              className="sm:col-span-6 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
             />
             <button
               type="submit"
-              disabled={buyMutation.isPending}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+              disabled={buyMutation.isPending || recordMutation.isPending}
+              className="sm:col-span-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
+              title="Buy position and deduct cost from cash balance"
             >
-              <Plus className="w-4 h-4" />
-              <span>{buyMutation.isPending ? 'Buying...' : 'Buy'}</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>{buyMutation.isPending ? 'Buying...' : 'Buy (Spend Cash)'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={buyMutation.isPending || recordMutation.isPending}
+              onClick={handleRecord}
+              className="sm:col-span-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-900/60 transition disabled:opacity-50 cursor-pointer"
+              title="Record already-owned stock or crypto without deducting cash balance"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5" />
+              <span>{recordMutation.isPending ? 'Recording...' : 'Record Existing (No Cash)'}</span>
             </button>
           </div>
         </form>

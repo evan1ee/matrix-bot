@@ -19,6 +19,7 @@ use crate::utils::html_escape;
 
 pub fn usage() -> String {
     "⚠️ Unknown command. Try <code>!portfolio buy &lt;symbol&gt; &lt;qty&gt; @ &lt;price&gt; [CUR] [note]</code>, \
+     <code>!portfolio record &lt;symbol&gt; &lt;qty&gt; @ &lt;price&gt; [CUR] [note]</code>, \
      <code>!portfolio sell &lt;symbol&gt; &lt;qty&gt; @ &lt;price&gt;</code>, \
      <code>!portfolio price &lt;symbol&gt; &lt;price&gt;</code>, <code>!portfolio refresh</code>, \
      <code>!portfolio note &lt;symbol&gt; [text]</code>, \

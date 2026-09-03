@@ -236,27 +236,58 @@ impl PortfolioRepository {
             }
         };
 
+        match Self::record_holding(
+            pool,
+            owner_id,
+            symbol,
+            quantity_minor,
+            price_minor,
+            currency,
+            currency_exponent,
+            note,
+        )
+        .await?
+        {
+            Ok(holding) => Ok(BuyOutcome::Ok { holding, cash }),
+            Err(err) => {
+                let _ = Self::deposit_cash(pool, owner_id, currency, currency_exponent, needed).await;
+                Ok(BuyOutcome::CurrencyMismatch { existing_currency: err })
+            }
+        }
+    }
+
+    /// Records an existing position without checking or debiting cash balances.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_holding(
+        pool: &SqlitePool,
+        owner_id: &str,
+        symbol: &str,
+        quantity_minor: i64,
+        price_minor: i64,
+        currency: &str,
+        currency_exponent: i64,
+        note: Option<&str>,
+    ) -> Result<Result<Holding, String>> {
+        let existing = Self::find(pool, owner_id, symbol).await?;
+
+        if let Some(h) = &existing {
+            if h.currency != currency {
+                return Ok(Err(h.currency.clone()));
+            }
+        }
+
         let Some(existing) = existing else {
             sqlx::query(
                 "INSERT INTO portfolio_holdings \
-                 (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, \
-                  current_price_minor, price_updated_at, note) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                 (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
             )
-            .bind(owner_id)
-            .bind(symbol)
-            .bind(quantity_minor)
-            .bind(price_minor)
-            .bind(currency)
-            .bind(currency_exponent)
-            .bind(note)
-            .execute(pool)
-            .await?;
+            .bind(owner_id).bind(symbol).bind(quantity_minor).bind(price_minor).bind(currency).bind(currency_exponent).bind(price_minor).bind(note)
+            .execute(pool).await?;
 
-            let holding = Self::find(pool, owner_id, symbol)
-                .await?
+            let holding = Self::find(pool, owner_id, symbol).await?
                 .ok_or_else(|| anyhow::anyhow!("inserted holding vanished before it could be read"))?;
-            return Ok(BuyOutcome::Ok { holding, cash });
+            return Ok(Ok(holding));
         };
 
         let new_quantity = existing.quantity_minor + quantity_minor;
@@ -269,33 +300,22 @@ impl PortfolioRepository {
 
         if let Some(text) = note {
             sqlx::query(
-                "UPDATE portfolio_holdings \
-                 SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP \
-                 WHERE id = ?",
+                "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             )
-            .bind(new_quantity)
-            .bind(new_avg_cost)
-            .bind(text)
-            .bind(existing.id)
-            .execute(pool)
-            .await?;
+            .bind(new_quantity).bind(new_avg_cost).bind(text).bind(existing.id)
+            .execute(pool).await?;
         } else {
             sqlx::query(
-                "UPDATE portfolio_holdings \
-                 SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP \
-                 WHERE id = ?",
+                "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             )
-            .bind(new_quantity)
-            .bind(new_avg_cost)
-            .bind(existing.id)
-            .execute(pool)
-            .await?;
+            .bind(new_quantity).bind(new_avg_cost).bind(existing.id)
+            .execute(pool).await?;
         }
 
         let holding = Self::find(pool, owner_id, symbol)
             .await?
             .ok_or_else(|| anyhow::anyhow!("updated holding vanished before it could be read"))?;
-        Ok(BuyOutcome::Ok { holding, cash })
+        Ok(Ok(holding))
     }
 
     /// Reduces or closes a position, crediting cash with the sale's gross

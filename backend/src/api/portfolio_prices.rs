@@ -62,10 +62,69 @@ pub async fn refresh_single_holding_price(
 
     match refresh_holding_price(&state.db.pool, Some(&state.broadcaster), &holding).await {
         Ok(updated) => Ok(Json(updated)),
-        Err(err) => Err(ApiError::bad_gateway(format!(
+        Err(err) => Err(ApiError::bad_request(format!(
             "Failed to fetch market price for {}: {}",
             holding.symbol, err
         ))),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/portfolio/holdings/record",
+    request_body = BuyHoldingRequest,
+    responses(
+        (status = 200, description = "Position recorded without cash debit", body = Holding),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn record_holding_position(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Json(payload): Json<crate::api::portfolio::BuyHoldingRequest>,
+) -> Result<Json<Holding>, ApiError> {
+    use crate::events::SystemEvent;
+    use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
+    use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
+
+    let owner_id = user.owner_id();
+    let symbol = normalise_symbol(&payload.symbol)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency = normalise_currency(&payload.currency)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let exponent = exponent_for(&currency);
+
+    let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let price_minor = parse_amount(&payload.price, exponent)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+
+    let note = match payload.note {
+        Some(ref n) if n.trim().is_empty() => None,
+        Some(ref n) => Some(n.as_str()),
+        None => None,
+    };
+
+    match PortfolioRepository::record_holding(
+        &state.db.pool,
+        &owner_id,
+        &symbol,
+        quantity_minor,
+        price_minor,
+        &currency,
+        exponent as i64,
+        note,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    {
+        Ok(holding) => {
+            state.broadcaster.send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
+            Ok(Json(holding))
+        }
+        Err(err) => Err(ApiError::bad_request(err)),
     }
 }
 
@@ -106,6 +165,6 @@ mod tests {
         let err = refresh_single_holding_price(State(state), alice, Path(999))
             .await
             .unwrap_err();
-        assert_eq!(err.code(), 404);
+        assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
     }
 }

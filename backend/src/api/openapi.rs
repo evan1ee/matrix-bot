@@ -75,6 +75,7 @@ use crate::modules::settings::UserSettings;
         portfolio::withdraw_cash,
         portfolio_prices::refresh_all_prices,
         portfolio_prices::refresh_single_holding_price,
+        portfolio_prices::record_holding_position,
         recurring_bills::list_bills,
         recurring_bills::create_bill,
         recurring_bills::get_bill,

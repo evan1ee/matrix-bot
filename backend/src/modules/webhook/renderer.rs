@@ -254,6 +254,7 @@ mod tests {
         assert!(sanitized.contains("&lt;script&gt;"));
         assert!(!sanitized.contains("<a href=\"javascript:evil()\">"));
         assert!(sanitized.contains("&lt;a href=&quot;javascript:evil()&quot;&gt;"));
-        assert!(!sanitized.contains("onerror"));
+        assert!(!sanitized.contains("<img"));
+        assert!(sanitized.contains("&lt;img"));
     }
 }

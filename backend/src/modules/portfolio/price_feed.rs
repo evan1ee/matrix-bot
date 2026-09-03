@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::portfolio::models::Holding;

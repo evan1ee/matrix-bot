@@ -43,8 +43,15 @@ impl BotModule for PortfolioModule {
             CommandHelp {
                 name: "portfolio buy".to_string(),
                 usage: "!portfolio buy <symbol> <qty> @ <price> [CUR] [note]".to_string(),
-                description: "Open or add to a position \
+                description: "Open or add to a position using cash \
                               (e.g. !portfolio buy AAPL 10 @ 150.00 USD core position)"
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "portfolio record".to_string(),
+                usage: "!portfolio record <symbol> <qty> @ <price> [CUR] [note]".to_string(),
+                description: "Record already-owned position without spending cash \
+                              (e.g. !portfolio record BTC 0.5 @ 60000 USD cold storage)"
                     .to_string(),
             },
             CommandHelp {
