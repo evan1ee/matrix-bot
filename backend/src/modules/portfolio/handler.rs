@@ -40,6 +40,9 @@ pub async fn handle_portfolio_command(
     if rest_lower.starts_with("price") {
         return Some(handle_price(pool, owner_id, rest[5..].trim(), broadcaster).await);
     }
+    if rest_lower.starts_with("refresh") || rest_lower.starts_with("update") {
+        return Some(handle_refresh(pool, owner_id, broadcaster).await);
+    }
     if rest_lower.starts_with("note") {
         return Some(handle_note(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
@@ -333,6 +336,32 @@ async fn handle_price(
     }
 }
 
+async fn handle_refresh(
+    pool: &SqlitePool,
+    owner_id: &str,
+    broadcaster: Option<&EventBroadcaster>,
+) -> String {
+    let summary = super::price_feed::refresh_all_for_owner(pool, broadcaster, owner_id).await;
+    if summary.updated.is_empty() && summary.failed.is_empty() {
+        return "ℹ️ You have no holdings to refresh.".to_string();
+    }
+    let mut msg = String::new();
+    if !summary.updated.is_empty() {
+        msg.push_str(&format!(
+            "🔄 <b>Refreshed market prices for {} holding(s):</b> {}<br/>",
+            summary.updated.len(),
+            summary.updated.iter().map(|s| format!("<code>{}</code>", html_escape(s))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !summary.failed.is_empty() {
+        msg.push_str(&format!(
+            "⚠️ <b>Failed to fetch:</b> {}",
+            summary.failed.iter().map(|s| format!("<code>{}</code>", html_escape(s))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    msg
+}
+
 async fn handle_note(
     pool: &SqlitePool,
     owner_id: &str,
@@ -475,5 +504,16 @@ mod tests {
         assert_eq!(signed_amount(1550, 2), "+15.50");
         assert_eq!(signed_amount(-1550, 2), "-15.50");
         assert_eq!(signed_amount(0, 2), "+0.00");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_empty_holdings() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
+            .await
+            .unwrap();
+        assert!(reply.contains("no holdings to refresh"));
     }
 }

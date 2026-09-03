@@ -14,54 +14,23 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Wallet,
+  RefreshCw,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { CURRENCY_OPTIONS, useSettings } from '../../core/settings';
+import { AllocationCard } from './AllocationCard';
+import {
+  Holding,
+  PortfolioCurrencySummary,
+  SellResponse,
+  CashBalance,
+  RefreshSummary,
+} from './types';
+
+export * from './types';
 
 /** Decimal places quantity is stored at — mirrors the backend's `QUANTITY_EXPONENT`. */
 const QUANTITY_EXPONENT = 8;
-
-export interface Holding {
-  id: number;
-  owner_id: string;
-  symbol: string;
-  /** Minor units, scaled at `QUANTITY_EXPONENT` — always positive. */
-  quantity_minor: number;
-  /** Minor units, scaled at `currency_exponent`. */
-  avg_cost_minor: number;
-  currency: string;
-  currency_exponent: number;
-  current_price_minor?: number | null;
-  price_updated_at?: string | null;
-  note?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
-
-interface PortfolioCurrencySummary {
-  currency: string;
-  currency_exponent: number;
-  cost_basis_minor: number;
-  market_value_minor: number;
-  unrealized_pl_minor: number;
-  priced_holdings: number;
-  unpriced_holdings: number;
-  cash_minor: number;
-}
-
-interface SellResponse {
-  holding: Holding | null;
-  realized_pl_minor: number;
-}
-
-export interface CashBalance {
-  id: number;
-  owner_id: string;
-  currency: string;
-  currency_exponent: number;
-  balance_minor: number;
-  updated_at?: string | null;
-}
 
 /**
  * Renders minor units as a decimal string. Integer maths only, same reason
@@ -357,6 +326,27 @@ export const PortfolioMainView: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
     queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
   };
+
+  const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+
+  const refreshPricesMutation = useMutation({
+    mutationFn: () => fetchApi<RefreshSummary>('/portfolio/refresh-prices', { method: 'POST' }),
+    onSuccess: (summary) => {
+      invalidate();
+      if (summary.updated.length > 0) {
+        setRefreshStatus(`Updated ${summary.updated.length} holding(s): ${summary.updated.join(', ')}`);
+      } else if (summary.failed.length > 0) {
+        setRefreshStatus(`Failed to fetch: ${summary.failed.join(', ')}`);
+      } else {
+        setRefreshStatus('No holdings to update.');
+      }
+      setTimeout(() => setRefreshStatus(null), 5000);
+    },
+    onError: (err: Error) => {
+      setRefreshStatus(err.message || 'Failed to refresh prices.');
+      setTimeout(() => setRefreshStatus(null), 5000);
+    },
+  });
 
   const buyMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -654,12 +644,36 @@ export const PortfolioMainView: React.FC = () => {
         </form>
       </div>
 
+      {/* Asset Allocation Analytics */}
+      <AllocationCard holdings={holdings ?? []} cashBalances={cashBalances ?? []} />
+
       {/* Holdings */}
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-          <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">HOLDINGS</span>
-          <span className="text-xs font-mono text-neutral-500">{(holdings ?? []).length} positions</span>
+        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">HOLDINGS</span>
+            <span className="text-xs font-mono text-neutral-500">{(holdings ?? []).length} positions</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => refreshPricesMutation.mutate()}
+              disabled={refreshPricesMutation.isPending || (holdings ?? []).length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition disabled:opacity-50 cursor-pointer shadow-2xs"
+              title="Automatically fetch latest market prices for all holdings using free Yahoo Finance and crypto feeds"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshPricesMutation.isPending ? 'animate-spin' : ''}`} />
+              <span>{refreshPricesMutation.isPending ? 'Updating...' : 'Refresh Prices'}</span>
+            </button>
+          </div>
         </div>
+
+        {refreshStatus && (
+          <div className="p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-300 text-xs font-mono">
+            {refreshStatus}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="py-8 text-center text-xs font-mono text-neutral-500">Loading holdings...</div>
@@ -750,6 +764,11 @@ export const PortfolioMainView: React.FC = () => {
                           : 'set current price'}
                         <Pencil className="w-3 h-3" />
                       </button>
+                    )}
+                    {h.price_updated_at && (
+                      <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono ml-1">
+                        · {new Date(h.price_updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     )}
                   </div>
 

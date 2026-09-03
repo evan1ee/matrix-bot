@@ -24,6 +24,7 @@ pub mod health;
 pub mod openapi;
 pub mod finance;
 pub mod portfolio;
+pub mod portfolio_prices;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
@@ -96,6 +97,11 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/portfolio/holdings/:id/sell", post(portfolio::sell_holding))
         .route("/portfolio/holdings/:id/price", put(portfolio::set_price))
         .route("/portfolio/holdings/:id/note", put(portfolio::set_note))
+        .route("/portfolio/refresh-prices", post(portfolio_prices::refresh_all_prices))
+        .route(
+            "/portfolio/holdings/:id/refresh-price",
+            post(portfolio_prices::refresh_single_holding_price),
+        )
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/cash", get(portfolio::list_cash))
         .route("/portfolio/cash/deposit", post(portfolio::deposit_cash))

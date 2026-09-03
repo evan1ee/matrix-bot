@@ -8,12 +8,14 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
 pub mod cash;
 pub mod handler;
 pub mod models;
+pub mod price_feed;
 pub mod repository;
+pub mod scheduler;
 pub mod view;
 
 pub struct PortfolioModule;
@@ -55,6 +57,11 @@ impl BotModule for PortfolioModule {
                 name: "portfolio price".to_string(),
                 usage: "!portfolio price <symbol> <price>".to_string(),
                 description: "Record the current market price for a holding".to_string(),
+            },
+            CommandHelp {
+                name: "portfolio refresh".to_string(),
+                usage: "!portfolio refresh".to_string(),
+                description: "Automatically fetch and update current market prices for all holdings".to_string(),
             },
             CommandHelp {
                 name: "portfolio note".to_string(),
@@ -104,6 +111,13 @@ impl BotModule for PortfolioModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
+    }
+
+    async fn spawn_background_workers(
+        &self,
+        ctx: &ModuleContext,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        vec![scheduler::start_portfolio_price_scheduler(ctx.clone())]
     }
 }
 

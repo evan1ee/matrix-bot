@@ -3,7 +3,7 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, finance, health, portfolio, recurring_bills, reminders, rooms, settings, sse,
+    account, ai, auth, finance, health, portfolio, portfolio_prices, recurring_bills, reminders, rooms, settings, sse,
     todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
@@ -73,6 +73,8 @@ use crate::modules::settings::UserSettings;
         portfolio::list_cash,
         portfolio::deposit_cash,
         portfolio::withdraw_cash,
+        portfolio_prices::refresh_all_prices,
+        portfolio_prices::refresh_single_holding_price,
         recurring_bills::list_bills,
         recurring_bills::create_bill,
         recurring_bills::get_bill,
@@ -151,6 +153,7 @@ use crate::modules::settings::UserSettings;
             portfolio::SetNoteRequest,
             portfolio::SellResponse,
             portfolio::CashAmountRequest,
+            crate::modules::portfolio::price_feed::RefreshSummary,
             RecurringBill,
             CreateBillPayload,
             UpdateBillPayload,

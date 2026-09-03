@@ -20,7 +20,8 @@ use crate::utils::html_escape;
 pub fn usage() -> String {
     "⚠️ Unknown command. Try <code>!portfolio buy &lt;symbol&gt; &lt;qty&gt; @ &lt;price&gt; [CUR] [note]</code>, \
      <code>!portfolio sell &lt;symbol&gt; &lt;qty&gt; @ &lt;price&gt;</code>, \
-     <code>!portfolio price &lt;symbol&gt; &lt;price&gt;</code>, <code>!portfolio note &lt;symbol&gt; [text]</code>, \
+     <code>!portfolio price &lt;symbol&gt; &lt;price&gt;</code>, <code>!portfolio refresh</code>, \
+     <code>!portfolio note &lt;symbol&gt; [text]</code>, \
      <code>!portfolio cash</code>, <code>!portfolio cash deposit &lt;amount&gt; [CUR]</code>, \
      <code>!portfolio cash withdraw &lt;amount&gt; [CUR]</code>, \
      <code>!portfolio list</code>, <code>!portfolio summary</code>, or <code>!portfolio remove &lt;symbol&gt;</code>."
