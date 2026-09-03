@@ -240,14 +240,14 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400 font-mono">
-                <th className="pb-2 font-normal">ACTION</th>
-                <th className="pb-2 font-normal">ASSET / OPERATION</th>
-                <th className="pb-2 font-normal text-right">EXECUTION PRICE</th>
-                <th className="pb-2 font-normal text-right">TOTAL AMOUNT</th>
-                <th className="pb-2 font-normal text-right">REALIZED P&L</th>
-                <th className="pb-2 font-normal">HASH (SHA-256)</th>
-                <th className="pb-2 font-normal">NOTE / MEMO</th>
-                <th className="pb-2 font-normal text-right">TIMESTAMP</th>
+                <th className="pb-2 pr-3 font-normal">ACTION</th>
+                <th className="pb-2 pr-3 font-normal">ASSET / OPERATION</th>
+                <th className="pb-2 px-3 font-normal text-right">EXECUTION PRICE</th>
+                <th className="pb-2 px-3 font-normal text-right">TOTAL AMOUNT</th>
+                <th className="pb-2 px-3 font-normal text-right">REALIZED P&L</th>
+                <th className="pb-2 px-3 font-normal">HASH (SHA-256)</th>
+                <th className="pb-2 px-3 font-normal">NOTE / MEMO</th>
+                <th className="pb-2 pl-3 font-normal text-right">TIMESTAMP</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800/60 font-mono">
