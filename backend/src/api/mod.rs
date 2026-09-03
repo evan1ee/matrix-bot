@@ -20,9 +20,10 @@ const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub mod account;
 pub mod ai;
 pub mod auth;
+pub mod finance;
+pub mod footprints;
 pub mod health;
 pub mod openapi;
-pub mod finance;
 pub mod portfolio;
 pub mod portfolio_alerts;
 pub mod portfolio_history;
@@ -163,6 +164,24 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route(
             "/account/ai-config",
             get(ai::get_ai_config).put(ai::update_ai_config),
+        )
+        .route(
+            "/footprints",
+            get(footprints::list_footprints).post(footprints::create_footprint),
+        )
+        .route(
+            "/footprints/stats",
+            get(footprints::get_summary_stats),
+        )
+        .route(
+            "/footprints/geocode",
+            get(footprints::geocode_proxy),
+        )
+        .route(
+            "/footprints/:id",
+            get(footprints::get_footprint)
+                .put(footprints::update_footprint)
+                .delete(footprints::delete_footprint),
         )
 }
 

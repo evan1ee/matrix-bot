@@ -1,0 +1,229 @@
+import React, { useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchApi } from '../../core/apiClient';
+import { FrontendModule, SystemEvent } from '../../core/types';
+import { Footprint, CreateFootprintInput, FootprintsSummaryStats } from './types';
+import { FootprintsMap } from './FootprintsMap';
+import { FootprintsList } from './FootprintsList';
+import { FootprintModal } from './FootprintModal';
+import { Compass, MapPin, Globe, Calendar, DollarSign, Plus } from 'lucide-react';
+
+export * from './types';
+
+const FootprintsView: React.FC<{
+  events?: SystemEvent[];
+  isConnected?: boolean;
+}> = () => {
+  const queryClient = useQueryClient();
+
+  const [selectedFootprint, setSelectedFootprint] = useState<Footprint | null>(null);
+  const [editingFootprint, setEditingFootprint] = useState<Footprint | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [pendingPin, setPendingPin] = useState<{ lat: number; lon: number } | null>(null);
+
+  // Queries
+  const { data: footprints = [], isLoading } = useQuery({
+    queryKey: ['footprints'],
+    queryFn: () => fetchApi<Footprint[]>('/footprints'),
+  });
+
+  const { data: summaryStats = null } = useQuery({
+    queryKey: ['footprints-stats'],
+    queryFn: () => fetchApi<FootprintsSummaryStats>('/footprints/stats'),
+  });
+
+  // Mutations
+  const createMutation = useMutation({
+    mutationFn: (data: CreateFootprintInput) =>
+      fetchApi<Footprint>('/footprints', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (newFp) => {
+      queryClient.invalidateQueries({ queryKey: ['footprints'] });
+      queryClient.invalidateQueries({ queryKey: ['footprints-stats'] });
+      setSelectedFootprint(newFp);
+      setPendingPin(null);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: CreateFootprintInput }) =>
+      fetchApi<Footprint>(`/footprints/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (updatedFp) => {
+      queryClient.invalidateQueries({ queryKey: ['footprints'] });
+      queryClient.invalidateQueries({ queryKey: ['footprints-stats'] });
+      setSelectedFootprint(updatedFp);
+      setEditingFootprint(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetchApi<{ success: boolean; id: number }>(`/footprints/${id}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['footprints'] });
+      queryClient.invalidateQueries({ queryKey: ['footprints-stats'] });
+      if (selectedFootprint?.id === res.id) {
+        setSelectedFootprint(null);
+      }
+    },
+  });
+
+  const handleMapClick = useCallback((lat: number, lon: number) => {
+    setPendingPin({ lat, lon });
+    setEditingFootprint(null);
+    setIsModalOpen(true);
+  }, []);
+
+  const handleSaveFootprint = async (data: CreateFootprintInput) => {
+    if (editingFootprint) {
+      await updateMutation.mutateAsync({ id: editingFootprint.id, data });
+    } else {
+      await createMutation.mutateAsync(data);
+    }
+  };
+
+  const handleOpenAdd = () => {
+    setEditingFootprint(null);
+    setPendingPin(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (fp: Footprint) => {
+    setEditingFootprint(fp);
+    setPendingPin(null);
+    setIsModalOpen(true);
+  };
+
+  // Primary spend metric from summary
+  const primarySpend = summaryStats?.spend_by_currency?.[0];
+  const formattedTotalSpend = primarySpend
+    ? `${(primarySpend.total_spend_minor / Math.pow(10, primarySpend.currency_exponent)).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} ${primarySpend.currency}`
+    : '$0.00';
+
+  return (
+    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+      {/* Header & Description */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div>
+          <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2 tracking-tight">
+            <Compass className="w-5 h-5 text-neutral-600 dark:text-neutral-300" />
+            <span>Footprints &amp; Travel Journal</span>
+          </h1>
+          <p className="text-xs text-neutral-500 font-sans mt-0.5">
+            Track everywhere you've been on an interactive star map with memories and spending stats.
+          </p>
+        </div>
+      </div>
+
+      {/* Vercel Stat Strip (Design.md vbg-stat-strip) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shrink-0">
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+            Places Visited
+          </span>
+          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+            {summaryStats?.total_places ?? footprints.length}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+            Countries
+          </span>
+          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+            {summaryStats?.total_countries ?? 0}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+            Days Traveled
+          </span>
+          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+            {summaryStats?.total_days_traveled ?? 0}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+            Recorded Spend
+          </span>
+          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5 truncate">
+            {formattedTotalSpend}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Symmetrical 50/50 Workspace (Map on Left, List on Right) */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+        {/* Left: Star Map View */}
+        <div className="h-full flex flex-col min-h-[400px]">
+          <FootprintsMap
+            footprints={footprints}
+            selectedFootprint={selectedFootprint}
+            onSelectFootprint={setSelectedFootprint}
+            onMapClick={handleMapClick}
+            pendingPin={pendingPin}
+          />
+        </div>
+
+        {/* Right: Card Grid & Filter List */}
+        <div className="h-full flex flex-col min-h-0">
+          <FootprintsList
+            footprints={footprints}
+            summaryStats={summaryStats}
+            selectedFootprint={selectedFootprint}
+            onSelectFootprint={setSelectedFootprint}
+            onEditFootprint={handleOpenEdit}
+            onDeleteFootprint={(id) => deleteMutation.mutate(id)}
+            onOpenAddModal={handleOpenAdd}
+          />
+        </div>
+      </div>
+
+      {/* Modal Dialog for Recording / Editing */}
+      <FootprintModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setPendingPin(null);
+          setEditingFootprint(null);
+        }}
+        onSave={handleSaveFootprint}
+        initialData={editingFootprint}
+        initialCoordinates={pendingPin}
+      />
+    </div>
+  );
+};
+
+export const footprintsModule: FrontendModule = {
+  id: 'footprints',
+  name: 'Footprints',
+  description: 'Track visited places on an interactive star map with memories and spending',
+  iconName: 'Compass',
+  navTab: {
+    label: 'Footprints',
+  },
+  MainView: FootprintsView,
+  handleSseEvent: (event, queryClient) => {
+    if (
+      event.type === 'FootprintCreated' ||
+      event.type === 'FootprintUpdated' ||
+      event.type === 'FootprintDeleted'
+    ) {
+      queryClient.invalidateQueries({ queryKey: ['footprints'] });
+      queryClient.invalidateQueries({ queryKey: ['footprints-stats'] });
+    }
+  },
+};

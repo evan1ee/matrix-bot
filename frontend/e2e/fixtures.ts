@@ -27,6 +27,7 @@ export const TAB = {
   finance: 'Expenses',
   portfolio: 'Portfolio',
   bills: 'Bills',
+  footprints: 'Footprints',
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
 } as const;

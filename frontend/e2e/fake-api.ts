@@ -89,6 +89,28 @@ export interface FakeHolding {
   updated_at: string;
 }
 
+export interface FakeFootprint {
+  id: number;
+  owner_id: string;
+  title: string;
+  latitude: number;
+  longitude: number;
+  country: string | null;
+  city: string | null;
+  address: string | null;
+  arrival_date: string;
+  departure_date: string | null;
+  stay_duration_days: number;
+  spend_amount_minor: number;
+  spend_currency: string;
+  spend_currency_exponent: number;
+  rating: number;
+  category: string;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FakeWebhook {
   id: string;
   owner_id: string;
@@ -238,6 +260,7 @@ export class FakeApi {
   holdings: FakeHolding[] = [];
   cash: FakeCashBalance[] = [];
   alerts: any[] = [];
+  footprints: FakeFootprint[] = [];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -247,6 +270,40 @@ export class FakeApi {
   private nextCategoryId = 1;
   private nextHoldingId = 1;
   private nextCashId = 1;
+  private nextFootprintId = 1;
+
+  seedFootprint(partial: Partial<FakeFootprint> = {}): FakeFootprint {
+    const arr = partial.arrival_date ?? '2026-06-01';
+    const dep = partial.departure_date ?? null;
+    let duration = 1;
+    if (dep) {
+      const diff = Math.round((new Date(dep).getTime() - new Date(arr).getTime()) / (1000 * 3600 * 24));
+      duration = Math.max(1, diff);
+    }
+    const fp: FakeFootprint = {
+      id: this.nextFootprintId++,
+      owner_id: OWNER,
+      title: partial.title ?? 'Eiffel Tower',
+      latitude: partial.latitude ?? 48.8584,
+      longitude: partial.longitude ?? 2.2945,
+      country: partial.country ?? 'France',
+      city: partial.city ?? 'Paris',
+      address: partial.address ?? 'Champ de Mars, 5 Av. Anatole France, 75007 Paris, France',
+      arrival_date: arr,
+      departure_date: dep,
+      stay_duration_days: partial.stay_duration_days ?? duration,
+      spend_amount_minor: partial.spend_amount_minor ?? 0,
+      spend_currency: partial.spend_currency ?? 'USD',
+      spend_currency_exponent: partial.spend_currency_exponent ?? 2,
+      rating: partial.rating ?? 5,
+      category: partial.category ?? 'sightseeing',
+      note: partial.note ?? null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.footprints.push(fp);
+    return fp;
+  }
 
   seedTodo(partial: Partial<FakeTodo> = {}): FakeTodo {
     const todo: FakeTodo = {
@@ -1341,6 +1398,86 @@ export class FakeApi {
       const id = aiMsgMatch[1];
       const msgs = this.aiMessages.filter((m) => m.conversation_id === id);
       return json(route, 200, msgs);
+    }
+
+    // --- footprints ---
+    if (path === '/footprints' && method === 'GET') {
+      return json(route, 200, this.footprints);
+    }
+    if (path === '/footprints/stats' && method === 'GET') {
+      const countries = new Set(this.footprints.map((f) => f.country).filter(Boolean));
+      const days = this.footprints.reduce((sum, f) => sum + f.stay_duration_days, 0);
+      const spendMinor = this.footprints.reduce((sum, f) => sum + f.spend_amount_minor, 0);
+      return json(route, 200, {
+        total_places: this.footprints.length,
+        total_countries: countries.size,
+        total_days_traveled: days,
+        spend_by_currency: spendMinor > 0 ? [{ currency: 'USD', currency_exponent: 2, total_spend_minor: spendMinor }] : [],
+      });
+    }
+    if (path.startsWith('/footprints/geocode') && method === 'GET') {
+      if (path.includes('lat=') && path.includes('lon=')) {
+        return json(route, 200, {
+          display_name: 'Colosseum, Rome, Italy',
+          name: 'Colosseum',
+          address: { city: 'Rome', country: 'Italy' },
+        });
+      }
+      return json(route, 200, [
+        {
+          place_id: 1,
+          lat: '48.8584',
+          lon: '2.2945',
+          display_name: 'Eiffel Tower, Paris, France',
+          address: { city: 'Paris', country: 'France' },
+        },
+      ]);
+    }
+    if (path === '/footprints' && method === 'POST') {
+      const title = String(body?.title ?? '').trim();
+      if (!title) return json(route, 400, { error: 'Title required', code: 400 });
+      const fp = this.seedFootprint({
+        title,
+        latitude: body?.latitude ?? 0,
+        longitude: body?.longitude ?? 0,
+        country: body?.country ?? null,
+        city: body?.city ?? null,
+        address: body?.address ?? null,
+        arrival_date: body?.arrival_date ?? '2026-06-01',
+        departure_date: body?.departure_date ?? null,
+        spend_amount_minor: body?.spend_amount ? Math.round(parseFloat(body.spend_amount) * 100) : 0,
+        spend_currency: body?.spend_currency ?? 'USD',
+        rating: body?.rating ?? 5,
+        category: body?.category ?? 'sightseeing',
+        note: body?.note ?? null,
+      });
+      return json(route, 200, fp);
+    }
+    const fpMatch = path.match(/^\/footprints\/(\d+)$/);
+    if (fpMatch && method === 'GET') {
+      const id = Number(fpMatch[1]);
+      const fp = this.footprints.find((f) => f.id === id);
+      if (!fp) return json(route, 404, { error: 'Footprint not found', code: 404 });
+      return json(route, 200, fp);
+    }
+    if (fpMatch && method === 'PUT') {
+      const id = Number(fpMatch[1]);
+      const fp = this.footprints.find((f) => f.id === id);
+      if (!fp) return json(route, 404, { error: 'Footprint not found', code: 404 });
+      if (body?.title) fp.title = body.title;
+      if (body?.country) fp.country = body.country;
+      if (body?.city) fp.city = body.city;
+      if (body?.note !== undefined) fp.note = body.note;
+      if (body?.rating !== undefined) fp.rating = body.rating;
+      fp.updated_at = new Date().toISOString();
+      return json(route, 200, fp);
+    }
+    if (fpMatch && method === 'DELETE') {
+      const id = Number(fpMatch[1]);
+      const idx = this.footprints.findIndex((f) => f.id === id);
+      if (idx === -1) return json(route, 404, { error: 'Footprint not found', code: 404 });
+      this.footprints.splice(idx, 1);
+      return json(route, 200, { success: true, id });
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

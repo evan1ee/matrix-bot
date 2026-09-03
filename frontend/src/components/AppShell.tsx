@@ -28,6 +28,7 @@ const MODULE_LABELS: Record<string, string> = {
   finance: 'Expenses',
   portfolio: 'Portfolio',
   recurring_bills: 'Bills',
+  footprints: 'Footprints',
   core: 'System Overview',
 };
 

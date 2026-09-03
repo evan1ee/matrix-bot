@@ -58,6 +58,9 @@ pub enum SystemEvent {
     AiConversationUpdated { id: String, owner_id: String },
     AiConversationDeleted { id: String, owner_id: String },
     AiConfigUpdated { owner_id: String },
+    FootprintCreated(crate::modules::footprints::models::Footprint),
+    FootprintUpdated(crate::modules::footprints::models::Footprint),
+    FootprintDeleted { id: i64, owner_id: String },
 }
 
 impl SystemEvent {
@@ -103,6 +106,8 @@ impl SystemEvent {
             SystemEvent::AiConversationUpdated { owner_id, .. }
             | SystemEvent::AiConversationDeleted { owner_id, .. }
             | SystemEvent::AiConfigUpdated { owner_id } => owner_id,
+            SystemEvent::FootprintCreated(f) | SystemEvent::FootprintUpdated(f) => &f.owner_id,
+            SystemEvent::FootprintDeleted { owner_id, .. } => owner_id,
         }
     }
 }

@@ -12,6 +12,7 @@ pub mod ai;
 pub mod core;
 pub mod due_reminder;
 pub mod finance;
+pub mod footprints;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;

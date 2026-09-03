@@ -394,12 +394,12 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
               key={s.currency}
               className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1"
             >
-              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
+              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] uppercase font-mono tracking-wider">
                 <span>{s.currency} THIS MONTH</span>
                 <Wallet className="w-3.5 h-3.5" />
               </div>
               <div
-                className={`text-2xl font-bold font-mono tracking-tight ${
+                className={`text-2xl font-semibold font-sans tabular-nums tracking-tight ${
                   s.net_minor < 0
                     ? 'text-rose-600 dark:text-rose-400'
                     : 'text-emerald-600 dark:text-emerald-400'
@@ -407,7 +407,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
               >
                 {formatMinor(s.net_minor, s.currency_exponent)}
               </div>
-              <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">
+              <div className="text-[11px] text-neutral-500 font-mono">
                 in {formatMinor(s.income_minor, s.currency_exponent)} · out{' '}
                 {formatMinor(s.expense_minor, s.currency_exponent)}
               </div>
@@ -570,15 +570,15 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
 
       {/* Ledger */}
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">LEDGER</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 whitespace-nowrap">STATUS FILTER</span>
             <div className="flex items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded p-0.5 text-xs font-mono">
               {(['all', 'expense', 'income'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setFilter(tab)}
-                  className={`px-2.5 py-1 rounded capitalize transition ${
+                  className={`px-2.5 py-1 rounded capitalize transition whitespace-nowrap ${
                     filter === tab
                       ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
                       : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
@@ -589,7 +589,9 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
               ))}
             </div>
           </div>
-          <span className="text-xs font-mono text-neutral-500">{items.length} items</span>
+          <span className="text-xs font-mono text-neutral-500 shrink-0">
+            {items.length} {items.length === 1 ? 'item' : 'items'}
+          </span>
         </div>
 
         {isLoading ? (
@@ -623,7 +625,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                 <div
                   key={tx.id}
                   data-testid="ledger-row"
-                  className="py-3 flex items-center justify-between gap-4 px-2 rounded transition hover:bg-neutral-100 dark:hover:bg-neutral-900/30"
+                  className="py-3 flex items-center justify-between gap-4 px-2 rounded transition hover:bg-neutral-100/60 dark:hover:bg-neutral-900/50"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     {isExpense ? (
@@ -644,7 +646,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
 
                   <div className="flex items-center gap-3 shrink-0">
                     <span
-                      className={`font-mono text-sm font-medium ${
+                      className={`font-mono tabular-nums text-sm font-medium ${
                         isExpense
                           ? 'text-rose-600 dark:text-rose-400'
                           : 'text-emerald-600 dark:text-emerald-400'
@@ -656,14 +658,14 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                     <button
                       onClick={() => setEditingId(tx.id)}
                       title="Edit entry"
-                      className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+                      className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => deleteMutation.mutate(tx.id)}
                       title="Delete entry"
-                      className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+                      className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

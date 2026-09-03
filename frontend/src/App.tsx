@@ -10,6 +10,7 @@ import { portfolioModule } from './modules/portfolio';
 import { recurringBillsModule } from './modules/recurring_bills';
 import { webhooksModule } from './modules/webhooks';
 import { aiModule } from './modules/ai';
+import { footprintsModule } from './modules/footprints';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
@@ -19,7 +20,7 @@ import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, todoModule, reminderModule, financeModule, portfolioModule, recurringBillsModule, webhooksModule, aiModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, webhooksModule, aiModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
