@@ -11,41 +11,7 @@ const HOLDING_COLUMNS: &str = "id, owner_id, symbol, quantity_minor, avg_cost_mi
                                 created_at, updated_at";
 const CASH_COLUMNS: &str = "id, owner_id, currency, currency_exponent, balance_minor, updated_at";
 
-/// The result of a buy. A second currency for a symbol already held is rejected
-/// rather than guessed at — exactly like `finance` never sums two currencies
-/// together, there is no rate source to reconcile a position priced in two of
-/// them. A buy that would take cash negative is rejected the same way.
-// 272 bytes in the success variant against a `String` in the rejections.
-// Boxing would shrink the enum and complicate every `match` that reads a
-// holding back — and this is returned once per `!portfolio buy`, on a path that
-// has just done several database round trips. The stack bytes are not the cost
-// that matters here.
-#[allow(clippy::large_enum_variant)]
-pub enum BuyOutcome {
-    Ok { holding: Holding, cash: CashBalance },
-    CurrencyMismatch { existing_currency: String },
-    InsufficientCash { available_minor: i64, needed_minor: i64 },
-}
-
-/// The result of a sell.
-pub enum SellOutcome {
-    NotFound,
-    /// Attempted to sell more than is held.
-    ExceedsHolding { held_minor: i64 },
-    /// The sale exactly closed the position; the row is gone.
-    Closed { realized_pl_minor: i64, cash: CashBalance },
-    /// The position was reduced but remains open.
-    Reduced { holding: Holding, realized_pl_minor: i64, cash: CashBalance },
-}
-
-/// The result of a manual cash withdrawal. Also reused internally by [`PortfolioRepository::buy`]
-/// as its funding gate: the "is there enough?" check and the debit happen in
-/// this one function, so there is no separate check-then-act window for a buy
-/// to race against.
-pub enum WithdrawOutcome {
-    Ok(CashBalance),
-    InsufficientFunds { available_minor: i64 },
-}
+pub use crate::modules::portfolio::models::{BuyOutcome, SellOutcome, WithdrawOutcome};
 
 pub struct PortfolioRepository;
 
@@ -127,8 +93,8 @@ impl PortfolioRepository {
     }
 
     /// Adds to a cash balance, creating the row at zero first if needed. Never
-    /// fails on the amount — a deposit can only ever increase how much you have.
-    pub async fn deposit_cash(
+    /// Adds to a cash balance, creating the row at zero first if needed.
+    pub async fn credit_cash(
         pool: &SqlitePool,
         owner_id: &str,
         currency: &str,
@@ -142,20 +108,28 @@ impl PortfolioRepository {
                 balance_minor = balance_minor + excluded.balance_minor, \
                 updated_at = CURRENT_TIMESTAMP",
         )
-        .bind(owner_id)
-        .bind(currency)
-        .bind(currency_exponent)
-        .bind(amount_minor)
-        .execute(pool)
-        .await?;
+        .bind(owner_id).bind(currency).bind(currency_exponent).bind(amount_minor)
+        .execute(pool).await?;
 
         Self::get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
     }
 
-    /// Subtracts from a cash balance. Rejected — with nothing written — if it
-    /// would take the balance negative, including when there is no row at all
-    /// (a balance of zero can never cover a positive withdrawal).
-    pub async fn withdraw_cash(
+    pub async fn deposit_cash(
+        pool: &SqlitePool,
+        owner_id: &str,
+        currency: &str,
+        currency_exponent: i64,
+        amount_minor: i64,
+    ) -> Result<CashBalance> {
+        let cash = Self::credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await?;
+        let _ = crate::modules::portfolio::audit::record_audit_entry(
+            pool, owner_id, "deposit", None, None, None, amount_minor, currency, currency_exponent, None, None,
+        ).await;
+        Ok(cash)
+    }
+
+    /// Internal cash debit helper.
+    pub async fn debit_cash(
         pool: &SqlitePool,
         owner_id: &str,
         currency: &str,
@@ -164,10 +138,8 @@ impl PortfolioRepository {
         let existing: Option<(i64, i64)> = sqlx::query_as(
             "SELECT id, balance_minor FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?",
         )
-        .bind(owner_id)
-        .bind(currency)
-        .fetch_optional(pool)
-        .await?;
+        .bind(owner_id).bind(currency)
+        .fetch_optional(pool).await?;
 
         let (id, balance) = match existing {
             Some(row) => row,
@@ -179,22 +151,32 @@ impl PortfolioRepository {
         }
 
         sqlx::query(
-            "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP \
-             WHERE id = ?",
+            "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         )
-        .bind(amount_minor)
-        .bind(id)
-        .execute(pool)
-        .await?;
+        .bind(amount_minor).bind(id).execute(pool).await?;
 
         let updated = sqlx::query_as::<_, CashBalance>(&format!(
             "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"
         ))
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
+        .bind(id).fetch_one(pool).await?;
 
         Ok(WithdrawOutcome::Ok(updated))
+    }
+
+    /// Subtracts from a cash balance and writes an immutable audit log entry.
+    pub async fn withdraw_cash(
+        pool: &SqlitePool,
+        owner_id: &str,
+        currency: &str,
+        amount_minor: i64,
+    ) -> Result<WithdrawOutcome> {
+        let outcome = Self::debit_cash(pool, owner_id, currency, amount_minor).await?;
+        if let WithdrawOutcome::Ok(ref cash) = outcome {
+            let _ = crate::modules::portfolio::audit::record_audit_entry(
+                pool, owner_id, "withdraw", None, None, None, amount_minor, currency, cash.currency_exponent, None, None,
+            ).await;
+        }
+        Ok(outcome)
     }
 
     // ---- holdings ----------------------------------------------------------
@@ -229,14 +211,14 @@ impl PortfolioRepository {
         }
 
         let needed = cost_of(quantity_minor, price_minor);
-        let cash = match Self::withdraw_cash(pool, owner_id, currency, needed).await? {
+        let cash = match Self::debit_cash(pool, owner_id, currency, needed).await? {
             WithdrawOutcome::Ok(cash) => cash,
             WithdrawOutcome::InsufficientFunds { available_minor } => {
                 return Ok(BuyOutcome::InsufficientCash { available_minor, needed_minor: needed });
             }
         };
 
-        match Self::record_holding(
+        match Self::record_holding_action(
             pool,
             owner_id,
             symbol,
@@ -245,12 +227,13 @@ impl PortfolioRepository {
             currency,
             currency_exponent,
             note,
+            "buy",
         )
         .await?
         {
             Ok(holding) => Ok(BuyOutcome::Ok { holding, cash }),
             Err(err) => {
-                let _ = Self::deposit_cash(pool, owner_id, currency, currency_exponent, needed).await;
+                let _ = Self::credit_cash(pool, owner_id, currency, currency_exponent, needed).await;
                 Ok(BuyOutcome::CurrencyMismatch { existing_currency: err })
             }
         }
@@ -268,6 +251,33 @@ impl PortfolioRepository {
         currency_exponent: i64,
         note: Option<&str>,
     ) -> Result<Result<Holding, String>> {
+        Self::record_holding_action(
+            pool,
+            owner_id,
+            symbol,
+            quantity_minor,
+            price_minor,
+            currency,
+            currency_exponent,
+            note,
+            "record",
+        )
+        .await
+    }
+
+    /// Internal position recording with customizable audit action ("buy" vs "record").
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_holding_action(
+        pool: &SqlitePool,
+        owner_id: &str,
+        symbol: &str,
+        quantity_minor: i64,
+        price_minor: i64,
+        currency: &str,
+        currency_exponent: i64,
+        note: Option<&str>,
+        action: &str,
+    ) -> Result<Result<Holding, String>> {
         let existing = Self::find(pool, owner_id, symbol).await?;
 
         if let Some(h) = &existing {
@@ -276,17 +286,25 @@ impl PortfolioRepository {
             }
         }
 
+        let total_val = cost_of(quantity_minor, price_minor);
+
         let Some(existing) = existing else {
             sqlx::query(
                 "INSERT INTO portfolio_holdings \
                  (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
             )
-            .bind(owner_id).bind(symbol).bind(quantity_minor).bind(price_minor).bind(currency).bind(currency_exponent).bind(price_minor).bind(note)
+            .bind(owner_id).bind(symbol).bind(quantity_minor).bind(price_minor).bind(currency).bind(currency_exponent).bind(note)
             .execute(pool).await?;
 
             let holding = Self::find(pool, owner_id, symbol).await?
                 .ok_or_else(|| anyhow::anyhow!("inserted holding vanished before it could be read"))?;
+
+            let _ = crate::modules::portfolio::audit::record_audit_entry(
+                pool, owner_id, action, Some(symbol), Some(quantity_minor), Some(price_minor),
+                total_val, currency, currency_exponent, None, note,
+            ).await;
+
             return Ok(Ok(holding));
         };
 
@@ -315,6 +333,12 @@ impl PortfolioRepository {
         let holding = Self::find(pool, owner_id, symbol)
             .await?
             .ok_or_else(|| anyhow::anyhow!("updated holding vanished before it could be read"))?;
+
+        let _ = crate::modules::portfolio::audit::record_audit_entry(
+            pool, owner_id, action, Some(symbol), Some(quantity_minor), Some(price_minor),
+            total_val, currency, currency_exponent, None, note,
+        ).await;
+
         Ok(Ok(holding))
     }
 
@@ -343,8 +367,23 @@ impl PortfolioRepository {
         let realized = realized_pl_minor(quantity_minor, sell_price_minor, existing.avg_cost_minor);
         let proceeds = cost_of(quantity_minor, sell_price_minor);
         let cash =
-            Self::deposit_cash(pool, owner_id, &existing.currency, existing.currency_exponent, proceeds)
+            Self::credit_cash(pool, owner_id, &existing.currency, existing.currency_exponent, proceeds)
                 .await?;
+
+        let _ = crate::modules::portfolio::audit::record_audit_entry(
+            pool,
+            owner_id,
+            "sell",
+            Some(symbol),
+            Some(quantity_minor),
+            Some(sell_price_minor),
+            proceeds,
+            &existing.currency,
+            existing.currency_exponent,
+            Some(realized),
+            None,
+        )
+        .await;
 
         let remaining = existing.quantity_minor - quantity_minor;
         if remaining == 0 {
@@ -434,47 +473,7 @@ impl PortfolioRepository {
     pub async fn summary(pool: &SqlitePool, owner_id: &str) -> Result<Vec<PortfolioCurrencySummary>> {
         let holdings = Self::list(pool, owner_id).await?;
         let cash_balances = Self::list_cash(pool, owner_id).await?;
-
-        let mut summaries: Vec<PortfolioCurrencySummary> = Vec::new();
-
-        let entry_for = |summaries: &mut Vec<PortfolioCurrencySummary>, currency: &str, exponent: i64| {
-            if !summaries.iter().any(|s| s.currency == currency) {
-                summaries.push(PortfolioCurrencySummary {
-                    currency: currency.to_string(),
-                    currency_exponent: exponent,
-                    cost_basis_minor: 0,
-                    market_value_minor: 0,
-                    unrealized_pl_minor: 0,
-                    priced_holdings: 0,
-                    unpriced_holdings: 0,
-                    cash_minor: 0,
-                });
-            }
-        };
-
-        for holding in &holdings {
-            entry_for(&mut summaries, &holding.currency, holding.currency_exponent);
-            let entry = summaries.iter_mut().find(|s| s.currency == holding.currency).expect("just inserted");
-
-            entry.cost_basis_minor += holding.cost_basis_minor();
-            match holding.unrealized_pl_minor() {
-                Some(pl) => {
-                    entry.market_value_minor += holding.market_value_minor().unwrap_or(0);
-                    entry.unrealized_pl_minor += pl;
-                    entry.priced_holdings += 1;
-                }
-                None => entry.unpriced_holdings += 1,
-            }
-        }
-
-        for cash in &cash_balances {
-            entry_for(&mut summaries, &cash.currency, cash.currency_exponent);
-            let entry = summaries.iter_mut().find(|s| s.currency == cash.currency).expect("just inserted");
-            entry.cash_minor = cash.balance_minor;
-        }
-
-        summaries.sort_by(|a, b| a.currency.cmp(&b.currency));
-        Ok(summaries)
+        Ok(crate::modules::portfolio::models::build_summaries(&holdings, &cash_balances))
     }
 }
 

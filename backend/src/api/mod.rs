@@ -103,6 +103,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
             post(portfolio_prices::refresh_single_holding_price),
         )
         .route("/portfolio/holdings/record", post(portfolio_prices::record_holding_position))
+        .route("/portfolio/activity", get(portfolio_prices::get_portfolio_activity))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/cash", get(portfolio::list_cash))
         .route("/portfolio/cash/deposit", post(portfolio::deposit_cash))

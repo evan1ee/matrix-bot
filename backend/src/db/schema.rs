@@ -152,6 +152,35 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Append-only, immutable audit log for all portfolio activity (buy, sell, deposit, withdraw, record).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS portfolio_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            symbol TEXT,
+            quantity_minor INTEGER,
+            price_minor INTEGER,
+            amount_minor INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            realized_pl_minor INTEGER,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_audit_log_owner \
+         ON portfolio_audit_log(owner_id, created_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
     // Per-user spending categories. Names are unique per owner, not globally.
     sqlx::query(
         r#"
@@ -391,6 +420,7 @@ mod tests {
         let tables = table_names(&pool).await;
         for expected in [
             "finance_categories",
+            "portfolio_audit_log",
             "portfolio_cash_balances",
             "portfolio_holdings",
             "recurring_bills",

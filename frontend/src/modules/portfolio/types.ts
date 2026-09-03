@@ -44,3 +44,18 @@ export interface RefreshSummary {
   updated: string[];
   failed: string[];
 }
+
+export interface PortfolioAuditEntry {
+  id: number;
+  owner_id: string;
+  action: 'buy' | 'sell' | 'deposit' | 'withdraw' | 'record';
+  symbol?: string | null;
+  quantity_minor?: number | null;
+  price_minor?: number | null;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  realized_pl_minor?: number | null;
+  note?: string | null;
+  created_at?: string | null;
+}

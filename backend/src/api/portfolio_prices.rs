@@ -128,6 +128,42 @@ pub async fn record_holding_position(
     }
 }
 
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct ActivityQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/portfolio/activity",
+    params(ActivityQuery),
+    responses(
+        (status = 200, description = "Recent portfolio operations audit log", body = Vec<PortfolioAuditEntry>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn get_portfolio_activity(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    axum::extract::Query(params): axum::extract::Query<ActivityQuery>,
+) -> Result<Json<Vec<crate::modules::portfolio::audit::PortfolioAuditEntry>>, ApiError> {
+    let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
+
+    let entries = crate::modules::portfolio::audit::list_audit_entries(
+        &state.db.pool,
+        &user.owner_id(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(entries))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

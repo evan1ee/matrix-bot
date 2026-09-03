@@ -2,6 +2,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::modules::finance::models::{Category, Transaction};
+use crate::modules::portfolio::audit::PortfolioAuditEntry;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::reminder::models::Reminder;
@@ -42,6 +43,7 @@ pub enum SystemEvent {
     /// real row to key off — the event fields are what the SSE stream and the
     /// frontend cache actually key on.
     PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
+    PortfolioAuditLogged(PortfolioAuditEntry),
     RecurringBillCreated(RecurringBill),
     RecurringBillUpdated(RecurringBill),
     RecurringBillDeleted { id: i64, owner_id: String },
@@ -84,6 +86,7 @@ impl SystemEvent {
             }
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
+            SystemEvent::PortfolioAuditLogged(entry) => &entry.owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
                 &b.owner_id
             }

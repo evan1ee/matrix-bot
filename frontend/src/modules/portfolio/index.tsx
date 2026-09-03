@@ -20,6 +20,7 @@ import {
 import { CustomSelect } from '../../components/CustomSelect';
 import { CURRENCY_OPTIONS, useSettings } from '../../core/settings';
 import { AllocationCard } from './AllocationCard';
+import { ActivitySection } from './ActivitySection';
 import {
   Holding,
   PortfolioCurrencySummary,
@@ -326,6 +327,7 @@ export const PortfolioMainView: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['portfolio-holdings'] });
     queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
     queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
+    queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
   };
 
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
@@ -847,6 +849,9 @@ export const PortfolioMainView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Audit Activity Log */}
+      <ActivitySection />
     </div>
   );
 };
@@ -861,14 +866,17 @@ export const portfolioModule: FrontendModule = {
     if (
       event.type === 'PortfolioHoldingCreated' ||
       event.type === 'PortfolioHoldingUpdated' ||
-      event.type === 'PortfolioHoldingDeleted'
+      event.type === 'PortfolioHoldingDeleted' ||
+      event.type === 'PortfolioAuditLogged'
     ) {
       queryClient.invalidateQueries({ queryKey: ['portfolio-holdings'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
     }
     if (event.type === 'PortfolioCashUpdated') {
       queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
     }
   },
 };
