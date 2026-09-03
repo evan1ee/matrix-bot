@@ -12,6 +12,7 @@ use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
 pub mod audit;
 pub mod cash;
+pub mod cash_repo;
 pub mod handler;
 pub mod models;
 pub mod price_feed;

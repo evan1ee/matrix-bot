@@ -96,6 +96,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/portfolio/holdings/:id", delete(portfolio::delete_holding))
         .route("/portfolio/holdings/:id/sell", post(portfolio::sell_holding))
         .route("/portfolio/holdings/:id/price", put(portfolio::set_price))
+        .route("/portfolio/holdings/:id/symbol", put(portfolio_prices::update_holding_symbol))
         .route("/portfolio/holdings/:id/note", put(portfolio::set_note))
         .route("/portfolio/refresh-prices", post(portfolio_prices::refresh_all_prices))
         .route(
@@ -103,6 +104,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
             post(portfolio_prices::refresh_single_holding_price),
         )
         .route("/portfolio/holdings/record", post(portfolio_prices::record_holding_position))
+        .route("/portfolio/search", get(portfolio_prices::search_ticker_symbols))
         .route("/portfolio/activity", get(portfolio_prices::get_portfolio_activity))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/cash", get(portfolio::list_cash))

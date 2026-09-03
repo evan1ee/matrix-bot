@@ -59,3 +59,10 @@ export interface PortfolioAuditEntry {
   note?: string | null;
   created_at?: string | null;
 }
+
+export interface TickerSearchResult {
+  symbol: string;
+  name: string;
+  exchange?: string | null;
+  quote_type?: string | null;
+}

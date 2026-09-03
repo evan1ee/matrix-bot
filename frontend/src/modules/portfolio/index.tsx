@@ -16,11 +16,13 @@ import {
   Wallet,
   RefreshCw,
   BookmarkPlus,
+  AlertTriangle,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { CURRENCY_OPTIONS, useSettings } from '../../core/settings';
 import { AllocationCard } from './AllocationCard';
 import { ActivitySection } from './ActivitySection';
+import { TickerSearchInput } from './TickerSearchInput';
 import {
   Holding,
   PortfolioCurrencySummary,
@@ -331,24 +333,84 @@ export const PortfolioMainView: React.FC = () => {
   };
 
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+  const [failedSymbols, setFailedSymbols] = useState<Set<string>>(new Set());
+
+  const [editingSymbolHolding, setEditingSymbolHolding] = useState<Holding | null>(null);
+  const [newSymbolInput, setNewSymbolInput] = useState('');
+  const [symbolError, setSymbolError] = useState<string | null>(null);
+  const [refreshingHoldingId, setRefreshingHoldingId] = useState<number | null>(null);
 
   const refreshPricesMutation = useMutation({
     mutationFn: () => fetchApi<RefreshSummary>('/portfolio/refresh-prices', { method: 'POST' }),
     onSuccess: (summary) => {
       invalidate();
-      if (summary.updated.length > 0) {
+      if (summary.failed.length > 0) {
+        setFailedSymbols(new Set(summary.failed));
+      } else {
+        setFailedSymbols(new Set());
+      }
+
+      if (summary.updated.length > 0 && summary.failed.length > 0) {
+        setRefreshStatus(
+          `Updated ${summary.updated.length} holding(s). Skipped: ${summary.failed.join(', ')} (no quote found).`
+        );
+      } else if (summary.updated.length > 0) {
         setRefreshStatus(`Updated ${summary.updated.length} holding(s): ${summary.updated.join(', ')}`);
       } else if (summary.failed.length > 0) {
-        setRefreshStatus(`Failed to fetch: ${summary.failed.join(', ')}`);
+        setRefreshStatus(
+          `Could not find market quotes for: ${summary.failed.join(', ')}. Check symbols or enter prices manually.`
+        );
       } else {
         setRefreshStatus('No holdings to update.');
       }
-      setTimeout(() => setRefreshStatus(null), 5000);
+      setTimeout(() => setRefreshStatus(null), 6000);
     },
     onError: (err: Error) => {
       setRefreshStatus(err.message || 'Failed to refresh prices.');
       setTimeout(() => setRefreshStatus(null), 5000);
     },
+  });
+
+  const singleRefreshMutation = useMutation({
+    mutationFn: (id: number) => {
+      setRefreshingHoldingId(id);
+      return fetchApi<Holding>(`/portfolio/holdings/${id}/refresh-price`, { method: 'POST' });
+    },
+    onSuccess: (holding) => {
+      invalidate();
+      setFailedSymbols((prev) => {
+        const next = new Set(prev);
+        next.delete(holding.symbol);
+        return next;
+      });
+      setRefreshStatus(`Price updated for ${holding.symbol}.`);
+      setTimeout(() => setRefreshStatus(null), 4000);
+    },
+    onError: (err: Error) => {
+      setRefreshStatus(err.message || 'Failed to refresh price.');
+      setTimeout(() => setRefreshStatus(null), 5000);
+    },
+    onSettled: () => setRefreshingHoldingId(null),
+  });
+
+  const updateSymbolMutation = useMutation({
+    mutationFn: ({ id, symbol }: { id: number; symbol: string }) =>
+      fetchApi<Holding>(`/portfolio/holdings/${id}/symbol`, {
+        method: 'PUT',
+        body: JSON.stringify({ symbol }),
+      }),
+    onSuccess: (updated) => {
+      setFailedSymbols((prev) => {
+        const next = new Set(prev);
+        if (editingSymbolHolding) next.delete(editingSymbolHolding.symbol);
+        return next;
+      });
+      setEditingSymbolHolding(null);
+      setNewSymbolInput('');
+      setSymbolError(null);
+      invalidate();
+    },
+    onError: (err: Error) => setSymbolError(err.message),
   });
 
   const buyMutation = useMutation({
@@ -612,11 +674,10 @@ export const PortfolioMainView: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase font-mono text-neutral-500">Symbol</span>
-              <input
-                type="text"
-                placeholder="AAPL"
+              <TickerSearchInput
                 value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
+                onChange={setSymbol}
+                placeholder="e.g. AAPL, BTC, VOO"
                 className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono uppercase"
               />
             </label>
@@ -758,8 +819,29 @@ export const PortfolioMainView: React.FC = () => {
                   className="py-3 flex items-center justify-between gap-4 px-2 rounded transition hover:bg-neutral-100 dark:hover:bg-neutral-900/30"
                 >
                   <div className="space-y-0.5 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{h.symbol}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSymbolHolding(h);
+                          setNewSymbolInput(h.symbol);
+                          setSymbolError(null);
+                        }}
+                        title="Edit symbol"
+                        className="p-1 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      {failedSymbols.has(h.symbol) && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60"
+                          title={`No market quote found for "${h.symbol}". Click the pencil to correct the symbol or enter price manually.`}
+                        >
+                          <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                          Quote not found
+                        </span>
+                      )}
                       <span className="text-xs font-mono text-neutral-500">
                         {formatQuantity(h.quantity_minor)} @ avg {formatMinor(h.avg_cost_minor, h.currency_exponent)}{' '}
                         {h.currency}
@@ -829,6 +911,20 @@ export const PortfolioMainView: React.FC = () => {
                       <span className="text-xs font-mono text-neutral-400">no price set</span>
                     )}
                     <button
+                      onClick={() => singleRefreshMutation.mutate(h.id)}
+                      disabled={singleRefreshMutation.isPending && refreshingHoldingId === h.id}
+                      title="Fetch latest market price"
+                      className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-4 h-4 ${
+                          singleRefreshMutation.isPending && refreshingHoldingId === h.id
+                            ? 'animate-spin text-blue-500'
+                            : ''
+                        }`}
+                      />
+                    </button>
+                    <button
                       onClick={() => setSellingId(h.id)}
                       title="Sell"
                       className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
@@ -849,6 +945,69 @@ export const PortfolioMainView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Edit Symbol Modal */}
+      {editingSymbolHolding && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-800 p-5 max-w-sm w-full space-y-4 shadow-xl">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Edit Ticker Symbol
+              </h3>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Update the ticker symbol for this position. Position quantity and cost basis will remain unchanged.
+              </p>
+            </div>
+
+            {symbolError && (
+              <div className="flex items-center gap-2 p-2.5 rounded bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 text-xs">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{symbolError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-mono text-neutral-500">
+                New Symbol
+              </label>
+              <TickerSearchInput
+                value={newSymbolInput}
+                onChange={setNewSymbolInput}
+                placeholder="e.g. AAPL, BTC..."
+                className="px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono uppercase"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingSymbolHolding(null);
+                  setSymbolError(null);
+                }}
+                className="px-3 py-1.5 rounded text-xs text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!newSymbolInput.trim() || updateSymbolMutation.isPending}
+                onClick={() => {
+                  if (editingSymbolHolding && newSymbolInput.trim()) {
+                    updateSymbolMutation.mutate({
+                      id: editingSymbolHolding.id,
+                      symbol: newSymbolInput.trim(),
+                    });
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
+              >
+                {updateSymbolMutation.isPending ? 'Saving...' : 'Save Symbol'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Audit Activity Log */}
       <ActivitySection />

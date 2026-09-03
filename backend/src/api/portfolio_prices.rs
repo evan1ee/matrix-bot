@@ -5,6 +5,7 @@ use axum::{
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
+use crate::events::SystemEvent;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::portfolio::price_feed::{
     refresh_all_for_owner, refresh_holding_price, RefreshSummary,
@@ -164,6 +165,70 @@ pub async fn get_portfolio_activity(
     Ok(Json(entries))
 }
 
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct SearchQuery {
+    pub q: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/portfolio/search",
+    params(SearchQuery),
+    responses(
+        (status = 200, description = "Ticker symbol search results", body = Vec<TickerSearchResult>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn search_ticker_symbols(
+    State(_state): State<ApiState>,
+    _user: AuthUser,
+    axum::extract::Query(params): axum::extract::Query<SearchQuery>,
+) -> Result<Json<Vec<crate::modules::portfolio::price_feed::TickerSearchResult>>, ApiError> {
+    let results = crate::modules::portfolio::price_feed::search_symbols(&params.q)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    Ok(Json(results))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct UpdateSymbolRequest {
+    pub symbol: String,
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/portfolio/holdings/{id}/symbol",
+    request_body = UpdateSymbolRequest,
+    responses(
+        (status = 200, description = "Holding symbol updated", body = Holding),
+        (status = 400, description = "Invalid symbol or symbol already exists", body = ApiErrorResponse),
+        (status = 404, description = "Holding not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn update_holding_symbol(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateSymbolRequest>,
+) -> Result<Json<Holding>, ApiError> {
+    let owner_id = user.owner_id();
+
+    match PortfolioRepository::update_symbol(&state.db.pool, &owner_id, id, &payload.symbol)
+        .await
+        .map_err(|e| ApiError::not_found(e.to_string()))?
+    {
+        Ok(holding) => {
+            state.broadcaster.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
+            Ok(Json(holding))
+        }
+        Err(err) => Err(ApiError::bad_request(err)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +267,40 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_update_holding_symbol_api() {
+        let state = test_state().await;
+        let alice = AuthUser::named("alice", "acct_alice");
+
+        let Json(recorded) = record_holding_position(
+            State(state.clone()),
+            alice.clone(),
+            Json(crate::api::portfolio::BuyHoldingRequest {
+                symbol: "AAPLL".to_string(),
+                quantity: "10".to_string(),
+                price: "150.00".to_string(),
+                currency: "USD".to_string(),
+                note: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(recorded.symbol, "AAPLL");
+
+        let Json(updated) = update_holding_symbol(
+            State(state.clone()),
+            alice.clone(),
+            Path(recorded.id),
+            Json(UpdateSymbolRequest {
+                symbol: "AAPL".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updated.symbol, "AAPL");
     }
 }

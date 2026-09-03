@@ -255,6 +255,83 @@ pub async fn refresh_all_for_owner(
     summary
 }
 
+// ---------------------------------------------------------------------------
+// Yahoo Finance Ticker Search & Autocomplete
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct TickerSearchResult {
+    pub symbol: String,
+    pub name: String,
+    pub exchange: Option<String>,
+    pub quote_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct YahooSearchResponse {
+    quotes: Option<Vec<YahooSearchQuote>>,
+}
+
+#[derive(Deserialize)]
+struct YahooSearchQuote {
+    symbol: Option<String>,
+    shortname: Option<String>,
+    longname: Option<String>,
+    #[serde(rename = "exchDisp")]
+    exch_disp: Option<String>,
+    #[serde(rename = "typeDisp")]
+    type_disp: Option<String>,
+    #[serde(rename = "quoteType")]
+    quote_type: Option<String>,
+}
+
+pub fn parse_yahoo_search_json(json_str: &str) -> Result<Vec<TickerSearchResult>, String> {
+    let parsed: YahooSearchResponse = serde_json::from_str(json_str)
+        .map_err(|e| format!("Failed to parse Yahoo Search JSON: {e}"))?;
+
+    let mut results = Vec::new();
+    if let Some(quotes) = parsed.quotes {
+        for q in quotes {
+            if let Some(symbol) = q.symbol {
+                if symbol.is_empty() {
+                    continue;
+                }
+                let name = q.longname.or(q.shortname).unwrap_or_else(|| symbol.clone());
+                results.push(TickerSearchResult {
+                    symbol,
+                    name,
+                    exchange: q.exch_disp,
+                    quote_type: q.type_disp.or(q.quote_type),
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+pub async fn search_symbols(query: &str) -> Result<Vec<TickerSearchResult>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let client = get_client();
+    let resp = client
+        .get("https://query2.finance.yahoo.com/v1/finance/search")
+        .query(&[("q", q), ("quotesCount", "8")])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Yahoo Search returned HTTP {}", resp.status()));
+    }
+
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    parse_yahoo_search_json(&text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,5 +381,35 @@ mod tests {
         assert!(is_crypto_symbol("BTC-USD"));
         assert!(!is_crypto_symbol("AAPL"));
         assert!(!is_crypto_symbol("MSFT"));
+    }
+
+    #[test]
+    fn test_parse_yahoo_search_json() {
+        let json = r#"{
+            "quotes": [
+                {
+                    "symbol": "AAPL",
+                    "shortname": "Apple Inc.",
+                    "longname": "Apple Inc.",
+                    "exchDisp": "NASDAQ",
+                    "typeDisp": "Equity"
+                },
+                {
+                    "symbol": "BTC-USD",
+                    "shortname": "Bitcoin USD",
+                    "longname": "Bitcoin USD",
+                    "exchDisp": "CCC",
+                    "typeDisp": "Cryptocurrency"
+                }
+            ]
+        }"#;
+
+        let results = parse_yahoo_search_json(json).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].symbol, "AAPL");
+        assert_eq!(results[0].name, "Apple Inc.");
+        assert_eq!(results[0].exchange, Some("NASDAQ".to_string()));
+        assert_eq!(results[0].quote_type, Some("Equity".to_string()));
+        assert_eq!(results[1].symbol, "BTC-USD");
     }
 }

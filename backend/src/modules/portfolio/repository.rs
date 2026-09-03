@@ -9,7 +9,6 @@ use crate::modules::portfolio::models::{
 const HOLDING_COLUMNS: &str = "id, owner_id, symbol, quantity_minor, avg_cost_minor, currency, \
                                 currency_exponent, current_price_minor, price_updated_at, note, \
                                 created_at, updated_at";
-const CASH_COLUMNS: &str = "id, owner_id, currency, currency_exponent, balance_minor, updated_at";
 
 pub use crate::modules::portfolio::models::{BuyOutcome, SellOutcome, WithdrawOutcome};
 
@@ -63,37 +62,13 @@ impl PortfolioRepository {
         currency: &str,
         currency_exponent: i64,
     ) -> Result<CashBalance> {
-        let found = sqlx::query_as::<_, CashBalance>(&format!(
-            "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?"
-        ))
-        .bind(owner_id)
-        .bind(currency)
-        .fetch_optional(pool)
-        .await?;
-
-        Ok(found.unwrap_or(CashBalance {
-            id: 0,
-            owner_id: owner_id.to_string(),
-            currency: currency.to_string(),
-            currency_exponent,
-            balance_minor: 0,
-            updated_at: None,
-        }))
+        crate::modules::portfolio::cash_repo::get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
     }
 
     pub async fn list_cash(pool: &SqlitePool, owner_id: &str) -> Result<Vec<CashBalance>> {
-        let balances = sqlx::query_as::<_, CashBalance>(&format!(
-            "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE owner_id = ? ORDER BY currency ASC"
-        ))
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
-
-        Ok(balances)
+        crate::modules::portfolio::cash_repo::list_cash(pool, owner_id).await
     }
 
-    /// Adds to a cash balance, creating the row at zero first if needed. Never
-    /// Adds to a cash balance, creating the row at zero first if needed.
     pub async fn credit_cash(
         pool: &SqlitePool,
         owner_id: &str,
@@ -101,17 +76,7 @@ impl PortfolioRepository {
         currency_exponent: i64,
         amount_minor: i64,
     ) -> Result<CashBalance> {
-        sqlx::query(
-            "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
-             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
-             ON CONFLICT(owner_id, currency) DO UPDATE SET \
-                balance_minor = balance_minor + excluded.balance_minor, \
-                updated_at = CURRENT_TIMESTAMP",
-        )
-        .bind(owner_id).bind(currency).bind(currency_exponent).bind(amount_minor)
-        .execute(pool).await?;
-
-        Self::get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
+        crate::modules::portfolio::cash_repo::credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await
     }
 
     pub async fn deposit_cash(
@@ -121,62 +86,25 @@ impl PortfolioRepository {
         currency_exponent: i64,
         amount_minor: i64,
     ) -> Result<CashBalance> {
-        let cash = Self::credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await?;
-        let _ = crate::modules::portfolio::audit::record_audit_entry(
-            pool, owner_id, "deposit", None, None, None, amount_minor, currency, currency_exponent, None, None,
-        ).await;
-        Ok(cash)
+        crate::modules::portfolio::cash_repo::deposit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await
     }
 
-    /// Internal cash debit helper.
     pub async fn debit_cash(
         pool: &SqlitePool,
         owner_id: &str,
         currency: &str,
         amount_minor: i64,
     ) -> Result<WithdrawOutcome> {
-        let existing: Option<(i64, i64)> = sqlx::query_as(
-            "SELECT id, balance_minor FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?",
-        )
-        .bind(owner_id).bind(currency)
-        .fetch_optional(pool).await?;
-
-        let (id, balance) = match existing {
-            Some(row) => row,
-            None => return Ok(WithdrawOutcome::InsufficientFunds { available_minor: 0 }),
-        };
-
-        if amount_minor > balance {
-            return Ok(WithdrawOutcome::InsufficientFunds { available_minor: balance });
-        }
-
-        sqlx::query(
-            "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        )
-        .bind(amount_minor).bind(id).execute(pool).await?;
-
-        let updated = sqlx::query_as::<_, CashBalance>(&format!(
-            "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"
-        ))
-        .bind(id).fetch_one(pool).await?;
-
-        Ok(WithdrawOutcome::Ok(updated))
+        crate::modules::portfolio::cash_repo::debit_cash(pool, owner_id, currency, amount_minor).await
     }
 
-    /// Subtracts from a cash balance and writes an immutable audit log entry.
     pub async fn withdraw_cash(
         pool: &SqlitePool,
         owner_id: &str,
         currency: &str,
         amount_minor: i64,
     ) -> Result<WithdrawOutcome> {
-        let outcome = Self::debit_cash(pool, owner_id, currency, amount_minor).await?;
-        if let WithdrawOutcome::Ok(ref cash) = outcome {
-            let _ = crate::modules::portfolio::audit::record_audit_entry(
-                pool, owner_id, "withdraw", None, None, None, amount_minor, currency, cash.currency_exponent, None, None,
-            ).await;
-        }
-        Ok(outcome)
+        crate::modules::portfolio::cash_repo::withdraw_cash(pool, owner_id, currency, amount_minor).await
     }
 
     // ---- holdings ----------------------------------------------------------
@@ -451,6 +379,44 @@ impl PortfolioRepository {
             return Ok(None);
         }
         Self::find(pool, owner_id, symbol).await
+    }
+
+    /// Renames a holding's ticker symbol. Rejects duplicates if the target symbol
+    /// is already owned by this user under a different holding row.
+    pub async fn update_symbol(
+        pool: &SqlitePool,
+        owner_id: &str,
+        id: i64,
+        new_symbol: &str,
+    ) -> Result<Result<Holding, String>> {
+        let normalized = match crate::modules::portfolio::models::normalise_symbol(new_symbol) {
+            Ok(sym) => sym,
+            Err(e) => return Ok(Err(e.to_string())),
+        };
+
+        if let Some(existing) = Self::find(pool, owner_id, &normalized).await? {
+            if existing.id != id {
+                return Ok(Err(format!("Position in {} already exists", normalized)));
+            }
+        }
+
+        let result = sqlx::query(
+            "UPDATE portfolio_holdings SET symbol = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?",
+        )
+        .bind(&normalized)
+        .bind(id)
+        .bind(owner_id)
+        .execute(pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(anyhow::anyhow!("Holding not found or access denied"));
+        }
+
+        match Self::find_owned(pool, id, owner_id).await? {
+            Some(h) => Ok(Ok(h)),
+            None => Err(anyhow::anyhow!("Updated holding vanished")),
+        }
     }
 
     /// Removes a holding entirely — an administrative correction (a typo'd
@@ -955,5 +921,40 @@ mod tests {
         let theirs = PortfolioRepository::list_cash(&pool, "@b:x").await.unwrap();
         assert_eq!(theirs.len(), 1);
         assert_eq!(theirs[0].balance_minor, 999999);
+    }
+
+    #[tokio::test]
+    async fn test_update_symbol() {
+        let pool = pool().await;
+        fund(&pool, "@a:x", "USD").await;
+
+        let holding = unwrap_ok(
+            PortfolioRepository::buy(&pool, "@a:x", "AAPLL", qty(10), 15000, "USD", 2, None)
+                .await
+                .unwrap(),
+        );
+
+        // Rename AAPLL -> AAPL
+        let res = PortfolioRepository::update_symbol(&pool, "@a:x", holding.id, "aapl")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(res.symbol, "AAPL");
+
+        // Verify lookup by new symbol works
+        let found = PortfolioRepository::find(&pool, "@a:x", "AAPL").await.unwrap().unwrap();
+        assert_eq!(found.id, holding.id);
+        assert!(PortfolioRepository::find(&pool, "@a:x", "AAPLL").await.unwrap().is_none());
+
+        // Attempting to rename to an already held symbol must fail
+        unwrap_ok(
+            PortfolioRepository::buy(&pool, "@a:x", "MSFT", qty(5), 30000, "USD", 2, None)
+                .await
+                .unwrap(),
+        );
+        let conflict = PortfolioRepository::update_symbol(&pool, "@a:x", holding.id, "MSFT")
+            .await
+            .unwrap();
+        assert!(conflict.is_err());
     }
 }
