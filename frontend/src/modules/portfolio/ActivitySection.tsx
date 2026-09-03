@@ -170,6 +170,7 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
             <button
               key={tab}
               onClick={() => setActiveFilter(tab)}
+              aria-label={`Filter by ${tab}`}
               className={`px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer ${
                 activeFilter === tab
                   ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs'

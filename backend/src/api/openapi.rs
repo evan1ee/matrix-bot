@@ -3,8 +3,8 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, finance, health, portfolio, portfolio_prices, recurring_bills, reminders, rooms, settings, sse,
-    todos, webhooks,
+    account, ai, auth, finance, health, portfolio, portfolio_alerts, portfolio_history, portfolio_prices,
+    recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -81,6 +81,10 @@ use crate::modules::settings::UserSettings;
         portfolio_prices::search_ticker_symbols,
         portfolio_prices::get_symbol_quote,
         portfolio_prices::update_holding_symbol,
+        portfolio_alerts::list_alerts,
+        portfolio_alerts::create_alert,
+        portfolio_alerts::delete_alert,
+        portfolio_history::get_portfolio_history,
         recurring_bills::list_bills,
         recurring_bills::create_bill,
         recurring_bills::get_bill,

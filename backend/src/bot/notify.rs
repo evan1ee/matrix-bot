@@ -97,6 +97,38 @@ pub async fn send_dm(client: &Client, mxid: &str, body: &str) {
     }
 }
 
+/// Sends an HTML formatted message to a user's DM with the bot.
+pub async fn send_dm_html(client: &Client, mxid: &str, plain: &str, html: &str) {
+    let Ok(user_id) = UserId::parse(mxid) else {
+        error!("Cannot notify {}: not a valid user ID", mxid);
+        return;
+    };
+
+    let content = RoomMessageEventContent::text_html(plain, html);
+
+    for room in client.joined_rooms() {
+        if !room.is_direct().await.unwrap_or(false) {
+            continue;
+        }
+        if !matches!(room.get_member(&user_id).await, Ok(Some(_))) {
+            continue;
+        }
+        if let Err(err) = room.send(content.clone()).await {
+            error!("Could not send an HTML notification to {}: {:?}", mxid, err);
+        }
+        return;
+    }
+
+    match client.create_dm(&user_id).await {
+        Ok(room) => {
+            if let Err(err) = room.send(content).await {
+                error!("Could not send an HTML notification to the new DM with {}: {:?}", mxid, err);
+            }
+        }
+        Err(err) => error!("Could not open a DM with {} to notify them: {:?}", mxid, err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

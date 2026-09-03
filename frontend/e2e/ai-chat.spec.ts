@@ -15,7 +15,7 @@ test('sends a chat prompt and receives AI assistant reply', async ({ app }) => {
   await app.getByPlaceholder(/Ask AI assistant/i).fill('Explain Rust lifetimes simply');
   await app.locator('form button[type="submit"]').click();
 
-  await expect(app.getByText('Explain Rust lifetimes simply')).toBeVisible();
+  await expect(app.getByText('Explain Rust lifetimes simply', { exact: true })).toBeVisible();
   await expect(app.getByText(/I received your prompt: "Explain Rust lifetimes simply"/i)).toBeVisible();
 });
 
@@ -40,7 +40,7 @@ test('resets conversation via New Chat button', async ({ app }) => {
 
   await app.getByPlaceholder(/Ask AI assistant/i).fill('Hello AI');
   await app.locator('form button[type="submit"]').click();
-  await expect(app.getByText('Hello AI')).toBeVisible();
+  await expect(app.getByText('Hello AI', { exact: true })).toBeVisible();
 
   await app.getByRole('button', { name: /New Chat/i }).click();
   await expect(app.getByText('How can I help you today?')).toBeVisible();

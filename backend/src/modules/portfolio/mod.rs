@@ -10,10 +10,13 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
+pub mod alerts;
+pub mod alerts_handler;
 pub mod audit;
 pub mod cash;
 pub mod cash_repo;
 pub mod handler;
+pub mod history;
 pub mod models;
 pub mod price_feed;
 pub mod repository;

@@ -53,6 +53,9 @@ pub async fn handle_portfolio_command(
         let symbol = rest.split_whitespace().nth(1).unwrap_or("");
         return Some(handle_remove(pool, owner_id, symbol, broadcaster).await);
     }
+    if rest_lower.starts_with("alert") {
+        return Some(crate::modules::portfolio::alerts_handler::handle_alert_command(pool, owner_id, rest[5..].trim(), broadcaster).await);
+    }
 
     Some(usage())
 }

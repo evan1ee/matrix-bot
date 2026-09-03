@@ -237,6 +237,7 @@ export class FakeApi {
   categories: FakeCategory[] = [];
   holdings: FakeHolding[] = [];
   cash: FakeCashBalance[] = [];
+  alerts: any[] = [];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -1090,6 +1091,64 @@ export class FakeApi {
       }
 
       return json(route, 200, [...byCurrency.values()]);
+    }
+
+    // --- portfolio alerts ---
+    if (path === '/portfolio/alerts' && method === 'GET') {
+      return json(route, 200, this.alerts);
+    }
+    if (path === '/portfolio/alerts' && method === 'POST') {
+      const symbol = String(body?.symbol ?? '').trim().toUpperCase();
+      const condition = body?.condition === 'below' ? 'below' : 'above';
+      const target_price = String(body?.target_price ?? '').trim();
+      const currency = String(body?.currency ?? 'USD').trim().toUpperCase();
+      const exponent = exponentFor(currency);
+      const parsed = parseDecimal(target_price, exponent);
+      const priceMinor = 'minor' in parsed ? parsed.minor : 10000;
+      const alert = {
+        id: ++this.nextHoldingId,
+        owner_id: OWNER,
+        symbol,
+        target_price_minor: priceMinor,
+        currency,
+        currency_exponent: exponent,
+        condition,
+        is_triggered: false,
+        triggered_at: null,
+        created_at: new Date().toISOString(),
+      };
+      this.alerts.push(alert);
+      return json(route, 201, alert);
+    }
+    const alertDeleteMatch = path.match(/^\/portfolio\/alerts\/(\d+)$/);
+    if (alertDeleteMatch && method === 'DELETE') {
+      const id = Number(alertDeleteMatch[1]);
+      this.alerts = this.alerts.filter((a) => a.id !== id);
+      return route.fulfill({ status: 204, body: '' });
+    }
+
+    // --- portfolio history ---
+    if (path.startsWith('/portfolio/history') && method === 'GET') {
+      const totalCash = this.cash.reduce((acc, c) => acc + c.balance_minor, 0);
+      const totalHoldings = this.holdings.reduce((acc, h) => {
+        const p = h.current_price_minor ?? h.avg_cost_minor;
+        return acc + Math.trunc((h.quantity_minor * p) / 10 ** QUANTITY_EXPONENT);
+      }, 0);
+      const total = totalCash + totalHoldings;
+      const today = new Date().toISOString().split('T')[0];
+      return json(route, 200, {
+        currency: 'USD',
+        currency_exponent: 2,
+        timeframe: '1m',
+        points: [
+          { date: '2026-08-01', holdings_value_minor: Math.trunc(totalHoldings * 0.9), cash_minor: totalCash, total_net_worth_minor: Math.trunc(total * 0.95) },
+          { date: today, holdings_value_minor: totalHoldings, cash_minor: totalCash, total_net_worth_minor: total },
+        ],
+        starting_value_minor: Math.trunc(total * 0.95),
+        current_value_minor: total,
+        period_change_minor: Math.trunc(total * 0.05),
+        period_change_pct: 5.26,
+      });
     }
 
     // --- webhooks ---

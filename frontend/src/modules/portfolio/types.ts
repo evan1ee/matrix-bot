@@ -77,3 +77,37 @@ export interface TickerSearchResult {
   exchange?: string | null;
   quote_type?: string | null;
 }
+
+export type AlertCondition = 'above' | 'below';
+
+export interface PriceAlert {
+  id: number;
+  owner_id: string;
+  symbol: string;
+  target_price_minor: number;
+  currency: string;
+  currency_exponent: number;
+  condition: AlertCondition;
+  is_triggered: boolean;
+  triggered_at?: string | null;
+  created_at: string;
+}
+
+export interface PortfolioHistoryPoint {
+  date: string;
+  holdings_value_minor: number;
+  cash_minor: number;
+  total_net_worth_minor: number;
+}
+
+export interface PortfolioHistoryResponse {
+  currency: string;
+  currency_exponent: number;
+  timeframe: string;
+  points: PortfolioHistoryPoint[];
+  starting_value_minor: number;
+  current_value_minor: number;
+  period_change_minor: number;
+  period_change_pct: number;
+}
+

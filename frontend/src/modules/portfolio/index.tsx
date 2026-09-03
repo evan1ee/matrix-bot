@@ -17,11 +17,14 @@ import {
   RefreshCw,
   BookmarkPlus,
   AlertTriangle,
+  Bell,
 } from 'lucide-react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import { CURRENCY_OPTIONS, useSettings, zonedInputToUtcIso, nowInZone } from '../../core/settings';
 import { AllocationCard } from './AllocationCard';
+import { PerformanceChart } from './PerformanceChart';
+import { AlertsModal } from './AlertsModal';
 import { ActivitySection } from './ActivitySection';
 import { TickerSearchInput } from './TickerSearchInput';
 import {
@@ -367,6 +370,8 @@ export const PortfolioMainView: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
     queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
     queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
+    queryClient.invalidateQueries({ queryKey: ['portfolio-history'] });
+    queryClient.invalidateQueries({ queryKey: ['portfolio-alerts'] });
   };
 
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
@@ -377,6 +382,9 @@ export const PortfolioMainView: React.FC = () => {
   const [symbolError, setSymbolError] = useState<string | null>(null);
   const [refreshingHoldingId, setRefreshingHoldingId] = useState<number | null>(null);
   const [removingHolding, setRemovingHolding] = useState<Holding | null>(null);
+  const [alertsModalOpen, setAlertsModalOpen] = useState(false);
+  const [alertSymbol, setAlertSymbol] = useState('');
+  const [alertCurrency, setAlertCurrency] = useState('USD');
 
   const refreshPricesMutation = useMutation({
     mutationFn: () => fetchApi<RefreshSummary>('/portfolio/refresh-prices', { method: 'POST' }),
@@ -802,7 +810,7 @@ export const PortfolioMainView: React.FC = () => {
               title="Buy position and deduct cost from cash balance"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>{buyMutation.isPending ? 'Buying...' : 'Buy (Spend Cash)'}</span>
+              <span>{buyMutation.isPending ? 'Buying...' : 'Buy'}</span>
             </button>
             <button
               type="button"
@@ -818,8 +826,18 @@ export const PortfolioMainView: React.FC = () => {
         </form>
       </div>
 
-      {/* Asset Allocation Analytics */}
-      <AllocationCard holdings={holdings ?? []} cashBalances={cashBalances ?? []} />
+      {/* Analytics & Performance Visualizations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+        <div className="h-full">
+          <PerformanceChart
+            currency={holdings?.[0]?.currency || cashBalances?.[0]?.currency || 'USD'}
+            currencyExponent={holdings?.[0]?.currency_exponent ?? cashBalances?.[0]?.currency_exponent ?? 2}
+          />
+        </div>
+        <div className="h-full">
+          <AllocationCard holdings={holdings ?? []} cashBalances={cashBalances ?? []} />
+        </div>
+      </div>
 
       {/* Holdings */}
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
@@ -830,6 +848,16 @@ export const PortfolioMainView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAlertsModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+              title="Manage market price and volatility alerts"
+            >
+              <Bell className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Price Alerts</span>
+            </button>
+
             <button
               type="button"
               onClick={() => refreshPricesMutation.mutate()}
@@ -1001,6 +1029,17 @@ export const PortfolioMainView: React.FC = () => {
                       />
                     </button>
                     <button
+                      onClick={() => {
+                        setAlertSymbol(h.symbol);
+                        setAlertCurrency(h.currency);
+                        setAlertsModalOpen(true);
+                      }}
+                      title={`Set price alert for ${h.symbol}`}
+                      className="p-1.5 rounded text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition cursor-pointer"
+                    >
+                      <Bell className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => setSellingId(h.id)}
                       title="Sell"
                       className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
@@ -1130,6 +1169,18 @@ export const PortfolioMainView: React.FC = () => {
         </div>
       )}
 
+      {/* Market Price & Volatility Alerts Modal */}
+      {alertsModalOpen && (
+        <AlertsModal
+          initialSymbol={alertSymbol}
+          defaultCurrency={alertCurrency}
+          onClose={() => {
+            setAlertsModalOpen(false);
+            setAlertSymbol('');
+          }}
+        />
+      )}
+
       {/* Audit Activity Log */}
       <ActivitySection />
     </div>
@@ -1147,16 +1198,22 @@ export const portfolioModule: FrontendModule = {
       event.type === 'PortfolioHoldingCreated' ||
       event.type === 'PortfolioHoldingUpdated' ||
       event.type === 'PortfolioHoldingDeleted' ||
-      event.type === 'PortfolioAuditLogged'
+      event.type === 'PortfolioAuditLogged' ||
+      event.type === 'PortfolioAlertCreated' ||
+      event.type === 'PortfolioAlertTriggered' ||
+      event.type === 'PortfolioAlertDeleted'
     ) {
       queryClient.invalidateQueries({ queryKey: ['portfolio-holdings'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history'] });
     }
     if (event.type === 'PortfolioCashUpdated') {
       queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history'] });
     }
   },
 };

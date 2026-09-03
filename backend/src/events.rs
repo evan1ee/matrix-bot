@@ -44,6 +44,9 @@ pub enum SystemEvent {
     /// frontend cache actually key on.
     PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
     PortfolioAuditLogged(PortfolioAuditEntry),
+    PortfolioAlertCreated(crate::modules::portfolio::alerts::PriceAlert),
+    PortfolioAlertTriggered(crate::modules::portfolio::alerts::PriceAlert),
+    PortfolioAlertDeleted { id: i64, owner_id: String },
     RecurringBillCreated(RecurringBill),
     RecurringBillUpdated(RecurringBill),
     RecurringBillDeleted { id: i64, owner_id: String },
@@ -87,6 +90,8 @@ impl SystemEvent {
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
             SystemEvent::PortfolioAuditLogged(entry) => &entry.owner_id,
+            SystemEvent::PortfolioAlertCreated(a) | SystemEvent::PortfolioAlertTriggered(a) => &a.owner_id,
+            SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
                 &b.owner_id
             }
