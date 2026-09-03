@@ -28,6 +28,11 @@ fn check_rate_limit(token_hash: &str) -> bool {
     let mut map = limiter.lock().unwrap();
     let now = Instant::now();
 
+    // Prune stale entries when map exceeds threshold to prevent unbounded memory growth
+    if map.len() > 500 {
+        map.retain(|_, (last_seen, _)| now.duration_since(*last_seen).as_secs() < 120);
+    }
+
     let entry = map.entry(token_hash.to_string()).or_insert((now, 0));
     if now.duration_since(entry.0).as_secs() >= 60 {
         *entry = (now, 1);

@@ -1,4 +1,5 @@
 use sqlx::SqlitePool;
+use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
 
 use super::client::{AiClient, ResolvedAiConfig};
@@ -8,6 +9,12 @@ use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
 use crate::utils::html::html_escape;
+
+static AI_CLIENT: OnceLock<AiClient> = OnceLock::new();
+
+pub fn get_ai_client() -> &'static AiClient {
+    AI_CLIENT.get_or_init(AiClient::new)
+}
 
 pub const MAX_HISTORY_TURNS: i64 = 15;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
@@ -150,16 +157,23 @@ pub async fn run_ai_turn(
     });
 
     for msg in recent_messages {
+        // Skip tool messages and intermediate empty assistant messages from past turns.
+        // The OpenAI/xAI API requires every message with role 'tool' to immediately follow an
+        // assistant message with 'tool_calls'. Stripping intermediate tool rounds preserves
+        // a clean, valid conversation history of user prompts and final assistant replies.
+        if msg.role == "tool" || (msg.role == "assistant" && msg.content.trim().is_empty()) {
+            continue;
+        }
         chat_messages.push(ChatCompletionMessage {
             role: msg.role,
             content: Some(msg.content),
             tool_calls: None,
-            tool_call_id: msg.tool_call_id,
-            name: msg.tool_name,
+            tool_call_id: None,
+            name: None,
         });
     }
 
-    let client = AiClient::new();
+    let client = get_ai_client();
     let tools = ToolRegistry::get_tool_definitions();
 
     let mut iteration = 0;
@@ -455,6 +469,73 @@ mod tests {
         .await
         .unwrap();
         assert!(reset.contains("conversation history reset"));
+    }
+
+    #[tokio::test]
+    async fn test_multiturn_history_filters_tool_messages() {
+        let (db, owner) = setup_test().await;
+        let conv = AiRepository::get_or_create_conversation(&db.pool, &owner, "!room:1", 1800)
+            .await
+            .unwrap();
+
+        // 1. User message
+        AiRepository::add_message(&db.pool, &conv.id, "user", "Add a task: buy milk", None, None)
+            .await
+            .unwrap();
+        // 2. Assistant tool call with empty content
+        AiRepository::add_message(&db.pool, &conv.id, "assistant", "", None, None)
+            .await
+            .unwrap();
+        // 3. Tool result
+        AiRepository::add_message(
+            &db.pool,
+            &conv.id,
+            "tool",
+            "{\"id\":1,\"status\":\"ok\"}",
+            Some("call_1"),
+            Some("add_todo"),
+        )
+        .await
+        .unwrap();
+        // 4. Assistant final reply
+        AiRepository::add_message(
+            &db.pool,
+            &conv.id,
+            "assistant",
+            "I added your task: buy milk.",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let recent = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
+            .await
+            .unwrap();
+        assert_eq!(recent.len(), 4);
+
+        let mut filtered: Vec<ChatCompletionMessage> = Vec::new();
+        for msg in recent {
+            if msg.role == "tool" || (msg.role == "assistant" && msg.content.trim().is_empty()) {
+                continue;
+            }
+            filtered.push(ChatCompletionMessage {
+                role: msg.role,
+                content: Some(msg.content),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].role, "user");
+        assert_eq!(filtered[0].content.as_deref(), Some("Add a task: buy milk"));
+        assert_eq!(filtered[1].role, "assistant");
+        assert_eq!(
+            filtered[1].content.as_deref(),
+            Some("I added your task: buy milk.")
+        );
     }
 
     #[tokio::test]

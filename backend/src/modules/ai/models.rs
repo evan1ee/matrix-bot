@@ -37,9 +37,22 @@ pub struct UpdateAiConfigInput {
 
 impl UpdateAiConfigInput {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if let Some(ref url) = self.api_base_url {
-            if url.len() > 500 {
+        if let Some(ref url_str) = self.api_base_url {
+            let trimmed = url_str.trim();
+            if trimmed.len() > 500 {
                 return Err("API base URL exceeds 500 characters");
+            }
+            if !trimmed.is_empty() {
+                let parsed = url::Url::parse(trimmed)
+                    .map_err(|_| "API base URL is not a valid URL")?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err("API base URL must use http or https scheme");
+                }
+                if let Some(host) = parsed.host_str() {
+                    if host == "169.254.169.254" || host.starts_with("169.254.") {
+                        return Err("API base URL cannot target link-local metadata addresses");
+                    }
+                }
             }
         }
         if let Some(ref key) = self.api_key {
@@ -218,4 +231,48 @@ pub struct ToolCallChunk {
 pub struct FunctionCallChunk {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_api_base_url() {
+        let valid = UpdateAiConfigInput {
+            api_base_url: Some("https://api.openai.com/v1".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_scheme = UpdateAiConfigInput {
+            api_base_url: Some("ftp://example.com".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert_eq!(
+            invalid_scheme.validate().unwrap_err(),
+            "API base URL must use http or https scheme"
+        );
+
+        let ssrf_metadata = UpdateAiConfigInput {
+            api_base_url: Some("http://169.254.169.254/latest/meta-data".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert_eq!(
+            ssrf_metadata.validate().unwrap_err(),
+            "API base URL cannot target link-local metadata addresses"
+        );
+    }
 }

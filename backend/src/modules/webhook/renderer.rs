@@ -95,6 +95,78 @@ fn format_inline_markdown(escaped: &str) -> String {
     res
 }
 
+/// Sanitizes an HTML snippet for safe Matrix rendering by allowing only safe tags and attributes,
+/// escaping or stripping dangerous elements like <script>, <iframe>, event handlers, and javascript: links.
+pub fn sanitize_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next_c) = chars.peek() {
+                if next_c == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let trimmed_tag = tag.trim();
+            let clean_tag = trimmed_tag.trim_start_matches('/').trim();
+            let tag_name = clean_tag
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_lowercase();
+
+            let is_allowed = matches!(
+                tag_name.as_str(),
+                "b" | "strong"
+                    | "i"
+                    | "em"
+                    | "u"
+                    | "del"
+                    | "s"
+                    | "code"
+                    | "pre"
+                    | "blockquote"
+                    | "br"
+                    | "p"
+                    | "ul"
+                    | "ol"
+                    | "li"
+                    | "font"
+                    | "span"
+                    | "a"
+                    | "hr"
+            );
+
+            let lower_tag = trimmed_tag.to_lowercase();
+            let has_event_handler = lower_tag.contains("javascript:")
+                || lower_tag.contains("data:")
+                || lower_tag.contains("onload")
+                || lower_tag.contains("onerror")
+                || lower_tag.contains("onclick")
+                || lower_tag.contains("onmouse");
+
+            if is_allowed && !has_event_handler {
+                out.push('<');
+                out.push_str(trimmed_tag);
+                out.push('>');
+            } else {
+                out.push_str("&lt;");
+                out.push_str(&html_escape(trimmed_tag));
+                out.push_str("&gt;");
+            }
+        } else {
+            out.push(c);
+        }
+    }
+
+    out
+}
+
 /// Builds full Matrix HTML and plain text for an incoming webhook alert.
 pub fn render_alert_message(
     webhook_name: &str,
@@ -104,7 +176,7 @@ pub fn render_alert_message(
     format: Option<&str>,
 ) -> (String, String) {
     let body_html = match format.map(|f| f.to_lowercase()).as_deref() {
-        Some("html") => raw_message.to_string(),
+        Some("html") => sanitize_html(raw_message),
         Some("plain") => html_escape(raw_message).replace('\n', "<br/>"),
         _ => markdown_to_html(raw_message),
     };
@@ -171,5 +243,17 @@ mod tests {
         assert!(html.contains("VPS Monitor"));
         assert!(plain.contains("🔴 [CRITICAL]"));
         assert!(plain.contains("Host Failure"));
+    }
+
+    #[test]
+    fn test_sanitize_html() {
+        let input = "<b>Safe Bold</b> <script>alert('xss')</script> <a href=\"javascript:evil()\">click</a> <img src=\"x\" onerror=\"steal()\">";
+        let sanitized = sanitize_html(input);
+        assert!(sanitized.contains("<b>Safe Bold</b>"));
+        assert!(!sanitized.contains("<script>"));
+        assert!(sanitized.contains("&lt;script&gt;"));
+        assert!(!sanitized.contains("<a href=\"javascript:evil()\">"));
+        assert!(sanitized.contains("&lt;a href=&quot;javascript:evil()&quot;&gt;"));
+        assert!(!sanitized.contains("onerror"));
     }
 }
