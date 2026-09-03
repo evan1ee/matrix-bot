@@ -194,5 +194,166 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                 }),
             },
         },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "get_portfolio_holding".to_string(),
+                description: "Fetch details of a specific investment holding (quantity, cost basis, current market price, total value, and unrealized profit/loss).".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "symbol": { "type": "string", "description": "Ticker or symbol of the holding, e.g. AAPL, BTC, NVDA" }
+                    },
+                    "required": ["symbol"],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "sell_portfolio_holding".to_string(),
+                description: "Sell a position or part of a position from the portfolio. Gross proceeds are credited to cash balance and realized gain/loss is calculated.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "symbol": { "type": "string", "description": "Ticker or symbol of the holding to sell, e.g. AAPL, BTC" },
+                        "quantity": { "type": "string", "description": "Quantity to sell, e.g. '5' or '0.25'" },
+                        "price": { "type": "string", "description": "Sale price per unit, e.g. '175.50'" }
+                    },
+                    "required": ["symbol", "quantity", "price"],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "withdraw_portfolio_cash".to_string(),
+                description: "Withdraw uninvested cash from the investment portfolio.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "amount": { "type": "string", "description": "Amount of cash to withdraw, e.g. '250.00'" },
+                        "currency": { "type": "string", "description": "3-letter currency code. Defaults to user currency" }
+                    },
+                    "required": ["amount"],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "create_portfolio_price_alert".to_string(),
+                description: "Create a real-time price alert that sends a notification to the user's Matrix chat when a market price target is crossed.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "symbol": { "type": "string", "description": "Ticker or symbol, e.g. BTC-USD, AAPL" },
+                        "condition": { "type": "string", "enum": ["gte", "lte", "above", "below"], "description": "'gte' / 'above' if price rises to or above target; 'lte' / 'below' if price falls to or below target" },
+                        "target_price": { "type": "string", "description": "Target price trigger, e.g. '70000.00' or '120.50'" }
+                    },
+                    "required": ["symbol", "target_price"],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "get_portfolio_price_alerts".to_string(),
+                description: "Fetch all active and past market price alerts configured for the user.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "active_only": { "type": "boolean", "description": "Optional: set true to only return pending, untriggered alerts" }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "cancel_portfolio_price_alert".to_string(),
+                description: "Cancel a market price alert by alert ID or symbol.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "integer", "description": "Alert numeric ID" },
+                        "symbol": { "type": "string", "description": "Ticker symbol to cancel active alerts for" }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "get_portfolio_performance_history".to_string(),
+                description: "Fetch historical portfolio net worth snapshots, period percentage returns, and value changes over a given timeframe.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "timeframe": { "type": "string", "enum": ["7d", "1m", "3m", "1y", "all"], "description": "History timeframe period (default '1m')" },
+                        "currency": { "type": "string", "description": "3-letter currency code. Defaults to user currency" }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "list_finance_transactions".to_string(),
+                description: "List recent expense and income transactions from the financial ledger with optional category, direction, or time filters.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "direction": { "type": "string", "enum": ["expense", "income"], "description": "Filter by 'expense' or 'income'" },
+                        "category": { "type": "string", "description": "Filter by category name, e.g. 'Food', 'Rent'" },
+                        "days": { "type": "integer", "description": "Only include transactions from the last N days (default 365)" },
+                        "limit": { "type": "integer", "description": "Maximum number of transactions to return (default 10, max 50)" }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "get_spending_by_category".to_string(),
+                description: "Analyze expense spending by category over a given timeframe, showing amounts and percentage shares.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "days": { "type": "integer", "description": "Lookback period in days (e.g. 7, 30, 90; default 30)" },
+                        "currency": { "type": "string", "description": "3-letter currency code (e.g. USD, EUR). Defaults to user currency" }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                }),
+            },
+        },
+        ToolDefinition {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "delete_finance_entry".to_string(),
+                description: "Delete an expense or income transaction from the financial ledger by transaction ID.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "integer", "description": "Transaction ID to delete" }
+                    },
+                    "required": ["id"],
+                    "additionalProperties": false
+                }),
+            },
+        },
     ]
 }

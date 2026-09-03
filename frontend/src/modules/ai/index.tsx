@@ -15,6 +15,9 @@ const SUGGESTIONS = [
   'What tasks do I have due today?',
   'Summarize my upcoming reminders and bills',
   'Show a breakdown of my portfolio and cash balance',
+  'What is my position in BTC-USD and how has it performed?',
+  'How much did I spend in each category over the last 30 days?',
+  'Alert me if BTC-USD rises above 75,000 USD',
   'Give me a summary of my expense ledger',
 ];
 

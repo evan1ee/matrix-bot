@@ -1,5 +1,8 @@
 pub mod definitions;
 pub mod executor;
+pub mod executor_finance;
+pub mod executor_portfolio;
+pub mod executor_todo;
 
 use sqlx::SqlitePool;
 use crate::events::EventBroadcaster;
@@ -41,15 +44,25 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 12);
+        assert_eq!(defs.len(), 22);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
         assert!(names.contains(&"complete_todo"));
         assert!(names.contains(&"record_finance_entry"));
+        assert!(names.contains(&"list_finance_transactions"));
+        assert!(names.contains(&"get_spending_by_category"));
+        assert!(names.contains(&"delete_finance_entry"));
         assert!(names.contains(&"set_reminder"));
         assert!(names.contains(&"deposit_portfolio_cash"));
+        assert!(names.contains(&"withdraw_portfolio_cash"));
         assert!(names.contains(&"buy_portfolio_holding"));
+        assert!(names.contains(&"sell_portfolio_holding"));
+        assert!(names.contains(&"get_portfolio_holding"));
+        assert!(names.contains(&"create_portfolio_price_alert"));
+        assert!(names.contains(&"get_portfolio_price_alerts"));
+        assert!(names.contains(&"cancel_portfolio_price_alert"));
+        assert!(names.contains(&"get_portfolio_performance_history"));
     }
 
     #[tokio::test]
@@ -138,5 +151,190 @@ mod tests {
         .await
         .unwrap();
         assert!(buy_res.contains("AAPL"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_portfolio_holding_sell_and_withdraw() {
+        let (db, owner) = setup_db().await;
+
+        // Deposit cash
+        ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "deposit_portfolio_cash",
+            r#"{"amount":"5000.00","currency":"USD"}"#,
+        )
+        .await
+        .unwrap();
+
+        // Buy 10 AAPL @ 150 = 1500
+        ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "buy_portfolio_holding",
+            r#"{"symbol":"AAPL","quantity":"10","price":"150.00","currency":"USD"}"#,
+        )
+        .await
+        .unwrap();
+
+        // Query holding details
+        let holding_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_portfolio_holding",
+            r#"{"symbol":"AAPL"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(holding_res.contains("AAPL"));
+        assert!(holding_res.contains("15000")); // avg_cost_minor
+
+        // Sell 4 AAPL @ 180 = 720
+        let sell_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "sell_portfolio_holding",
+            r#"{"symbol":"AAPL","quantity":"4","price":"180.00"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(sell_res.contains("reduced"));
+        assert!(sell_res.contains("AAPL"));
+
+        // Withdraw 500 cash
+        let withdraw_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "withdraw_portfolio_cash",
+            r#"{"amount":"500.00","currency":"USD"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(withdraw_res.contains("balance_minor"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_portfolio_price_alerts_and_history() {
+        let (db, owner) = setup_db().await;
+
+        // Create price alert
+        let alert_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "create_portfolio_price_alert",
+            r#"{"symbol":"BTC-USD","condition":"gte","target_price":"70000.00"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(alert_res.contains("BTC-USD"));
+        assert!(alert_res.contains("7000000"));
+
+        // List alerts
+        let list_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_portfolio_price_alerts",
+            r#"{"active_only":true}"#,
+        )
+        .await
+        .unwrap();
+        assert!(list_res.contains("BTC-USD"));
+
+        // Cancel alert by symbol
+        let cancel_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "cancel_portfolio_price_alert",
+            r#"{"symbol":"BTC-USD"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(cancel_res.contains(r#""cancelled":true"#));
+
+        // Performance history
+        let history_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_portfolio_performance_history",
+            r#"{"timeframe":"1m","currency":"USD"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(history_res.contains("period_change_pct"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_finance_transactions_and_category_spending() {
+        let (db, owner) = setup_db().await;
+
+        // Record two entries
+        let e1 = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "record_finance_entry",
+            r#"{"amount":"45.00","direction":"expense","note":"Groceries","category":"Food"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(e1.contains("Groceries"));
+
+        ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "record_finance_entry",
+            r#"{"amount":"20.00","direction":"expense","note":"Metro pass","category":"Transit"}"#,
+        )
+        .await
+        .unwrap();
+
+        // List transactions
+        let list_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "list_finance_transactions",
+            r#"{"limit":5}"#,
+        )
+        .await
+        .unwrap();
+        assert!(list_res.contains("Groceries"));
+        assert!(list_res.contains("Metro pass"));
+
+        // Category spending
+        let spending_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_spending_by_category",
+            r#"{"days":30}"#,
+        )
+        .await
+        .unwrap();
+        assert!(spending_res.contains("Food"));
+        assert!(spending_res.contains("Transit"));
     }
 }
