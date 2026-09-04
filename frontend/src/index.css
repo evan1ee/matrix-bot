@@ -104,3 +104,11 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-strong);
 }
+
+/* Ensure Leaflet map stays strictly clipped inside rounded containers */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: inherit;
+  overflow: hidden !important;
+}

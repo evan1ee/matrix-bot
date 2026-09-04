@@ -111,6 +111,29 @@ export interface FakeFootprint {
   updated_at: string;
 }
 
+export interface FakeHabit {
+  id: number;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  frequency: string;
+  category: string;
+  target_days_per_week: number;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FakeHabitLog {
+  id: number;
+  habit_id: number;
+  owner_id: string;
+  log_date: string;
+  completed: boolean;
+  note: string | null;
+  created_at: string;
+}
+
 export interface FakeWebhook {
   id: string;
   owner_id: string;
@@ -261,6 +284,8 @@ export class FakeApi {
   cash: FakeCashBalance[] = [];
   alerts: any[] = [];
   footprints: FakeFootprint[] = [];
+  habits: FakeHabit[] = [];
+  habitLogs: FakeHabitLog[] = [];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -271,6 +296,39 @@ export class FakeApi {
   private nextHoldingId = 1;
   private nextCashId = 1;
   private nextFootprintId = 1;
+  private nextHabitId = 1;
+  private nextHabitLogId = 1;
+
+  seedHabit(partial: Partial<FakeHabit> = {}): FakeHabit {
+    const habit: FakeHabit = {
+      id: this.nextHabitId++,
+      owner_id: OWNER,
+      name: partial.name || `Habit #${this.nextHabitId}`,
+      description: partial.description ?? null,
+      frequency: partial.frequency || 'daily',
+      category: partial.category || 'wellness',
+      target_days_per_week: partial.target_days_per_week || 7,
+      archived: partial.archived || false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.habits.push(habit);
+    return habit;
+  }
+
+  seedHabitLog(partial: Partial<FakeHabitLog> = {}): FakeHabitLog {
+    const log: FakeHabitLog = {
+      id: this.nextHabitLogId++,
+      habit_id: partial.habit_id || 1,
+      owner_id: OWNER,
+      log_date: partial.log_date || new Date().toISOString().split('T')[0],
+      completed: partial.completed ?? true,
+      note: partial.note ?? null,
+      created_at: new Date().toISOString(),
+    };
+    this.habitLogs.push(log);
+    return log;
+  }
 
   seedFootprint(partial: Partial<FakeFootprint> = {}): FakeFootprint {
     const arr = partial.arrival_date ?? '2026-06-01';
@@ -1477,6 +1535,125 @@ export class FakeApi {
       const idx = this.footprints.findIndex((f) => f.id === id);
       if (idx === -1) return json(route, 404, { error: 'Footprint not found', code: 404 });
       this.footprints.splice(idx, 1);
+      return json(route, 200, { success: true, id });
+    }
+
+    // --- habits ---
+    if (path === '/habits' && method === 'GET') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const items = this.habits.map((h) => {
+        const logs = this.habitLogs.filter((l) => l.habit_id === h.id && l.completed);
+        const logDates = new Set(logs.map((l) => l.log_date));
+        const completed_today = logDates.has(todayStr);
+
+        let streak = 0;
+        let cur = new Date();
+        let checkStr = todayStr;
+        if (!completed_today) {
+          cur.setDate(cur.getDate() - 1);
+          checkStr = cur.toISOString().split('T')[0];
+        }
+        while (logDates.has(checkStr)) {
+          streak++;
+          cur.setDate(cur.getDate() - 1);
+          checkStr = cur.toISOString().split('T')[0];
+        }
+
+        const last_7_days: { date: string; completed: boolean }[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const ds = d.toISOString().split('T')[0];
+          last_7_days.push({ date: ds, completed: logDates.has(ds) });
+        }
+
+        return {
+          ...h,
+          completed_today,
+          current_streak: streak,
+          longest_streak: streak,
+          total_completions: logs.length,
+          last_7_days,
+        };
+      });
+      return json(route, 200, items);
+    }
+
+    if (path === '/habits/stats' && method === 'GET') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const completedToday = this.habits.filter((h) =>
+        this.habitLogs.some((l) => l.habit_id === h.id && l.completed && l.log_date === todayStr)
+      ).length;
+      return json(route, 200, {
+        total_active_habits: this.habits.length,
+        completed_today: completedToday,
+        completion_rate_today_percent: this.habits.length > 0 ? Math.round((completedToday / this.habits.length) * 100) : 0,
+        best_streak: 0,
+        total_all_time_completions: this.habitLogs.filter((l) => l.completed).length,
+      });
+    }
+
+    if (path === '/habits/heatmap' && method === 'GET') {
+      const dateCounts = new Map<string, number>();
+      for (const log of this.habitLogs) {
+        if (log.completed) {
+          dateCounts.set(log.log_date, (dateCounts.get(log.log_date) || 0) + 1);
+        }
+      }
+      const days = Array.from(dateCounts.entries()).map(([date, count]) => ({ date, count }));
+      return json(route, 200, days);
+    }
+
+    if (path === '/habits' && method === 'POST') {
+      if (!body?.name?.trim()) {
+        return json(route, 400, { error: 'Habit name is required.', code: 400 });
+      }
+      const habit = this.seedHabit({
+        name: body.name.trim(),
+        description: body.description ?? null,
+        category: body.category || 'wellness',
+        frequency: body.frequency || 'daily',
+        target_days_per_week: body.target_days_per_week || 7,
+      });
+      return json(route, 200, habit);
+    }
+
+    const habitToggleMatch = path.match(/^\/habits\/(\d+)\/toggle$/);
+    if (habitToggleMatch && method === 'POST') {
+      const id = Number(habitToggleMatch[1]);
+      const habit = this.habits.find((h) => h.id === id);
+      if (!habit) return json(route, 404, { error: 'Habit not found', code: 404 });
+      const todayStr = body?.date || new Date().toISOString().split('T')[0];
+      const existing = this.habitLogs.find((l) => l.habit_id === id && l.log_date === todayStr);
+      let newCompleted = true;
+      if (existing) {
+        existing.completed = !existing.completed;
+        newCompleted = existing.completed;
+      } else {
+        this.seedHabitLog({ habit_id: id, log_date: todayStr, completed: true });
+      }
+      return json(route, 200, { habit_id: id, log_date: todayStr, completed: newCompleted });
+    }
+
+    const habitMatch = path.match(/^\/habits\/(\d+)$/);
+    if (habitMatch && method === 'PUT') {
+      const id = Number(habitMatch[1]);
+      const habit = this.habits.find((h) => h.id === id);
+      if (!habit) return json(route, 404, { error: 'Habit not found', code: 404 });
+      if (body?.name) habit.name = body.name.trim();
+      if (body?.description !== undefined) habit.description = body.description;
+      if (body?.category) habit.category = body.category;
+      if (body?.target_days_per_week) habit.target_days_per_week = body.target_days_per_week;
+      habit.updated_at = new Date().toISOString();
+      return json(route, 200, habit);
+    }
+
+    if (habitMatch && method === 'DELETE') {
+      const id = Number(habitMatch[1]);
+      const idx = this.habits.findIndex((h) => h.id === id);
+      if (idx === -1) return json(route, 404, { error: 'Habit not found', code: 404 });
+      this.habits.splice(idx, 1);
+      this.habitLogs = this.habitLogs.filter((l) => l.habit_id !== id);
       return json(route, 200, { success: true, id });
     }
 

@@ -13,6 +13,7 @@ use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
 use crate::modules::footprints::FootprintsModule;
+use crate::modules::habits::HabitsModule;
 use crate::modules::portfolio::PortfolioModule;
 use crate::modules::recurring_bills::RecurringBillsModule;
 use crate::modules::reminder::ReminderModule;
@@ -74,6 +75,7 @@ impl MatrixBot {
         registry.register(FinanceModule::new());
         registry.register(PortfolioModule::new());
         registry.register(FootprintsModule::new());
+        registry.register(HabitsModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
         registry.register(WebhookModule::new());

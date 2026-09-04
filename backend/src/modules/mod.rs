@@ -13,6 +13,7 @@ pub mod core;
 pub mod due_reminder;
 pub mod finance;
 pub mod footprints;
+pub mod habits;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;

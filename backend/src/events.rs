@@ -61,6 +61,10 @@ pub enum SystemEvent {
     FootprintCreated(crate::modules::footprints::models::Footprint),
     FootprintUpdated(crate::modules::footprints::models::Footprint),
     FootprintDeleted { id: i64, owner_id: String },
+    HabitCreated(crate::modules::habits::models::Habit),
+    HabitUpdated(crate::modules::habits::models::Habit),
+    HabitDeleted { id: i64, owner_id: String },
+    HabitLogToggled { habit_id: i64, owner_id: String, log_date: String, completed: bool },
 }
 
 impl SystemEvent {
@@ -108,6 +112,9 @@ impl SystemEvent {
             | SystemEvent::AiConfigUpdated { owner_id } => owner_id,
             SystemEvent::FootprintCreated(f) | SystemEvent::FootprintUpdated(f) => &f.owner_id,
             SystemEvent::FootprintDeleted { owner_id, .. } => owner_id,
+            SystemEvent::HabitCreated(h) | SystemEvent::HabitUpdated(h) => &h.owner_id,
+            SystemEvent::HabitDeleted { owner_id, .. }
+            | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id,
         }
     }
 }

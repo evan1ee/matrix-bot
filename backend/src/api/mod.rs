@@ -22,6 +22,7 @@ pub mod ai;
 pub mod auth;
 pub mod finance;
 pub mod footprints;
+pub mod habits;
 pub mod health;
 pub mod openapi;
 pub mod portfolio;
@@ -182,6 +183,26 @@ pub fn api_routes() -> Router<auth::ApiState> {
             get(footprints::get_footprint)
                 .put(footprints::update_footprint)
                 .delete(footprints::delete_footprint),
+        )
+        .route(
+            "/habits",
+            get(habits::list_habits).post(habits::create_habit),
+        )
+        .route(
+            "/habits/heatmap",
+            get(habits::get_heatmap),
+        )
+        .route(
+            "/habits/stats",
+            get(habits::get_stats),
+        )
+        .route(
+            "/habits/:id",
+            put(habits::update_habit).delete(habits::delete_habit),
+        )
+        .route(
+            "/habits/:id/toggle",
+            post(habits::toggle_habit_log),
         )
 }
 

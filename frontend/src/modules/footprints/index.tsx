@@ -111,9 +111,9 @@ const FootprintsView: React.FC<{
     : '$0.00';
 
   return (
-    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+    <div className="space-y-6 pb-8">
       {/* Header & Description */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2 tracking-tight">
             <Compass className="w-5 h-5 text-neutral-600 dark:text-neutral-300" />
@@ -126,7 +126,7 @@ const FootprintsView: React.FC<{
       </div>
 
       {/* Vercel Stat Strip (Design.md vbg-stat-strip) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shrink-0">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
         <div className="flex flex-col">
           <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
             Places Visited
@@ -164,31 +164,28 @@ const FootprintsView: React.FC<{
         </div>
       </div>
 
-      {/* Main Symmetrical 50/50 Workspace (Map on Left, List on Right) */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
-        {/* Left: Star Map View */}
-        <div className="h-full flex flex-col min-h-[400px]">
-          <FootprintsMap
-            footprints={footprints}
-            selectedFootprint={selectedFootprint}
-            onSelectFootprint={setSelectedFootprint}
-            onMapClick={handleMapClick}
-            pendingPin={pendingPin}
-          />
-        </div>
+      {/* TOP: Interactive World Map (Full Width) */}
+      <div className="w-full">
+        <FootprintsMap
+          footprints={footprints}
+          selectedFootprint={selectedFootprint}
+          onSelectFootprint={setSelectedFootprint}
+          onMapClick={handleMapClick}
+          pendingPin={pendingPin}
+        />
+      </div>
 
-        {/* Right: Card Grid & Filter List */}
-        <div className="h-full flex flex-col min-h-0">
-          <FootprintsList
-            footprints={footprints}
-            summaryStats={summaryStats}
-            selectedFootprint={selectedFootprint}
-            onSelectFootprint={setSelectedFootprint}
-            onEditFootprint={handleOpenEdit}
-            onDeleteFootprint={(id) => deleteMutation.mutate(id)}
-            onOpenAddModal={handleOpenAdd}
-          />
-        </div>
+      {/* DOWN: Card Grid & Filter List (Full Width) */}
+      <div className="w-full">
+        <FootprintsList
+          footprints={footprints}
+          summaryStats={summaryStats}
+          selectedFootprint={selectedFootprint}
+          onSelectFootprint={setSelectedFootprint}
+          onEditFootprint={handleOpenEdit}
+          onDeleteFootprint={(id) => deleteMutation.mutate(id)}
+          onOpenAddModal={handleOpenAdd}
+        />
       </div>
 
       {/* Modal Dialog for Recording / Editing */}
