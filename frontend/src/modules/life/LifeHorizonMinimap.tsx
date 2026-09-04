@@ -183,42 +183,39 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   if (days.length === 0) return null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 rounded-xl p-4 shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5">
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 mb-3">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-            <span>Life Horizon</span>
-            <span className="text-xs font-normal text-zinc-500">
-              (~{days.length.toLocaleString()} days macro overview)
-            </span>
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            Life horizon macro overview
           </h3>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Click anywhere on the timeline to jump to that year. Blue outline marks Year {currentYear}.
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            Full {days.length.toLocaleString()} days. Click anywhere on the timeline to jump to that year.
           </p>
         </div>
 
         {/* Legend */}
-        <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-500 dark:text-zinc-400">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-zinc-300 dark:bg-zinc-700" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-zinc-300 dark:bg-zinc-700" />
             <span>Past</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
             <span>Today</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-amber-400" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-amber-400 dark:bg-amber-500" />
             <span>Logged</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900" />
+            <span className="w-2.5 h-2.5 rounded-xs border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" />
             <span>Future</span>
           </div>
         </div>
       </div>
 
-      <div ref={containerRef} className="w-full relative cursor-crosshair overflow-hidden rounded-lg">
+      <div ref={containerRef} className="w-full relative cursor-crosshair overflow-hidden rounded">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}

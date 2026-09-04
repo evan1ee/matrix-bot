@@ -64,7 +64,7 @@ async fn handle_stats(pool: &SqlitePool, owner_id: &str, today_str: &str) -> Str
             format!(
                 "<b>Life Grid Statistics</b><br/>\
                  {}\
-                 ⏳ <b>Age:</b> {} days lived<br/>\
+                 ⏳ <b>Days passed:</b> {} days<br/>\
                  📊 <b>Life elapsed:</b> {}%<br/>\
                  📝 <b>Days logged:</b> {}<br/>\
                  🌟 <b>Dominant mood:</b> {}",

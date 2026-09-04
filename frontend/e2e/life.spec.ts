@@ -3,37 +3,37 @@ import path from 'path';
 
 const gotoLife = (page: import('@playwright/test').Page) => gotoApp(page, TAB.life);
 
-test.describe('Visualizing Life (Life Grid)', () => {
+test.describe('Visualizing Life (Lifespan Grid)', () => {
   test('renders onboarding banner when no profile exists', async ({ app }) => {
     await gotoLife(app);
 
     await expect(app.getByRole('heading', { name: 'Visualizing Life' })).toBeVisible();
-    await expect(app.getByText('Start Visualizing Your Lifespan')).toBeVisible();
-    await expect(app.getByRole('button', { name: 'Set Birth Date Now' })).toBeVisible();
+    await expect(app.getByText('Start visualizing your lifespan')).toBeVisible();
+    await expect(app.getByRole('button', { name: /set birth date now/i })).toBeVisible();
   });
 
-  test('configures birth date and displays stats strip and canvas minimap', async ({ app, api }) => {
+  test('configures birth date and displays stats strip and full lifespan grid', async ({ app, api }) => {
     await gotoLife(app);
 
     // Click Set Birth Date Now
-    await app.getByRole('button', { name: 'Set Birth Date Now' }).click();
-    await expect(app.getByRole('heading', { name: 'Set Up Life Grid' })).toBeVisible();
+    await app.getByRole('button', { name: /set birth date now/i }).click();
+    await expect(app.getByRole('heading', { name: /set up life grid|edit life profile/i })).toBeVisible();
 
     // Fill in birth date: 1995-05-15
     const birthInput = app.locator('input[type="date"]');
     await birthInput.fill('1995-05-15');
 
     // Submit profile
-    await app.getByRole('button', { name: 'Start Visualizing Life' }).click();
+    await app.getByRole('button', { name: /save profile/i }).click();
 
-    // Verify stats strip visible
-    await expect(app.getByText('Age in Days')).toBeVisible();
-    await expect(app.getByText('Life Lived')).toBeVisible();
+    // Verify stats strip visible without any age references
+    await expect(app.getByText('Days Elapsed')).toBeVisible();
+    await expect(app.getByText('Days Ahead')).toBeVisible();
     await expect(app.getByText('Days Logged')).toBeVisible();
-    await expect(app.getByText('Born 1995-05-15')).toBeVisible();
+    await expect(app.getByText('Started 1995-05-15')).toBeVisible();
 
-    // Verify Life Horizon canvas visible
-    await expect(app.getByRole('heading', { name: 'Life Horizon' })).toBeVisible();
+    // Verify Lifespan Grid visible (no calendar)
+    await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
 
     // Verify profile in api state
     expect(api.lifeProfile).toBeDefined();
@@ -41,20 +41,17 @@ test.describe('Visualizing Life (Life Grid)', () => {
   });
 
   test('logs a day with mood, weather, activities, and notes, updating the grid', async ({ app, api }) => {
-    // Seed profile and some initial logs
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
 
     await gotoLife(app);
 
-    // Check year 2026 header and age
-    await expect(app.getByText('2026', { exact: true })).toBeVisible();
-    await expect(app.getByText('Age 31')).toBeVisible();
+    await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
 
     // Click Log Today
-    await app.getByRole('button', { name: 'Log Today' }).click();
+    await app.getByRole('button', { name: /log today/i }).click();
 
     // Verify day modal opened
-    await expect(app.getByText('How was your day? (Mood)')).toBeVisible();
+    await expect(app.getByText('Mood', { exact: true })).toBeVisible();
 
     // Select Amazing mood
     await app.getByRole('button', { name: /Amazing/i }).click();
@@ -75,11 +72,11 @@ test.describe('Visualizing Life (Life Grid)', () => {
     });
 
     // Save record
-    await app.getByRole('button', { name: 'Save Record' }).click();
+    await app.getByRole('button', { name: /save record/i }).click();
 
     // Check stats updated
     await expect(app.getByText('Dominant Mood')).toBeVisible();
-    await expect(app.getByText('Amazing')).toBeVisible();
+    await expect(app.getByText('Amazing').first()).toBeVisible();
 
     // Verify api state
     const todayStr = new Date().toISOString().split('T')[0];
@@ -90,7 +87,7 @@ test.describe('Visualizing Life (Life Grid)', () => {
     expect(logged?.note).toContain('Shipped the Visualizing Life feature');
   });
 
-  test('navigates years and captures visual screenshots', async ({ app, api }) => {
+  test('navigates decades, clicks day blocks, and captures visual screenshots', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
 
     // Seed several day logs with different moods
@@ -107,8 +104,18 @@ test.describe('Visualizing Life (Life Grid)', () => {
 
     await gotoLife(app);
 
-    await expect(app.getByText('Age in Days')).toBeVisible();
-    await expect(app.getByText('Life Horizon')).toBeVisible();
+    await expect(app.getByText('Days Elapsed')).toBeVisible();
+    await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
+
+    // Test Decade jump
+    const decadePill = app.getByRole('button', { name: '2020s' }).first();
+    await expect(decadePill).toBeVisible();
+    await decadePill.click();
+
+    // Test Jump to Today button
+    const todayJumpBtn = app.getByRole('button', { name: /jump to today/i });
+    await expect(todayJumpBtn).toBeVisible();
+    await todayJumpBtn.click();
 
     const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
 
@@ -122,7 +129,6 @@ test.describe('Visualizing Life (Life Grid)', () => {
     if (await themeBtn.isVisible()) {
       await themeBtn.click();
     } else {
-      // Toggle via document element class
       await app.evaluate(() => {
         document.documentElement.classList.remove('dark');
       });

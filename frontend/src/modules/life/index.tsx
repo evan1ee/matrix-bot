@@ -1,30 +1,28 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Hourglass, Sparkles, Plus, Calendar, Compass } from 'lucide-react';
+import { Hourglass, Plus, Calendar } from 'lucide-react';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
   LifeProfileResponse,
   LifeHorizonDay,
-  LifeYearView,
   LifeDayItem,
   UpsertDayPayload,
   UpsertProfilePayload,
 } from './types';
 import { LifeStatStrip } from './LifeStatStrip';
 import { LifeHorizonMinimap } from './LifeHorizonMinimap';
-import { LifeYearGrid } from './LifeYearGrid';
+import { LifeAllBlocksGrid } from './LifeAllBlocksGrid';
 import { LifeDayModal } from './LifeDayModal';
 import { LifeProfileModal } from './LifeProfileModal';
 
 export const LifeView: React.FC = () => {
   const queryClient = useQueryClient();
   const currentActualYear = new Date().getFullYear();
-  const [selectedYear, setSelectedYear] = useState<number>(currentActualYear);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<LifeDayItem | null>(null);
   const [isDayModalOpen, setIsDayModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  // Theme check for canvas rendering
   const isDark =
     typeof document !== 'undefined' &&
     document.documentElement.classList.contains('dark');
@@ -39,23 +37,13 @@ export const LifeView: React.FC = () => {
     },
   });
 
-  // 2. Fetch Macro Life Horizon Array
+  // 2. Fetch Macro Life Horizon Array (All ~30,000 days of life)
   const { data: horizonDays = [] } = useQuery<LifeHorizonDay[]>({
     queryKey: ['life-horizon'],
     enabled: !!profileData?.profile,
     queryFn: async () => {
       const res = await fetch('/api/v1/life/horizon', { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to load life horizon');
-      return res.json();
-    },
-  });
-
-  // 3. Fetch Selected Year View (~365 blocks)
-  const { data: yearView, isLoading: isLoadingYear } = useQuery<LifeYearView>({
-    queryKey: ['life-year', selectedYear],
-    queryFn: async () => {
-      const res = await fetch(`/api/v1/life/year/${selectedYear}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load year ${selectedYear}`);
       return res.json();
     },
   });
@@ -78,7 +66,6 @@ export const LifeView: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
       queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-      queryClient.invalidateQueries({ queryKey: ['life-year'] });
     },
   });
 
@@ -99,7 +86,6 @@ export const LifeView: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
       queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-      queryClient.invalidateQueries({ queryKey: ['life-year', selectedYear] });
     },
   });
 
@@ -118,39 +104,72 @@ export const LifeView: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
       queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-      queryClient.invalidateQueries({ queryKey: ['life-year', selectedYear] });
     },
   });
 
-  const handleSelectDay = (day: LifeDayItem) => {
-    setSelectedDay(day);
+  const handleSelectDate = async (date: string) => {
+    setSelectedDate(date);
+    const todayStr = new Date().toISOString().split('T')[0];
+    let dayType: 'past' | 'present' | 'future' = 'past';
+    if (date === todayStr) {
+      dayType = 'present';
+    } else if (date > todayStr) {
+      dayType = 'future';
+    }
+
+    try {
+      const res = await fetch(`/api/v1/life/days/${date}`, { credentials: 'include' });
+      if (res.ok) {
+        const log = await res.json();
+        if (log) {
+          let acts: string[] = [];
+          try {
+            if (log.activities) acts = JSON.parse(log.activities);
+          } catch {
+            acts = [];
+          }
+          setSelectedDay({
+            date: log.log_date,
+            day_type: dayType,
+            mood: log.mood,
+            weather: log.weather,
+            activities: acts,
+            note: log.note,
+          });
+          setIsDayModalOpen(true);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching day log:', e);
+    }
+
+    setSelectedDay({
+      date,
+      day_type: dayType,
+    });
     setIsDayModalOpen(true);
   };
 
   const handleLogToday = () => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const todayItem =
-      yearView?.days.find((d) => d.date === todayStr) || {
-        date: todayStr,
-        day_type: 'present' as const,
-      };
-    handleSelectDay(todayItem);
+    handleSelectDate(todayStr);
   };
 
   const profile = profileData?.profile || null;
   const stats = profileData?.stats || null;
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="space-y-5 pb-8">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-            <Hourglass className="w-5 h-5 text-emerald-500" />
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+            <Hourglass className="w-5 h-5 text-zinc-700 dark:text-zinc-300" />
             <span>Visualizing Life</span>
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-            Every block represents one day of your life. Future is white, today is a beacon, past holds your memories.
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            Every block represents one day of your life. Future is white, today is the beacon, past holds your memories.
           </p>
         </div>
 
@@ -158,46 +177,45 @@ export const LifeView: React.FC = () => {
           {profile && (
             <button
               onClick={handleLogToday}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-xs transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors"
             >
-              <Plus className="w-4 h-4" />
-              <span>Log Today</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Log today</span>
             </button>
           )}
 
           <button
             onClick={() => setIsProfileModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors"
           >
-            <Calendar className="w-4 h-4" />
-            <span>{profile ? 'Edit Profile' : 'Set Birth Date'}</span>
+            <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+            <span>{profile ? 'Edit profile' : 'Set birth date'}</span>
           </button>
         </div>
       </div>
 
       {/* Onboarding Banner if no profile exists */}
       {!isLoadingProfile && !profile && (
-        <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-zinc-900 border border-emerald-200 dark:border-emerald-800/60 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-base">
-              <Sparkles className="w-5 h-5" />
-              <span>Start Visualizing Your Lifespan</span>
-            </div>
-            <p className="text-xs text-emerald-700 dark:text-emerald-400/90 max-w-xl leading-relaxed">
-              Set your birth date to unlock your personal 80-year Life Horizon minimap and 365-day year
-              calendar grid. Every day is a canvas for your mood, reflections, and life milestones.
+        <div className="p-5 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Start visualizing your lifespan
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xl leading-relaxed">
+              Set your birth date to unlock your personal 80-year Life Horizon and lifespan grid of all days.
+              Every block is a canvas for your mood, reflections, and life milestones.
             </p>
           </div>
           <button
             onClick={() => setIsProfileModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition-all shrink-0"
+            className="px-3.5 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white font-medium text-xs shadow-xs transition-colors shrink-0"
           >
-            Set Birth Date Now
+            Set birth date now
           </button>
         </div>
       )}
 
-      {/* 1. Life Statistics Strip */}
+      {/* 1. Life Statistics Strip (Strictly no age references) */}
       {stats && (
         <LifeStatStrip
           stats={stats}
@@ -205,25 +223,27 @@ export const LifeView: React.FC = () => {
         />
       )}
 
-      {/* 2. Macro Life Horizon Minimap (~30,000 days canvas) */}
+      {/* 2. Macro Life Horizon Overview (~30,000 days canvas) */}
       {profile && horizonDays.length > 0 && (
         <LifeHorizonMinimap
           days={horizonDays}
-          currentYear={selectedYear}
-          onSelectYear={setSelectedYear}
+          currentYear={currentActualYear}
+          onSelectYear={(year) => {
+            const el = document.getElementById(`year-${year}`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }}
           isDark={isDark}
         />
       )}
 
-      {/* 3. Bottom Interactive Year Calendar Grid (~365 blocks) */}
-      <LifeYearGrid
-        year={selectedYear}
-        birthDate={profile?.birth_date || null}
-        days={yearView?.days || []}
-        selectedDate={selectedDay?.date || null}
-        onSelectYear={setSelectedYear}
-        onSelectDay={handleSelectDay}
-      />
+      {/* 3. All Blocks Lifespan Grid (No calendar) */}
+      {profile && horizonDays.length > 0 && (
+        <LifeAllBlocksGrid
+          days={horizonDays}
+          onSelectDate={handleSelectDate}
+          selectedDate={selectedDate}
+        />
+      )}
 
       {/* Day Logging Modal */}
       <LifeDayModal
@@ -271,7 +291,6 @@ export const lifeModule: FrontendModule = {
     ) {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
       queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-      queryClient.invalidateQueries({ queryKey: ['life-year'] });
     }
   },
 };
