@@ -294,12 +294,11 @@ export const LifeView: React.FC = () => {
         />
       )}
 
-      {/* 2. Unified Lifespan Day Grid (10px blocks) */}
+      {/* 2. Unified Lifespan Day Grid */}
       {profile && allLifespanDays.length > 0 && (
         <LifeHorizonMinimap
           days={allLifespanDays}
           onSelectDate={handleSelectDate}
-          isDark={isDark}
         />
       )}
 

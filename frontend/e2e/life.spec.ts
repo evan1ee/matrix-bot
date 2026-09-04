@@ -114,20 +114,42 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       path: path.join(brainDir, 'life_grid_10px.png'),
     });
 
-    // Test Decade jump
+    // Test Decade filter
     const decadePill = app.getByRole('button', { name: '2020s' }).first();
     await expect(decadePill).toBeVisible();
     await decadePill.click();
 
-    // Test Jump to Today button
-    const todayJumpBtn = app.getByRole('button', { name: /jump to today/i });
+    // Test Open Today button
+    const todayJumpBtn = app.getByRole('button', { name: /jump to today|open today/i });
     await expect(todayJumpBtn).toBeVisible();
     await todayJumpBtn.click();
 
-    // Dark mode screenshot
-    await app.screenshot({
-      path: path.join(brainDir, 'life_grid_dark.png'),
-    });
+    // Close modal opened by Open Today
+    await expect(app.getByText('Mood', { exact: true })).toBeVisible();
+    await app.getByRole('button', { name: /cancel/i }).click();
+
+    // Hover over canvas to activate the magnifying glass
+    const canvas = app.locator('canvas').first();
+    await expect(canvas).toBeVisible();
+    const box = await canvas.boundingBox();
+    if (box) {
+      // Move mouse over canvas center
+      await app.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.45);
+      await app.waitForTimeout(300);
+
+      // Verify the magnifying reticle HUD is visible
+      await expect(app.getByText(/Click block to open/i)).toBeVisible();
+
+      // Dark mode screenshot with magnifying glass active
+      await app.screenshot({
+        path: path.join(brainDir, 'life_grid_magnifier_dark.png'),
+      });
+
+      // Click on canvas to open day modal via magnifier
+      await app.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
+      await expect(app.getByText('Mood', { exact: true })).toBeVisible();
+      await app.getByRole('button', { name: /cancel/i }).click();
+    }
 
     // Switch to Light mode
     const themeBtn = app.locator('button[title*="theme" i], button[title*="Theme" i]').first();
@@ -139,11 +161,14 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    await app.waitForTimeout(500);
+    if (box) {
+      await app.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
+      await app.waitForTimeout(300);
+    }
 
-    // Light mode screenshot
+    // Light mode screenshot with magnifying glass active
     await app.screenshot({
-      path: path.join(brainDir, 'life_grid_light.png'),
+      path: path.join(brainDir, 'life_grid_magnifier_light.png'),
     });
   });
 });
