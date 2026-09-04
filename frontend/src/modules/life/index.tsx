@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Hourglass, Plus, Calendar } from 'lucide-react';
+import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
   LifeProfileResponse,
@@ -11,6 +12,7 @@ import type {
   UpsertProfilePayload,
 } from './types';
 import { LifeStatStrip } from './LifeStatStrip';
+import { LifeOverview } from './LifeOverview';
 import { LifeHorizonMinimap } from './LifeHorizonMinimap';
 import { LifeDayModal } from './LifeDayModal';
 import { LifeProfileModal } from './LifeProfileModal';
@@ -31,9 +33,7 @@ export const LifeView: React.FC = () => {
   const { data: profileData, isLoading: isLoadingProfile } = useQuery<LifeProfileResponse>({
     queryKey: ['life-profile'],
     queryFn: async () => {
-      const res = await fetch('/api/v1/life/profile', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load life profile');
-      return res.json();
+      return fetchApi<LifeProfileResponse>('/life/profile');
     },
   });
 
@@ -42,26 +42,17 @@ export const LifeView: React.FC = () => {
     queryKey: ['life-horizon'],
     enabled: !!profileData?.profile,
     queryFn: async () => {
-      const res = await fetch('/api/v1/life/horizon', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load life horizon');
-      return res.json();
+      return fetchApi<LifeHorizonDay[]>('/life/horizon');
     },
   });
 
   // Mutations
   const saveProfileMutation = useMutation({
     mutationFn: async (payload: UpsertProfilePayload) => {
-      const res = await fetch('/api/v1/life/profile', {
+      return fetchApi('/life/profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to save life profile');
-      }
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
@@ -71,21 +62,16 @@ export const LifeView: React.FC = () => {
 
   const saveDayMutation = useMutation({
     mutationFn: async (payload: UpsertDayPayload) => {
-      const res = await fetch('/api/v1/life/days', {
+      return fetchApi('/life/days', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
-          ...payload,
-          log_date: payload.log_date || payload.date,
-          date: payload.date || payload.log_date,
+          log_date: payload.date,
+          mood: payload.mood,
+          weather: payload.weather ?? null,
+          activities: payload.activities ?? null,
+          note: payload.note ?? null,
         }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to save day record');
-      }
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
@@ -95,15 +81,9 @@ export const LifeView: React.FC = () => {
 
   const deleteDayMutation = useMutation({
     mutationFn: async (date: string) => {
-      const res = await fetch(`/api/v1/life/days/${date}`, {
+      return fetchApi(`/life/days/${date}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to delete day record');
-      }
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
@@ -122,27 +102,24 @@ export const LifeView: React.FC = () => {
     }
 
     try {
-      const res = await fetch(`/api/v1/life/days/${date}`, { credentials: 'include' });
-      if (res.ok) {
-        const log = await res.json();
-        if (log) {
-          let acts: string[] = [];
-          try {
-            if (log.activities) acts = JSON.parse(log.activities);
-          } catch {
-            acts = [];
-          }
-          setSelectedDay({
-            date: log.log_date,
-            day_type: dayType,
-            mood: log.mood,
-            weather: log.weather,
-            activities: acts,
-            note: log.note,
-          });
-          setIsDayModalOpen(true);
-          return;
+      const log = await fetchApi<any>(`/life/days/${date}`);
+      if (log) {
+        let acts: string[] = [];
+        try {
+          if (log.activities) acts = JSON.parse(log.activities);
+        } catch {
+          acts = [];
         }
+        setSelectedDay({
+          date: log.log_date,
+          day_type: dayType,
+          mood: log.mood,
+          weather: log.weather,
+          activities: acts,
+          note: log.note,
+        });
+        setIsDayModalOpen(true);
+        return;
       }
     } catch (e) {
       console.error('Error fetching day log:', e);
@@ -294,7 +271,15 @@ export const LifeView: React.FC = () => {
         />
       )}
 
-      {/* 2. Unified Lifespan Day Grid */}
+      {/* 2. Lifespan Overview (View Only - No logging) */}
+      {profile && allLifespanDays.length > 0 && (
+        <LifeOverview
+          days={allLifespanDays}
+          isDark={isDark}
+        />
+      )}
+
+      {/* 3. Interactive Lifespan Day Grid */}
       {profile && allLifespanDays.length > 0 && (
         <LifeHorizonMinimap
           days={allLifespanDays}

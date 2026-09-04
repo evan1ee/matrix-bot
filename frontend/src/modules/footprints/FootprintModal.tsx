@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchApi } from '../../core/apiClient';
 import { Footprint, CreateFootprintInput, NominatimSearchResult } from './types';
 import { X, MapPin, Calendar, Star, DollarSign, Search, Loader2, Compass } from 'lucide-react';
+import { DatePicker } from '../../components/DatePicker';
 
 interface FootprintModalProps {
   isOpen: boolean;
@@ -327,24 +328,22 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
               <label className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider block mb-1">
                 Arrival Date *
               </label>
-              <input
-                type="date"
+              <DatePicker
                 required
                 value={arrivalDate}
-                onChange={(e) => setArrivalDate(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans cursor-pointer"
+                onChange={setArrivalDate}
+                placeholder="Arrival date"
               />
             </div>
             <div>
               <label className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider block mb-1">
                 Departure Date (Optional)
               </label>
-              <input
-                type="date"
+              <DatePicker
                 min={arrivalDate}
                 value={departureDate}
-                onChange={(e) => setDepartureDate(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans cursor-pointer"
+                onChange={setDepartureDate}
+                placeholder="Departure date"
               />
             </div>
           </div>

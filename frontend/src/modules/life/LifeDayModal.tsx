@@ -24,6 +24,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   const [note, setNote] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (day) {
@@ -35,6 +36,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
 
       setSelectedActivities(day.activities || []);
       setNote(day.note || '');
+      setSaveError(null);
     }
   }, [day]);
 
@@ -50,6 +52,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     e.preventDefault();
     if (!day) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
       await onSave({
         date: day.date,
@@ -59,6 +62,9 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
         note: note.trim() || null,
       });
       onClose();
+    } catch (err: any) {
+      console.error('Failed to save day log:', err);
+      setSaveError(err?.message || 'Failed to save day record');
     } finally {
       setIsSaving(false);
     }
@@ -68,9 +74,13 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     if (!day || !day.mood) return;
     if (window.confirm(`Clear record for ${day.date}?`)) {
       setIsDeleting(true);
+      setSaveError(null);
       try {
         await onDelete(day.date);
         onClose();
+      } catch (err: any) {
+        console.error('Failed to clear day log:', err);
+        setSaveError(err?.message || 'Failed to clear day record');
       } finally {
         setIsDeleting(false);
       }
@@ -220,14 +230,22 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
             </div>
           </div>
 
+          {/* Error Banner */}
+          {saveError && (
+            <div className="p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+              <span className="shrink-0 font-bold">⚠️</span>
+              <span className="flex-1">{saveError}</span>
+            </div>
+          )}
+
           {/* Footer Actions */}
           <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800">
             {day.mood ? (
               <button
                 type="button"
                 onClick={handleDelete}
-                disabled={isDeleting}
-                className="inline-flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400 hover:underline transition-colors"
+                disabled={isDeleting || isSaving}
+                className="inline-flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400 hover:underline transition-colors disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isDeleting ? 'Clearing...' : 'Clear record'}</span>
@@ -240,16 +258,23 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                disabled={isSaving || isDeleting}
+                className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={isSaving}
-                className="px-3.5 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors"
+                disabled={isSaving || isDeleting}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50"
               >
-                {isSaving ? 'Saving...' : 'Save record'}
+                {isSaving && (
+                  <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-zinc-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                )}
+                <span>{isSaving ? 'Saving...' : 'Save record'}</span>
               </button>
             </div>
           </div>

@@ -1849,10 +1849,11 @@ export class FakeApi {
     }
 
     if (path === '/life/days' && method === 'POST') {
-      if (!body?.date || !body?.mood) {
+      const logDate = body?.log_date || body?.date;
+      if (!logDate || !body?.mood) {
         return json(route, 400, { error: 'Date and mood are required', code: 400 });
       }
-      const existingIdx = this.lifeDayLogs.findIndex((l) => l.log_date === body.date);
+      const existingIdx = this.lifeDayLogs.findIndex((l) => l.log_date === logDate);
       const activitiesStr = body.activities ? JSON.stringify(body.activities) : null;
       let saved: FakeLifeDayLog;
       if (existingIdx >= 0) {
@@ -1866,7 +1867,7 @@ export class FakeApi {
         saved = {
           id: this.nextLifeDayLogId++,
           owner_id: OWNER,
-          log_date: body.date,
+          log_date: logDate,
           mood: body.mood,
           weather: body.weather ?? null,
           activities: activitiesStr,

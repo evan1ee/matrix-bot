@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { LifeProfile, UpsertProfilePayload } from './types';
+import { DatePicker } from '../../components/DatePicker';
 
 interface LifeProfileModalProps {
   profile: LifeProfile | null;
@@ -93,13 +94,12 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
               Date of birth
             </label>
-            <input
-              type="date"
+            <DatePicker
               value={birthDate}
-              onChange={(e) => setBirthDate(e.target.value)}
+              onChange={setBirthDate}
               required
               max={new Date().toISOString().split('T')[0]}
-              className="w-full px-3 py-1.5 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-zinc-100 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+              placeholder="Select date of birth"
             />
             <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
               Anchors your timeline from Day 1.

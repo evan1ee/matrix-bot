@@ -128,8 +128,19 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByText('Mood', { exact: true })).toBeVisible();
     await app.getByRole('button', { name: /cancel/i }).click();
 
-    // Hover over canvas to activate the tooltip
-    const canvas = app.locator('canvas').first();
+    // Verify Lifespan Overview exists
+    await expect(app.getByText('Lifespan overview')).toBeVisible();
+
+    // Verify overview canvas does NOT open day modal on click
+    const overviewCanvas = app.locator('canvas').first();
+    const overviewBox = await overviewCanvas.boundingBox();
+    if (overviewBox) {
+      await app.mouse.click(overviewBox.x + overviewBox.width * 0.5, overviewBox.y + overviewBox.height * 0.5);
+      await expect(app.getByText('Mood', { exact: true })).not.toBeVisible();
+    }
+
+    // Hover over interactive grid canvas to activate the tooltip
+    const canvas = app.locator('canvas').last();
     await expect(canvas).toBeVisible();
     const box = await canvas.boundingBox();
     if (box) {
@@ -138,9 +149,12 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       await app.waitForTimeout(300);
 
       // Verify the day HUD tooltip is visible
-      await expect(app.getByText(/Click to view or edit day/i)).toBeVisible();
+      await expect(app.getByText(/\d{4}-\d{2}-\d{2}/).first()).toBeVisible();
 
       // Dark mode screenshot
+      await app.screenshot({
+        path: path.join(brainDir, 'life_grid_radial_dark.png'),
+      });
       await app.screenshot({
         path: path.join(brainDir, 'life_grid_dark.png'),
       });
@@ -173,11 +187,14 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       // Move mouse toward center for light mode screenshot
       await app.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
       await app.waitForTimeout(300);
-    }
 
-    // Light mode screenshot
-    await app.screenshot({
-      path: path.join(brainDir, 'life_grid_light.png'),
-    });
+      // Light mode radial magnification screenshot
+      await app.screenshot({
+        path: path.join(brainDir, 'life_grid_radial_light.png'),
+      });
+      await app.screenshot({
+        path: path.join(brainDir, 'life_grid_light.png'),
+      });
+    }
   });
 });
