@@ -128,7 +128,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByText('Mood', { exact: true })).toBeVisible();
     await app.getByRole('button', { name: /cancel/i }).click();
 
-    // Hover over canvas to activate the magnifying glass
+    // Hover over canvas to activate the tooltip
     const canvas = app.locator('canvas').first();
     await expect(canvas).toBeVisible();
     const box = await canvas.boundingBox();
@@ -137,15 +137,15 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       await app.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.45);
       await app.waitForTimeout(300);
 
-      // Verify the magnifying reticle HUD is visible
-      await expect(app.getByText(/Click block to open/i)).toBeVisible();
+      // Verify the day HUD tooltip is visible
+      await expect(app.getByText(/Click to view or edit day/i)).toBeVisible();
 
-      // Dark mode screenshot with magnifying glass active
+      // Dark mode screenshot
       await app.screenshot({
-        path: path.join(brainDir, 'life_grid_magnifier_dark.png'),
+        path: path.join(brainDir, 'life_grid_dark.png'),
       });
 
-      // Click on canvas to open day modal via magnifier
+      // Click on canvas to open day modal
       await app.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
       await expect(app.getByText('Mood', { exact: true })).toBeVisible();
       await app.getByRole('button', { name: /cancel/i }).click();
@@ -162,13 +162,22 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     }
 
     if (box) {
+      // Hover near the far left edge to verify tooltip is never clipped
+      await app.mouse.move(box.x + 25, box.y + 120);
+      await app.waitForTimeout(300);
+
+      await app.screenshot({
+        path: path.join(brainDir, 'life_grid_left_edge.png'),
+      });
+
+      // Move mouse toward center for light mode screenshot
       await app.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
       await app.waitForTimeout(300);
     }
 
-    // Light mode screenshot with magnifying glass active
+    // Light mode screenshot
     await app.screenshot({
-      path: path.join(brainDir, 'life_grid_magnifier_light.png'),
+      path: path.join(brainDir, 'life_grid_light.png'),
     });
   });
 });

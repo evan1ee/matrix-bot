@@ -8,9 +8,6 @@ interface LifeHorizonMinimapProps {
   isDark?: boolean;
 }
 
-const LENS_RADIUS = 80;
-const ZOOM_FACTOR = 4.2;
-
 export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   days,
   onSelectDate,
@@ -47,8 +44,8 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
 
   const animFrameRef = useRef<number | null>(null);
 
-  // Decoupled mouse tracking for 120 FPS zero-lag smoothness
-  const mouseCoordsRef = useRef<{ x: number | null; y: number | null }>({ x: null, y: null });
+  // Fast mouse tracking without React state lag
+  const hoveredCellRef = useRef<{ col: number | null; row: number | null }>({ col: null, row: null });
   const rectCacheRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const activeDayDateRef = useRef<string | null>(null);
 
@@ -70,7 +67,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     return Array.from(set).sort((a, b) => a - b);
   }, [days]);
 
-  // 1. Pre-render base grid into offscreen canvas ONLY on size / filter changes (never on mousemove!)
+  // 1. Pre-render base grid into offscreen canvas ONLY on size / filter changes
   const renderBaseGrid = useCallback(
     (cols: number, rows: number, cellWidth: number, cellHeight: number, w: number, h: number) => {
       if (days.length === 0 || w <= 0 || h <= 0) return;
@@ -143,153 +140,9 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     [days, isDark, selectedDecade]
   );
 
-  // 2. Draw Magnifying Glass Loupe with sub-millisecond vector rendering
-  const drawMagnifier = useCallback(
-    (
-      ctx: CanvasRenderingContext2D,
-      mx: number,
-      my: number,
-      cols: number,
-      rows: number,
-      cellWidth: number,
-      cellHeight: number
-    ) => {
-      const targetCol = Math.floor(mx / cellWidth);
-      const targetRow = Math.floor(my / cellHeight);
-
-      ctx.save();
-
-      // Step A: Circular lens clip
-      ctx.beginPath();
-      ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.save();
-      ctx.clip();
-
-      // Step B: Opaque background for lens interior
-      ctx.fillStyle = isDark ? '#141416' : '#ffffff';
-      ctx.fill();
-
-      // Step C: Magnified vector blocks within lens radius
-      const baseRadius = LENS_RADIUS / ZOOM_FACTOR;
-      const minCol = Math.max(0, Math.floor((mx - baseRadius) / cellWidth) - 1);
-      const maxCol = Math.min(cols - 1, Math.ceil((mx + baseRadius) / cellWidth) + 1);
-      const minRow = Math.max(0, Math.floor((my - baseRadius) / cellHeight) - 1);
-      const maxRow = Math.min(rows - 1, Math.ceil((my + baseRadius) / cellHeight) + 1);
-
-      const magW = cellWidth * ZOOM_FACTOR;
-      const magH = cellHeight * ZOOM_FACTOR;
-      const magPad = 2;
-      const bw = Math.max(3, magW - magPad);
-      const bh = Math.max(3, magH - magPad);
-      const cornerRadius = Math.min(3, bw * 0.22);
-
-      for (let r = minRow; r <= maxRow; r++) {
-        for (let c = minCol; c <= maxCol; c++) {
-          const idx = r * cols + c;
-          if (idx < 0 || idx >= days.length) continue;
-          const d = days[idx];
-
-          const baseX = c * cellWidth;
-          const baseY = r * cellHeight;
-          const bx = mx + (baseX - mx) * ZOOM_FACTOR + magPad / 2;
-          const by = my + (baseY - my) * ZOOM_FACTOR + magPad / 2;
-
-          const blockCenterX = bx + bw / 2;
-          const blockCenterY = by + bh / 2;
-          const dist = Math.hypot(blockCenterX - mx, blockCenterY - my);
-          if (dist > LENS_RADIUS + bw) continue;
-
-          const isTarget = c === targetCol && r === targetRow;
-
-          if (d.status === 'present') {
-            ctx.fillStyle = '#10b981';
-          } else if (d.status === 'past_logged' && d.mood) {
-            const moodKey = d.mood.toLowerCase() as keyof typeof MOOD_CONFIG;
-            ctx.fillStyle = MOOD_CONFIG[moodKey]?.color || '#10b981';
-          } else if (d.status === 'past_empty') {
-            ctx.fillStyle = isDark ? '#27272a' : '#e4e4e7';
-          } else {
-            ctx.fillStyle = isDark ? '#1e1e24' : '#fafafa';
-          }
-
-          ctx.beginPath();
-          if (ctx.roundRect) {
-            ctx.roundRect(bx, by, bw, bh, cornerRadius);
-          } else {
-            ctx.rect(bx, by, bw, bh);
-          }
-          ctx.fill();
-
-          if (isTarget) {
-            ctx.strokeStyle = isDark ? '#ffffff' : '#09090b';
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
-
-            ctx.fillStyle = isDark ? '#ffffff' : '#09090b';
-            ctx.beginPath();
-            ctx.arc(blockCenterX, blockCenterY, 2, 0, Math.PI * 2);
-            ctx.fill();
-          } else if (d.status === 'present') {
-            ctx.strokeStyle = '#34d399';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-          } else if (d.status === 'future') {
-            ctx.strokeStyle = isDark ? '#3f3f46' : '#e4e4e7';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-        }
-      }
-
-      ctx.restore(); // Exit clip
-
-      // Step D: Outer bezel, shadow & precision reticle ticks
-      ctx.save();
-      ctx.shadowColor = isDark ? 'rgba(0, 0, 0, 0.75)' : 'rgba(0, 0, 0, 0.22)';
-      ctx.shadowBlur = 18;
-      ctx.shadowOffsetY = 5;
-      ctx.beginPath();
-      ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2);
-      ctx.strokeStyle = isDark ? '#27272a' : '#e4e4e7';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.beginPath();
-      ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2);
-      ctx.strokeStyle = isDark ? '#ffffff' : '#09090b';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(mx, my, LENS_RADIUS - 3, -Math.PI * 0.75, -Math.PI * 0.25);
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      const notchLen = 6;
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.85)' : 'rgba(9, 9, 11, 0.85)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(mx, my - LENS_RADIUS);
-      ctx.lineTo(mx, my - LENS_RADIUS + notchLen);
-      ctx.moveTo(mx, my + LENS_RADIUS);
-      ctx.lineTo(mx, my + LENS_RADIUS - notchLen);
-      ctx.moveTo(mx - LENS_RADIUS, my);
-      ctx.lineTo(mx - LENS_RADIUS + notchLen, my);
-      ctx.moveTo(mx + LENS_RADIUS, my);
-      ctx.lineTo(mx + LENS_RADIUS - notchLen, my);
-      ctx.stroke();
-
-      ctx.restore();
-    },
-    [days, isDark]
-  );
-
-  // 3. Fast Composite Scene Blit (< 0.2ms total execution time)
+  // 2. Render Scene: Blit cached base grid & highlight hovered block
   const renderScene = useCallback(
-    (mx: number | null, my: number | null) => {
+    (hoveredCol: number | null, hoveredRow: number | null) => {
       const canvas = canvasRef.current;
       const baseCanvas = baseCanvasRef.current;
       if (!canvas || !baseCanvas) return;
@@ -305,27 +158,31 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, w, h);
 
-      // 1-op blit
+      // Blit base grid
       ctx.drawImage(baseCanvas, 0, 0, w, h);
 
-      if (mx !== null && my !== null) {
-        drawMagnifier(
-          ctx,
-          mx,
-          my,
-          currentColsRef.current,
-          currentRowsRef.current,
-          currentCellWidthRef.current,
-          currentCellHeightRef.current
-        );
+      // Highlight the hovered block
+      if (hoveredCol !== null && hoveredRow !== null) {
+        const cellWidth = currentCellWidthRef.current;
+        const cellHeight = currentCellHeightRef.current;
+        const x = hoveredCol * cellWidth;
+        const y = hoveredRow * cellHeight;
+        const pad = Math.max(0.6, Math.min(1.2, cellWidth * 0.16));
+        const bw = Math.max(1, cellWidth - pad);
+        const bh = Math.max(1, cellHeight - pad);
+
+        // Highlight ring around hovered block
+        ctx.strokeStyle = isDark ? '#ffffff' : '#09090b';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 0.5, y - 0.5, bw + 1, bh + 1);
       }
 
       ctx.restore();
     },
-    [drawMagnifier]
+    [isDark]
   );
 
-  // 4. Update container dimensions (Higher: 600px - 800px)
+  // 3. Update container dimensions (Higher: 600px - 800px)
   const updateSize = useCallback(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -359,7 +216,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     canvas.style.height = `${h}px`;
 
     renderBaseGrid(cols, rows, cellWidth, cellHeight, w, h);
-    renderScene(mouseCoordsRef.current.x, mouseCoordsRef.current.y);
+    renderScene(hoveredCellRef.current.col, hoveredCellRef.current.row);
   }, [days.length, renderBaseGrid, renderScene]);
 
   useEffect(() => {
@@ -384,7 +241,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         currentWRef.current,
         currentHRef.current
       );
-      renderScene(mouseCoordsRef.current.x, mouseCoordsRef.current.y);
+      renderScene(hoveredCellRef.current.col, hoveredCellRef.current.row);
     }
   }, [selectedDecade, renderBaseGrid, renderScene]);
 
@@ -416,7 +273,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     }
   }, []);
 
-  // 5. Ultra-Fast Pointer Move (< 0.05ms per move, ZERO React re-renders)
+  // 4. Ultra-Fast Pointer Move (< 0.05ms per move, ZERO React re-renders)
   const handlePointerMove = (clientX: number, clientY: number) => {
     let rect = rectCacheRef.current;
     if (!rect) {
@@ -445,13 +302,18 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     const index = row * cols + col;
     if (index >= 0 && index < days.length) {
       const day = days[index];
-      mouseCoordsRef.current = { x: mouseX, y: mouseY };
+      hoveredCellRef.current = { col, row };
 
-      // Update tooltip position and visibility directly via hardware transform
+      // Update tooltip position directly via hardware transform (clamped to never clip edges)
       if (tooltipRef.current) {
-        const isNearTop = mouseY - LENS_RADIUS - 64 < 0;
-        const top = isNearTop ? mouseY + LENS_RADIUS + 14 : mouseY - LENS_RADIUS - 14;
-        const left = Math.max(90, Math.min(currentWRef.current - 90, mouseX));
+        const tooltipHalfWidth = 145;
+        const left = Math.max(
+          tooltipHalfWidth + 12,
+          Math.min(currentWRef.current - tooltipHalfWidth - 12, mouseX)
+        );
+        const isNearTop = mouseY < 75;
+        const top = isNearTop ? mouseY + 24 : mouseY - 14;
+
         tooltipRef.current.style.display = 'block';
         tooltipRef.current.style.transform = `translate3d(${left}px, ${top}px, 0) translateY(${isNearTop ? '0%' : '-100%'}) translateX(-50%)`;
       }
@@ -462,11 +324,11 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         updateTooltipDOM(day);
       }
 
-      // Schedule single RAF frame for canvas blit
+      // Schedule single RAF frame for canvas highlight
       if (!animFrameRef.current) {
         animFrameRef.current = requestAnimationFrame(() => {
           animFrameRef.current = null;
-          renderScene(mouseCoordsRef.current.x, mouseCoordsRef.current.y);
+          renderScene(hoveredCellRef.current.col, hoveredCellRef.current.row);
         });
       }
     } else {
@@ -482,7 +344,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   };
 
   const handlePointerLeave = () => {
-    mouseCoordsRef.current = { x: null, y: null };
+    hoveredCellRef.current = { col: null, row: null };
     activeDayDateRef.current = null;
 
     if (tooltipRef.current) {
@@ -537,7 +399,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
             Lifespan day grid
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            {days.length.toLocaleString()} total days. Hover to magnify and pick any single day with precision.
+            {days.length.toLocaleString()} total days. Hover to inspect and click any day to view or record.
           </p>
         </div>
 
@@ -616,7 +478,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
       {/* Higher Grid Canvas: Expansive 600px-800px View Without Inner Scroll */}
       <div
         ref={containerRef}
-        className="w-full relative cursor-none overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 min-h-[600px] select-none"
+        className="w-full relative cursor-pointer rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 min-h-[600px] select-none"
       >
         <canvas
           ref={canvasRef}
@@ -629,10 +491,10 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
           }}
           onTouchEnd={handlePointerLeave}
           onClick={handleClick}
-          className="block w-full"
+          className="block w-full rounded-md"
         />
 
-        {/* Floating Precision Reticle HUD: Persistent DOM element, zero React re-render overhead */}
+        {/* Floating Tooltip HUD */}
         <div
           ref={tooltipRef}
           style={{ display: 'none' }}
@@ -644,7 +506,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
             <span ref={tooltipBadgeRef}></span>
           </div>
           <div className="text-[10px] opacity-75 mt-1 flex items-center gap-1">
-            <span>🎯 Click block to open & record day</span>
+            <span>Click to view or edit day</span>
           </div>
         </div>
       </div>
