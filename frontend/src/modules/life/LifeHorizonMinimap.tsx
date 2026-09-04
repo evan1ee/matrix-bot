@@ -28,8 +28,12 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
     // Color palette based on theme
@@ -39,14 +43,12 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     const presentColor = '#10b981'; // emerald-500
 
     const total = days.length;
-    // Calculate optimal grid: e.g., cols based on canvas aspect ratio
-    // Target roughly width:height ~ 4:1 to 6:1
     const cols = Math.ceil(Math.sqrt(total * (width / height)));
     const rows = Math.ceil(total / cols);
 
     const cellWidth = width / cols;
     const cellHeight = height / rows;
-    const pad = Math.max(0.2, Math.min(1, cellWidth * 0.2));
+    const pad = Math.max(0.6, Math.min(1.2, cellWidth * 0.18));
     for (let i = 0; i < total; i++) {
       const d = days[i];
       const col = i % cols;
@@ -78,6 +80,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         }
       }
     }
+    ctx.restore();
   }, [days, isDark]);
 
   // Resize canvas according to container
@@ -90,17 +93,14 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const w = Math.floor(rect.width);
-      const h = Math.min(180, Math.max(110, Math.floor(w * 0.16)));
+      // 4x larger block area: scale canvas height proportionally (~4.7px x 4.7px per block)
+      const h = Math.min(680, Math.max(420, Math.floor(w * 0.62)));
 
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
 
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(dpr, dpr);
-      }
       drawMinimap();
     };
 
