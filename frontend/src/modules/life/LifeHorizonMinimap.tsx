@@ -47,12 +47,6 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     const cellWidth = width / cols;
     const cellHeight = height / rows;
     const pad = Math.max(0.2, Math.min(1, cellWidth * 0.2));
-
-    let selectedYearMinX = Infinity;
-    let selectedYearMaxX = -Infinity;
-    let selectedYearMinY = Infinity;
-    let selectedYearMaxY = -Infinity;
-
     for (let i = 0; i < total; i++) {
       const d = days[i];
       const col = i % cols;
@@ -62,13 +56,6 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
       const y = row * cellHeight;
       const w = Math.max(1, cellWidth - pad);
       const h = Math.max(1, cellHeight - pad);
-
-      if (d.year === currentYear) {
-        selectedYearMinX = Math.min(selectedYearMinX, x);
-        selectedYearMaxX = Math.max(selectedYearMaxX, x + w);
-        selectedYearMinY = Math.min(selectedYearMinY, y);
-        selectedYearMaxY = Math.max(selectedYearMaxY, y + h);
-      }
 
       if (d.status === 'present') {
         ctx.fillStyle = presentColor;
@@ -91,19 +78,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         }
       }
     }
-
-    // Highlight selected year region
-    if (selectedYearMinX < Infinity) {
-      ctx.strokeStyle = isDark ? '#38bdf8' : '#0284c7'; // cyan / sky
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        selectedYearMinX - 1,
-        selectedYearMinY - 1,
-        selectedYearMaxX - selectedYearMinX + 2,
-        selectedYearMaxY - selectedYearMinY + 2
-      );
-    }
-  }, [days, currentYear, isDark]);
+  }, [days, isDark]);
 
   // Resize canvas according to container
   useEffect(() => {
