@@ -134,6 +134,27 @@ export interface FakeHabitLog {
   created_at: string;
 }
 
+export interface FakeLifeProfile {
+  id: number;
+  owner_id: string;
+  birth_date: string;
+  expected_lifespan_years: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FakeLifeDayLog {
+  id: number;
+  owner_id: string;
+  log_date: string;
+  mood: string;
+  weather: string | null;
+  activities: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FakeWebhook {
   id: string;
   owner_id: string;
@@ -286,6 +307,8 @@ export class FakeApi {
   footprints: FakeFootprint[] = [];
   habits: FakeHabit[] = [];
   habitLogs: FakeHabitLog[] = [];
+  lifeProfile: FakeLifeProfile | null = null;
+  lifeDayLogs: FakeLifeDayLog[] = [];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -298,6 +321,37 @@ export class FakeApi {
   private nextFootprintId = 1;
   private nextHabitId = 1;
   private nextHabitLogId = 1;
+  private nextLifeProfileId = 1;
+  private nextLifeDayLogId = 1;
+
+  seedLifeProfile(partial: Partial<FakeLifeProfile> = {}): FakeLifeProfile {
+    const profile: FakeLifeProfile = {
+      id: this.nextLifeProfileId++,
+      owner_id: OWNER,
+      birth_date: partial.birth_date || '1995-05-15',
+      expected_lifespan_years: partial.expected_lifespan_years || 80,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.lifeProfile = profile;
+    return profile;
+  }
+
+  seedLifeDayLog(partial: Partial<FakeLifeDayLog> = {}): FakeLifeDayLog {
+    const log: FakeLifeDayLog = {
+      id: this.nextLifeDayLogId++,
+      owner_id: OWNER,
+      log_date: partial.log_date || '2026-06-01',
+      mood: partial.mood || 'good',
+      weather: partial.weather ?? 'sunny',
+      activities: partial.activities ?? JSON.stringify(['Workout', 'Deep Work']),
+      note: partial.note ?? 'Great day of progress!',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.lifeDayLogs.push(log);
+    return log;
+  }
 
   seedHabit(partial: Partial<FakeHabit> = {}): FakeHabit {
     const habit: FakeHabit = {
@@ -1655,6 +1709,178 @@ export class FakeApi {
       this.habits.splice(idx, 1);
       this.habitLogs = this.habitLogs.filter((l) => l.habit_id !== id);
       return json(route, 200, { success: true, id });
+    }
+
+    // --- life ---
+    if (path === '/life/profile' && method === 'GET') {
+      if (!this.lifeProfile) {
+        return json(route, 200, { profile: null, stats: null });
+      }
+      const birth = new Date(this.lifeProfile.birth_date);
+      const today = new Date();
+      const ageInDays = Math.max(0, Math.floor((today.getTime() - birth.getTime()) / (1000 * 3600 * 24)));
+      const totalLifeDays = Math.floor(this.lifeProfile.expected_lifespan_years * 365.25);
+      const lifeLived = totalLifeDays > 0 ? Math.round((ageInDays / totalLifeDays) * 10000) / 100 : 0;
+      const daysLogged = this.lifeDayLogs.length;
+
+      const moodCounts: Record<string, number> = {};
+      for (const l of this.lifeDayLogs) {
+        moodCounts[l.mood] = (moodCounts[l.mood] || 0) + 1;
+      }
+      let dominantMood: string | null = null;
+      let maxCount = 0;
+      for (const [m, count] of Object.entries(moodCounts)) {
+        if (count > maxCount) {
+          maxCount = count;
+          dominantMood = m;
+        }
+      }
+
+      return json(route, 200, {
+        profile: this.lifeProfile,
+        stats: {
+          birth_date: this.lifeProfile.birth_date,
+          expected_lifespan_years: this.lifeProfile.expected_lifespan_years,
+          age_in_days: ageInDays,
+          total_life_days: totalLifeDays,
+          life_lived_percentage: Math.min(100, lifeLived),
+          days_logged: daysLogged,
+          dominant_mood: dominantMood,
+        },
+      });
+    }
+
+    if (path === '/life/profile' && (method === 'PUT' || method === 'POST')) {
+      if (!body?.birth_date) {
+        return json(route, 400, { error: 'Birth date is required', code: 400 });
+      }
+      const lifespan = Number(body.expected_lifespan_years) || 80;
+      if (!this.lifeProfile) {
+        this.lifeProfile = {
+          id: this.nextLifeProfileId++,
+          owner_id: OWNER,
+          birth_date: body.birth_date,
+          expected_lifespan_years: lifespan,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      } else {
+        this.lifeProfile.birth_date = body.birth_date;
+        this.lifeProfile.expected_lifespan_years = lifespan;
+        this.lifeProfile.updated_at = new Date().toISOString();
+      }
+      return json(route, 200, this.lifeProfile);
+    }
+
+    const yearMatch = path.match(/^\/life\/year\/(\d+)$/);
+    if (yearMatch && method === 'GET') {
+      const year = Number(yearMatch[1]);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const days = [];
+      const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+      const daysInYear = isLeap ? 366 : 365;
+      const curDate = new Date(Date.UTC(year, 0, 1));
+      const logMap = new Map(this.lifeDayLogs.map((l) => [l.log_date, l]));
+
+      for (let i = 0; i < daysInYear; i++) {
+        const dateStr = curDate.toISOString().split('T')[0];
+        const log = logMap.get(dateStr);
+        let day_type = 'past';
+        if (dateStr === todayStr) {
+          day_type = 'present';
+        } else if (dateStr > todayStr) {
+          day_type = 'future';
+        }
+        days.push({
+          date: dateStr,
+          day_type,
+          mood: log?.mood,
+          weather: log?.weather ?? undefined,
+          activities: log?.activities ? JSON.parse(log.activities) : undefined,
+          note: log?.note ?? undefined,
+        });
+        curDate.setUTCDate(curDate.getUTCDate() + 1);
+      }
+
+      return json(route, 200, {
+        year,
+        birth_date: this.lifeProfile?.birth_date ?? null,
+        days,
+      });
+    }
+
+    if (path === '/life/horizon' && method === 'GET') {
+      if (!this.lifeProfile) {
+        return json(route, 200, []);
+      }
+      const birth = new Date(this.lifeProfile.birth_date);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const logMap = new Map(this.lifeDayLogs.map((l) => [l.log_date, l]));
+      const totalDays = Math.min(36500, Math.floor(this.lifeProfile.expected_lifespan_years * 365.25));
+      const horizon = [];
+      const cur = new Date(birth);
+      for (let i = 0; i < totalDays; i++) {
+        const dateStr = cur.toISOString().split('T')[0];
+        const log = logMap.get(dateStr);
+        let status = 'past_empty';
+        if (dateStr === todayStr) {
+          status = 'present';
+        } else if (dateStr > todayStr) {
+          status = 'future';
+        } else if (log) {
+          status = 'past_logged';
+        }
+        horizon.push({
+          index: i,
+          year: cur.getUTCFullYear(),
+          date: dateStr,
+          status,
+          mood: log?.mood ?? null,
+        });
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      return json(route, 200, horizon);
+    }
+
+    if (path === '/life/days' && method === 'POST') {
+      if (!body?.date || !body?.mood) {
+        return json(route, 400, { error: 'Date and mood are required', code: 400 });
+      }
+      const existingIdx = this.lifeDayLogs.findIndex((l) => l.log_date === body.date);
+      const activitiesStr = body.activities ? JSON.stringify(body.activities) : null;
+      let saved: FakeLifeDayLog;
+      if (existingIdx >= 0) {
+        this.lifeDayLogs[existingIdx].mood = body.mood;
+        this.lifeDayLogs[existingIdx].weather = body.weather ?? null;
+        this.lifeDayLogs[existingIdx].activities = activitiesStr;
+        this.lifeDayLogs[existingIdx].note = body.note ?? null;
+        this.lifeDayLogs[existingIdx].updated_at = new Date().toISOString();
+        saved = this.lifeDayLogs[existingIdx];
+      } else {
+        saved = {
+          id: this.nextLifeDayLogId++,
+          owner_id: OWNER,
+          log_date: body.date,
+          mood: body.mood,
+          weather: body.weather ?? null,
+          activities: activitiesStr,
+          note: body.note ?? null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.lifeDayLogs.push(saved);
+      }
+      return json(route, 200, saved);
+    }
+
+    const dayDelMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})$/);
+    if (dayDelMatch && method === 'DELETE') {
+      const date = dayDelMatch[1];
+      const idx = this.lifeDayLogs.findIndex((l) => l.log_date === date);
+      if (idx >= 0) {
+        this.lifeDayLogs.splice(idx, 1);
+      }
+      return json(route, 200, { date, deleted: true });
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

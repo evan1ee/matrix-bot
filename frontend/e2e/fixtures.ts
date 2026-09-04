@@ -29,6 +29,7 @@ export const TAB = {
   portfolio: 'Portfolio',
   bills: 'Bills',
   footprints: 'Footprints',
+  life: 'Life Grid',
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
 } as const;

@@ -65,6 +65,9 @@ pub enum SystemEvent {
     HabitUpdated(crate::modules::habits::models::Habit),
     HabitDeleted { id: i64, owner_id: String },
     HabitLogToggled { habit_id: i64, owner_id: String, log_date: String, completed: bool },
+    LifeProfileUpdated { owner_id: String, profile: crate::modules::life::models::LifeProfile },
+    LifeDayLogged(crate::modules::life::models::LifeDayLog),
+    LifeDayCleared { owner_id: String, date: String },
 }
 
 impl SystemEvent {
@@ -115,6 +118,9 @@ impl SystemEvent {
             SystemEvent::HabitCreated(h) | SystemEvent::HabitUpdated(h) => &h.owner_id,
             SystemEvent::HabitDeleted { owner_id, .. }
             | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id,
+            SystemEvent::LifeProfileUpdated { owner_id, .. }
+            | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id,
+            SystemEvent::LifeDayLogged(l) => &l.owner_id,
         }
     }
 }

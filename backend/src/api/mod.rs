@@ -24,6 +24,7 @@ pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod health;
+pub mod life;
 pub mod openapi;
 pub mod portfolio;
 pub mod portfolio_alerts;
@@ -203,6 +204,28 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route(
             "/habits/:id/toggle",
             post(habits::toggle_habit_log),
+        )
+        .route(
+            "/life/profile",
+            get(life::get_profile_and_stats)
+                .put(life::upsert_profile)
+                .post(life::upsert_profile),
+        )
+        .route(
+            "/life/year/:year",
+            get(life::get_year_view),
+        )
+        .route(
+            "/life/horizon",
+            get(life::get_horizon),
+        )
+        .route(
+            "/life/days",
+            post(life::upsert_day),
+        )
+        .route(
+            "/life/days/:date",
+            get(life::get_day).delete(life::delete_day),
         )
 }
 
