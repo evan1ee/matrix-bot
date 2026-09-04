@@ -1738,6 +1738,12 @@ export class FakeApi {
 
       return json(route, 200, {
         profile: this.lifeProfile,
+        age_days: ageInDays,
+        total_expected_days: totalLifeDays,
+        days_lived_percent: Math.min(100, lifeLived),
+        total_logged_days: daysLogged,
+        dominant_mood: dominantMood,
+        today_date: new Date().toISOString().split('T')[0],
         stats: {
           birth_date: this.lifeProfile.birth_date,
           expected_lifespan_years: this.lifeProfile.expected_lifespan_years,

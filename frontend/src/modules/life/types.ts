@@ -23,7 +23,13 @@ export interface LifeProfileStats {
 
 export interface LifeProfileResponse {
   profile: LifeProfile | null;
-  stats: LifeProfileStats | null;
+  age_days?: number;
+  total_expected_days?: number;
+  days_lived_percent?: number;
+  total_logged_days?: number;
+  dominant_mood?: string | null;
+  today_date?: string;
+  stats?: LifeProfileStats | null;
 }
 
 export interface LifeHorizonDay {
@@ -51,6 +57,7 @@ export interface LifeYearView {
 
 export interface UpsertDayPayload {
   date: string;
+  log_date?: string;
   mood: string;
   weather?: string | null;
   activities?: string[] | null;

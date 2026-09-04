@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Hourglass, Plus, Calendar } from 'lucide-react';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
   LifeProfileResponse,
+  LifeProfileStats,
   LifeHorizonDay,
   LifeDayItem,
   UpsertDayPayload,
@@ -75,7 +76,11 @@ export const LifeView: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          log_date: payload.log_date || payload.date,
+          date: payload.date || payload.log_date,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -157,7 +162,74 @@ export const LifeView: React.FC = () => {
   };
 
   const profile = profileData?.profile || null;
-  const stats = profileData?.stats || null;
+  const stats = useMemo<LifeProfileStats | null>(() => {
+    if (!profile || !profileData) return null;
+    const ageInDays = profileData.age_days ?? profileData.stats?.age_in_days ?? 0;
+    const totalDays =
+      profileData.total_expected_days ??
+      profileData.stats?.total_life_days ??
+      Math.floor((profile.expected_lifespan_years || 80) * 365.25);
+    const lifeLived =
+      profileData.days_lived_percent ??
+      profileData.stats?.life_lived_percentage ??
+      (totalDays > 0 ? (ageInDays / totalDays) * 100 : 0);
+    const loggedCount = profileData.total_logged_days ?? profileData.stats?.days_logged ?? 0;
+    const dominantMood = profileData.dominant_mood ?? profileData.stats?.dominant_mood ?? null;
+
+    return {
+      birth_date: profile.birth_date,
+      expected_lifespan_years: profile.expected_lifespan_years,
+      age_in_days: ageInDays,
+      total_life_days: totalDays,
+      life_lived_percentage: lifeLived,
+      days_logged: loggedCount,
+      dominant_mood: dominantMood,
+    };
+  }, [profileData, profile]);
+
+  const allLifespanDays = useMemo<LifeHorizonDay[]>(() => {
+    if (!profile?.birth_date) return [];
+    const birthParts = profile.birth_date.split('-').map(Number);
+    if (birthParts.length < 3 || isNaN(birthParts[0])) return [];
+    const birthYear = birthParts[0];
+    const lifespan = profile.expected_lifespan_years || 80;
+    const endYear = birthYear + lifespan - 1;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const loggedMap = new Map<string, string>();
+    for (const d of horizonDays) {
+      if (d.date && d.mood) loggedMap.set(d.date, d.mood);
+    }
+
+    const result: LifeHorizonDay[] = [];
+    let idx = 0;
+    for (let yr = birthYear; yr <= endYear; yr++) {
+      const isLeap = (yr % 4 === 0 && yr % 100 !== 0) || (yr % 400 === 0);
+      const daysInYear = isLeap ? 366 : 365;
+      const curDate = new Date(Date.UTC(yr, 0, 1));
+      for (let d = 0; d < daysInYear; d++) {
+        const dateStr = curDate.toISOString().split('T')[0];
+        let status: 'past_empty' | 'past_logged' | 'present' | 'future' = 'past_empty';
+        const loggedMood = loggedMap.get(dateStr) || null;
+        if (dateStr === todayStr) {
+          status = 'present';
+        } else if (dateStr > todayStr) {
+          status = 'future';
+        } else if (loggedMood) {
+          status = 'past_logged';
+        }
+        result.push({
+          index: idx++,
+          year: yr,
+          date: dateStr,
+          status,
+          mood: loggedMood,
+        });
+        curDate.setUTCDate(curDate.getUTCDate() + 1);
+      }
+    }
+    return result;
+  }, [profile, horizonDays]);
 
   return (
     <div className="space-y-5 pb-8">
@@ -224,9 +296,9 @@ export const LifeView: React.FC = () => {
       )}
 
       {/* 2. Macro Life Horizon Overview (~30,000 days canvas) */}
-      {profile && horizonDays.length > 0 && (
+      {profile && allLifespanDays.length > 0 && (
         <LifeHorizonMinimap
-          days={horizonDays}
+          days={allLifespanDays}
           currentYear={currentActualYear}
           onSelectYear={(year) => {
             const el = document.getElementById(`year-${year}`);
@@ -237,9 +309,9 @@ export const LifeView: React.FC = () => {
       )}
 
       {/* 3. All Blocks Lifespan Grid (No calendar) */}
-      {profile && horizonDays.length > 0 && (
+      {profile && allLifespanDays.length > 0 && (
         <LifeAllBlocksGrid
-          days={horizonDays}
+          days={allLifespanDays}
           onSelectDate={handleSelectDate}
           selectedDate={selectedDate}
         />

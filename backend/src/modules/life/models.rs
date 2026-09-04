@@ -31,6 +31,7 @@ pub struct UpsertLifeProfileInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpsertLifeDayLogInput {
+    #[serde(alias = "date")]
     pub log_date: String,
     pub mood: String,
     pub weather: Option<String>,
