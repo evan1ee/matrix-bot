@@ -107,11 +107,11 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByText('Days Elapsed')).toBeVisible();
     const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
 
-    // Screenshot of Macro Overview card with 4x bigger blocks
-    const macroCard = app.locator('text=Life horizon macro overview').locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
-    await expect(macroCard).toBeVisible();
-    await macroCard.screenshot({
-      path: path.join(brainDir, 'life_macro_overview_4x.png'),
+    // Screenshot of Lifespan Day Grid card with 10px blocks
+    const gridCard = app.getByRole('heading', { name: /lifespan day grid/i }).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
+    await expect(gridCard).toBeVisible();
+    await gridCard.screenshot({
+      path: path.join(brainDir, 'life_grid_10px.png'),
     });
 
     // Test Decade jump

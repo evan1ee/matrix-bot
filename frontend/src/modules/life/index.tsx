@@ -12,7 +12,6 @@ import type {
 } from './types';
 import { LifeStatStrip } from './LifeStatStrip';
 import { LifeHorizonMinimap } from './LifeHorizonMinimap';
-import { LifeAllBlocksGrid } from './LifeAllBlocksGrid';
 import { LifeDayModal } from './LifeDayModal';
 import { LifeProfileModal } from './LifeProfileModal';
 
@@ -295,25 +294,12 @@ export const LifeView: React.FC = () => {
         />
       )}
 
-      {/* 2. Macro Life Horizon Overview (~30,000 days canvas) */}
+      {/* 2. Unified Lifespan Day Grid (10px blocks) */}
       {profile && allLifespanDays.length > 0 && (
         <LifeHorizonMinimap
           days={allLifespanDays}
-          currentYear={currentActualYear}
-          onSelectYear={(year) => {
-            const el = document.getElementById(`year-${year}`);
-            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }}
-          isDark={isDark}
-        />
-      )}
-
-      {/* 3. All Blocks Lifespan Grid (No calendar) */}
-      {profile && allLifespanDays.length > 0 && (
-        <LifeAllBlocksGrid
-          days={allLifespanDays}
           onSelectDate={handleSelectDate}
-          selectedDate={selectedDate}
+          isDark={isDark}
         />
       )}
 
