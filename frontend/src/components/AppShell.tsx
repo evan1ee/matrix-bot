@@ -25,6 +25,7 @@ const MODULE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
   todo: 'Tasks',
   reminder: 'Reminders',
+  bookmarks: 'Bookmarks',
   finance: 'Expenses',
   portfolio: 'Portfolio',
   recurring_bills: 'Bills',
@@ -90,7 +91,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 !user
                   ? 'bg-neutral-400 dark:bg-neutral-600'
                   : isConnected
-                  ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
+                  ? 'bg-emerald-500 dark:bg-emerald-400'
                   : 'bg-amber-500 dark:bg-amber-400'
               }`}
             />

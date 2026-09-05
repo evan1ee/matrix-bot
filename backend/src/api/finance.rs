@@ -182,6 +182,8 @@ pub async fn create_transaction(
         exponent,
         category_id,
         payload.note.as_deref(),
+        None,
+        None,
         payload.occurred_at.unwrap_or_else(Utc::now),
     )
     .await

@@ -24,6 +24,7 @@ export const TAB = {
   dashboard: 'Dashboard',
   todo: 'Tasks',
   reminder: 'Reminders',
+  bookmarks: 'Bookmarks',
   habits: 'Habits',
   finance: 'Expenses',
   portfolio: 'Portfolio',

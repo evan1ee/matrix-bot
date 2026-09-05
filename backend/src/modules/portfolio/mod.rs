@@ -364,6 +364,24 @@ mod tests {
 
         let withdrawn = module.handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &db, None).await.unwrap();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
+
+        // Verify deposit and withdraw transactions were posted to the finance ledger
+        let txs = crate::modules::finance::repository::FinanceRepository::list(
+            &db.pool,
+            "@alice:a",
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(txs.len(), 2);
+        assert_eq!(txs[0].direction, "income");
+        assert_eq!(txs[0].amount_minor, 115000);
+        assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
+        assert_eq!(txs[1].direction, "expense");
+        assert_eq!(txs[1].amount_minor, 100000);
+        assert_eq!(txs[1].source_kind.as_deref(), Some("portfolio_cash"));
     }
 
     /// Withdrawing more than is on hand must be rejected and say why.

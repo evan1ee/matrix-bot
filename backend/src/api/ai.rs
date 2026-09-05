@@ -15,6 +15,7 @@ use crate::modules::ai::models::{
     UpdateAiConfigInput,
 };
 use crate::modules::ai::repository::AiRepository;
+use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
 
 #[utoipa::path(
     post,
@@ -191,6 +192,23 @@ pub async fn update_ai_config(
     Ok(Json(updated.redacted()))
 }
 
+#[utoipa::path(
+    get,
+    tag = "ai",
+    path = "/api/v1/ai/retrospective",
+    responses((status = 200, body = WeeklyRetrospective)),
+    security(("session_cookie" = []))
+)]
+pub async fn get_retrospective(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<WeeklyRetrospective>, ApiError> {
+    let retro = generate_weekly_retrospective(&state.db.pool, &user.account_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(retro))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +278,17 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_retrospective() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(&owner);
+
+        let retro_res = get_retrospective(State(state), user).await.unwrap();
+        assert_eq!(retro_res.currency, "USD");
+        assert_eq!(retro_res.total_spent_minor, 0);
+        assert!(retro_res.formatted_markdown.contains("Weekly Executive Retrospective"));
     }
 }
 

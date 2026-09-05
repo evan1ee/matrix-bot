@@ -168,7 +168,7 @@ export const RecurringBillsView: React.FC = () => {
             setFormError(null);
             setIsModalOpen(true);
           }}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-lg shadow-sm transition-colors cursor-pointer"
+          className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Add Item
@@ -295,7 +295,7 @@ export const RecurringBillsView: React.FC = () => {
                             )}
                             {bill.remind_before_minutes ? (
                               <span
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-xs font-mono bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-xs font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded border border-neutral-200 dark:border-neutral-700"
                                 title={`Reminder ${leadLabel(bill.remind_before_minutes)}`}
                               >
                                 <BellRing className="w-3 h-3" /> {leadLabel(bill.remind_before_minutes)}

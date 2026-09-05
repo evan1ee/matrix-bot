@@ -1,6 +1,8 @@
 pub mod definitions;
+pub mod definitions_life;
 pub mod executor;
 pub mod executor_finance;
+pub mod executor_life_habits;
 pub mod executor_portfolio;
 pub mod executor_todo;
 
@@ -44,7 +46,7 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 22);
+        assert_eq!(defs.len(), 33);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
@@ -63,6 +65,17 @@ mod tests {
         assert!(names.contains(&"get_portfolio_price_alerts"));
         assert!(names.contains(&"cancel_portfolio_price_alert"));
         assert!(names.contains(&"get_portfolio_performance_history"));
+        assert!(names.contains(&"get_my_habits"));
+        assert!(names.contains(&"log_habit"));
+        assert!(names.contains(&"create_habit"));
+        assert!(names.contains(&"log_life_day"));
+        assert!(names.contains(&"get_life_profile"));
+        assert!(names.contains(&"pay_recurring_bill"));
+        assert!(names.contains(&"get_my_footprints"));
+        assert!(names.contains(&"record_footprint"));
+        assert!(names.contains(&"get_weekly_retrospective"));
+        assert!(names.contains(&"save_bookmark"));
+        assert!(names.contains(&"get_my_bookmarks"));
     }
 
     #[tokio::test]
@@ -336,5 +349,101 @@ mod tests {
         .unwrap();
         assert!(spending_res.contains("Food"));
         assert!(spending_res.contains("Transit"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_life_and_habits_and_retro_tools() {
+        let (db, owner) = setup_db().await;
+
+        // 1. Create habit
+        let create_habit_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "create_habit",
+            r#"{"name":"Morning Run","frequency":"daily"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(create_habit_res.contains("Morning Run"));
+
+        // 2. Log habit
+        let log_habit_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "log_habit",
+            r#"{"name":"Morning Run","completed":true}"#,
+        )
+        .await
+        .unwrap();
+        assert!(log_habit_res.contains("Morning Run"));
+
+        // 3. Log life day
+        let log_life_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "log_life_day",
+            r#"{"mood":"amazing","activities":["Running","Coding"],"note":"Great day!"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(log_life_res.contains("amazing"));
+
+        // 4. Record footprint
+        let footprint_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "record_footprint",
+            r#"{"title":"Coffee Shop","category":"cafe","latitude":37.7749,"longitude":-122.4194}"#,
+        )
+        .await
+        .unwrap();
+        assert!(footprint_res.contains("Coffee Shop"));
+
+        // 5. Weekly retrospective
+        let retro_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_weekly_retrospective",
+            r#"{}"#,
+        )
+        .await
+        .unwrap();
+        assert!(retro_res.contains("Weekly Executive Retrospective"));
+
+        // 6. Bookmarks
+        let save_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "save_bookmark",
+            r#"{"url":"https://example.com/rust-guide","title":"Rust Guide","tags":["rust","programming"]}"#,
+        )
+        .await
+        .unwrap();
+        assert!(save_res.contains("Rust Guide"));
+        assert!(save_res.contains("example.com"));
+
+        let list_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_my_bookmarks",
+            r#"{"tag":"rust"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(list_res.contains("Rust Guide"));
     }
 }

@@ -18,6 +18,28 @@ interface CustomSelectProps {
   position?: 'bottom' | 'top' | 'auto';
 }
 
+function getAvailableSpace(el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  let limitTop = 0;
+  let limitBottom = window.innerHeight;
+
+  let parent = el.parentElement;
+  while (parent && parent !== document.body && parent !== document.documentElement) {
+    const style = window.getComputedStyle(parent);
+    const overflowY = style.overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') {
+      const parentRect = parent.getBoundingClientRect();
+      if (parentRect.top > limitTop) limitTop = parentRect.top;
+      if (parentRect.bottom < limitBottom) limitBottom = parentRect.bottom;
+    }
+    parent = parent.parentElement;
+  }
+
+  const spaceBelow = Math.max(0, limitBottom - rect.bottom);
+  const spaceAbove = Math.max(0, rect.top - limitTop);
+  return { spaceBelow, spaceAbove };
+}
+
 export const CustomSelect: React.FC<CustomSelectProps> = ({
   value,
   onChange,
@@ -31,27 +53,29 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [effectivePosition, setEffectivePosition] = useState<'bottom' | 'top'>('bottom');
+  const [maxMenuHeight, setMaxMenuHeight] = useState<number | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
 
   useEffect(() => {
     if (isOpen && containerRef.current) {
+      const { spaceBelow, spaceAbove } = getAvailableSpace(containerRef.current);
       if (position === 'top') {
         setEffectivePosition('top');
+        setMaxMenuHeight(Math.min(240, Math.max(80, spaceAbove - 8)));
       } else if (position === 'bottom') {
         setEffectivePosition('bottom');
+        setMaxMenuHeight(Math.min(240, Math.max(80, spaceBelow - 8)));
       } else {
-        const rect = containerRef.current.getBoundingClientRect();
-        const dialog = containerRef.current.closest('[role="dialog"], form');
-        const limitBottom = dialog ? dialog.getBoundingClientRect().bottom : window.innerHeight;
-        const limitTop = dialog ? dialog.getBoundingClientRect().top : 0;
-        const spaceBelow = limitBottom - rect.bottom;
-        const spaceAbove = rect.top - limitTop;
-        if (spaceBelow < 180 && spaceAbove > spaceBelow) {
+        // Default to opening downward. Only flip upward if there is inadequate
+        // space below (< 200px), MORE space above, AND at least 160px above.
+        if (spaceBelow < 200 && spaceAbove > spaceBelow && spaceAbove >= 160) {
           setEffectivePosition('top');
+          setMaxMenuHeight(Math.min(240, Math.max(80, spaceAbove - 8)));
         } else {
           setEffectivePosition('bottom');
+          setMaxMenuHeight(Math.min(240, Math.max(80, spaceBelow - 8)));
         }
       }
     }
@@ -80,7 +104,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const triggerClasses =
     variant === 'inline'
       ? 'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-neutral-900 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none transition cursor-pointer'
-      : 'w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100 hover:bg-neutral-50 dark:hover:bg-neutral-850 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 transition shadow-xs cursor-pointer';
+      : 'w-full h-9 flex items-center justify-between gap-2 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100 hover:bg-neutral-50 dark:hover:bg-neutral-850 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 transition shadow-xs cursor-pointer';
 
   const popoverClasses =
     variant === 'inline'
@@ -88,7 +112,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       : `absolute left-0 ${posClass} w-full min-w-[180px] z-50 p-1 rounded-lg bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-0.5 max-h-60 overflow-y-auto animate-in fade-in-0 zoom-in-95 duration-100`;
 
   return (
-    <div ref={containerRef} className={`relative inline-block ${className}`}>
+    <div ref={containerRef} className={`relative ${variant === 'inline' ? 'inline-block' : 'w-full'} ${className}`}>
       {/* Trigger Button */}
       <button
         type="button"
@@ -107,7 +131,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
       {/* Floating Popover Dropdown Menu */}
       {isOpen && (
-        <div className={popoverClasses}>
+        <div
+          className={popoverClasses}
+          style={maxMenuHeight ? { maxHeight: `${maxMenuHeight}px` } : undefined}
+        >
           {options.map((opt) => {
             const isSelected = opt.value === value;
             return (
@@ -128,7 +155,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
               >
                 <span className="truncate">{opt.label}</span>
                 {isSelected && showCheckmark && (
-                  <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <Check className="w-3.5 h-3.5 text-neutral-900 dark:text-neutral-100 shrink-0" />
                 )}
               </button>
             );

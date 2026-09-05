@@ -135,12 +135,12 @@ const WebhooksView: React.FC<{
   });
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-5">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <WebhookIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <WebhookIcon className="w-6 h-6 text-neutral-700 dark:text-neutral-300" />
             Inbound Webhooks
           </h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
@@ -152,7 +152,7 @@ const WebhooksView: React.FC<{
             setIsCreateOpen(true);
             setFormError(null);
           }}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-sm rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-sm cursor-pointer"
+          className="h-9 inline-flex items-center gap-2 px-3.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-xs rounded-md hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-xs cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Create Webhook
@@ -168,8 +168,8 @@ const WebhooksView: React.FC<{
         </div>
       ) : webhooks.length === 0 ? (
         <div className="text-center py-16 px-4 border border-dashed border-neutral-300 dark:border-neutral-800 rounded-xl bg-neutral-50/50 dark:bg-neutral-900/40">
-          <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4">
-            <Globe className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 flex items-center justify-center mx-auto mb-4">
+            <Globe className="w-5 h-5" />
           </div>
           <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">No inbound webhooks configured</h3>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-md mx-auto mt-1 mb-6">
@@ -202,13 +202,13 @@ const WebhooksView: React.FC<{
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <h3 className="font-semibold text-base text-neutral-900 dark:text-neutral-100 truncate">{hook.name}</h3>
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded ${
                         hook.is_active
                           ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700'
                       }`}
                     >
-                      <Radio className={`w-3 h-3 ${hook.is_active ? 'animate-pulse text-emerald-500' : ''}`} />
+                      <Radio className={`w-3 h-3 ${hook.is_active ? 'text-emerald-500' : ''}`} />
                       {hook.is_active ? 'Active' : 'Disabled'}
                     </span>
                     <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700">
@@ -250,7 +250,7 @@ const WebhooksView: React.FC<{
                     title="View message history and delivery logs"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
                   >
-                    <History className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <History className="w-3.5 h-3.5 text-neutral-500" />
                     History ({hook.total_delivered_count + hook.failure_count})
                   </button>
 

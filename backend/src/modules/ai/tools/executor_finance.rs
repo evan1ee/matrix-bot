@@ -144,6 +144,8 @@ pub async fn execute_finance_tool(
                 exp as i64,
                 category_id,
                 Some(note),
+                None,
+                None,
                 Utc::now(),
             )
             .await

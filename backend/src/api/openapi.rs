@@ -3,7 +3,7 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, finance, health, portfolio, portfolio_alerts, portfolio_history, portfolio_prices,
+    account, ai, auth, bookmarks, finance, health, portfolio, portfolio_alerts, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
@@ -104,7 +104,16 @@ use crate::modules::settings::UserSettings;
         ai::get_conversation_messages,
         ai::delete_conversation,
         ai::get_ai_config,
-        ai::update_ai_config
+        ai::update_ai_config,
+        ai::get_retrospective,
+        bookmarks::list_bookmarks,
+        bookmarks::create_bookmark,
+        bookmarks::get_stats,
+        bookmarks::get_bookmark,
+        bookmarks::update_bookmark,
+        bookmarks::toggle_favorite,
+        bookmarks::toggle_archive,
+        bookmarks::delete_bookmark
     ),
     components(
         schemas(
@@ -166,6 +175,12 @@ use crate::modules::settings::UserSettings;
             crate::modules::portfolio::price_feed::RefreshSummary,
             crate::modules::portfolio::price_feed::TickerSearchResult,
             portfolio_prices::UpdateSymbolRequest,
+            portfolio_prices::SymbolQuoteResponse,
+            portfolio_alerts::CreateAlertRequest,
+            crate::modules::portfolio::alerts::PriceAlert,
+            crate::modules::portfolio::alerts::AlertCondition,
+            crate::modules::portfolio::history::PortfolioHistoryResponse,
+            crate::modules::portfolio::history::PortfolioHistoryPoint,
             crate::modules::portfolio::audit::PortfolioAuditEntry,
             crate::modules::portfolio::audit::AuditVerificationResult,
             RecurringBill,
@@ -185,7 +200,13 @@ use crate::modules::settings::UserSettings;
             crate::modules::ai::models::AiConversation,
             crate::modules::ai::models::AiMessage,
             crate::modules::ai::models::AiChatRequest,
-            crate::modules::ai::models::AiChatResponse
+            crate::modules::ai::models::AiChatResponse,
+            crate::modules::ai::retrospective::WeeklyRetrospective,
+            crate::modules::bookmarks::models::Bookmark,
+            crate::modules::bookmarks::models::CreateBookmarkInput,
+            crate::modules::bookmarks::models::UpdateBookmarkInput,
+            crate::modules::bookmarks::models::BookmarkStats,
+            crate::modules::bookmarks::models::DomainCount
         )
     ),
     modifiers(&SecurityAddon),

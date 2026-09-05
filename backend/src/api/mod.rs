@@ -20,6 +20,7 @@ const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub mod account;
 pub mod ai;
 pub mod auth;
+pub mod bookmarks;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
@@ -166,6 +167,26 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route(
             "/account/ai-config",
             get(ai::get_ai_config).put(ai::update_ai_config),
+        )
+        .route("/ai/retrospective", get(ai::get_retrospective))
+        .route(
+            "/bookmarks",
+            get(bookmarks::list_bookmarks).post(bookmarks::create_bookmark),
+        )
+        .route("/bookmarks/stats", get(bookmarks::get_stats))
+        .route(
+            "/bookmarks/:id",
+            get(bookmarks::get_bookmark)
+                .patch(bookmarks::update_bookmark)
+                .delete(bookmarks::delete_bookmark),
+        )
+        .route(
+            "/bookmarks/:id/toggle-favorite",
+            post(bookmarks::toggle_favorite),
+        )
+        .route(
+            "/bookmarks/:id/toggle-archive",
+            post(bookmarks::toggle_archive),
         )
         .route(
             "/footprints",

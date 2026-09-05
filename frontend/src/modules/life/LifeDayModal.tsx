@@ -259,14 +259,14 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
                 type="button"
                 onClick={onClose}
                 disabled={isSaving || isDeleting}
-                className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors disabled:opacity-50"
+                className="h-9 px-3.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md transition-colors disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving || isDeleting}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50"
+                className="h-9 inline-flex items-center gap-1.5 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
               >
                 {isSaving && (
                   <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-zinc-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

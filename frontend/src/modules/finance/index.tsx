@@ -40,6 +40,8 @@ export interface Transaction {
   note?: string | null;
   occurred_at: string;
   created_at?: string | null;
+  source_kind?: string | null;
+  source_id?: number | null;
 }
 
 export interface Category {
@@ -193,7 +195,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+            className="h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
           />
         </label>
 
@@ -226,7 +228,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         value={note}
         placeholder="What was it for?"
         onChange={(e) => setNote(e.target.value)}
-        className="w-full px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+        className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
       />
 
       {error && (
@@ -240,7 +242,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+          className="h-9 inline-flex items-center gap-2 px-3 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
         >
           <Check className="w-3.5 h-3.5" />
           {saving ? 'Saving…' : 'Save'}
@@ -248,7 +250,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         <button
           type="button"
           onClick={onCancel}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
+          className="h-9 inline-flex items-center gap-2 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
         >
           <X className="w-3.5 h-3.5" />
           Cancel
@@ -453,12 +455,12 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                 placeholder="New category name"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                className="flex-1 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+                className="flex-1 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
               />
               <button
                 type="button"
                 onClick={() => newCategory.trim() && addCategoryMutation.mutate(newCategory.trim())}
-                className="px-3 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition"
+                className="h-9 px-3 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition cursor-pointer"
               >
                 Add
               </button>
@@ -520,7 +522,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                 placeholder="15.50"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+                className="h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
               />
             </label>
 
@@ -554,12 +556,12 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
               placeholder="What was it for?"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="sm:col-span-3 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              className="sm:col-span-3 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
             />
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+              className="h-9 inline-flex items-center justify-center gap-2 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>{createMutation.isPending ? 'Saving...' : 'Record'}</span>
@@ -640,6 +642,22 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                       <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-neutral-500">
                         <span>{formatDateInZone(tx.occurred_at, timezone)}</span>
                         <span>{tx.category_name ?? 'Uncategorised'}</span>
+                        {tx.source_kind === 'recurring_bill' && (
+                          <span
+                            data-testid="badge-source-bill"
+                            className="px-1.5 py-0.2 rounded text-[10px] font-medium uppercase tracking-wider bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                          >
+                            Bill
+                          </span>
+                        )}
+                        {tx.source_kind === 'portfolio_cash' && (
+                          <span
+                            data-testid="badge-source-portfolio"
+                            className="px-1.5 py-0.2 rounded text-[10px] font-medium uppercase tracking-wider bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                          >
+                            Portfolio
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

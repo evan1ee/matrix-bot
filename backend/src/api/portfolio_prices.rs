@@ -6,6 +6,7 @@ use axum::{
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
+use crate::modules::portfolio::audit::AuditVerificationResult;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::portfolio::price_feed::{
     refresh_all_for_owner, refresh_holding_price, RefreshSummary,
@@ -268,7 +269,7 @@ pub async fn update_holding_symbol(
     path = "/api/v1/portfolio/activity/verify",
     tag = "portfolio",
     responses(
-        (status = 200, description = "Cryptographic verification report", body = crate::modules::portfolio::audit::AuditVerificationResult),
+        (status = 200, description = "Cryptographic verification report", body = AuditVerificationResult),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
     security(("session_cookie" = []))
@@ -276,7 +277,7 @@ pub async fn update_holding_symbol(
 pub async fn verify_portfolio_activity_chain(
     State(state): State<ApiState>,
     user: AuthUser,
-) -> Result<Json<crate::modules::portfolio::audit::AuditVerificationResult>, ApiError> {
+) -> Result<Json<AuditVerificationResult>, ApiError> {
     let owner_id = user.owner_id();
     let report = crate::modules::portfolio::audit::verify_audit_chain(&state.db.pool, &owner_id)
         .await

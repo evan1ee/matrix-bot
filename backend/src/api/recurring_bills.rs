@@ -268,7 +268,7 @@ pub async fn pay_bill(
     Path(id): Path<i64>,
 ) -> Result<Json<RecurringBill>, ApiError> {
     let owner_id = user.owner_id();
-    let bill = RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id)
+    let (bill, tx) = RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => ApiError::not_found("Recurring bill not found or access denied"),
@@ -287,6 +287,7 @@ pub async fn pay_bill(
         next_due_at: bill.next_due_at.clone(),
     });
     state.broadcaster.send(SystemEvent::RecurringBillUpdated(bill.clone()));
+    state.broadcaster.send(SystemEvent::TransactionCreated(tx));
 
     Ok(Json(bill))
 }
@@ -519,6 +520,23 @@ mod tests {
 
         assert_eq!(paid.paid_installments, 1);
         assert_eq!(paid.next_due_at, "2026-10-01 00:00:00");
+
+        // Verify bill payment automatically posted an expense transaction to the finance ledger
+        let txs = crate::modules::finance::repository::FinanceRepository::list(
+            &state.db.pool,
+            &alice.owner_id(),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].amount_minor, 999);
+        assert_eq!(txs[0].direction, "expense");
+        assert_eq!(txs[0].source_kind.as_deref(), Some("recurring_bill"));
+        assert_eq!(txs[0].source_id, Some(bill.id));
+        assert_eq!(txs[0].category_name.as_deref(), Some("subscription"));
 
         // Delete
         let status = delete_bill(State(state.clone()), alice, Path(bill.id))

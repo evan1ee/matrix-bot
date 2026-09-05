@@ -116,7 +116,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
               placeholder="e.g., Morning Run, Read 30 mins, Code"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
             />
           </div>
 
@@ -129,7 +129,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
               >
                 <option value="wellness">Wellness</option>
                 <option value="fitness">Fitness</option>
@@ -146,7 +146,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
               <select
                 value={targetDays}
                 onChange={(e) => setTargetDays(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
               >
                 <option value={7}>7 days (Everyday)</option>
                 <option value={6}>6 days / week</option>
@@ -170,7 +170,7 @@ export const HabitModal: React.FC<HabitModalProps> = ({
               placeholder="e.g., Minimum 3 miles before 8:00 AM"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
             />
           </div>
 
@@ -179,14 +179,14 @@ export const HabitModal: React.FC<HabitModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+              className="h-9 px-3.5 rounded-md text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
+              className="h-9 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Create Habit'}
             </button>

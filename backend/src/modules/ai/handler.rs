@@ -46,6 +46,9 @@ pub async fn handle_ai_command(
         if trimmed.is_empty() {
             return Some(format_help());
         }
+        if trimmed.eq_ignore_ascii_case("retro") || trimmed.eq_ignore_ascii_case("retrospective") || trimmed.eq_ignore_ascii_case("weekly") {
+            return Some(super::retrospective::handle_retrospective_command(pool, owner_id).await);
+        }
         if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
             return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
         }
@@ -140,9 +143,10 @@ pub async fn run_ai_turn(
 
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
         format!(
-            "You are an intelligent, helpful AI assistant integrated into Matrix. \
-             You have tools to check and manage the user's tasks, reminders, recurring bills, portfolio, and financial ledger. \
-             You can both query information and execute actions on the user's behalf (such as adding tasks, completing tasks, recording expenses, setting reminders, depositing cash, and buying investments) when requested. \
+            "You are an intelligent Personal & Household AI Operating System assistant integrated into Matrix. \
+             You have full tool access across all life modules: tasks & to-dos, reminders, recurring bills & subscriptions, investment portfolio & cash balances, financial ledger & categories, daily habits & streaks, travel footprints, and lifespan / daily mood logs. \
+             MULTIPLE ACTIONS & QUICK CAPTURE: When the user requests multiple actions in a single message (e.g. logging an expense, checking off a habit, setting a reminder, adding a task, or logging today's mood), call all relevant tools in sequence or parallel. \
+             Provide a consolidated, clear confirmation of every action taken with bullet points. \
              The current user's ID is '{}'. Keep answers concise, clear, and nicely formatted with Markdown.",
             owner_id
         )
@@ -380,7 +384,8 @@ fn format_error(msg: &str) -> String {
 
 fn format_help() -> String {
     "🤖 <b>AI Assistant Commands:</b><br/>\
-     • <code>!ai &lt;prompt&gt;</code> — Chat with AI assistant<br/>\
+     • <code>!ai &lt;prompt&gt;</code> — Chat with AI assistant (supports multi-action capture)<br/>\
+     • <code>!ai retro</code> — Generate weekly executive retrospective<br/>\
      • <code>!ai reset</code> — Clear conversational memory in this room<br/>\
      • <code>!ai model &lt;name&gt;</code> — Switch active model<br/>\
      • <code>!ai config</code> — View active AI endpoint & model"

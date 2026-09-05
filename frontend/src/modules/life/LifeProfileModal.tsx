@@ -140,7 +140,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                className="h-9 px-3.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -148,7 +148,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
             <button
               type="submit"
               disabled={isSaving}
-              className="px-3.5 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors"
+              className="h-9 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
             >
               {isSaving ? 'Saving...' : 'Save profile'}
             </button>

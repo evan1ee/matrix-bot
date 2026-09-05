@@ -219,7 +219,7 @@ export const BillModal: React.FC<BillModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Netflix, Rent, Car Loan"
-              className="w-full px-3 py-1.5 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100"
+              className="w-full h-9 px-3 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100"
             />
           </div>
 
@@ -275,7 +275,7 @@ export const BillModal: React.FC<BillModalProps> = ({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full px-3 py-1.5 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100 font-mono"
+                className="w-full h-9 px-3 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100 font-mono"
               />
             </div>
           </div>
@@ -305,7 +305,7 @@ export const BillModal: React.FC<BillModalProps> = ({
                   value={totalInstallments}
                   onChange={(e) => setTotalInstallments(e.target.value)}
                   placeholder="e.g. 12"
-                  className="w-full px-3 py-1.5 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100 font-mono"
+                  className="w-full h-9 px-3 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100 font-mono"
                 />
               </div>
             )}
@@ -380,14 +380,14 @@ export const BillModal: React.FC<BillModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition"
+              className="h-9 px-3 rounded-md text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="h-9 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-white transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Create Item'}
             </button>

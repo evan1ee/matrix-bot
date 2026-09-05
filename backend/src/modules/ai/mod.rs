@@ -8,6 +8,7 @@ pub mod client;
 pub mod handler;
 pub mod models;
 pub mod repository;
+pub mod retrospective;
 pub mod tools;
 
 pub struct AiModule;
@@ -52,6 +53,11 @@ impl BotModule for AiModule {
                 usage: "!ai config".to_string(),
                 description: "View AI backend endpoint and configuration".to_string(),
             },
+            CommandHelp {
+                name: "ai retro".to_string(),
+                usage: "!ai retro".to_string(),
+                description: "Generate a weekly executive retrospective".to_string(),
+            },
         ]
     }
 
@@ -85,6 +91,6 @@ mod tests {
         let module = AiModule::new();
         assert_eq!(module.name(), "AI Assistant");
         let commands = module.commands();
-        assert_eq!(commands.len(), 4);
+        assert_eq!(commands.len(), 5);
     }
 }

@@ -65,7 +65,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ data, onClose }) => {
           {/* Sample Commands */}
           <div className="space-y-3 pt-2">
             <div className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5 uppercase tracking-wider">
-              <Terminal className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <Terminal className="w-3.5 h-3.5 text-neutral-500" />
               Example Integrations
             </div>
 
@@ -74,7 +74,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ data, onClose }) => {
                 <span>1. Standard JSON Webhook (Alertmanager / Cron / Python)</span>
                 <button
                   onClick={() => handleCopy(data.example_curl_json, 'json')}
-                  className="text-blue-600 dark:text-blue-400 hover:underline text-[11px] cursor-pointer"
+                  className="text-neutral-900 dark:text-neutral-100 hover:underline text-[11px] cursor-pointer"
                 >
                   {copiedType === 'json' ? 'Copied' : 'Copy curl'}
                 </button>
@@ -89,7 +89,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ data, onClose }) => {
                 <span>2. Telegram Bot API Drop-in Emulation</span>
                 <button
                   onClick={() => handleCopy(data.example_curl_telegram, 'tg')}
-                  className="text-blue-600 dark:text-blue-400 hover:underline text-[11px] cursor-pointer"
+                  className="text-neutral-900 dark:text-neutral-100 hover:underline text-[11px] cursor-pointer"
                 >
                   {copiedType === 'tg' ? 'Copied' : 'Copy curl'}
                 </button>

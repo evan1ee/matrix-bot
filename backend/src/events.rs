@@ -68,6 +68,9 @@ pub enum SystemEvent {
     LifeProfileUpdated { owner_id: String, profile: crate::modules::life::models::LifeProfile },
     LifeDayLogged(crate::modules::life::models::LifeDayLog),
     LifeDayCleared { owner_id: String, date: String },
+    BookmarkCreated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkUpdated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkDeleted { id: i64, owner_id: String },
 }
 
 impl SystemEvent {
@@ -121,6 +124,8 @@ impl SystemEvent {
             SystemEvent::LifeProfileUpdated { owner_id, .. }
             | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id,
             SystemEvent::LifeDayLogged(l) => &l.owner_id,
+            SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => &b.owner_id,
+            SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
         }
     }
 }

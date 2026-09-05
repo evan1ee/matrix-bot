@@ -70,7 +70,7 @@ export const AllocationCard: React.FC<AllocationCardProps> = ({ holdings, cashBa
               Asset Allocation ({primaryCurrency})
             </h3>
             <span className="flex items-center gap-1 text-[11px] text-neutral-400 font-mono bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
-              <PieChart className="w-3 h-3 text-blue-500" />
+              <PieChart className="w-3 h-3 text-neutral-500" />
               {holdings.length} {holdings.length === 1 ? 'Holding' : 'Holdings'}
             </span>
           </div>

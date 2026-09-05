@@ -176,6 +176,8 @@ async fn handle_add(
         entry.exponent as i64,
         category_id,
         note,
+        None,
+        None,
         Utc::now(),
     )
     .await

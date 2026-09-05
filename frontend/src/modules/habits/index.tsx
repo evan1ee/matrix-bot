@@ -222,7 +222,7 @@ export const HabitsView: React.FC = () => {
               setEditingHabit(null);
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition cursor-pointer"
+            className="h-9 flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New Habit</span>
@@ -263,7 +263,7 @@ export const HabitsView: React.FC = () => {
               placeholder="Search habits..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              className="w-full h-9 pl-8 pr-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
             />
           </div>
         </div>

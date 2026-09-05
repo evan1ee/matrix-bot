@@ -1,8 +1,9 @@
 use serde_json::json;
 use crate::modules::ai::models::{FunctionDefinition, ToolDefinition};
+use super::definitions_life::life_and_habits_tool_definitions;
 
 pub fn all_tool_definitions() -> Vec<ToolDefinition> {
-    vec![
+    let mut tools = vec![
         // --- Read / Query Tools ---
         ToolDefinition {
             r#type: "function".to_string(),
@@ -355,5 +356,7 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                 }),
             },
         },
-    ]
+    ];
+    tools.extend(life_and_habits_tool_definitions());
+    tools
 }

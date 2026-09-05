@@ -25,7 +25,7 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
   let stateClasses = '';
   if (day_type === 'present') {
     stateClasses =
-      'bg-emerald-500 text-white font-bold ring-2 ring-emerald-400 shadow-md shadow-emerald-500/30 animate-pulse';
+      'bg-emerald-600 dark:bg-emerald-500 text-white font-bold ring-2 ring-emerald-500/40';
   } else if (moodCfg) {
     stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold shadow-xs`;
   } else if (day_type === 'past') {
@@ -44,8 +44,8 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
       type="button"
       onClick={() => onClick(day)}
       title={`${date}${mood ? ` • ${mood}` : ''}${weather ? ` • ${weather}` : ''}${note ? ` • "${note}"` : ''}`}
-      className={`relative group aspect-square flex flex-col items-center justify-center rounded-md text-[11px] transition-all duration-150 select-none ${stateClasses} ${
-        isSelected ? 'ring-2 ring-sky-500 dark:ring-sky-400 z-10 scale-105' : ''
+      className={`relative group aspect-square flex flex-col items-center justify-center rounded-md text-[11px] transition-colors duration-150 select-none ${stateClasses} ${
+        isSelected ? 'ring-2 ring-neutral-900 dark:ring-neutral-100 z-10' : ''
       }`}
     >
       <span className="leading-none">{dayNumber}</span>

@@ -30,6 +30,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::db::schema_footprints::create_tables(pool).await?;
     crate::db::schema_habits::create_tables(pool).await?;
     crate::db::schema_life::run_life_schema(pool).await?;
+    crate::db::schema_bookmarks::create_tables(pool).await?;
 
     sqlx::query(
         r#"
@@ -248,6 +249,8 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             currency_exponent INTEGER NOT NULL DEFAULT 2,
             category_id INTEGER,
             note TEXT,
+            source_kind TEXT,
+            source_id INTEGER,
             occurred_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -371,6 +374,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Link transactions to external originating sources (e.g. recurring_bill, portfolio_cash).
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_kind TEXT;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_id INTEGER;").execute(pool).await;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions(source_kind, source_id);").execute(pool).await?;
 
     // Migration helpers for recurring_bills columns on existing SQLite DBs
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;").execute(pool).await;

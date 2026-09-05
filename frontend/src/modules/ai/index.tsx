@@ -4,21 +4,21 @@ import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import {
   Sparkles, Send, RefreshCw, Settings, Trash2, Bot, User,
-  Wrench, AlertCircle, Clock, ChevronRight
+  Wrench, AlertCircle, Clock, ChevronRight, Calendar
 } from 'lucide-react';
 import { AiConversation, AiMessage, AiChatResponse, AiUserConfig } from './types';
 import { AiSettingsModal } from './SettingsModal';
+import { RetrospectiveModal } from './RetrospectiveModal';
 
 export * from './types';
 
 const SUGGESTIONS = [
+  'Spent $16.50 on lunch at Shake Shack, check off my workout habit, and remind me to call mom at 7pm',
+  'Log my mood as amazing today, spent $45 on groceries, and add task Buy birthday gift',
+  'Generate weekly retrospective',
   'What tasks do I have due today?',
-  'Summarize my upcoming reminders and bills',
   'Show a breakdown of my portfolio and cash balance',
-  'What is my position in BTC-USD and how has it performed?',
-  'How much did I spend in each category over the last 30 days?',
-  'Alert me if BTC-USD rises above 75,000 USD',
-  'Give me a summary of my expense ledger',
+  'Summarize my upcoming reminders and bills',
 ];
 
 const AiAssistantView: React.FC<{
@@ -30,6 +30,7 @@ const AiAssistantView: React.FC<{
   const [prompt, setPrompt] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRetroOpen, setIsRetroOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -135,43 +136,55 @@ const AiAssistantView: React.FC<{
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
+    <div className="flex-1 flex flex-col min-h-0 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-4">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-            <Sparkles className="w-5 h-5" />
+          <div className="w-8 h-8 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2 font-sans">
               AI Assistant
-              <span className="font-mono text-[11px] font-normal px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
+              <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
                 {config?.model_name || 'llama3.2'}
               </span>
             </h1>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Conversational assistant with access to your tasks, reminders, bills, portfolio, and finances.
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-sans">
+              Conversational assistant with access to tasks, reminders, bills, portfolio, and finances.
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsRetroOpen(true)}
+            title="Weekly Executive Retrospective"
+            className="h-9 inline-flex items-center gap-1.5 px-3.5 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer"
+          >
+            <Calendar className="w-3.5 h-3.5 text-neutral-500" />
+            <span>Weekly Retro</span>
+          </button>
+
           {activeConversationId && (
             <button
+              type="button"
               onClick={() => resetMutation.mutate(activeConversationId)}
               disabled={resetMutation.isPending}
               title="Reset current conversation"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
+              className="h-9 inline-flex items-center gap-1.5 px-3.5 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
-              New Chat
+              <Trash2 className="w-3.5 h-3.5 text-neutral-400" />
+              <span>New Chat</span>
             </button>
           )}
 
           <button
+            type="button"
             onClick={() => setIsSettingsOpen(true)}
             title="Configure AI model & API keys"
-            className="p-2 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
+            className="h-9 w-9 flex items-center justify-center text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition cursor-pointer"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -179,18 +192,18 @@ const AiAssistantView: React.FC<{
       </div>
 
       {/* Messages Thread Container */}
-      <div className="flex-1 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 p-4 sm:p-6 space-y-5">
+      <div className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5">
         {isLoadingMessages ? (
-          <div className="py-20 text-center text-sm text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
+          <div className="py-20 text-center text-xs font-mono text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
         ) : messages.length === 0 ? (
           <div className="py-16 text-center max-w-lg mx-auto space-y-6">
-            <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
-              <Bot className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 flex items-center justify-center mx-auto">
+              <Bot className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">How can I help you today?</h3>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                Ask questions, explore ideas, or ask me to manage your tasks, reminders, bills, portfolio, and financial ledger.
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 font-sans">How can I help you today?</h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-sans">
+                Ask questions, execute multi-action quick capture, or manage tasks, reminders, bills, and portfolios.
               </p>
             </div>
 
@@ -198,14 +211,15 @@ const AiAssistantView: React.FC<{
               {SUGGESTIONS.map((s, idx) => (
                 <button
                   key={idx}
+                  type="button"
                   onClick={() => {
                     setPrompt(s);
                     chatMutation.mutate(s);
                   }}
-                  className="p-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 text-xs text-neutral-800 dark:text-neutral-200 transition-colors flex items-center justify-between group cursor-pointer shadow-2xs"
+                  className="p-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-neutral-400 dark:hover:border-neutral-700 text-xs text-neutral-800 dark:text-neutral-200 transition flex items-center justify-between group cursor-pointer shadow-2xs font-sans"
                 >
                   <span className="line-clamp-2">{s}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0 ml-1.5 transition-colors" />
+                  <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-900 dark:group-hover:text-neutral-100 shrink-0 ml-1.5 transition" />
                 </button>
               ))}
             </div>
@@ -221,42 +235,45 @@ const AiAssistantView: React.FC<{
                 }`}
               >
                 {m.role !== 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="w-3.5 h-3.5" />
                   </div>
                 )}
 
                 <div
-                  className={`p-3.5 rounded-xl text-sm leading-relaxed space-y-2 max-w-2xl ${
+                  className={`p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans ${
                     m.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-tr-none shadow-sm'
+                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs'
                       : m.role === 'tool'
-                      ? 'bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 font-mono text-xs'
-                      : 'bg-white dark:bg-neutral-850 border border-neutral-200 dark:border-neutral-750 text-neutral-900 dark:text-neutral-100 rounded-tl-none shadow-xs'
+                      ? 'bg-neutral-100/80 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 font-mono text-xs'
+                      : 'bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs'
                   }`}
                 >
                   {m.role === 'tool' ? (
-                    <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-sans font-medium">
+                    <div className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400 font-sans font-medium">
                       <Wrench className="w-3.5 h-3.5" />
-                      Tool Result: <code>{m.tool_name || 'internal_tool'}</code>
+                      <span>Tool Result:</span>
+                      <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
+                        {m.tool_name || 'internal_tool'}
+                      </code>
                     </div>
                   ) : null}
 
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
 
                   <div
-                    className={`text-[10px] flex items-center gap-1 pt-1 ${
-                      m.role === 'user' ? 'text-white/80 justify-end' : 'text-neutral-500 dark:text-neutral-400'
+                    className={`text-[10px] font-mono flex items-center gap-1 pt-1 ${
+                      m.role === 'user' ? 'text-neutral-300 dark:text-neutral-600 justify-end' : 'text-neutral-400 dark:text-neutral-500'
                     }`}
                   >
                     <Clock className="w-2.5 h-2.5" />
-                    {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <span>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 </div>
 
                 {m.role === 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-blue-600/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">
-                    <User className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5 font-mono text-[11px]">
+                    <User className="w-3.5 h-3.5" />
                   </div>
                 )}
               </div>
@@ -265,19 +282,19 @@ const AiAssistantView: React.FC<{
 
         {chatMutation.isPending && (
           <div className="flex gap-3 max-w-3xl mr-auto justify-start animate-in fade-in-0">
-            <div className="w-8 h-8 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-              <Bot className="w-4 h-4" />
+            <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
+              <Bot className="w-3.5 h-3.5" />
             </div>
-            <div className="p-4 rounded-xl text-sm bg-white dark:bg-neutral-850 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-tl-none shadow-2xs flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">Thinking and querying tools...</span>
+            <div className="p-3.5 rounded-lg text-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-neutral-500" />
+              <span className="text-xs text-neutral-500 font-sans">Thinking and executing tools...</span>
             </div>
           </div>
         )}
 
         {chatMutation.error && (
-          <div className="p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg text-red-800 dark:text-red-300 text-xs flex items-start gap-2 max-w-2xl mx-auto">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-600 dark:text-red-400 text-xs flex items-start gap-2 max-w-2xl mx-auto font-sans">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <div>
               <strong>Generation failed:</strong> {(chatMutation.error as Error).message}
             </div>
@@ -296,14 +313,14 @@ const AiAssistantView: React.FC<{
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask AI assistant... (Enter to send, Shift+Enter for newline)"
-          className="w-full px-4 py-3 pr-14 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none shadow-xs"
+          className="w-full px-3.5 py-2.5 pr-12 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 rounded-lg text-sm focus:outline-none focus:border-neutral-500 font-sans resize-none shadow-2xs"
         />
         <button
           type="submit"
           disabled={!prompt.trim() || chatMutation.isPending}
-          className="absolute right-3 bottom-3 p-2 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors disabled:opacity-40 cursor-pointer"
+          className="absolute right-2.5 bottom-2.5 p-1.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-40 cursor-pointer"
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-3.5 h-3.5" />
         </button>
       </form>
 
@@ -315,6 +332,16 @@ const AiAssistantView: React.FC<{
         onSave={(input) => saveConfigMutation.mutate(input)}
         isSaving={saveConfigMutation.isPending}
         error={saveConfigMutation.error ? (saveConfigMutation.error as Error).message : null}
+      />
+
+      {/* Retrospective Modal */}
+      <RetrospectiveModal
+        isOpen={isRetroOpen}
+        onClose={() => setIsRetroOpen(false)}
+        onShareToChat={(text) => {
+          setPrompt(text);
+          chatMutation.mutate(text);
+        }}
       />
     </div>
   );

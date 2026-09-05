@@ -91,7 +91,7 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+            <div className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
               <BellRing className="w-5 h-5" />
             </div>
             <div>
@@ -124,19 +124,19 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
                 value={symbol}
                 onChange={setSymbol}
                 placeholder="BTC-USD, AAPL"
-                className="w-full px-2.5 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono uppercase text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500"
+                className="w-full h-9 px-2.5 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono uppercase text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500"
               />
             </div>
 
             <div className="sm:col-span-3 space-y-1">
               <label className="text-[10px] uppercase font-mono text-neutral-500">Condition</label>
-              <div className="flex rounded border border-neutral-300 dark:border-neutral-700 overflow-hidden bg-white dark:bg-neutral-900 p-0.5">
+              <div className="flex h-9 rounded-md border border-neutral-300 dark:border-neutral-700 overflow-hidden bg-white dark:bg-neutral-900 p-0.5">
                 <button
                   type="button"
                   onClick={() => setCondition('above')}
-                  className={`flex-1 flex items-center justify-center gap-1 py-1 text-[11px] font-mono rounded transition cursor-pointer ${
+                  className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-mono rounded transition cursor-pointer ${
                     condition === 'above'
-                      ? 'bg-blue-600 text-white font-bold shadow-xs'
+                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 font-semibold shadow-xs'
                       : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
                   }`}
                 >
@@ -145,9 +145,9 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setCondition('below')}
-                  className={`flex-1 flex items-center justify-center gap-1 py-1 text-[11px] font-mono rounded transition cursor-pointer ${
+                  className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-mono rounded transition cursor-pointer ${
                     condition === 'below'
-                      ? 'bg-blue-600 text-white font-bold shadow-xs'
+                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 font-semibold shadow-xs'
                       : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
                   }`}
                 >
@@ -164,7 +164,7 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
                 value={targetPrice}
                 onChange={(e) => setTargetPrice(e.target.value)}
                 placeholder="e.g. 70000"
-                className="w-full px-2.5 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500"
+                className="w-full h-9 px-2.5 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500"
               />
             </div>
 
@@ -172,7 +172,7 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
               <button
                 type="submit"
                 disabled={createMutation.isPending || !symbol.trim() || !targetPrice.trim()}
-                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
+                className="w-full h-9 flex items-center justify-center gap-1 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add
@@ -249,7 +249,7 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
                         Triggered
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/50">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
                         Active
                       </span>
                     )}

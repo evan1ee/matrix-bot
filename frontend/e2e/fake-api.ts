@@ -51,6 +51,32 @@ export interface FakeTransaction {
   note: string | null;
   occurred_at: string;
   created_at: string;
+  source_kind?: string | null;
+  source_id?: number | null;
+}
+
+export interface FakeRecurringBill {
+  id: number;
+  room_id: string;
+  owner_id: string;
+  sender_name: string;
+  name: string;
+  category: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  frequency: string;
+  due_day: number | null;
+  next_due_at: string;
+  total_installments: number | null;
+  paid_installments: number;
+  auto_pay: boolean;
+  status: string;
+  notes: string | null;
+  remind_before_minutes: number | null;
+  remind_room_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface FakeCategory {
@@ -186,6 +212,24 @@ export interface FakeWebhookOutboxItem {
   delivered_at: string | null;
 }
 
+export interface FakeBookmark {
+  id: number;
+  owner_id: string;
+  url: string;
+  title: string;
+  description: string | null;
+  author: string | null;
+  image_url: string | null;
+  domain: string;
+  reader_content: string | null;
+  reading_time_minutes: number;
+  tags: string;
+  is_favorite: boolean;
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FakeAiConfig {
   owner_id: string;
   api_base_url: string | null;
@@ -309,6 +353,8 @@ export class FakeApi {
   habitLogs: FakeHabitLog[] = [];
   lifeProfile: FakeLifeProfile | null = null;
   lifeDayLogs: FakeLifeDayLog[] = [];
+  bills: FakeRecurringBill[] = [];
+  bookmarks: FakeBookmark[] = [];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -323,6 +369,36 @@ export class FakeApi {
   private nextHabitLogId = 1;
   private nextLifeProfileId = 1;
   private nextLifeDayLogId = 1;
+  private nextBillId = 1;
+  private nextBookmarkId = 1;
+
+  seedBookmark(partial: Partial<FakeBookmark> & { url: string; title?: string }): FakeBookmark {
+    const id = this.nextBookmarkId++;
+    const now = new Date().toISOString();
+    let domain = 'example.com';
+    try {
+      domain = new URL(partial.url).hostname;
+    } catch (_) {}
+    const bookmark: FakeBookmark = {
+      id,
+      owner_id: OWNER,
+      url: partial.url,
+      title: partial.title || 'Saved Page',
+      description: partial.description ?? null,
+      author: partial.author ?? null,
+      image_url: partial.image_url ?? null,
+      domain: partial.domain ?? domain,
+      reader_content: partial.reader_content ?? null,
+      reading_time_minutes: partial.reading_time_minutes ?? 3,
+      tags: partial.tags ?? '',
+      is_favorite: partial.is_favorite ?? false,
+      is_archived: partial.is_archived ?? false,
+      created_at: partial.created_at ?? now,
+      updated_at: partial.updated_at ?? now,
+    };
+    this.bookmarks.push(bookmark);
+    return bookmark;
+  }
 
   seedLifeProfile(partial: Partial<FakeLifeProfile> = {}): FakeLifeProfile {
     const profile: FakeLifeProfile = {
@@ -527,6 +603,35 @@ export class FakeApi {
     };
     this.transactions.push(tx);
     return tx;
+  }
+
+  seedRecurringBill(partial: Partial<FakeRecurringBill> = {}): FakeRecurringBill {
+    const bill: FakeRecurringBill = {
+      id: this.nextBillId++,
+      room_id: 'web',
+      owner_id: OWNER,
+      sender_name: DISPLAY_NAME,
+      name: 'Netflix',
+      category: 'subscription',
+      amount_minor: 1599,
+      currency: 'USD',
+      currency_exponent: 2,
+      frequency: 'monthly',
+      due_day: 15,
+      next_due_at: new Date(Date.now() + 86400000 * 7).toISOString(),
+      total_installments: null,
+      paid_installments: 0,
+      auto_pay: false,
+      status: 'active',
+      notes: null,
+      remind_before_minutes: null,
+      remind_room_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...partial,
+    };
+    this.bills.push(bill);
+    return bill;
   }
 
   seedHolding(partial: Partial<FakeHolding> = {}): FakeHolding {
@@ -1197,6 +1302,15 @@ export class FakeApi {
       if ('error' in amount) return json(route, 400, { error: amount.error, code: 400 });
 
       const cash = this.seedCash(currency, amount.minor, exponent);
+      this.seedTransaction({
+        direction: 'expense',
+        amount_minor: amount.minor,
+        currency,
+        currency_exponent: exponent,
+        category_name: 'Portfolio Cash Deposit',
+        note: `Portfolio cash deposit (${currency})`,
+        source_kind: 'portfolio_cash',
+      });
       return json(route, 200, cash);
     }
     if (path === '/portfolio/cash/withdraw' && method === 'POST') {
@@ -1217,6 +1331,15 @@ export class FakeApi {
         });
       }
       const cash = this.seedCash(currency, -amount.minor, exponent);
+      this.seedTransaction({
+        direction: 'income',
+        amount_minor: amount.minor,
+        currency,
+        currency_exponent: exponent,
+        category_name: 'Portfolio Cash Withdrawal',
+        note: `Portfolio cash withdrawal (${currency})`,
+        source_kind: 'portfolio_cash',
+      });
       return json(route, 200, cash);
     }
 
@@ -1446,10 +1569,37 @@ export class FakeApi {
       };
       this.aiMessages.push(userMsg);
 
-      const isTaskQuestion = body?.prompt?.toLowerCase().includes('task');
-      const toolCalls = isTaskQuestion ? ['get_my_tasks'] : [];
+      const lowerPrompt = (body?.prompt || '').toLowerCase();
+      const isMultiAction = lowerPrompt.includes('shake shack') || (lowerPrompt.includes('spent') && (lowerPrompt.includes('habit') || lowerPrompt.includes('remind')));
+      const isRetroPrompt = lowerPrompt.includes('retro') || lowerPrompt.includes('retrospective');
+      const isTaskQuestion = !isMultiAction && !isRetroPrompt && lowerPrompt.includes('task');
 
-      if (isTaskQuestion) {
+      const toolCalls: string[] = [];
+      let botReply = `I received your prompt: "${body?.prompt}". How can I help further?`;
+
+      if (isMultiAction) {
+        toolCalls.push('record_finance_entry', 'log_habit', 'set_reminder');
+        this.aiMessages.push({
+          id: `msg_${this.nextAiMsgId++}`,
+          conversation_id: conv.id,
+          role: 'tool',
+          content: JSON.stringify({
+            tools_executed: [
+              { tool: 'record_finance_entry', status: 'success', amount: 16.50, category: 'Dining' },
+              { tool: 'log_habit', status: 'success', habit: 'Workout', completed: true },
+              { tool: 'set_reminder', status: 'success', message: 'Call mom', trigger_at: '19:00' },
+            ],
+          }),
+          tool_call_id: 'call_multi',
+          tool_name: 'multi_action_executor',
+          created_at: new Date().toISOString(),
+        });
+        botReply = "I've handled all three actions for you:\n1. 💸 Recorded $16.50 for Dining at Shake Shack\n2. ✅ Marked Workout habit as completed\n3. ⏰ Scheduled reminder to call mom at 7:00 PM";
+      } else if (isRetroPrompt) {
+        toolCalls.push('get_weekly_retrospective');
+        botReply = "### 🌟 Weekly Executive Retrospective (2026-08-29 to 2026-09-05)\n\n**💰 Financial Velocity**\n- **Total Spent**: `USD 125.50`\n- **Total Income**: `USD 2500.00`\n- **Net Cashflow**: `USD 2374.50`\n\n**📋 Productivity & Habits**\n- **Tasks Completed**: 8\n- **Habit Adherence**: 85.7%\n\n**🧬 Life & Wellness**\n- **Days Logged**: 6 of 7 days\n- **Dominant Mood**: Good";
+      } else if (isTaskQuestion) {
+        toolCalls.push('get_my_tasks');
         this.aiMessages.push({
           id: `msg_${this.nextAiMsgId++}`,
           conversation_id: conv.id,
@@ -1468,11 +1618,8 @@ export class FakeApi {
           tool_name: 'get_my_tasks',
           created_at: new Date().toISOString(),
         });
+        botReply = `You have ${this.todos.length} task(s) currently recorded in your list.`;
       }
-
-      const botReply = isTaskQuestion
-        ? `You have ${this.todos.length} task(s) currently recorded in your list.`
-        : `I received your prompt: "${body?.prompt}". How can I help further?`;
 
       const assistantMsg: FakeAiMessage = {
         id: `msg_${this.nextAiMsgId++}`,
@@ -1490,6 +1637,43 @@ export class FakeApi {
         message: botReply,
         model_used: this.aiConfig.model_name || 'llama3.2',
         tool_calls_executed: toolCalls,
+      });
+    }
+
+    if (path === '/ai/retrospective' && method === 'GET') {
+      return json(route, 200, {
+        period_start: '2026-08-29',
+        period_end: '2026-09-05',
+        total_spent_minor: 12550,
+        total_income_minor: 250000,
+        net_cashflow_minor: 237450,
+        currency: 'USD',
+        top_expense_category: 'Dining',
+        completed_tasks_count: 8,
+        active_tasks_count: 3,
+        habits_adherence_percent: 85.7,
+        active_habits_count: 4,
+        upcoming_bills_count: 2,
+        upcoming_bills_total_minor: 4500,
+        upcoming_reminders_count: 3,
+        days_logged_count: 6,
+        dominant_mood: 'good',
+        formatted_markdown:
+          '### 🌟 Weekly Executive Retrospective (2026-08-29 to 2026-09-05)\n\n' +
+          '**💰 Financial Velocity**\n' +
+          '- **Total Spent**: `USD 125.50`\n' +
+          '- **Total Income**: `USD 2500.00`\n' +
+          '- **Net Cashflow**: `USD 2374.50`\n' +
+          '- **Top Category**: Dining\n\n' +
+          '**📋 Productivity & Habits**\n' +
+          '- **Tasks Completed**: 8 (Active remaining: 3)\n' +
+          '- **Habit Adherence**: 85.7% across 4 tracked habits\n\n' +
+          '**🧬 Life & Wellness**\n' +
+          '- **Days Logged**: 6 of 7 days\n' +
+          '- **Dominant Mood**: Good\n\n' +
+          '**📅 Upcoming Commitments (Next 7 Days)**\n' +
+          '- **Bills Due**: 2 (`USD 45.00`)\n' +
+          '- **Pending Reminders**: 3',
       });
     }
 
@@ -1888,6 +2072,193 @@ export class FakeApi {
         this.lifeDayLogs.splice(idx, 1);
       }
       return json(route, 200, { date, deleted: true });
+    }
+
+    // --- recurring bills ---
+    if (path === '/recurring-bills' && method === 'GET') {
+      return json(route, 200, this.bills);
+    }
+    if (path === '/recurring-bills' && method === 'POST') {
+      const bill = this.seedRecurringBill({
+        name: String(body?.name ?? ''),
+        category: String(body?.category ?? 'subscription'),
+        amount_minor: Number(body?.amount_minor ?? 0),
+        currency: String(body?.currency ?? 'USD'),
+        currency_exponent: Number(body?.currency_exponent ?? 2),
+        frequency: String(body?.frequency ?? 'monthly'),
+        due_day: body?.due_day ?? null,
+        next_due_at: String(body?.next_due_at ?? new Date().toISOString()),
+        notes: body?.notes ?? null,
+      });
+      return json(route, 200, bill);
+    }
+    const payMatch = path.match(/^\/recurring-bills\/(\d+)\/pay$/);
+    if (payMatch && method === 'POST') {
+      const id = Number(payMatch[1]);
+      const bill = this.bills.find((b) => b.id === id);
+      if (!bill) return json(route, 404, { error: 'Bill not found', code: 404 });
+      bill.paid_installments += 1;
+      bill.updated_at = new Date().toISOString();
+      this.seedTransaction({
+        direction: 'expense',
+        amount_minor: bill.amount_minor,
+        currency: bill.currency,
+        currency_exponent: bill.currency_exponent,
+        category_name: bill.category,
+        note: `Recurring bill: ${bill.name}`,
+        source_kind: 'recurring_bill',
+        source_id: bill.id,
+      });
+      return json(route, 200, bill);
+    }
+    const billDelMatch = path.match(/^\/recurring-bills\/(\d+)$/);
+    if (billDelMatch && method === 'DELETE') {
+      const id = Number(billDelMatch[1]);
+      const idx = this.bills.findIndex((b) => b.id === id);
+      if (idx >= 0) {
+        this.bills.splice(idx, 1);
+      }
+      return json(route, 200, { deleted: true });
+    }
+
+    // --- bookmarks ---
+    if (path === '/bookmarks' && method === 'GET') {
+      const url = new URL(route.request().url());
+      const archivedParam = url.searchParams.get('archived');
+      const favoriteParam = url.searchParams.get('favorite');
+      const tagParam = url.searchParams.get('tag');
+      const searchParam = url.searchParams.get('search')?.toLowerCase();
+      const domainParam = url.searchParams.get('domain');
+
+      let list = [...this.bookmarks];
+      if (archivedParam !== null) {
+        const isArch = archivedParam === 'true';
+        list = list.filter((b) => b.is_archived === isArch);
+      }
+      if (favoriteParam !== null) {
+        const isFav = favoriteParam === 'true';
+        list = list.filter((b) => b.is_favorite === isFav);
+      }
+      if (tagParam) {
+        list = list.filter((b) =>
+          b.tags
+            .split(',')
+            .map((t) => t.trim().toLowerCase())
+            .includes(tagParam.toLowerCase())
+        );
+      }
+      if (domainParam) {
+        list = list.filter((b) => b.domain.toLowerCase() === domainParam.toLowerCase());
+      }
+      if (searchParam) {
+        list = list.filter(
+          (b) =>
+            b.title.toLowerCase().includes(searchParam) ||
+            (b.description && b.description.toLowerCase().includes(searchParam)) ||
+            b.url.toLowerCase().includes(searchParam) ||
+            b.tags.toLowerCase().includes(searchParam)
+        );
+      }
+      return json(route, 200, list);
+    }
+
+    if (path === '/bookmarks/stats' && method === 'GET') {
+      const total_count = this.bookmarks.length;
+      const unread_count = this.bookmarks.filter((b) => !b.is_archived).length;
+      const favorite_count = this.bookmarks.filter((b) => b.is_favorite).length;
+      const archived_count = this.bookmarks.filter((b) => b.is_archived).length;
+
+      const tagSet = new Set<string>();
+      const domainMap = new Map<string, number>();
+      for (const b of this.bookmarks) {
+        for (const t of b.tags.split(',')) {
+          const trimmed = t.trim();
+          if (trimmed) tagSet.add(trimmed);
+        }
+        domainMap.set(b.domain, (domainMap.get(b.domain) || 0) + 1);
+      }
+      const top_domains = Array.from(domainMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([domain, count]) => ({ domain, count }));
+
+      return json(route, 200, {
+        total_count,
+        unread_count,
+        favorite_count,
+        archived_count,
+        tags: Array.from(tagSet),
+        top_domains,
+      });
+    }
+
+    if (path === '/bookmarks' && method === 'POST') {
+      if (!body?.url?.trim()) {
+        return json(route, 400, { error: 'url is required', code: 400 });
+      }
+      const rawUrl = body.url.trim();
+      let domain = 'example.com';
+      try {
+        domain = new URL(rawUrl).hostname;
+      } catch (_) {}
+      const tagsStr = Array.isArray(body.tags) ? body.tags.join(',') : '';
+      const bookmark = this.seedBookmark({
+        url: rawUrl,
+        title: body.title || 'Saved Page',
+        domain,
+        tags: tagsStr,
+        reader_content: `This is the readable extracted article text for ${rawUrl}.\n\nIt features distraction-free reading with paragraphs cleanly displayed.`,
+      });
+      return json(route, 200, bookmark);
+    }
+
+    const bookmarkToggleFav = path.match(/^\/bookmarks\/(\d+)\/toggle-favorite$/);
+    if (bookmarkToggleFav && method === 'POST') {
+      const id = Number(bookmarkToggleFav[1]);
+      const bm = this.bookmarks.find((b) => b.id === id);
+      if (!bm) return json(route, 404, { error: 'Bookmark not found', code: 404 });
+      bm.is_favorite = !bm.is_favorite;
+      bm.updated_at = new Date().toISOString();
+      return json(route, 200, bm);
+    }
+
+    const bookmarkToggleArch = path.match(/^\/bookmarks\/(\d+)\/toggle-archive$/);
+    if (bookmarkToggleArch && method === 'POST') {
+      const id = Number(bookmarkToggleArch[1]);
+      const bm = this.bookmarks.find((b) => b.id === id);
+      if (!bm) return json(route, 404, { error: 'Bookmark not found', code: 404 });
+      bm.is_archived = !bm.is_archived;
+      bm.updated_at = new Date().toISOString();
+      return json(route, 200, bm);
+    }
+
+    const bookmarkIdMatch = path.match(/^\/bookmarks\/(\d+)$/);
+    if (bookmarkIdMatch && method === 'GET') {
+      const id = Number(bookmarkIdMatch[1]);
+      const bm = this.bookmarks.find((b) => b.id === id);
+      if (!bm) return json(route, 404, { error: 'Bookmark not found', code: 404 });
+      return json(route, 200, bm);
+    }
+
+    if (bookmarkIdMatch && method === 'PATCH') {
+      const id = Number(bookmarkIdMatch[1]);
+      const bm = this.bookmarks.find((b) => b.id === id);
+      if (!bm) return json(route, 404, { error: 'Bookmark not found', code: 404 });
+      if (body?.title !== undefined) bm.title = body.title;
+      if (body?.description !== undefined) bm.description = body.description;
+      if (body?.is_favorite !== undefined) bm.is_favorite = body.is_favorite;
+      if (body?.is_archived !== undefined) bm.is_archived = body.is_archived;
+      if (Array.isArray(body?.tags)) bm.tags = body.tags.join(',');
+      bm.updated_at = new Date().toISOString();
+      return json(route, 200, bm);
+    }
+
+    if (bookmarkIdMatch && method === 'DELETE') {
+      const id = Number(bookmarkIdMatch[1]);
+      const idx = this.bookmarks.findIndex((b) => b.id === id);
+      if (idx === -1) return json(route, 404, { error: 'Bookmark not found', code: 404 });
+      this.bookmarks.splice(idx, 1);
+      return json(route, 200, { success: true, id });
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

@@ -13,6 +13,8 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{
     exponent_for, format_amount, normalise_currency, parse_amount,
 };
+use crate::modules::finance::models::{Transaction, TransactionSource};
+use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::portfolio::handler::broadcast;
 use crate::modules::portfolio::models::CashBalance;
 use crate::modules::portfolio::repository::{PortfolioRepository, WithdrawOutcome};
@@ -25,6 +27,49 @@ pub fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
         currency: cash.currency.clone(),
         balance_minor: cash.balance_minor,
     }
+}
+
+/// Posts a cash deposit or withdrawal to the finance ledger so portfolio funding
+/// reflects accurately in liquid cash balances.
+pub async fn record_portfolio_cash_transaction(
+    pool: &SqlitePool,
+    owner_id: &str,
+    action: &str,
+    amount_minor: i64,
+    currency: &str,
+    exponent: i64,
+    cash_id: i64,
+    executed_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<Transaction> {
+    let (direction, note) = match action {
+        "deposit" => ("expense", "Portfolio cash deposit"),
+        "withdraw" => ("income", "Portfolio cash withdrawal"),
+        _ => return None,
+    };
+
+    let category_id = FinanceRepository::find_or_create_category(pool, owner_id, "Investments")
+        .await
+        .ok()
+        .flatten()
+        .map(|c| c.id);
+
+    FinanceRepository::create_transaction(
+        pool,
+        "web",
+        owner_id,
+        "Portfolio",
+        direction,
+        amount_minor,
+        currency,
+        exponent,
+        category_id,
+        Some(note),
+        Some(TransactionSource::PortfolioCash.as_str()),
+        Some(cash_id),
+        executed_at.unwrap_or_else(chrono::Utc::now),
+    )
+    .await
+    .ok()
 }
 
 /// Parses `<amount> [CUR]` for a deposit/withdraw — the same optional,
@@ -107,6 +152,11 @@ async fn handle_cash_deposit(
     {
         Ok(cash) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
+            if let Some(tx) = record_portfolio_cash_transaction(
+                pool, owner_id, "deposit", amount_minor, &currency, exponent as i64, cash.id, None,
+            ).await {
+                broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
+            }
             format!(
                 "✅ Deposited <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),
@@ -142,6 +192,11 @@ async fn handle_cash_withdraw(
     match PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
         Ok(WithdrawOutcome::Ok(cash)) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
+            if let Some(tx) = record_portfolio_cash_transaction(
+                pool, owner_id, "withdraw", amount_minor, &currency, exponent as i64, cash.id, None,
+            ).await {
+                broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
+            }
             format!(
                 "✅ Withdrew <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),

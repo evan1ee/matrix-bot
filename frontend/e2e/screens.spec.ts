@@ -55,6 +55,11 @@ test('@screens the module views', async ({ app, api }) => {
     failure_count: 1,
     last_triggered_at: '2026-08-27T02:30:00Z',
   });
+  api.seedBookmark({
+    url: 'https://news.ycombinator.com',
+    title: 'Hacker News',
+    tags: 'tech,news',
+  });
 
   await gotoApp(app);
   await expect(app.getByText(DASHBOARD_READY)).toBeVisible();
@@ -67,6 +72,7 @@ test('@screens the module views', async ({ app, api }) => {
     ['07-portfolio', TAB.portfolio],
     ['08-bills', TAB.bills],
     ['09-webhooks', TAB.webhooks],
+    ['10-bookmarks', TAB.bookmarks],
     ['12-ai-assistant', TAB.ai],
   ] as const) {
     await app.getByRole('button', { name: tab, exact: true }).click();

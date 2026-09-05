@@ -132,10 +132,10 @@ const ReminderRow: React.FC<{
             type="text"
             value={draftMessage}
             onChange={(e) => setDraftMessage(e.target.value)}
-            className="sm:col-span-2 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+            className="sm:col-span-2 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
           />
 
-          <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+          <div className="h-9 flex items-center gap-1 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800">
             <span className="text-xs font-mono text-neutral-500">In</span>
             <input
               type="number"
@@ -176,14 +176,14 @@ const ReminderRow: React.FC<{
           <button
             type="submit"
             disabled={editMutation.isPending}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+            className="h-9 inline-flex items-center gap-2 px-3 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
           >
             {editMutation.isPending ? 'Saving...' : 'Save'}
           </button>
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="px-3 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
+            className="h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
           >
             Cancel
           </button>
@@ -198,7 +198,7 @@ const ReminderRow: React.FC<{
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{item.message}</p>
           {item.recurrence !== 'none' && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-blue-100 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-900/50">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
               <Repeat className="w-3 h-3" />
               {item.recurrence}
             </span>
@@ -214,7 +214,7 @@ const ReminderRow: React.FC<{
       </div>
 
       <div className="flex items-center gap-3 shrink-0">
-        <span className="px-2.5 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-amber-600 dark:text-amber-300 animate-pulse">
+        <span className="px-2.5 py-1 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-amber-600 dark:text-amber-300">
           {timeLeft}
         </span>
         <button
@@ -414,11 +414,11 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
               placeholder="Reminder message..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              className="sm:col-span-2 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+              className="sm:col-span-2 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
             />
 
             {recurrence === 'none' ? (
-              <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm">
+              <div className="h-9 flex items-center gap-1 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 shadow-xs">
                 <span className="text-xs font-mono text-neutral-500">In</span>
                 <input
                   type="number"
@@ -441,7 +441,7 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
                 />
               </div>
             ) : (
-              <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm font-mono text-xs">
+              <div className="h-9 flex items-center gap-1 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 shadow-xs font-mono text-xs">
                 <span className="text-neutral-500">At</span>
                 <CustomSelect
                   value={hour12}
@@ -500,7 +500,7 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+              className="h-9 inline-flex items-center justify-center gap-2 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>{createMutation.isPending ? 'Scheduling...' : 'Set Reminder'}</span>

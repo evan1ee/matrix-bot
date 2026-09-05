@@ -35,14 +35,14 @@ export const WebhookLogsModal: React.FC<WebhookLogsModalProps> = ({
         );
       case 'success':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            🟢 SUCCESS
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            SUCCESS
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-            🔵 INFO
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
+            INFO
           </span>
         );
     }
@@ -52,19 +52,19 @@ export const WebhookLogsModal: React.FC<WebhookLogsModalProps> = ({
     switch (status.toLowerCase()) {
       case 'delivered':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
             <CheckCircle2 className="w-3 h-3" /> Delivered
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-destructive/10 text-destructive border border-destructive/20">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded bg-destructive/10 text-destructive border border-destructive/20">
             <AlertCircle className="w-3 h-3" /> Failed
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
             <Clock className="w-3 h-3 animate-spin" /> In Queue
           </span>
         );
@@ -80,7 +80,7 @@ export const WebhookLogsModal: React.FC<WebhookLogsModalProps> = ({
       <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-3xl rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 max-h-[88vh] flex flex-col">
         <div className="p-4 sm:p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 bg-neutral-50 dark:bg-neutral-900/50">
           <div className="flex items-center gap-2.5 min-w-0">
-            <History className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <History className="w-5 h-5 text-neutral-500 shrink-0" />
             <div className="min-w-0">
               <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100 truncate">
                 Delivery Logs: {webhook.name}

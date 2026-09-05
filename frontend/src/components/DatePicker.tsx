@@ -187,7 +187,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   }, [min, max]);
 
   return (
-    <div ref={containerRef} data-testid="datepicker-container" className={`relative ${className}`}>
+    <div ref={containerRef} data-testid="datepicker-container" className={`relative w-full ${className}`}>
       {/* Hidden input for form validation, accessible label binding & automated test fill compatibility */}
       <input
         ref={hiddenInputRef}
@@ -213,7 +213,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           setIsOpen((prev) => !prev);
           setIsYearPickerOpen(false);
         }}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700/60 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition shadow-xs cursor-pointer ${
+        className={`w-full h-9 flex items-center justify-between gap-2 px-3 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700/60 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition shadow-xs cursor-pointer ${
           disabled ? 'opacity-50 cursor-not-allowed' : ''
         }`}
       >

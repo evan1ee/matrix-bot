@@ -385,6 +385,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/retrospective": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_retrospective"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -491,6 +507,86 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["register_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_bookmarks"];
+        put?: never;
+        post: operations["create_bookmark"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookmarks/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookmarks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_bookmark"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_bookmark"];
+        options?: never;
+        head?: never;
+        patch: operations["update_bookmark"];
+        trace?: never;
+    };
+    "/api/v1/bookmarks/{id}/toggle-archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["toggle_archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookmarks/{id}/toggle-favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["toggle_favorite"];
         delete?: never;
         options?: never;
         head?: never;
@@ -617,6 +713,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_portfolio_activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/activity/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Verifies the cryptographic SHA-256 hash chain of the user's audit log. */
+        get: operations["verify_portfolio_activity_chain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_alerts"];
+        put?: never;
+        post: operations["create_alert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/alerts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_alert"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/portfolio/cash": {
         parameters: {
             query?: never;
@@ -665,6 +826,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_portfolio_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/portfolio/holdings": {
         parameters: {
             query?: never;
@@ -675,6 +852,22 @@ export interface paths {
         get: operations["list_holdings"];
         put?: never;
         post: operations["buy_holding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["record_holding_position"];
         delete?: never;
         options?: never;
         head?: never;
@@ -729,6 +922,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio/holdings/{id}/refresh-price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refresh_single_holding_price"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/portfolio/holdings/{id}/sell": {
         parameters: {
             query?: never;
@@ -739,6 +948,70 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["sell_holding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/holdings/{id}/symbol": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_holding_symbol"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_symbol_quote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/refresh-prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refresh_all_prices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search_ticker_symbols"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -965,10 +1238,52 @@ export interface components {
             temperature?: number | null;
             updated_at: string;
         };
+        /** @enum {string} */
+        AlertCondition: "above" | "below";
         ApiErrorResponse: {
             /** Format: int32 */
             code: number;
             error: string;
+        };
+        AuditVerificationResult: {
+            /** Format: int64 */
+            broken_entry_id?: number | null;
+            genesis_hash: string;
+            head_hash?: string | null;
+            is_valid: boolean;
+            message: string;
+            total_verified: number;
+        };
+        Bookmark: {
+            author?: string | null;
+            created_at: string;
+            description?: string | null;
+            domain: string;
+            /** Format: int64 */
+            id: number;
+            image_url?: string | null;
+            is_archived: boolean;
+            is_favorite: boolean;
+            owner_id: string;
+            reader_content?: string | null;
+            /** Format: int64 */
+            reading_time_minutes: number;
+            tags: string;
+            title: string;
+            updated_at: string;
+            url: string;
+        };
+        BookmarkStats: {
+            /** Format: int64 */
+            archived_count: number;
+            /** Format: int64 */
+            favorite_count: number;
+            tags: string[];
+            top_domains: components["schemas"]["DomainCount"][];
+            /** Format: int64 */
+            total_count: number;
+            /** Format: int64 */
+            unread_count: number;
         };
         /**
          * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
@@ -978,6 +1293,8 @@ export interface components {
         BuyHoldingRequest: {
             /** @description ISO 4217 code, e.g. `"USD"`. */
             currency: string;
+            /** Format: date-time */
+            executed_at?: string | null;
             note?: string | null;
             /** @description Decimal string, e.g. `"150.00"`. */
             price: string;
@@ -991,6 +1308,8 @@ export interface components {
             amount: string;
             /** @description ISO 4217 code, e.g. `"USD"`. */
             currency: string;
+            /** Format: date-time */
+            executed_at?: string | null;
         };
         /**
          * @description Cash available to spend on a buy, in one currency. A missing row means a
@@ -1056,6 +1375,15 @@ export interface components {
         ConfirmMergeRequest: {
             from_account: string;
         };
+        CreateAlertRequest: {
+            condition: components["schemas"]["AlertCondition"];
+            /** @description Currency, e.g. "USD". Defaults to "USD" if omitted. */
+            currency?: string | null;
+            /** @description Ticker or crypto pair, e.g. "BTC-USD" or "AAPL" */
+            symbol: string;
+            /** @description Target price as decimal string, e.g. "65000.00" */
+            target_price: string;
+        };
         CreateBillPayload: {
             /** Format: int64 */
             amount_minor: number;
@@ -1082,6 +1410,11 @@ export interface components {
             remind_room_id?: string | null;
             /** Format: int32 */
             total_installments?: number | null;
+        };
+        CreateBookmarkInput: {
+            tags?: string[] | null;
+            title?: string | null;
+            url: string;
         };
         CreateReminderRequest: {
             message: string;
@@ -1147,6 +1480,11 @@ export interface components {
          * @enum {string}
          */
         Direction: "expense" | "income";
+        DomainCount: {
+            /** Format: int64 */
+            count: number;
+            domain: string;
+        };
         HealthResponse: {
             db_status: string;
             service: string;
@@ -1273,6 +1611,31 @@ export interface components {
             from_account: string;
             preview: components["schemas"]["MergePreview"];
         };
+        /** @description An immutable, cryptographically signed record of a portfolio activity. */
+        PortfolioAuditEntry: {
+            /** @description Operation kind: "buy", "sell", "deposit", "withdraw", "record" */
+            action: string;
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: date-time */
+            created_at?: string | null;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            entry_hash: string;
+            /** Format: int64 */
+            id: number;
+            note?: string | null;
+            owner_id: string;
+            prev_hash: string;
+            /** Format: int64 */
+            price_minor?: number | null;
+            /** Format: int64 */
+            quantity_minor?: number | null;
+            /** Format: int64 */
+            realized_pl_minor?: number | null;
+            symbol?: string | null;
+        };
         /**
          * @description Totals for one currency. Currencies are never combined — without a rate
          *     source, adding a USD position to a JPY position produces a meaningless
@@ -1304,6 +1667,47 @@ export interface components {
              * @description Unrealized P&L of only the holdings that have a price set.
              */
             unrealized_pl_minor: number;
+        };
+        PortfolioHistoryPoint: {
+            /** Format: int64 */
+            cash_minor: number;
+            date: string;
+            /** Format: int64 */
+            holdings_value_minor: number;
+            /** Format: int64 */
+            total_net_worth_minor: number;
+        };
+        PortfolioHistoryResponse: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            current_value_minor: number;
+            /** Format: int64 */
+            period_change_minor: number;
+            /** Format: double */
+            period_change_pct: number;
+            points: components["schemas"]["PortfolioHistoryPoint"][];
+            /** Format: int64 */
+            starting_value_minor: number;
+            timeframe: string;
+        };
+        PriceAlert: {
+            condition: string;
+            /** Format: date-time */
+            created_at: string;
+            currency: string;
+            /** Format: int32 */
+            currency_exponent: number;
+            /** Format: int64 */
+            id: number;
+            is_triggered: boolean;
+            owner_id: string;
+            symbol: string;
+            /** Format: int64 */
+            target_price_minor: number;
+            /** Format: date-time */
+            triggered_at?: string | null;
         };
         RecoveryCodesResponse: {
             /** @description Shown exactly once. The server keeps only hashes. */
@@ -1352,6 +1756,10 @@ export interface components {
             /** Format: int32 */
             total_installments?: number | null;
             updated_at?: string | null;
+        };
+        RefreshSummary: {
+            failed: string[];
+            updated: string[];
         };
         RegisterFinishRequest: {
             ceremony_id: string;
@@ -1427,6 +1835,8 @@ export interface components {
             kind: string;
         };
         SellHoldingRequest: {
+            /** Format: date-time */
+            executed_at?: string | null;
             price: string;
             quantity: string;
         };
@@ -1474,6 +1884,18 @@ export interface components {
              * @description End of the period, exclusive — so month boundaries do not double-count.
              */
             to: string;
+        };
+        SymbolQuoteResponse: {
+            currency: string;
+            /** Format: double */
+            price: number;
+            symbol: string;
+        };
+        TickerSearchResult: {
+            exchange?: string | null;
+            name: string;
+            quote_type?: string | null;
+            symbol: string;
         };
         TodoItem: {
             completed: boolean;
@@ -1562,6 +1984,13 @@ export interface components {
             room_id: string;
             /** @description Display only — user-controlled, and collides across identity spaces. */
             sender_name: string;
+            /**
+             * Format: int64
+             * @description The ID of the originating entity in that module.
+             */
+            source_id?: number | null;
+            /** @description Which module scheduled or generated this transaction (e.g. "recurring_bill", "portfolio_cash"). */
+            source_kind?: string | null;
         };
         /**
          * @description Amounts arrive as decimal strings, never as JSON numbers.
@@ -1623,6 +2052,13 @@ export interface components {
             /** Format: int32 */
             total_installments?: number | null;
         };
+        UpdateBookmarkInput: {
+            description?: string | null;
+            is_archived?: boolean | null;
+            is_favorite?: boolean | null;
+            tags?: string[] | null;
+            title?: string | null;
+        };
         /**
          * @description Mirrors `CreateReminderRequest` rather than patching individual fields: the
          *     fire time is expressed as a delay from now, exactly as at creation, so an
@@ -1643,6 +2079,9 @@ export interface components {
             currency: string;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. */
             timezone: string;
+        };
+        UpdateSymbolRequest: {
+            symbol: string;
         };
         /**
          * @description A PATCH body.
@@ -1743,6 +2182,30 @@ export interface components {
         };
         /** @enum {string} */
         WebhookSeverity: "critical" | "warning" | "info" | "success" | "default";
+        WeeklyRetrospective: {
+            active_habits_count: number;
+            active_tasks_count: number;
+            completed_tasks_count: number;
+            currency: string;
+            days_logged_count: number;
+            dominant_mood?: string | null;
+            formatted_markdown: string;
+            /** Format: double */
+            habits_adherence_percent: number;
+            /** Format: int64 */
+            net_cashflow_minor: number;
+            period_end: string;
+            period_start: string;
+            top_expense_category?: string | null;
+            /** Format: int64 */
+            total_income_minor: number;
+            /** Format: int64 */
+            total_spent_minor: number;
+            upcoming_bills_count: number;
+            /** Format: int64 */
+            upcoming_bills_total_minor: number;
+            upcoming_reminders_count: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -2318,6 +2781,25 @@ export interface operations {
             };
         };
     };
+    get_retrospective: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeeklyRetrospective"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -2528,6 +3010,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_bookmarks: {
+        parameters: {
+            query?: {
+                /** @description Filter by archived state */
+                archived?: boolean | null;
+                /** @description Filter by favorite state */
+                favorite?: boolean | null;
+                /** @description Filter by tag */
+                tag?: string | null;
+                /** @description Filter by domain */
+                domain?: string | null;
+                /** @description Search query */
+                search?: string | null;
+                /** @description Page limit */
+                limit?: number | null;
+                /** @description Page offset */
+                offset?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"][];
+                };
+            };
+        };
+    };
+    create_bookmark: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBookmarkInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    get_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmarkStats"];
+                };
+            };
+        };
+    };
+    get_bookmark: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bookmark ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    delete_bookmark: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bookmark ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_bookmark: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bookmark ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBookmarkInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    toggle_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bookmark ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    toggle_favorite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bookmark ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bookmark"];
                 };
             };
         };
@@ -2885,6 +3555,177 @@ export interface operations {
             };
         };
     };
+    get_portfolio_activity: {
+        parameters: {
+            query?: {
+                limit?: number | null;
+                offset?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent portfolio operations audit log */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioAuditEntry"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    verify_portfolio_activity_chain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cryptographic verification report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditVerificationResult"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_alerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of price alerts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceAlert"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_alert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAlertRequest"];
+            };
+        };
+        responses: {
+            /** @description Alert created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceAlert"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_alert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alert deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     list_cash: {
         parameters: {
             query?: never;
@@ -2998,6 +3839,40 @@ export interface operations {
             };
         };
     };
+    get_portfolio_history: {
+        parameters: {
+            query?: {
+                /** @description Timeframe: "7d", "1m", "3m", "1y", "all". Defaults to "1m". */
+                timeframe?: string | null;
+                /** @description Currency code, e.g. "USD". Defaults to "USD". */
+                currency?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Historical net worth data points */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioHistoryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     list_holdings: {
         parameters: {
             query?: never;
@@ -3050,6 +3925,48 @@ export interface operations {
                 };
             };
             /** @description Bad request, or insufficient cash */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    record_holding_position: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuyHoldingRequest"];
+            };
+        };
+        responses: {
+            /** @description Position recorded without cash debit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3216,6 +4133,56 @@ export interface operations {
             };
         };
     };
+    refresh_single_holding_price: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holding database ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Holding price refreshed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Holding not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Failed to fetch market price */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     sell_holding: {
         parameters: {
             query?: never;
@@ -3266,6 +4233,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_holding_symbol: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSymbolRequest"];
+            };
+        };
+        responses: {
+            /** @description Holding symbol updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Holding"];
+                };
+            };
+            /** @description Invalid symbol or symbol already exists */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Holding not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_symbol_quote: {
+        parameters: {
+            query: {
+                symbol: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current market quote for symbol */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SymbolQuoteResponse"];
+                };
+            };
+            /** @description Failed to fetch quote */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    refresh_all_prices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Refreshed prices for all holdings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshSummary"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    search_ticker_symbols: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticker symbol search results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TickerSearchResult"][];
                 };
             };
         };

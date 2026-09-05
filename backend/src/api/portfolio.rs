@@ -426,6 +426,11 @@ pub async fn deposit_cash(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(cash_event(&owner_id, &cash));
+    if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
+        &state.db.pool, &owner_id, "deposit", amount_minor, &currency, exponent, cash.id, payload.executed_at,
+    ).await {
+        state.broadcaster.send(SystemEvent::TransactionCreated(tx));
+    }
     Ok(Json(cash))
 }
 
@@ -454,6 +459,11 @@ pub async fn withdraw_cash(
     {
         WithdrawOutcome::Ok(cash) => {
             state.broadcaster.send(cash_event(&owner_id, &cash));
+            if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
+                &state.db.pool, &owner_id, "withdraw", amount_minor, &currency, exponent, cash.id, payload.executed_at,
+            ).await {
+                state.broadcaster.send(SystemEvent::TransactionCreated(tx));
+            }
             Ok(Json(cash))
         }
         WithdrawOutcome::InsufficientFunds { available_minor } => Err(ApiError::bad_request(format!(
@@ -864,9 +874,25 @@ mod tests {
         assert_eq!(cash.balance_minor, 100000);
         assert_eq!(cash.currency, "USD", "should normalise like every other currency field");
 
-        let listed = list_cash(State(state), alice).await.unwrap();
+        let listed = list_cash(State(state.clone()), alice.clone()).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].balance_minor, 100000);
+
+        // Verify deposit posted an expense transaction to the finance ledger
+        let txs = crate::modules::finance::repository::FinanceRepository::list(
+            &state.db.pool,
+            &alice.owner_id(),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].amount_minor, 100000);
+        assert_eq!(txs[0].direction, "expense");
+        assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
+        assert_eq!(txs[0].category_name.as_deref(), Some("Investments"));
     }
 
     #[tokio::test]
@@ -882,13 +908,29 @@ mod tests {
         .unwrap();
 
         let cash = withdraw_cash(
-            State(state),
-            alice,
+            State(state.clone()),
+            alice.clone(),
             Json(cash("400.00", "USD")),
         )
         .await
         .unwrap();
         assert_eq!(cash.balance_minor, 60000);
+
+        // Verify deposit (expense) and withdraw (income) transactions in the finance ledger
+        let txs = crate::modules::finance::repository::FinanceRepository::list(
+            &state.db.pool,
+            &alice.owner_id(),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(txs.len(), 2);
+        assert_eq!(txs[0].amount_minor, 40000);
+        assert_eq!(txs[0].direction, "income");
+        assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
+        assert_eq!(txs[0].category_name.as_deref(), Some("Investments"));
     }
 
     #[tokio::test]

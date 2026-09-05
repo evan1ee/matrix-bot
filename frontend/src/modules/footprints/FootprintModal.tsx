@@ -216,7 +216,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
             </span>
             <div className="flex gap-2">
               <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
                 <input
                   type="text"
                   placeholder="e.g. Eiffel Tower, Kyoto Fushimi Inari..."
@@ -228,14 +228,14 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                       handleSearchPlaces();
                     }
                   }}
-                  className="w-full pl-9 pr-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+                  className="w-full h-9 pl-9 pr-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
                 />
               </div>
               <button
                 type="button"
                 onClick={handleSearchPlaces}
                 disabled={isSearching}
-                className="px-3.5 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                className="h-9 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
               >
                 {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                 <span>Search</span>
@@ -272,7 +272,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                 placeholder="e.g. Grand Canyon"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
               />
             </div>
 
@@ -283,7 +283,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans cursor-pointer"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans cursor-pointer"
               >
                 {CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -305,7 +305,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                 placeholder="e.g. Paris"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
               />
             </div>
             <div>
@@ -317,7 +317,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                 placeholder="e.g. France"
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
-                className="w-full px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
               />
             </div>
           </div>
@@ -360,7 +360,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                     key={s}
                     type="button"
                     onClick={() => setRating(s)}
-                    className="p-1 text-neutral-300 dark:text-neutral-700 hover:scale-110 transition cursor-pointer"
+                    className="p-1 text-neutral-300 dark:text-neutral-700 hover:text-amber-500 dark:hover:text-amber-400 transition-colors duration-150 cursor-pointer"
                   >
                     <Star
                       className={`w-5 h-5 ${
@@ -386,12 +386,12 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                   placeholder="0.00"
                   value={spendAmount}
                   onChange={(e) => setSpendAmount(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-mono"
+                  className="flex-1 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-mono"
                 />
                 <select
                   value={spendCurrency}
                   onChange={(e) => setSpendCurrency(e.target.value)}
-                  className="w-24 px-2 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 cursor-pointer"
+                  className="w-24 h-9 px-2 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 cursor-pointer"
                 >
                   <option value="USD">USD</option>
                   <option value="EUR">EUR</option>
@@ -415,7 +415,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
               placeholder="What made this place special? Highlights, favorite spots, memories..."
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans resize-none"
+              className="w-full px-3 py-2 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans resize-none"
             />
           </div>
 
@@ -424,14 +424,14 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
+              className="h-9 px-3.5 rounded-md border border-neutral-300 dark:border-neutral-700 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
               {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
               <span>Save Footprint</span>

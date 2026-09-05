@@ -72,19 +72,19 @@ export const FootprintsList: React.FC<FootprintsListProps> = ({
       {/* Search & Add Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
           <input
             type="text"
             placeholder="Search places, cities, memories..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+            className="w-full h-9 pl-9 pr-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
           />
         </div>
 
         <button
           onClick={onOpenAddModal}
-          className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition shrink-0 cursor-pointer"
+          className="h-9 inline-flex items-center justify-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition shrink-0 cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>Add Place</span>
