@@ -274,9 +274,9 @@ export class FakeApi {
   webhookLogs: FakeWebhookOutboxItem[] = [];
   aiConfig: FakeAiConfig = {
     owner_id: OWNER,
-    api_base_url: 'http://localhost:11434/v1',
+    api_base_url: 'https://api.openai.com/v1',
     api_key: null,
-    model_name: 'llama3.2',
+    model_name: 'gpt-4o-mini',
     system_prompt: null,
     temperature: 0.7,
     max_tokens: 2048,
@@ -1544,6 +1544,27 @@ export class FakeApi {
       }
     }
 
+    if (path === '/ai/verify' && method === 'POST') {
+      const apiKey = body?.api_key || this.aiConfig.api_key;
+      const baseUrl = body?.api_base_url || this.aiConfig.api_base_url;
+      if (!apiKey && baseUrl && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
+        return json(route, 200, {
+          valid: false,
+          message: 'No API key provided to verify. Please enter an API key.',
+        });
+      }
+      if (apiKey === 'invalid_key') {
+        return json(route, 200, {
+          valid: false,
+          message: 'Invalid API key (HTTP 401): Unauthorized',
+        });
+      }
+      return json(route, 200, {
+        valid: true,
+        message: 'Connection successful and API key verified!',
+      });
+    }
+
     if (path === '/ai/chat' && method === 'POST') {
       let conv = this.aiConversations.find((c) => c.id === body?.conversation_id);
       if (!conv) {
@@ -1635,7 +1656,7 @@ export class FakeApi {
       return json(route, 200, {
         conversation_id: conv.id,
         message: botReply,
-        model_used: this.aiConfig.model_name || 'llama3.2',
+        model_used: this.aiConfig.model_name || 'gpt-4o-mini',
         tool_calls_executed: toolCalls,
       });
     }

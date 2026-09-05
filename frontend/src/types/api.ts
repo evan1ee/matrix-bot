@@ -401,6 +401,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["verify_ai_config"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -2133,6 +2149,15 @@ export interface components {
             /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
             timezone: string;
         };
+        VerifyAiKeyInput: {
+            api_base_url?: string | null;
+            api_key?: string | null;
+            model_name?: string | null;
+        };
+        VerifyAiKeyResponse: {
+            message: string;
+            valid: boolean;
+        };
         Webhook: {
             /** Format: date-time */
             created_at: string;
@@ -2796,6 +2821,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WeeklyRetrospective"];
+                };
+            };
+        };
+    };
+    verify_ai_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyAiKeyInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyAiKeyResponse"];
                 };
             };
         };

@@ -55,3 +55,8 @@ export interface WeeklyRetrospective {
   formatted_markdown: string;
 }
 
+export interface VerifyAiKeyResponse {
+  valid: boolean;
+  message: string;
+}
+

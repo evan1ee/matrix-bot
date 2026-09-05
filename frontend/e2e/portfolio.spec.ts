@@ -1,4 +1,5 @@
 import { test, expect, gotoApp, chooseCurrency, TAB } from './fixtures';
+import fs from 'fs';
 
 const holdingRow = (page: import('@playwright/test').Page, text: string) =>
   page.getByTestId('holding-row').filter({ hasText: text });
@@ -369,17 +370,19 @@ test.describe('per-currency summary', () => {
     await expect(app.getByRole('button', { name: '1Y' })).toBeVisible();
 
     // Capture focused Performance Chart screenshot
-    const artifactDir = 'C:/Users/mbmon/.gemini/antigravity/brain/e7af7078-5197-470f-9ad9-da9579965d67';
-    const chartCard = app.getByText('NET WORTH HISTORY (USD)').locator('xpath=ancestor::div[contains(@class, "rounded-xl")]').first();
-    await chartCard.screenshot({
-      path: `${artifactDir}/portfolio_chart_card.png`,
-    });
+    const artifactDir = process.env.BRAIN_DIR;
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      const chartCard = app.getByText('NET WORTH HISTORY (USD)').locator('xpath=ancestor::div[contains(@class, "rounded-xl")]').first();
+      await chartCard.screenshot({
+        path: `${artifactDir}/portfolio_chart_card.png`,
+      });
 
-    // Capture main dashboard view scrolled to the chart & holdings
-    await chartCard.scrollIntoViewIfNeeded();
-    await app.screenshot({
-      path: `${artifactDir}/portfolio_performance_dashboard.png`,
-    });
+      // Capture main dashboard view scrolled to the chart & holdings
+      await chartCard.scrollIntoViewIfNeeded();
+      await app.screenshot({
+        path: `${artifactDir}/portfolio_performance_dashboard.png`,
+      });
+    }
 
     // Capture holdings list with the Price Alerts toolbar button and holding row bell triggers
     const holdingsPanel = app.getByText('HOLDINGS').locator('xpath=ancestor::div[contains(@class, "rounded-lg")]').first();

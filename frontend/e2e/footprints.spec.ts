@@ -1,5 +1,6 @@
 import { test, expect, gotoApp, TAB } from './fixtures';
 import path from 'path';
+import fs from 'fs';
 
 const gotoFootprints = (page: import('@playwright/test').Page) => gotoApp(page, TAB.footprints);
 
@@ -188,28 +189,29 @@ test.describe('Footprints (Travel & Places Visited)', () => {
     // Wait for map tiles to load
     await app.waitForTimeout(2500);
 
-    const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
-
-    // 1. Dark Mode full-page screenshot
-    await app.screenshot({
-      path: path.join(brainDir, 'footprints_topdown_dark.png'),
-      fullPage: true,
-    });
-
-    // 2. Switch to Light Mode
-    const themeToggle = app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first();
-    if (await themeToggle.isVisible()) {
-      await themeToggle.click();
-      await app.waitForTimeout(500);
-
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      // 1. Dark Mode full-page screenshot
       await app.screenshot({
-        path: path.join(brainDir, 'footprints_topdown_light.png'),
+        path: path.join(brainDir, 'footprints_topdown_dark.png'),
         fullPage: true,
       });
 
-      // Switch back to dark mode
-      await themeToggle.click();
-      await app.waitForTimeout(300);
+      // 2. Switch to Light Mode
+      const themeToggle = app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first();
+      if (await themeToggle.isVisible()) {
+        await themeToggle.click();
+        await app.waitForTimeout(500);
+
+        await app.screenshot({
+          path: path.join(brainDir, 'footprints_topdown_light.png'),
+          fullPage: true,
+        });
+
+        // Switch back to dark mode
+        await themeToggle.click();
+        await app.waitForTimeout(300);
+      }
     }
   });
 });

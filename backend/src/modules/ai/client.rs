@@ -30,10 +30,10 @@ pub struct ResolvedAiConfig {
 impl ResolvedAiConfig {
     pub fn from_user_config(user_config: Option<&AiUserConfig>) -> Self {
         let env_base = std::env::var("AI_API_BASE")
-            .unwrap_or_else(|_| "http://localhost:11434/v1".to_string());
+            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
         let env_key = std::env::var("AI_API_KEY").ok().filter(|s| !s.trim().is_empty());
         let env_model = std::env::var("AI_MODEL")
-            .unwrap_or_else(|_| "llama3.2".to_string());
+            .unwrap_or_else(|_| "gpt-4o-mini".to_string());
 
         let api_base_url = user_config
             .and_then(|c| c.api_base_url.as_ref())
@@ -132,6 +132,85 @@ impl AiClient {
         let response: ChatCompletionResponse = res.json().await?;
         Ok(response)
     }
+
+    pub async fn verify_api_key(
+        &self,
+        base_url: &str,
+        api_key: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<(), String> {
+        let clean_base = base_url.trim().trim_end_matches('/');
+        if clean_base.is_empty() {
+            return Err("API base URL cannot be empty".to_string());
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key.trim())) {
+                headers.insert(AUTHORIZATION, val);
+            }
+        }
+
+        // 1. First try GET /models
+        let models_url = format!("{}/models", clean_base);
+        match self
+            .http_client
+            .get(&models_url)
+            .headers(headers.clone())
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(res) => {
+                let status = res.status();
+                if status.is_success() {
+                    return Ok(());
+                }
+                if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+                    let body = res.text().await.unwrap_or_default();
+                    let snippet: String = body.chars().take(200).collect();
+                    return Err(format!("Invalid API key (HTTP {}): {}", status.as_u16(), snippet));
+                }
+            }
+            Err(err) => {
+                if err.is_connect() || err.is_timeout() {
+                    return Err(format!("Connection error connecting to {}: {}", clean_base, err));
+                }
+            }
+        }
+
+        // 2. Fallback to minimal chat completion
+        let completions_url = format!("{}/chat/completions", clean_base);
+        let test_model = model.unwrap_or("gpt-4o-mini");
+        let body = serde_json::json!({
+            "model": test_model,
+            "messages": [{ "role": "user", "content": "ping" }],
+            "max_tokens": 1
+        });
+
+        let comp_res = self
+            .http_client
+            .post(&completions_url)
+            .headers(headers)
+            .json(&body)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await
+            .map_err(|e| format!("Connection error connecting to {}: {}", clean_base, e))?;
+
+        let comp_status = comp_res.status();
+        if comp_status.is_success() {
+            return Ok(());
+        }
+        let err_body = comp_res.text().await.unwrap_or_default();
+        let snippet: String = err_body.chars().take(200).collect();
+        if comp_status == reqwest::StatusCode::UNAUTHORIZED || comp_status == reqwest::StatusCode::FORBIDDEN {
+            return Err(format!("Invalid API key (HTTP {}): {}", comp_status.as_u16(), snippet));
+        }
+
+        Err(format!("Provider error (HTTP {}): {}", comp_status.as_u16(), snippet))
+    }
 }
 
 impl Default for AiClient {
@@ -147,8 +226,8 @@ mod tests {
     #[test]
     fn test_resolved_config_defaults() {
         let resolved = ResolvedAiConfig::from_user_config(None);
-        assert!(!resolved.api_base_url.is_empty());
-        assert!(!resolved.model_name.is_empty());
+        assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
+        assert_eq!(resolved.model_name, "gpt-4o-mini");
         assert_eq!(resolved.temperature, 0.7);
         assert_eq!(resolved.max_tokens, 2048);
     }

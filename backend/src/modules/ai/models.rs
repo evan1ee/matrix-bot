@@ -26,6 +26,53 @@ impl AiUserConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VerifyAiKeyInput {
+    pub api_base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub model_name: Option<String>,
+}
+
+impl VerifyAiKeyInput {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(ref url_str) = self.api_base_url {
+            let trimmed = url_str.trim();
+            if trimmed.len() > 500 {
+                return Err("API base URL exceeds 500 characters");
+            }
+            if !trimmed.is_empty() {
+                let parsed = url::Url::parse(trimmed)
+                    .map_err(|_| "API base URL is not a valid URL")?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err("API base URL must use http or https scheme");
+                }
+                if let Some(host) = parsed.host_str() {
+                    if host == "169.254.169.254" || host.starts_with("169.254.") {
+                        return Err("API base URL cannot target link-local metadata addresses");
+                    }
+                }
+            }
+        }
+        if let Some(ref key) = self.api_key {
+            if key.len() > 500 {
+                return Err("API key exceeds 500 characters");
+            }
+        }
+        if let Some(ref model) = self.model_name {
+            if model.len() > 500 {
+                return Err("Model name exceeds 500 characters");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VerifyAiKeyResponse {
+    pub valid: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateAiConfigInput {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,

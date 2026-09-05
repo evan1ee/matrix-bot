@@ -147,7 +147,7 @@ const AiAssistantView: React.FC<{
             <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2 font-sans">
               AI Assistant
               <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
-                {config?.model_name || 'llama3.2'}
+                {config?.model_name || 'gpt-4o-mini'}
               </span>
             </h1>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 font-sans">

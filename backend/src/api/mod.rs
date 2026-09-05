@@ -155,6 +155,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/account/webhooks/:id/test", post(webhooks::test_webhook))
         .route("/account/webhooks/:id/logs", get(webhooks::get_webhook_logs))
         .route("/ai/chat", post(ai::chat))
+        .route("/ai/verify", post(ai::verify_ai_config))
         .route("/ai/conversations", get(ai::list_conversations))
         .route(
             "/ai/conversations/:id",

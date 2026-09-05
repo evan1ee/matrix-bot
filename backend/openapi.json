@@ -872,6 +872,41 @@
         ]
       }
     },
+    "/api/v1/ai/verify": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "verify_ai_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyAiKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyAiKeyResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -6555,6 +6590,38 @@
           "timezone": {
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`. Validated on write."
+          }
+        }
+      },
+      "VerifyAiKeyInput": {
+        "type": "object",
+        "properties": {
+          "api_base_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "api_key": {
+            "type": "string",
+            "nullable": true
+          },
+          "model_name": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "VerifyAiKeyResponse": {
+        "type": "object",
+        "required": [
+          "valid",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
           }
         }
       },

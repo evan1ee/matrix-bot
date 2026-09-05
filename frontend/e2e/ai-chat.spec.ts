@@ -1,4 +1,4 @@
-import { test, expect, gotoApp, TAB } from './fixtures';
+import { test, expect, gotoApp, chooseOption, selectField, TAB } from './fixtures';
 
 test('navigates to AI Assistant and renders suggestions', async ({ app }) => {
   await gotoApp(app);
@@ -47,16 +47,39 @@ test('resets conversation via New Chat button', async ({ app }) => {
   await expect(app.getByText('Hello AI')).not.toBeVisible();
 });
 
-test('configures custom AI model and endpoint in settings', async ({ app }) => {
+test('configures AI model and endpoint via dropdowns in settings', async ({ app }) => {
   await gotoApp(app);
   await app.getByRole('button', { name: TAB.ai, exact: true }).click();
 
   await app.locator('button[title="Configure AI model & API keys"]').click();
   await expect(app.getByText('AI Assistant Settings')).toBeVisible();
 
-  await app.locator('input[placeholder*="llama3.2"]').fill('gpt-4o-mini');
+  // Switch provider to DeepSeek via dropdown
+  await chooseOption(selectField(app, 'API Endpoint / Provider'), 'DeepSeek');
+
   await app.getByRole('button', { name: 'Save Settings' }).click();
 
   await expect(app.getByText('AI Assistant Settings')).not.toBeVisible();
-  await expect(app.getByText('gpt-4o-mini')).toBeVisible();
+  await expect(app.getByText('deepseek-chat')).toBeVisible();
+
+  // Re-open and switch provider to xAI / Grok
+  await app.locator('button[title="Configure AI model & API keys"]').click();
+  await expect(app.getByText('AI Assistant Settings')).toBeVisible();
+  await chooseOption(selectField(app, 'API Endpoint / Provider'), 'xAI / Grok');
+
+  // Test API Key verification
+  await app.locator('input[type="password"]').fill('xai-test-valid-key');
+  await app.getByRole('button', { name: /verify key/i }).click();
+  await expect(app.getByText('Connection successful and API key verified!')).toBeVisible();
+
+  // Test invalid key verification feedback
+  await app.locator('input[type="password"]').fill('invalid_key');
+  await app.getByRole('button', { name: /verify key/i }).click();
+  await expect(app.getByText(/Invalid API key/i)).toBeVisible();
+
+  // Restore valid key and save
+  await app.locator('input[type="password"]').fill('xai-test-valid-key');
+  await app.getByRole('button', { name: 'Save Settings' }).click();
+  await expect(app.getByText('AI Assistant Settings')).not.toBeVisible();
+  await expect(app.getByText('grok-4.6')).toBeVisible();
 });

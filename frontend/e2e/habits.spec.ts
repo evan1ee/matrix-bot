@@ -1,5 +1,6 @@
 import { test, expect, gotoApp, TAB } from './fixtures';
 import path from 'path';
+import fs from 'fs';
 
 const gotoHabits = (page: import('@playwright/test').Page) => gotoApp(page, TAB.habits);
 
@@ -28,10 +29,12 @@ test.describe('Daily Cadence & Heatmap Habits', () => {
     await app.getByPlaceholder(/Morning Run/i).fill('Daily Meditation');
     await app.getByPlaceholder(/Minimum 3 miles/i).fill('15 minutes mindful breathing');
 
-    const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
-    await app.screenshot({
-      path: path.join(brainDir, 'habits_modal_dark.png'),
-    });
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'habits_modal_dark.png'),
+      });
+    }
 
     await app.getByRole('button', { name: 'Create Habit' }).click();
 
@@ -134,21 +137,22 @@ test.describe('Daily Cadence & Heatmap Habits', () => {
     await gotoHabits(app);
     await expect(app.getByText('Morning Run 5km')).toBeVisible();
 
-    const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      // Dark theme screenshot
+      await app.screenshot({
+        path: path.join(brainDir, 'habits_dashboard_dark.png'),
+        fullPage: true,
+      });
 
-    // Dark theme screenshot
-    await app.screenshot({
-      path: path.join(brainDir, 'habits_dashboard_dark.png'),
-      fullPage: true,
-    });
+      // Light theme
+      await app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first().click();
+      await app.waitForTimeout(300);
 
-    // Light theme
-    await app.locator('button[title*="light mode" i]:visible, button[title*="dark mode" i]:visible').first().click();
-    await app.waitForTimeout(300);
-
-    await app.screenshot({
-      path: path.join(brainDir, 'habits_dashboard_light.png'),
-      fullPage: true,
-    });
+      await app.screenshot({
+        path: path.join(brainDir, 'habits_dashboard_light.png'),
+        fullPage: true,
+      });
+    }
   });
 });

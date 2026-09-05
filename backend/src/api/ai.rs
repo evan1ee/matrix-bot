@@ -9,10 +9,10 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::ai::client::ResolvedAiConfig;
-use crate::modules::ai::handler::run_ai_turn;
+use crate::modules::ai::handler::{get_ai_client, run_ai_turn};
 use crate::modules::ai::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig,
-    UpdateAiConfigInput,
+    UpdateAiConfigInput, VerifyAiKeyInput, VerifyAiKeyResponse,
 };
 use crate::modules::ai::repository::AiRepository;
 use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
@@ -52,7 +52,7 @@ pub async fn chat(
     .await
     .map_err(|e| {
         error!("AI chat execution error for {}: {}", owner_id, e);
-        ApiError::internal("Failed to execute AI chat completion")
+        ApiError::bad_request(e)
     })?;
 
     Ok(Json(AiChatResponse {
@@ -190,6 +190,58 @@ pub async fn update_ai_config(
     });
 
     Ok(Json(updated.redacted()))
+}
+
+#[utoipa::path(
+    post,
+    tag = "ai",
+    path = "/api/v1/ai/verify",
+    request_body = VerifyAiKeyInput,
+    responses((status = 200, body = VerifyAiKeyResponse)),
+    security(("session_cookie" = []))
+)]
+pub async fn verify_ai_config(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Json(input): Json<VerifyAiKeyInput>,
+) -> Result<Json<VerifyAiKeyResponse>, ApiError> {
+    input.validate().map_err(ApiError::bad_request)?;
+
+    let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
+
+    let target_base_url = input
+        .api_base_url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or(resolved.api_base_url);
+
+    let target_key = input
+        .api_key
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| user_config.as_ref().and_then(|c| c.api_key.clone()))
+        .or(resolved.api_key);
+
+    let target_model = input
+        .model_name
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or(resolved.model_name);
+
+    match get_ai_client()
+        .verify_api_key(&target_base_url, target_key.as_deref(), Some(&target_model))
+        .await
+    {
+        Ok(()) => Ok(Json(VerifyAiKeyResponse {
+            valid: true,
+            message: "Connection successful and API key verified!".to_string(),
+        })),
+        Err(err) => Ok(Json(VerifyAiKeyResponse {
+            valid: false,
+            message: err,
+        })),
+    }
 }
 
 #[utoipa::path(

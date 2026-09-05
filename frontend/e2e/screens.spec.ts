@@ -1,4 +1,4 @@
-import { test, expect, gotoApp, TAB, DASHBOARD_READY } from './fixtures';
+import { test, expect, gotoApp, TAB, DASHBOARD_READY, chooseOption, selectField } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /**
@@ -126,6 +126,22 @@ test('@screens ai assistant chat thread and settings modal', async ({ app, api }
   await app.locator('button[title="Configure AI model & API keys"]').click();
   await expect(app.getByText('AI Assistant Settings')).toBeVisible();
   await shot(app, '14-ai-settings-modal');
+
+  // Also capture AI settings with xAI / Grok selected
+  await chooseOption(selectField(app, 'API Endpoint / Provider'), 'xAI / Grok');
+  await shot(app, '20-ai-settings-xai');
+
+  // Open the Model Name dropdown to show Grok models
+  const modelSelectBtn = selectField(app, 'Model Name (xAI / Grok)');
+  await modelSelectBtn.click();
+  await shot(app, '21-ai-settings-xai-models');
+  await modelSelectBtn.click(); // close
+
+  // Capture API key verification success feedback
+  await app.locator('input[type="password"]').fill('xai-test-key-12345');
+  await app.getByRole('button', { name: /verify key/i }).click();
+  await expect(app.getByText('Connection successful and API key verified!')).toBeVisible();
+  await shot(app, '22-ai-settings-verify-success');
 
   // Also capture AI settings in light mode
   await app.getByRole('button', { name: 'Cancel' }).click();

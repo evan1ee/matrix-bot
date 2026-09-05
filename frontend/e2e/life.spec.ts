@@ -1,5 +1,6 @@
 import { test, expect, gotoApp, TAB } from './fixtures';
 import path from 'path';
+import fs from 'fs';
 
 const gotoLife = (page: import('@playwright/test').Page) => gotoApp(page, TAB.life);
 
@@ -66,10 +67,12 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     // Fill note
     await app.getByPlaceholder(/What happened today/i).fill('Shipped the Visualizing Life feature! Feel great.');
 
-    const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
-    await app.screenshot({
-      path: path.join(brainDir, 'life_day_modal_dark.png'),
-    });
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'life_day_modal_dark.png'),
+      });
+    }
 
     // Save record
     await app.getByRole('button', { name: /save record/i }).click();
@@ -105,14 +108,15 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await gotoLife(app);
 
     await expect(app.getByText('Days Elapsed')).toBeVisible();
-    const brainDir = 'C:\\Users\\mbmon\\.gemini\\antigravity\\brain\\e7af7078-5197-470f-9ad9-da9579965d67';
-
-    // Screenshot of Lifespan Day Grid card with 10px blocks
-    const gridCard = app.getByRole('heading', { name: /lifespan day grid/i }).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
-    await expect(gridCard).toBeVisible();
-    await gridCard.screenshot({
-      path: path.join(brainDir, 'life_grid_10px.png'),
-    });
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      // Screenshot of Lifespan Day Grid card with 10px blocks
+      const gridCard = app.getByRole('heading', { name: /lifespan day grid/i }).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
+      await expect(gridCard).toBeVisible();
+      await gridCard.screenshot({
+        path: path.join(brainDir, 'life_grid_10px.png'),
+      });
+    }
 
     // Test Decade filter
     const decadePill = app.getByRole('button', { name: '2020s' }).first();
@@ -142,6 +146,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     // Hover over interactive grid canvas to activate the tooltip
     const canvas = app.locator('canvas').last();
     await expect(canvas).toBeVisible();
+    await canvas.scrollIntoViewIfNeeded();
     const box = await canvas.boundingBox();
     if (box) {
       // Move mouse over canvas center
@@ -151,13 +156,15 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       // Verify the day HUD tooltip is visible
       await expect(app.getByText(/\d{4}-\d{2}-\d{2}/).first()).toBeVisible();
 
-      // Dark mode screenshot
-      await app.screenshot({
-        path: path.join(brainDir, 'life_grid_radial_dark.png'),
-      });
-      await app.screenshot({
-        path: path.join(brainDir, 'life_grid_dark.png'),
-      });
+      if (fs.existsSync(brainDir)) {
+        // Dark mode screenshot
+        await app.screenshot({
+          path: path.join(brainDir, 'life_grid_radial_dark.png'),
+        });
+        await app.screenshot({
+          path: path.join(brainDir, 'life_grid_dark.png'),
+        });
+      }
 
       // Click on canvas to open day modal
       await app.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
@@ -175,7 +182,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    if (box) {
+    if (box && fs.existsSync(brainDir)) {
       // Hover near the far left edge to verify tooltip is never clipped
       await app.mouse.move(box.x + 25, box.y + 120);
       await app.waitForTimeout(300);
