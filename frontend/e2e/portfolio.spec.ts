@@ -387,9 +387,11 @@ test.describe('per-currency summary', () => {
     // Capture holdings list with the Price Alerts toolbar button and holding row bell triggers
     const holdingsPanel = app.getByText('HOLDINGS').locator('xpath=ancestor::div[contains(@class, "rounded-lg")]').first();
     await holdingsPanel.scrollIntoViewIfNeeded();
-    await holdingsPanel.screenshot({
-      path: `${artifactDir}/portfolio_holdings_with_alerts_trigger.png`,
-    });
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      await holdingsPanel.screenshot({
+        path: `${artifactDir}/portfolio_holdings_with_alerts_trigger.png`,
+      });
+    }
 
     // Open Alerts Modal via toolbar button
     await app.getByRole('button', { name: 'Price Alerts' }).click();
@@ -406,8 +408,10 @@ test.describe('per-currency summary', () => {
     await expect(app.getByText('Active', { exact: true })).toBeVisible();
 
     // Capture alerts modal screenshot
-    await app.screenshot({
-      path: `${artifactDir}/portfolio_alerts_modal.png`,
-    });
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      await app.screenshot({
+        path: `${artifactDir}/portfolio_alerts_modal.png`,
+      });
+    }
   });
 });

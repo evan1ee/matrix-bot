@@ -8,6 +8,117 @@ test('navigates to AI Assistant and renders suggestions', async ({ app }) => {
   await expect(app.getByText('What tasks do I have due today?')).toBeVisible();
 });
 
+test('clicking a recommended prompt sends immediately and clears input', async ({ app }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+
+  const promptText = 'What tasks do I have due today?';
+  const suggestionBtn = app.getByRole('button', { name: promptText });
+  await expect(suggestionBtn).toBeVisible();
+
+  await suggestionBtn.click();
+
+  // Input textarea should be empty immediately
+  const input = app.getByPlaceholder(/Ask AI assistant/i);
+  await expect(input).toHaveValue('');
+
+  // User message should appear immediately in chat
+  await expect(app.getByText(promptText, { exact: true })).toBeVisible();
+
+  // Assistant reply should arrive
+  await expect(app.getByText(/You have \d+ task\(s\) currently recorded in your list\./i)).toBeVisible();
+
+  const brainDir = process.env.BRAIN_DIR || '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
+  if (brainDir) {
+    await app.screenshot({ path: `${brainDir}/ai_chat_recommendation_sent.png`, fullPage: false });
+  }
+});
+
+test('shows optimistic user message and clears input while AI is replying', async ({ app }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+
+  let unblock: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+
+  await app.route('**/api/v1/ai/chat', async (route) => {
+    await gate;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        conversation_id: 'conv_delay_test',
+        message: 'Reply after thinking finished!',
+        model_used: 'gpt-4o-mini',
+        tool_calls_executed: [],
+      }),
+    });
+  });
+
+  await app.route('**/api/v1/ai/conversations/conv_delay_test/messages', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'msg_u',
+          conversation_id: 'conv_delay_test',
+          role: 'user',
+          content: 'What tasks do I have due today?',
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 'msg_a',
+          conversation_id: 'conv_delay_test',
+          role: 'assistant',
+          content: 'Reply after thinking finished!',
+          created_at: new Date().toISOString(),
+        },
+      ]),
+    });
+  });
+
+  await app.route('**/api/v1/ai/conversations', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'conv_delay_test',
+          owner_id: 'owner',
+          room_id: 'web_chat',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ]),
+    });
+  });
+
+  const promptText = 'What tasks do I have due today?';
+  const suggestionBtn = app.getByRole('button', { name: promptText });
+  await suggestionBtn.click();
+
+  // Input textarea should be empty immediately!
+  const input = app.getByPlaceholder(/Ask AI assistant/i);
+  await expect(input).toHaveValue('');
+
+  // Optimistic user message bubble should appear immediately
+  await expect(app.getByText(promptText, { exact: true })).toBeVisible();
+
+  // Thinking indicator should be visible
+  await expect(app.getByText('Thinking and executing tools...')).toBeVisible();
+
+  const brainDir = process.env.BRAIN_DIR || '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
+  if (brainDir) {
+    await app.screenshot({ path: `${brainDir}/ai_chat_optimistic_thinking.png`, fullPage: false });
+  }
+
+  unblock();
+  await expect(app.getByText('Reply after thinking finished!')).toBeVisible();
+});
+
 test('sends a chat prompt and receives AI assistant reply', async ({ app }) => {
   await gotoApp(app);
   await app.getByRole('button', { name: TAB.ai, exact: true }).click();

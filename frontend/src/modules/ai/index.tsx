@@ -74,10 +74,6 @@ const AiAssistantView: React.FC<{
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
   // Mutations
   const chatMutation = useMutation({
     mutationFn: (text: string) =>
@@ -89,13 +85,40 @@ const AiAssistantView: React.FC<{
           room_id: 'web_chat',
         }),
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setActiveConversationId(data.conversation_id);
+      queryClient.setQueryData<AiMessage[]>(['ai-messages', data.conversation_id], (old = []) => {
+        if (old.some((m) => m.role === 'user' && m.content === variables)) return old;
+        return [
+          ...old,
+          {
+            id: `temp_user_${Date.now()}`,
+            conversation_id: data.conversation_id,
+            role: 'user',
+            content: variables,
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: `temp_assistant_${Date.now()}`,
+            conversation_id: data.conversation_id,
+            role: 'assistant',
+            content: data.message,
+            created_at: new Date().toISOString(),
+          },
+        ];
+      });
       queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
       queryClient.invalidateQueries({ queryKey: ['ai-messages', data.conversation_id] });
       setPrompt('');
     },
+    onError: (_error, variables) => {
+      setPrompt((prev) => (prev ? prev : variables));
+    },
   });
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, chatMutation.isPending]);
 
   const resetMutation = useMutation({
     mutationFn: (convId: string) =>
@@ -121,11 +144,16 @@ const AiAssistantView: React.FC<{
     },
   });
 
+  const sendChat = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.length > 4000 || chatMutation.isPending) return;
+    setPrompt('');
+    chatMutation.mutate(trimmed);
+  };
+
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const trimmed = prompt.trim();
-    if (!trimmed || trimmed.length > 4000 || chatMutation.isPending) return;
-    chatMutation.mutate(trimmed);
+    sendChat(prompt);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -193,9 +221,9 @@ const AiAssistantView: React.FC<{
 
       {/* Messages Thread Container */}
       <div className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5">
-        {isLoadingMessages ? (
+        {isLoadingMessages && messages.length === 0 && !chatMutation.isPending ? (
           <div className="py-20 text-center text-xs font-mono text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && !chatMutation.isPending ? (
           <div className="py-16 text-center max-w-lg mx-auto space-y-6">
             <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 flex items-center justify-center mx-auto">
               <Bot className="w-5 h-5" />
@@ -212,10 +240,7 @@ const AiAssistantView: React.FC<{
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => {
-                    setPrompt(s);
-                    chatMutation.mutate(s);
-                  }}
+                  onClick={() => sendChat(s)}
                   className="p-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-neutral-400 dark:hover:border-neutral-700 text-xs text-neutral-800 dark:text-neutral-200 transition flex items-center justify-between group cursor-pointer shadow-2xs font-sans"
                 >
                   <span className="line-clamp-2">{s}</span>
@@ -280,6 +305,21 @@ const AiAssistantView: React.FC<{
             ))
         )}
 
+        {chatMutation.isPending && chatMutation.variables && !messages.some((m) => m.role === 'user' && m.content === chatMutation.variables) && (
+          <div className="flex gap-3 max-w-3xl ml-auto justify-end animate-in fade-in-0">
+            <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs">
+              <div className="whitespace-pre-wrap break-words">{chatMutation.variables}</div>
+              <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-300 dark:text-neutral-600 justify-end">
+                <Clock className="w-2.5 h-2.5" />
+                <span>Sending...</span>
+              </div>
+            </div>
+            <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5 font-mono text-[11px]">
+              <User className="w-3.5 h-3.5" />
+            </div>
+          </div>
+        )}
+
         {chatMutation.isPending && (
           <div className="flex gap-3 max-w-3xl mr-auto justify-start animate-in fade-in-0">
             <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
@@ -338,10 +378,7 @@ const AiAssistantView: React.FC<{
       <RetrospectiveModal
         isOpen={isRetroOpen}
         onClose={() => setIsRetroOpen(false)}
-        onShareToChat={(text) => {
-          setPrompt(text);
-          chatMutation.mutate(text);
-        }}
+        onShareToChat={(text) => sendChat(text)}
       />
     </div>
   );
