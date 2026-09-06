@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Hourglass, Plus, Calendar } from 'lucide-react';
+import { Hourglass, NotebookPen, Calendar } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
@@ -8,7 +8,6 @@ import type {
   LifeProfileStats,
   LifeHorizonDay,
   LifeDayItem,
-  UpsertDayPayload,
   UpsertProfilePayload,
 } from './types';
 import { LifeStatStrip } from './LifeStatStrip';
@@ -60,51 +59,6 @@ export const LifeView: React.FC = () => {
     },
   });
 
-  const saveDayMutation = useMutation({
-    mutationFn: async (payload: UpsertDayPayload) => {
-      return fetchApi('/life/days', {
-        method: 'POST',
-        body: JSON.stringify({
-          log_date: payload.date,
-          mood: payload.mood,
-          weather: payload.weather ?? null,
-          activities: payload.activities ?? null,
-          note: payload.note ?? null,
-          time_allocation: payload.time_allocation ?? null,
-        }),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['life-profile'] });
-      queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-    },
-  });
-
-  const saveTimeMutation = useMutation({
-    mutationFn: async ({ date, allocation }: { date: string; allocation: (string | null)[] }) => {
-      return fetchApi(`/life/days/${date}/time`, {
-        method: 'PUT',
-        body: JSON.stringify({ time_allocation: allocation }),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['life-profile'] });
-      queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-    },
-  });
-
-  const deleteDayMutation = useMutation({
-    mutationFn: async (date: string) => {
-      return fetchApi(`/life/days/${date}`, {
-        method: 'DELETE',
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['life-profile'] });
-      queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
-    },
-  });
-
   const handleSelectDate = async (date: string) => {
     setSelectedDate(date);
     const todayStr = new Date().toISOString().split('T')[0];
@@ -119,14 +73,20 @@ export const LifeView: React.FC = () => {
       const log = await fetchApi<any>(`/life/days/${date}`);
       if (log) {
         let acts: string[] = [];
-        try {
-          if (log.activities) acts = JSON.parse(log.activities);
-        } catch {
-          acts = [];
+        if (Array.isArray(log.activities)) {
+          acts = log.activities;
+        } else if (typeof log.activities === 'string') {
+          try {
+            acts = JSON.parse(log.activities);
+          } catch {
+            acts = [];
+          }
         }
 
         let parsedTimeAlloc: (string | null)[] | null = null;
-        if (log.time_allocation) {
+        if (Array.isArray(log.time_allocation)) {
+          parsedTimeAlloc = log.time_allocation;
+        } else if (typeof log.time_allocation === 'string') {
           try {
             parsedTimeAlloc = JSON.parse(log.time_allocation);
           } catch {
@@ -158,8 +118,7 @@ export const LifeView: React.FC = () => {
   };
 
   const handleLogToday = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    handleSelectDate(todayStr);
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal' } }));
   };
 
   const profile = profileData?.profile || null;
@@ -254,10 +213,10 @@ export const LifeView: React.FC = () => {
           {profile && (
             <button
               onClick={handleLogToday}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Log today</span>
+              <NotebookPen className="w-3.5 h-3.5" />
+              <span>Daily Log →</span>
             </button>
           )}
 
@@ -316,7 +275,7 @@ export const LifeView: React.FC = () => {
         />
       )}
 
-      {/* Day Logging Modal */}
+      {/* Day Retrospective Modal (View Only) */}
       <LifeDayModal
         day={selectedDay}
         isOpen={isDayModalOpen}
@@ -324,14 +283,8 @@ export const LifeView: React.FC = () => {
           setIsDayModalOpen(false);
           setSelectedDay(null);
         }}
-        onSave={async (payload) => {
-          await saveDayMutation.mutateAsync(payload);
-        }}
-        onSaveTimeAllocation={async (date, allocation) => {
-          await saveTimeMutation.mutateAsync({ date, allocation });
-        }}
-        onDelete={async (date) => {
-          await deleteDayMutation.mutateAsync(date);
+        onOpenJournal={(date) => {
+          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal', date } }));
         }}
       />
 

@@ -30,6 +30,8 @@ const MODULE_LABELS: Record<string, string> = {
   portfolio: 'Portfolio',
   recurring_bills: 'Bills',
   footprints: 'Footprints',
+  journal: 'Daily Log',
+  life: 'Life Grid',
   core: 'System Overview',
 };
 

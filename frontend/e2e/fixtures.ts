@@ -31,6 +31,7 @@ export const TAB = {
   bills: 'Bills',
   footprints: 'Footprints',
   life: 'Life Grid',
+  journal: 'Daily Log',
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
 } as const;

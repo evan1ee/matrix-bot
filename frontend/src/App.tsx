@@ -13,6 +13,7 @@ import { aiModule } from './modules/ai';
 import { footprintsModule } from './modules/footprints';
 import { habitsModule } from './modules/habits';
 import { lifeModule } from './modules/life';
+import { journalModule } from './modules/journal';
 import { bookmarksModule } from './modules/bookmarks';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
@@ -23,7 +24,7 @@ import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, journalModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
@@ -55,6 +56,18 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // Support decoupled module navigation events
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.moduleId) {
+        setActiveModuleId(detail.moduleId);
+      }
+    };
+    window.addEventListener('app:navigate', onNavigate);
+    return () => window.removeEventListener('app:navigate', onNavigate);
+  }, []);
 
   // Signed out is a state, not an event: derive the prompt from the session
   // itself so it appears on a cold load as well as on an expiry, and so it

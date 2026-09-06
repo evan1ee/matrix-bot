@@ -41,53 +41,33 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     expect(api.lifeProfile?.birth_date).toBe('1995-05-15');
   });
 
-  test('logs a day with mood, weather, activities, and notes, updating the grid', async ({ app, api }) => {
+  test('navigates to Daily Log from header and inspects view-only day retrospective modal', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
 
     await gotoLife(app);
 
     await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
 
-    // Click Log Today
-    await app.getByRole('button', { name: /log today/i }).click();
+    // Click Daily Log header button
+    await app.getByRole('button', { name: /daily log →/i }).click();
 
-    // Verify day modal opened
-    await expect(app.getByText('Mood', { exact: true })).toBeVisible();
+    // Verify navigation to Daily Log module
+    await expect(app.getByRole('main').getByRole('heading', { name: /daily log/i })).toBeVisible();
 
-    // Select Amazing mood
-    await app.getByRole('button', { name: /Amazing/i }).click();
+    // Navigate back to Life Grid
+    await gotoLife(app);
+    await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
 
-    // Select Sunny weather
-    await app.getByRole('button', { name: /Sunny/i }).click();
+    // Open Today in Life Grid to inspect view-only retrospective modal
+    await app.getByRole('button', { name: /open today/i }).click();
 
-    // Toggle Workout and Deep Work
-    await app.getByRole('button', { name: /Workout/i }).click();
-    await app.getByRole('button', { name: '💻 Deep Work' }).click();
+    // Verify view-only retrospective modal is shown
+    await expect(app.getByText(/retrospective for this day/i)).toBeVisible();
+    await expect(app.getByRole('button', { name: /open this day in daily log →/i })).toBeVisible();
 
-    // Fill note
-    await app.getByPlaceholder(/What happened today/i).fill('Shipped the Visualizing Life feature! Feel great.');
-
-    const brainDir = process.env.BRAIN_DIR;
-    if (brainDir && fs.existsSync(brainDir)) {
-      await app.screenshot({
-        path: path.join(brainDir, 'life_day_modal_dark.png'),
-      });
-    }
-
-    // Save record
-    await app.getByRole('button', { name: /save record/i }).click();
-
-    // Check stats updated
-    await expect(app.getByText('Dominant Mood')).toBeVisible();
-    await expect(app.getByText('Amazing').first()).toBeVisible();
-
-    // Verify api state
-    const todayStr = new Date().toISOString().split('T')[0];
-    const logged = api.lifeDayLogs.find((l) => l.log_date === todayStr);
-    expect(logged).toBeDefined();
-    expect(logged?.mood).toBe('amazing');
-    expect(logged?.weather).toBe('sunny');
-    expect(logged?.note).toContain('Shipped the Visualizing Life feature');
+    // Close modal
+    await app.getByRole('button', { name: /close/i }).first().click();
+    await expect(app.getByText(/retrospective for this day/i)).not.toBeVisible();
   });
 
   test('navigates decades, clicks day blocks, and captures visual screenshots', async ({ app, api }) => {
@@ -131,8 +111,8 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await todayJumpBtn.click();
 
     // Close modal opened by Open Today
-    await expect(app.getByText('Mood', { exact: true })).toBeVisible();
-    await app.getByRole('button', { name: /close|cancel/i }).click();
+    await expect(app.getByText(/retrospective for this day/i)).toBeVisible();
+    await app.getByRole('button', { name: /close/i }).first().click();
 
     // Verify Lifespan Overview exists
     await expect(app.getByText('Lifespan overview')).toBeVisible();
@@ -142,7 +122,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     const overviewBox = await overviewCanvas.boundingBox();
     if (overviewBox) {
       await app.mouse.click(overviewBox.x + overviewBox.width * 0.5, overviewBox.y + overviewBox.height * 0.5);
-      await expect(app.getByText('Mood', { exact: true })).not.toBeVisible();
+      await expect(app.getByText(/retrospective for this day/i)).not.toBeVisible();
     }
 
     // Hover over interactive grid canvas to activate the tooltip
@@ -170,8 +150,8 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
       // Click on canvas to open day modal
       await app.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
-      await expect(app.getByText('Mood', { exact: true })).toBeVisible();
-      await app.getByRole('button', { name: /close|cancel/i }).click();
+      await expect(app.getByText(/retrospective for this day/i)).toBeVisible();
+      await app.getByRole('button', { name: /close/i }).first().click();
     }
 
     // Switch to Light mode
@@ -207,7 +187,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     }
   });
 
-  test('logged day is read-only, cannot be edited, and only can be cleared', async ({ app, api }) => {
+  test('logged day is strictly view-only in life grid with navigation link to daily log', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
     const todayStr = new Date().toISOString().split('T')[0];
     api.seedLifeDayLog({
@@ -216,6 +196,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       weather: 'sunny',
       activities: ['workout'],
       note: 'A memorable milestone day',
+      time_allocation: JSON.stringify(['sleep', 'sleep', 'deep_work', 'deep_work']),
     });
 
     await gotoLife(app);
@@ -227,15 +208,18 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     // Verify Read-Only View is shown with Logged badge
     await expect(app.getByText('Logged', { exact: true })).toBeVisible();
-    await expect(app.getByText(/Once logged, records cannot be edited, only cleared/i)).toBeVisible();
+    await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).toBeVisible();
     await expect(app.getByText('A memorable milestone day')).toBeVisible();
+    await expect(app.getByText('Sunny')).toBeVisible();
+    await expect(app.getByText('Workout')).toBeVisible();
 
-    // Verify Save record is NOT visible
+    // Verify 24h time allocation summary is rendered
+    await expect(app.getByText('24h Time Allocation')).toBeVisible();
+    await expect(app.getByText(/1\.0h tracked/i)).toBeVisible();
+
+    // Verify editing controls are NOT visible in Life Grid
     await expect(app.getByRole('button', { name: /save record/i })).not.toBeVisible();
-
-    // Verify Clear record button is visible
-    const clearBtn = app.getByRole('button', { name: /clear record/i });
-    await expect(clearBtn).toBeVisible();
+    await expect(app.getByRole('button', { name: /clear record/i })).not.toBeVisible();
 
     const brainDir = process.env.BRAIN_DIR;
     if (brainDir && fs.existsSync(brainDir)) {
@@ -244,112 +228,19 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    // Click Clear record to open in-app confirmation box
-    await clearBtn.click();
-    await expect(app.getByText(/Clear record for/i)).toBeVisible();
-    await expect(app.getByText(/This will permanently remove your logged mood/i)).toBeVisible();
+    // Click "Open this day in Daily Log →" to navigate to journal
+    const navToJournalBtn = app.getByRole('button', { name: /open this day in daily log →/i });
+    await expect(navToJournalBtn).toBeVisible();
+    await navToJournalBtn.click();
 
-    if (brainDir && fs.existsSync(brainDir)) {
-      await app.screenshot({
-        path: path.join(brainDir, 'life_logged_day_confirm_clear.png'),
-      });
-    }
-
-    // Click confirm clear button
-    await app.getByRole('button', { name: /yes, clear record/i }).click();
-
-    // Modal should close
-    await expect(app.getByText(/Once logged, records cannot be edited, only cleared/i)).not.toBeVisible();
-
-    // Entry should be deleted from API state
-    const stillExists = api.lifeDayLogs.some((l) => l.log_date === todayStr);
-    expect(stillExists).toBe(false);
+    // Modal should close and Daily Log module should be opened
+    await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).not.toBeVisible();
+    await expect(app.getByRole('main').getByRole('heading', { name: /daily log/i })).toBeVisible();
+    await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
+    await expect(app.getByText('A memorable milestone day')).toBeVisible();
   });
 
-  test('allocates intraday 96-block time grid with presets and updates lifespan metrics', async ({ app, api }) => {
-    api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
-
-    await gotoLife(app);
-
-    // Open Today
-    await app.getByRole('button', { name: /log today/i }).click();
-
-    // Verify 24-Hour Time Allocation grid is rendered
-    await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
-    await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
-
-    // Verify clicking a single block paints ONLY that block and does not select upper block
-    const block53 = app.locator('[data-block-idx="53"]');
-    await expect(block53).toBeVisible();
-    await block53.click();
-    // Exactly 0.3h tracked (1 block * 0.25 = 0.3h)
-    await expect(app.getByText(/0\.3h \/ 24h tracked/i)).toBeVisible();
-    // Verify upper block (block 49, one row up in same quarter column) is NOT selected
-    const block49 = app.locator('[data-block-idx="49"]');
-    await expect(block49).toContainText(':15');
-
-    // Reset with Clear preset
-    const clearPreset = app.getByRole('button', { name: /clear/i }).first();
-    await clearPreset.click();
-    await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
-
-    // Test quick preset: Sleep
-    const sleepPreset = app.getByRole('button', { name: /sleep/i }).first();
-    await sleepPreset.click();
-    await expect(app.getByText(/8\.0h \/ 24h tracked/i)).toBeVisible();
-
-    // Test quick preset: Workday
-    const workdayPreset = app.getByRole('button', { name: /workday/i }).first();
-    await workdayPreset.click();
-    await expect(app.getByText(/17\.0h \/ 24h tracked/i)).toBeVisible();
-
-    // Test selecting Health palette and painting a block
-    await app.getByRole('button', { name: /🏃 Health/i }).click();
-    const block30 = app.locator('[data-block-idx="30"]');
-    await expect(block30).toBeVisible();
-    await block30.click();
-
-    // Save time blocks intraday (before sealing mood)
-    const saveTimeBtn = app.getByRole('button', { name: /save time blocks/i });
-    await expect(saveTimeBtn).toBeVisible();
-    await saveTimeBtn.click();
-    await expect(app.getByText(/time blocks saved|✓ Saved/i).first()).toBeVisible();
-
-    // Verify API state was updated with time_allocation even without mood
-    const todayStr = new Date().toISOString().split('T')[0];
-    const intradayLog = api.lifeDayLogs.find((l) => l.log_date === todayStr);
-    expect(intradayLog).toBeDefined();
-    expect(intradayLog?.time_allocation).toContain('deep_work');
-    expect(intradayLog?.time_allocation).toContain('sleep');
-
-    // Screenshot of 96-block time grid in modal
-    const brainDir = process.env.BRAIN_DIR;
-    if (brainDir && fs.existsSync(brainDir)) {
-      await app.screenshot({
-        path: path.join(brainDir, 'life_time_grid_intraday.png'),
-      });
-    }
-
-    // Now seal the day by choosing mood and saving record
-    await app.getByRole('button', { name: /Amazing/i }).click();
-    await app.getByRole('button', { name: /save record/i }).click();
-
-    // Modal closes; verify stats strip now displays deep work and sleep hours
-    await expect(app.getByText(/⚡ 9\.0h/i)).toBeVisible();
-    await expect(app.getByText(/💤 8\.0h/i)).toBeVisible();
-
-    // Hover over interactive grid canvas
-    const canvas = app.locator('canvas').last();
-    await expect(canvas).toBeVisible();
-    await canvas.scrollIntoViewIfNeeded();
-    const box = await canvas.boundingBox();
-    if (box) {
-      await app.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
-      await app.waitForTimeout(300);
-    }
-  });
-
-  test('auto-logs activities from todos, transactions, and habits in day modal feed', async ({ app, api }) => {
+  test('auto-logs activities from todos, transactions, and habits in view-only retrospective feed', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -377,14 +268,21 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     await gotoLife(app);
 
-    // Open Today modal
-    await app.getByRole('button', { name: /log today/i }).click();
+    // Open Today retrospective modal
+    await app.getByRole('button', { name: /open today/i }).click();
 
     // Verify auto-logged activity feed is visible
     await expect(app.getByText('Auto-logged Activity')).toBeVisible();
     await expect(app.getByText(/Deploy to production server/i).first()).toBeVisible();
     await expect(app.getByText(/Team lunch catering/i)).toBeVisible();
     await expect(app.getByText(/Morning Meditation/i)).toBeVisible();
+
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'life_day_modal_summary_tab.png'),
+      });
+    }
   });
 });
 
