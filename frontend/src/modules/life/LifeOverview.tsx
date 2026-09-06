@@ -77,12 +77,14 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
       const emptyPastColor = isDark ? '#27272a' : '#e4e4e7';
       const futureColor = isDark ? '#141417' : '#fafafa';
       const futureBorderColor = isDark ? '#2e2e33' : '#e4e4e7';
-      const presentColor = '#10b981';
+      const presentColor = '#3b82f6';
 
       const total = days.length;
-      const pad = Math.max(0.3, Math.min(1.0, cellWidth * 0.18));
+      const pad = Math.max(0.6, Math.min(1.2, cellWidth * 0.16));
       const bw = Math.max(1, cellWidth - pad);
       const bh = Math.max(1, cellHeight - pad);
+
+      ctx.globalAlpha = 1.0;
 
       for (let i = 0; i < total; i++) {
         const d = days[i];
@@ -95,7 +97,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         if (d.status === 'present') {
           ctx.fillStyle = presentColor;
           ctx.fillRect(x, y, bw, bh);
-          ctx.strokeStyle = '#34d399';
+          ctx.strokeStyle = '#60a5fa';
           ctx.lineWidth = 1;
           ctx.strokeRect(x, y, bw, bh);
         } else if (d.status === 'past_logged' && d.mood) {
@@ -219,7 +221,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
     if (tooltipBadgeRef.current) {
       const el = tooltipBadgeRef.current;
       if (d.status === 'present') {
-        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500 text-white';
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500 text-white';
         el.style.backgroundColor = '';
         el.textContent = 'TODAY';
       } else if (d.mood) {
@@ -320,7 +322,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
           {[
             { label: 'Past', cls: 'bg-zinc-200 dark:bg-zinc-800' },
-            { label: 'Today', cls: 'bg-emerald-500 ring-1 ring-emerald-400' },
+            { label: 'Today', cls: 'bg-blue-500 ring-1 ring-blue-400' },
             { label: 'Logged', cls: 'bg-amber-400 dark:bg-amber-500' },
             { label: 'Future', cls: 'bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800' },
           ].map((item) => (

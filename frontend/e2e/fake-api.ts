@@ -2094,35 +2094,36 @@ export class FakeApi {
         return json(route, 400, { error: 'Date and mood are required', code: 400 });
       }
       const existingIdx = this.lifeDayLogs.findIndex((l) => l.log_date === logDate);
-      const activitiesStr = body.activities ? JSON.stringify(body.activities) : null;
-      let saved: FakeLifeDayLog;
       if (existingIdx >= 0) {
-        this.lifeDayLogs[existingIdx].mood = body.mood;
-        this.lifeDayLogs[existingIdx].weather = body.weather ?? null;
-        this.lifeDayLogs[existingIdx].activities = activitiesStr;
-        this.lifeDayLogs[existingIdx].note = body.note ?? null;
-        this.lifeDayLogs[existingIdx].updated_at = new Date().toISOString();
-        saved = this.lifeDayLogs[existingIdx];
-      } else {
-        saved = {
-          id: this.nextLifeDayLogId++,
-          owner_id: OWNER,
-          log_date: logDate,
-          mood: body.mood,
-          weather: body.weather ?? null,
-          activities: activitiesStr,
-          note: body.note ?? null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        this.lifeDayLogs.push(saved);
+        return json(route, 400, {
+          error: 'This day has already been logged and cannot be edited. It can only be cleared.',
+          code: 400,
+        });
       }
+      const activitiesStr = body.activities ? JSON.stringify(body.activities) : null;
+      const saved: FakeLifeDayLog = {
+        id: this.nextLifeDayLogId++,
+        owner_id: OWNER,
+        log_date: logDate,
+        mood: body.mood,
+        weather: body.weather ?? null,
+        activities: activitiesStr,
+        note: body.note ?? null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      this.lifeDayLogs.push(saved);
       return json(route, 200, saved);
     }
 
-    const dayDelMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})$/);
-    if (dayDelMatch && method === 'DELETE') {
-      const date = dayDelMatch[1];
+    const dayMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})$/);
+    if (dayMatch && method === 'GET') {
+      const date = dayMatch[1];
+      const log = this.lifeDayLogs.find((l) => l.log_date === date) || null;
+      return json(route, 200, log);
+    }
+    if (dayMatch && method === 'DELETE') {
+      const date = dayMatch[1];
       const idx = this.lifeDayLogs.findIndex((l) => l.log_date === date);
       if (idx >= 0) {
         this.lifeDayLogs.splice(idx, 1);

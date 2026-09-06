@@ -98,7 +98,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
       const emptyPastColor = isDark ? '#27272a' : '#e4e4e7';
       const futureColor = isDark ? '#141417' : '#fafafa';
       const futureBorderColor = isDark ? '#2e2e33' : '#e4e4e7';
-      const presentColor = '#10b981';
+      const presentColor = '#3b82f6';
 
       const total = displayedDays.length;
       const pad = Math.max(0.6, Math.min(1.2, cellWidth * 0.16));
@@ -118,7 +118,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         if (d.status === 'present') {
           ctx.fillStyle = presentColor;
           ctx.fillRect(x, y, bw, bh);
-          ctx.strokeStyle = '#34d399';
+          ctx.strokeStyle = '#60a5fa';
           ctx.lineWidth = 1;
           ctx.strokeRect(x, y, bw, bh);
         } else if (d.status === 'past_logged' && d.mood) {
@@ -245,7 +245,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     if (tooltipBadgeRef.current) {
       const el = tooltipBadgeRef.current;
       if (d.status === 'present') {
-        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500 text-white';
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500 text-white';
         el.style.backgroundColor = '';
         el.textContent = 'TODAY';
       } else if (d.mood) {
@@ -396,7 +396,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
           {[
             { label: 'Past', cls: 'bg-zinc-200 dark:bg-zinc-800' },
-            { label: 'Today', cls: 'bg-emerald-500 ring-1 ring-emerald-400' },
+            { label: 'Today', cls: 'bg-blue-500 ring-1 ring-blue-400' },
             { label: 'Amazing', cls: 'bg-amber-400 dark:bg-amber-500' },
             { label: 'Good', cls: 'bg-emerald-500' },
             { label: 'Neutral', cls: 'bg-cyan-500' },
@@ -453,7 +453,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
           onClick={handleSelectToday}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors shrink-0"
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
           <span>Open today</span>
         </button>
       </div>

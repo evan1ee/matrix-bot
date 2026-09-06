@@ -100,6 +100,15 @@ pub async fn upsert_day(
     let mood = normalize_mood(&payload.mood)
         .ok_or_else(|| ApiError::bad_request("Invalid mood. Choose from amazing, good, neutral, low, rough."))?;
 
+    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, date_str)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if existing.is_some() {
+        return Err(ApiError::bad_request(
+            "This day has already been logged and cannot be edited. It can only be cleared.",
+        ));
+    }
+
     if let Some(ref note) = payload.note {
         if note.len() > 500 {
             return Err(ApiError::bad_request("Note exceeds 500 characters limit."));
@@ -239,6 +248,23 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(day.mood, "amazing");
+
+        // 3b. Attempting to edit an already logged day is rejected
+        let edit_err = upsert_day(
+            user.clone(),
+            State(state.clone()),
+            Json(UpsertLifeDayLogInput {
+                log_date: "2026-09-04".to_string(),
+                mood: "good".to_string(),
+                weather: None,
+                activities: None,
+                note: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(edit_err.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(edit_err.message.contains("cannot be edited"));
 
         // 4. Get Year View
         let year_view = get_year_view(user.clone(), State(state.clone()), Path(2026))

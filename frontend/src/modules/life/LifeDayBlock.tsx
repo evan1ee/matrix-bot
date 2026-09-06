@@ -24,8 +24,12 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
   // Base styling for each state
   let stateClasses = '';
   if (day_type === 'present') {
-    stateClasses =
-      'bg-emerald-600 dark:bg-emerald-500 text-white font-bold ring-2 ring-emerald-500/40';
+    if (moodCfg) {
+      stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-zinc-950 shadow-xs`;
+    } else {
+      stateClasses =
+        'bg-blue-600 dark:bg-blue-500 text-white font-bold ring-2 ring-blue-400/50';
+    }
   } else if (moodCfg) {
     stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold shadow-xs`;
   } else if (day_type === 'past') {

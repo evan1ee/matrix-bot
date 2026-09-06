@@ -130,7 +130,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     // Close modal opened by Open Today
     await expect(app.getByText('Mood', { exact: true })).toBeVisible();
-    await app.getByRole('button', { name: /cancel/i }).click();
+    await app.getByRole('button', { name: /close|cancel/i }).click();
 
     // Verify Lifespan Overview exists
     await expect(app.getByText('Lifespan overview')).toBeVisible();
@@ -169,7 +169,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       // Click on canvas to open day modal
       await app.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
       await expect(app.getByText('Mood', { exact: true })).toBeVisible();
-      await app.getByRole('button', { name: /cancel/i }).click();
+      await app.getByRole('button', { name: /close|cancel/i }).click();
     }
 
     // Switch to Light mode
@@ -204,4 +204,56 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
   });
+
+  test('logged day is read-only, cannot be edited, and only can be cleared', async ({ app, api }) => {
+    api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
+    const todayStr = new Date().toISOString().split('T')[0];
+    api.seedLifeDayLog({
+      log_date: todayStr,
+      mood: 'amazing',
+      weather: 'sunny',
+      activities: ['workout'],
+      note: 'A memorable milestone day',
+    });
+
+    await gotoLife(app);
+
+    // Click "Open today" button
+    const todayBtn = app.getByRole('button', { name: /open today/i }).first();
+    await expect(todayBtn).toBeVisible();
+    await todayBtn.click();
+
+    // Verify Read-Only View is shown with Logged badge
+    await expect(app.getByText('Logged', { exact: true })).toBeVisible();
+    await expect(app.getByText(/Once logged, records cannot be edited, only cleared/i)).toBeVisible();
+    await expect(app.getByText('A memorable milestone day')).toBeVisible();
+
+    // Verify Save record is NOT visible
+    await expect(app.getByRole('button', { name: /save record/i })).not.toBeVisible();
+
+    // Verify Clear record button is visible
+    const clearBtn = app.getByRole('button', { name: /clear record/i });
+    await expect(clearBtn).toBeVisible();
+
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'life_logged_day_readonly.png'),
+      });
+    }
+
+    // Handle confirmation dialog and click clear
+    app.once('dialog', async (dialog) => {
+      await dialog.accept();
+    });
+    await clearBtn.click();
+
+    // Modal should close
+    await expect(app.getByText(/Once logged, records cannot be edited, only cleared/i)).not.toBeVisible();
+
+    // Entry should be deleted from API state
+    const stillExists = api.lifeDayLogs.some((l) => l.log_date === todayStr);
+    expect(stillExists).toBe(false);
+  });
 });
+

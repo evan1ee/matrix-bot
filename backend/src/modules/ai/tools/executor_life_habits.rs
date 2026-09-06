@@ -107,6 +107,16 @@ pub async fn execute_life_habits_tool(
 
             let activities_json = activities.as_ref().and_then(|acts| serde_json::to_string(acts).ok());
 
+            let existing = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                .await
+                .map_err(|e| e.to_string())?;
+            if existing.is_some() {
+                return Err(format!(
+                    "A log for date {} already exists and cannot be edited. It can only be cleared.",
+                    date_str
+                ));
+            }
+
             let log = LifeRepository::upsert_day_log(
                 pool,
                 owner_id,
