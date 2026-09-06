@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import type { FrontendModule, SystemEvent } from '../../core/types';
+import { triggerAiPrompt } from '../ai';
 import type { Bookmark, BookmarkStats, CreateBookmarkInput, BookmarkFilterTab } from './types';
 import { BookmarkCard } from './BookmarkCard';
 import { ReaderModal } from './ReaderModal';
@@ -165,15 +166,31 @@ export const BookmarksView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          data-testid="save-bookmark-btn"
-          onClick={() => setIsAddModalOpen(true)}
-          className="h-9 inline-flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-neutral-100 dark:hover:bg-neutral-200 dark:text-neutral-900 text-xs font-medium transition shadow-xs cursor-pointer shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Save Link</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Review my unread and favorite bookmarks. Recommend which article or guide I should read next and summarize why it is relevant.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI for reading suggestions"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Suggestion</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="save-bookmark-btn"
+            onClick={() => setIsAddModalOpen(true)}
+            className="h-9 inline-flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-neutral-100 dark:hover:bg-neutral-200 dark:text-neutral-900 text-xs font-medium transition shadow-xs cursor-pointer shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Save Link</span>
+          </button>
+        </div>
       </div>
 
       {/* Sourced Stat Strip (Vercel-style) */}

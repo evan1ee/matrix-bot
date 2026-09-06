@@ -15,7 +15,9 @@ import {
   Pencil,
   Zap,
   BellRing,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { BillModal } from './BillModal';
 import {
   BillCategory,
@@ -169,17 +171,33 @@ export const RecurringBillsView: React.FC = () => {
             Overview of active subscriptions, fixed overhead, installment schedules, and automated transfers.
           </p>
         </div>
-        <button
-          onClick={() => {
-            setEditingBill(null);
-            setFormError(null);
-            setIsModalOpen(true);
-          }}
-          className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Add Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Audit my recurring bills and subscriptions. Summarize my monthly overhead, upcoming payments due soon, and highlight any potential duplicates or cancellation candidates.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI to audit recurring bills"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Audit</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEditingBill(null);
+              setFormError(null);
+              setIsModalOpen(true);
+            }}
+            className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Add Item
+          </button>
+        </div>
       </div>
 
       {/* Neutral Stat Strip */}

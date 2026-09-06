@@ -13,7 +13,9 @@ import {
   X,
   Pencil,
   Check,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import {
   CURRENCY_OPTIONS,
@@ -590,6 +592,19 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Analyze my recent transactions and cashflow. Give me actionable insights on my spending habits and optimization opportunities.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-sans font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded transition-colors shadow-2xs cursor-pointer"
+              title="Ask AI for spending insights"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              <span>AI Insights</span>
+            </button>
           </div>
           <span className="text-xs font-mono text-neutral-500 shrink-0">
             {items.length} {items.length === 1 ? 'item' : 'items'}

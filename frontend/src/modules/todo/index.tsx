@@ -14,7 +14,9 @@ import {
   Pencil,
   Check,
   X,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import {
@@ -577,6 +579,19 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Analyze my pending tasks, deadlines, and priorities. Recommend the top 3 items I should focus on first today and why.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-sans font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded transition-colors shadow-2xs cursor-pointer"
+              title="Ask AI to prioritize tasks"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              <span>AI Prioritize</span>
+            </button>
           </div>
           <span className="text-xs font-mono text-neutral-500 shrink-0">
             {filteredItems.length} items

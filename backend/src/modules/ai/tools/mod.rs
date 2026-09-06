@@ -1,6 +1,8 @@
 pub mod definitions;
+pub mod definitions_extended;
 pub mod definitions_life;
 pub mod executor;
+pub mod executor_bookmarks_webhooks;
 pub mod executor_finance;
 pub mod executor_life_habits;
 pub mod executor_portfolio;
@@ -46,16 +48,19 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 33);
+        assert_eq!(defs.len(), 47);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
         assert!(names.contains(&"complete_todo"));
+        assert!(names.contains(&"update_todo"));
+        assert!(names.contains(&"delete_todo"));
         assert!(names.contains(&"record_finance_entry"));
         assert!(names.contains(&"list_finance_transactions"));
         assert!(names.contains(&"get_spending_by_category"));
         assert!(names.contains(&"delete_finance_entry"));
         assert!(names.contains(&"set_reminder"));
+        assert!(names.contains(&"cancel_reminder"));
         assert!(names.contains(&"deposit_portfolio_cash"));
         assert!(names.contains(&"withdraw_portfolio_cash"));
         assert!(names.contains(&"buy_portfolio_holding"));
@@ -68,14 +73,27 @@ mod tests {
         assert!(names.contains(&"get_my_habits"));
         assert!(names.contains(&"log_habit"));
         assert!(names.contains(&"create_habit"));
+        assert!(names.contains(&"delete_habit"));
         assert!(names.contains(&"log_life_day"));
         assert!(names.contains(&"get_life_profile"));
+        assert!(names.contains(&"get_daily_log"));
+        assert!(names.contains(&"get_my_recurring_bills"));
         assert!(names.contains(&"pay_recurring_bill"));
+        assert!(names.contains(&"create_recurring_bill"));
+        assert!(names.contains(&"delete_recurring_bill"));
         assert!(names.contains(&"get_my_footprints"));
         assert!(names.contains(&"record_footprint"));
+        assert!(names.contains(&"delete_footprint"));
         assert!(names.contains(&"get_weekly_retrospective"));
         assert!(names.contains(&"save_bookmark"));
         assert!(names.contains(&"get_my_bookmarks"));
+        assert!(names.contains(&"toggle_bookmark_favorite"));
+        assert!(names.contains(&"archive_bookmark"));
+        assert!(names.contains(&"delete_bookmark"));
+        assert!(names.contains(&"get_my_webhooks"));
+        assert!(names.contains(&"get_webhook_logs"));
+        assert!(names.contains(&"get_my_settings"));
+        assert!(names.contains(&"update_my_settings"));
     }
 
     #[tokio::test]
@@ -445,5 +463,168 @@ mod tests {
         .await
         .unwrap();
         assert!(list_res.contains("Rust Guide"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_extended_tools() {
+        let (db, owner) = setup_db().await;
+
+        // 1. Todo update & delete
+        let add_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "add_todo",
+            r#"{"text":"Task to update","priority":"low"}"#,
+        )
+        .await
+        .unwrap();
+        let todo_json: serde_json::Value = serde_json::from_str(&add_res).unwrap();
+        let todo_id = todo_json["id"].as_i64().unwrap();
+
+        let update_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "update_todo",
+            &format!(r#"{{"id":{},"text":"Task updated","priority":"high"}}"#, todo_id),
+        )
+        .await
+        .unwrap();
+        assert!(update_res.contains("Task updated"));
+        assert!(update_res.contains("high"));
+
+        let delete_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "delete_todo",
+            &format!(r#"{{"id":{}}}"#, todo_id),
+        )
+        .await
+        .unwrap();
+        assert!(delete_res.contains(r#""deleted":true"#));
+
+        // 2. Reminder cancel
+        let rem_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "set_reminder",
+            r#"{"message":"Doctor appointment","in_minutes":120}"#,
+        )
+        .await
+        .unwrap();
+        let rem_json: serde_json::Value = serde_json::from_str(&rem_res).unwrap();
+        let rem_id = rem_json["id"].as_i64().unwrap();
+
+        let cancel_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "cancel_reminder",
+            &format!(r#"{{"id":{}}}"#, rem_id),
+        )
+        .await
+        .unwrap();
+        assert!(cancel_res.contains(r#""cancelled":true"#));
+
+        // 3. Recurring bill create & delete
+        let bill_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "create_recurring_bill",
+            r#"{"name":"Netflix","amount":"15.99","currency":"USD","category":"subscriptions"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(bill_res.contains("Netflix"));
+        let bill_json: serde_json::Value = serde_json::from_str(&bill_res).unwrap();
+        let bill_id = bill_json["id"].as_i64().unwrap();
+
+        let del_bill_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "delete_recurring_bill",
+            &format!(r#"{{"id":{}}}"#, bill_id),
+        )
+        .await
+        .unwrap();
+        assert!(del_bill_res.contains(r#""deleted":true"#));
+
+        // 4. Habit delete
+        let habit_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "create_habit",
+            r#"{"name":"Daily Pushups","category":"fitness"}"#,
+        )
+        .await
+        .unwrap();
+        let habit_json: serde_json::Value = serde_json::from_str(&habit_res).unwrap();
+        let habit_id = habit_json["id"].as_i64().unwrap();
+
+        let del_habit_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "delete_habit",
+            &format!(r#"{{"id":{}}}"#, habit_id),
+        )
+        .await
+        .unwrap();
+        assert!(del_habit_res.contains(r#""deleted":true"#));
+
+        // 5. Daily log query
+        let daily_log_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_daily_log",
+            r#"{}"#,
+        )
+        .await
+        .unwrap();
+        assert!(daily_log_res.contains("date"));
+
+        // 6. Settings update
+        let settings_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "update_my_settings",
+            r#"{"timezone":"America/New_York","currency":"EUR"}"#,
+        )
+        .await
+        .unwrap();
+        assert!(settings_res.contains("America/New_York"));
+        assert!(settings_res.contains("EUR"));
+
+        // 7. Webhooks list
+        let webhooks_res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "get_my_webhooks",
+            r#"{}"#,
+        )
+        .await
+        .unwrap();
+        assert!(webhooks_res.starts_with('['));
     }
 }

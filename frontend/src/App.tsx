@@ -65,8 +65,15 @@ const AppContent: React.FC = () => {
         setActiveModuleId(detail.moduleId);
       }
     };
+    const onAiPrompt = () => {
+      setActiveModuleId('ai');
+    };
     window.addEventListener('app:navigate', onNavigate);
-    return () => window.removeEventListener('app:navigate', onNavigate);
+    window.addEventListener('app:ai-prompt', onAiPrompt);
+    return () => {
+      window.removeEventListener('app:navigate', onNavigate);
+      window.removeEventListener('app:ai-prompt', onAiPrompt);
+    };
   }, []);
 
   // Signed out is a state, not an event: derive the prompt from the session

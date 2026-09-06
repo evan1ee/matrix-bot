@@ -289,6 +289,72 @@ pub async fn execute_life_habits_tool(
             serde_json::to_string(&list).map_err(|e| e.to_string())
         }.await),
 
+        "delete_habit" => Some(async {
+            let id = args.get("id").and_then(|v| v.as_i64()).ok_or("Field 'id' is required")?;
+            let ok = HabitsRepository::delete_habit(pool, id, owner_id)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !ok {
+                return Err(format!("Habit #{} not found or not owned by user", id));
+            }
+
+            if let Some(b) = broadcaster {
+                b.send(SystemEvent::HabitDeleted {
+                    id,
+                    owner_id: owner_id.to_string(),
+                });
+            }
+
+            serde_json::to_string(&json!({
+                "id": id,
+                "deleted": true
+            })).map_err(|e| e.to_string())
+        }.await),
+
+        "delete_footprint" => Some(async {
+            let id = args.get("id").and_then(|v| v.as_i64()).ok_or("Field 'id' is required")?;
+            let ok = FootprintRepository::delete(pool, id, owner_id)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !ok {
+                return Err(format!("Footprint #{} not found or not owned by user", id));
+            }
+
+            if let Some(b) = broadcaster {
+                b.send(SystemEvent::FootprintDeleted {
+                    id,
+                    owner_id: owner_id.to_string(),
+                });
+            }
+
+            serde_json::to_string(&json!({
+                "id": id,
+                "deleted": true
+            })).map_err(|e| e.to_string())
+        }.await),
+
+        "get_daily_log" => Some(async {
+            let date_str = args.get("date").and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
+
+            let day_log = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let habits = HabitsRepository::find_all_with_status(pool, owner_id, &date_str)
+                .await
+                .unwrap_or_default();
+
+            serde_json::to_string(&json!({
+                "date": date_str,
+                "day_log": day_log,
+                "habits_status": habits,
+            })).map_err(|e| e.to_string())
+        }.await),
+
         _ => None,
     }
 }

@@ -8,7 +8,9 @@ import {
   CheckCircle2,
   Calendar,
   Activity,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type { CreateHabitPayload, HabitStatsSummary, HabitWithStatus, HeatmapDay } from './types';
@@ -217,18 +219,34 @@ export const HabitsView: React.FC = () => {
             </span>
           </div>
 
-          <button
-            type="button"
-            data-testid="add-habit-button"
-            onClick={() => {
-              setEditingHabit(null);
-              setIsModalOpen(true);
-            }}
-            className="h-9 flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Habit</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Review my habit consistency streaks and completion rates. Give me personalized coaching and encouragement to build lasting momentum.'
+                )
+              }
+              className="h-9 flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+              title="Ask AI Habit Coach"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+              <span>AI Coach</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="add-habit-button"
+              onClick={() => {
+                setEditingHabit(null);
+                setIsModalOpen(true);
+              }}
+              className="h-9 flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Habit</span>
+            </button>
+          </div>
         </div>
 
         {/* Filters & Search */}

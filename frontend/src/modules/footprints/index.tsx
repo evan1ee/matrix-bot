@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Footprint, CreateFootprintInput, FootprintsSummaryStats } from './types';
+import { triggerAiPrompt } from '../ai';
 import { FootprintsMap } from './FootprintsMap';
 import { FootprintsList } from './FootprintsList';
 import { FootprintModal } from './FootprintModal';
-import { Compass, MapPin, Globe, Calendar, DollarSign, Plus } from 'lucide-react';
+import { Compass, MapPin, Globe, Calendar, DollarSign, Plus, Sparkles } from 'lucide-react';
 
 export * from './types';
 
@@ -126,6 +127,21 @@ const FootprintsView: React.FC<{
           <p className="text-xs text-neutral-500 font-sans mt-0.5">
             Track everywhere you've been on an interactive star map with memories and spending stats.
           </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Review my travel footprints and visited locations. Write a brief narrative summary of my travel journey and suggest future travel ideas.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI travel log"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Travel Log</span>
+          </button>
         </div>
       </div>
 

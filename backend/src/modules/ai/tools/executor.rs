@@ -2,6 +2,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
+use super::executor_bookmarks_webhooks;
 use super::executor_finance;
 use super::executor_life_habits;
 use super::executor_portfolio;
@@ -40,6 +41,11 @@ pub async fn execute(
 
     // 4. Try life, habits, bills, footprints, and retrospective tools
     if let Some(res) = executor_life_habits::execute_life_habits_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await {
+        return res;
+    }
+
+    // 5. Try bookmarks and webhooks tools
+    if let Some(res) = executor_bookmarks_webhooks::execute_bookmarks_webhooks_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
         return res;
     }
 

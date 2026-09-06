@@ -19,7 +19,9 @@ import {
   AlertTriangle,
   Bell,
   Briefcase,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import { CURRENCY_OPTIONS, useSettings, zonedInputToUtcIso, nowInZone } from '../../core/settings';
@@ -854,6 +856,20 @@ export const PortfolioMainView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Review my investment portfolio asset allocation, performance, and cash balances. Provide a concise executive overview and highlight key insights.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+              title="Ask AI for portfolio review"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+              <span>AI Review</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setAlertsModalOpen(true)}

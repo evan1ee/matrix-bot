@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
-import { Clock, Plus, Trash2, BellRing, Repeat, AlertCircle, Pencil } from 'lucide-react';
+import { Clock, Plus, Trash2, BellRing, Repeat, AlertCircle, Pencil, Sparkles } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { formatTimeInZone, nowInZone, useSettings } from '../../core/settings';
 
@@ -516,9 +517,24 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
             <BellRing className="w-4 h-4 text-neutral-600 dark:text-neutral-300" />
             <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Pending Reminders</h3>
           </div>
-          <span className="text-xs font-mono text-neutral-500">
-            {data?.items.length || 0} active
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Summarize my upcoming reminders and tell me if there are any conflicting or critical alerts I should prepare for.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-sans font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded transition-colors shadow-2xs cursor-pointer"
+              title="Ask AI to summarize reminders"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              <span>AI Summary</span>
+            </button>
+            <span className="text-xs font-mono text-neutral-500">
+              {data?.items.length || 0} active
+            </span>
+          </div>
         </div>
 
         {isLoading ? (

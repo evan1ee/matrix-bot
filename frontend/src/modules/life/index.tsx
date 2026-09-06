@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Hourglass, NotebookPen, Calendar } from 'lucide-react';
+import { Hourglass, NotebookPen, Calendar, Sparkles } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
@@ -210,6 +211,21 @@ export const LifeView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {profile && (
+            <button
+              onClick={() =>
+                triggerAiPrompt(
+                  'Give me a high-level perspective on my life progress across habits, projects, time allocation, and milestones. Offer thoughtful reflection on intentional living.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer shadow-2xs"
+              title="Ask AI for life perspective"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-zinc-500" />
+              <span>AI Perspective</span>
+            </button>
+          )}
+
           {profile && (
             <button
               onClick={handleLogToday}

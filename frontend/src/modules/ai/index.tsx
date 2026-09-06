@@ -14,6 +14,18 @@ import { useSettings, formatShortTimeInZone, browserTimezone } from '../../core/
 
 export * from './types';
 
+let pendingAiPrompt: { prompt: string; execute: boolean } | null = null;
+let promptListener: ((prompt: string, execute: boolean) => void) | null = null;
+
+export function triggerAiPrompt(prompt: string, execute = true) {
+  if (promptListener) {
+    promptListener(prompt, execute);
+  } else {
+    pendingAiPrompt = { prompt, execute };
+  }
+  window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'ai' } }));
+}
+
 const SUGGESTIONS = [
   'Spent $16.50 on lunch at Shake Shack, check off my workout habit, and remind me to call mom at 7pm',
   'Log my mood as amazing today, spent $45 on groceries, and add task Buy birthday gift',
@@ -123,6 +135,48 @@ const AiAssistantView: React.FC<{
   useEffect(() => {
     scrollToBottom();
   }, [messages, chatMutation.isPending]);
+
+  useEffect(() => {
+    promptListener = (text: string, execute: boolean) => {
+      setPrompt(text);
+      if (execute) {
+        chatMutation.mutate(text);
+      } else {
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    };
+
+    if (pendingAiPrompt) {
+      const { prompt: text, execute } = pendingAiPrompt;
+      pendingAiPrompt = null;
+      setPrompt(text);
+      if (execute) {
+        chatMutation.mutate(text);
+      } else {
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    }
+
+    const handleCustomEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ prompt?: string; execute?: boolean }>).detail;
+      if (detail?.prompt) {
+        setPrompt(detail.prompt);
+        if (detail.execute !== false) {
+          chatMutation.mutate(detail.prompt);
+        } else {
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      } else {
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    };
+    window.addEventListener('app:ai-prompt', handleCustomEvent);
+
+    return () => {
+      promptListener = null;
+      window.removeEventListener('app:ai-prompt', handleCustomEvent);
+    };
+  }, [chatMutation]);
 
   const resetMutation = useMutation({
     mutationFn: (convId: string) =>
