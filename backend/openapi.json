@@ -4905,6 +4905,37 @@
           }
         }
       },
+      "CurrencySpendSummary": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "spent_minor",
+          "income_minor",
+          "net_minor"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "income_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "net_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "spent_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "CurrencySummary": {
         "type": "object",
         "description": "Totals for one currency. Currencies are never combined — without a rate\nsource, adding EUR to JPY would produce a meaningless number.",
@@ -6317,6 +6348,27 @@
           }
         }
       },
+      "UpcomingBillsSummary": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "total_minor"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "UpdateAiConfigInput": {
         "type": "object",
         "properties": {
@@ -6796,6 +6848,12 @@
           "total_income_minor",
           "net_cashflow_minor",
           "currency",
+          "spends_by_currency",
+          "upcoming_bills_by_currency",
+          "formatted_spent",
+          "formatted_income",
+          "formatted_net",
+          "formatted_upcoming_bills",
           "completed_tasks_count",
           "active_tasks_count",
           "habits_adherence_percent",
@@ -6830,7 +6888,19 @@
             "type": "string",
             "nullable": true
           },
+          "formatted_income": {
+            "type": "string"
+          },
           "formatted_markdown": {
+            "type": "string"
+          },
+          "formatted_net": {
+            "type": "string"
+          },
+          "formatted_spent": {
+            "type": "string"
+          },
+          "formatted_upcoming_bills": {
             "type": "string"
           },
           "habits_adherence_percent": {
@@ -6847,6 +6917,12 @@
           "period_start": {
             "type": "string"
           },
+          "spends_by_currency": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrencySpendSummary"
+            }
+          },
           "top_expense_category": {
             "type": "string",
             "nullable": true
@@ -6858,6 +6934,12 @@
           "total_spent_minor": {
             "type": "integer",
             "format": "int64"
+          },
+          "upcoming_bills_by_currency": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpcomingBillsSummary"
+            }
           },
           "upcoming_bills_count": {
             "type": "integer",

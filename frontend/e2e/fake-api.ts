@@ -1684,6 +1684,26 @@ export class FakeApi {
         total_income_minor: 250000,
         net_cashflow_minor: 237450,
         currency: 'USD',
+        spends_by_currency: [
+          {
+            currency: 'USD',
+            currency_exponent: 2,
+            spent_minor: 12550,
+            income_minor: 250000,
+            net_minor: 237450,
+          },
+        ],
+        upcoming_bills_by_currency: [
+          {
+            currency: 'USD',
+            currency_exponent: 2,
+            total_minor: 4500,
+          },
+        ],
+        formatted_spent: 'USD 125.50',
+        formatted_income: 'USD 2500.00',
+        formatted_net: 'USD 2374.50',
+        formatted_upcoming_bills: 'USD 45.00',
         top_expense_category: 'Dining',
         completed_tasks_count: 8,
         active_tasks_count: 3,

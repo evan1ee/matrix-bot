@@ -205,6 +205,8 @@ use crate::modules::settings::UserSettings;
             crate::modules::ai::models::AiChatRequest,
             crate::modules::ai::models::AiChatResponse,
             crate::modules::ai::retrospective::WeeklyRetrospective,
+            crate::modules::ai::retrospective::CurrencySpendSummary,
+            crate::modules::ai::retrospective::UpcomingBillsSummary,
             crate::modules::bookmarks::models::Bookmark,
             crate::modules::bookmarks::models::CreateBookmarkInput,
             crate::modules::bookmarks::models::UpdateBookmarkInput,

@@ -120,11 +120,11 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
                     <span>Net Flow</span>
                     <DollarSign className="w-3.5 h-3.5" />
                   </div>
-                  <div className={`text-base font-semibold font-sans ${isNetPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  <div className={`text-base font-semibold font-sans truncate ${isNetPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={retro.formatted_net}>
                     {retro.currency} {netDec}
                   </div>
-                  <div className="text-[11px] font-mono text-neutral-500 truncate">
-                    Spent {retro.currency} {spentDec}
+                  <div className="text-[11px] font-mono text-neutral-500 truncate" title={retro.formatted_spent ? `Spent ${retro.formatted_spent}` : undefined}>
+                    Spent {retro.formatted_spent ? retro.formatted_spent : `${retro.currency} ${spentDec}`}
                   </div>
                 </div>
 
@@ -176,7 +176,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Bell className="w-4 h-4 text-neutral-500 shrink-0" />
                   <span>
-                    Upcoming (Next 7 Days): <strong className="font-semibold">{retro.upcoming_bills_count} bills</strong> ({retro.currency} {(retro.upcoming_bills_total_minor / 100).toFixed(2)}) &amp; <strong className="font-semibold">{retro.upcoming_reminders_count} reminders</strong>
+                    Upcoming (Next 7 Days): <strong className="font-semibold">{retro.upcoming_bills_count} bills</strong> ({retro.formatted_upcoming_bills || `${retro.currency} ${(retro.upcoming_bills_total_minor / 100).toFixed(2)}`}) &amp; <strong className="font-semibold">{retro.upcoming_reminders_count} reminders</strong>
                   </span>
                 </div>
               </div>

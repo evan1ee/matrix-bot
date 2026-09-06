@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
+use crate::modules::finance::money::format_amount;
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
@@ -14,6 +15,22 @@ use crate::modules::todo::repository::TodoRepository;
 use crate::utils::html::html_escape;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CurrencySpendSummary {
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub spent_minor: i64,
+    pub income_minor: i64,
+    pub net_minor: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpcomingBillsSummary {
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub total_minor: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WeeklyRetrospective {
     pub period_start: String,
     pub period_end: String,
@@ -21,6 +38,12 @@ pub struct WeeklyRetrospective {
     pub total_income_minor: i64,
     pub net_cashflow_minor: i64,
     pub currency: String,
+    pub spends_by_currency: Vec<CurrencySpendSummary>,
+    pub upcoming_bills_by_currency: Vec<UpcomingBillsSummary>,
+    pub formatted_spent: String,
+    pub formatted_income: String,
+    pub formatted_net: String,
+    pub formatted_upcoming_bills: String,
     pub top_expense_category: Option<String>,
     pub completed_tasks_count: usize,
     pub active_tasks_count: usize,
@@ -48,38 +71,119 @@ pub async fn generate_weekly_retrospective(
     let next_period_end = next_seven_days.format("%Y-%m-%d").to_string();
 
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    let currency = settings.currency.clone();
+    let default_currency = settings.currency.clone();
 
-    // 1. Finance (last 7 days)
+    // 1. Finance (last 7 days) — Currencies must NEVER be added together.
     let start_dt = seven_days_ago
         .and_hms_opt(0, 0, 0)
         .expect("valid midnight")
         .and_utc();
 
-    let tx_list = FinanceRepository::list(pool, owner_id, None, 200, 0).await?;
+    let summaries = FinanceRepository::summary(pool, owner_id, start_dt, now).await?;
 
-    let mut total_spent_minor: i64 = 0;
-    let mut total_income_minor: i64 = 0;
-    let mut category_totals: HashMap<String, i64> = HashMap::new();
+    let mut spends_by_currency: Vec<CurrencySpendSummary> = summaries
+        .iter()
+        .map(|s| CurrencySpendSummary {
+            currency: s.currency.clone(),
+            currency_exponent: s.currency_exponent,
+            spent_minor: s.expense_minor,
+            income_minor: s.income_minor,
+            net_minor: s.net_minor,
+        })
+        .collect();
+    spends_by_currency.sort_by(|a, b| a.currency.cmp(&b.currency));
 
-    for tx in &tx_list {
-        if tx.occurred_at >= start_dt {
-            if tx.direction == "expense" {
-                total_spent_minor += tx.amount_minor;
-                let cat = tx.category_name.clone().unwrap_or_else(|| "Uncategorized".to_string());
-                *category_totals.entry(cat).or_insert(0) += tx.amount_minor;
-            } else if tx.direction == "income" {
-                total_income_minor += tx.amount_minor;
+    let (currency, total_spent_minor, total_income_minor, net_cashflow_minor) =
+        if let Some(primary) = spends_by_currency.iter().find(|s| s.currency == default_currency) {
+            (
+                default_currency.clone(),
+                primary.spent_minor,
+                primary.income_minor,
+                primary.net_minor,
+            )
+        } else if let Some(first) = spends_by_currency.first() {
+            (
+                first.currency.clone(),
+                first.spent_minor,
+                first.income_minor,
+                first.net_minor,
+            )
+        } else {
+            (default_currency.clone(), 0, 0, 0)
+        };
+
+    let formatted_spent = {
+        let non_zero: Vec<String> = spends_by_currency
+            .iter()
+            .filter(|s| s.spent_minor > 0)
+            .map(|s| {
+                let dec = format_amount(s.spent_minor, s.currency_exponent as u32);
+                format!("{} {}", s.currency, dec)
+            })
+            .collect();
+        if non_zero.is_empty() {
+            format!("{} 0.00", currency)
+        } else {
+            non_zero.join(", ")
+        }
+    };
+
+    let formatted_income = {
+        let non_zero: Vec<String> = spends_by_currency
+            .iter()
+            .filter(|s| s.income_minor > 0)
+            .map(|s| {
+                let dec = format_amount(s.income_minor, s.currency_exponent as u32);
+                format!("{} {}", s.currency, dec)
+            })
+            .collect();
+        if non_zero.is_empty() {
+            format!("{} 0.00", currency)
+        } else {
+            non_zero.join(", ")
+        }
+    };
+
+    let formatted_net = {
+        let active: Vec<String> = spends_by_currency
+            .iter()
+            .filter(|s| s.spent_minor > 0 || s.income_minor > 0)
+            .map(|s| {
+                let dec = format_amount(s.net_minor, s.currency_exponent as u32);
+                format!("{} {}", s.currency, dec)
+            })
+            .collect();
+        if active.is_empty() {
+            format!("{} 0.00", currency)
+        } else {
+            active.join(", ")
+        }
+    };
+
+    // Find top category without cross-currency addition.
+    let top_expense_category = {
+        let mut all_cats: Vec<(&str, i64, &str, i64)> = Vec::new();
+        for s in &summaries {
+            for c in &s.categories {
+                if c.expense_minor > 0 {
+                    let name = c.category.as_deref().unwrap_or("Uncategorized");
+                    all_cats.push((name, c.expense_minor, &s.currency, s.currency_exponent));
+                }
             }
         }
-    }
-
-    let top_expense_category = category_totals
-        .into_iter()
-        .max_by_key(|(_, amount)| *amount)
-        .map(|(cat, _)| cat);
-
-    let net_cashflow_minor = total_income_minor - total_spent_minor;
+        all_cats.sort_by(|a, b| {
+            let a_is_default = a.2 == default_currency;
+            let b_is_default = b.2 == default_currency;
+            match (a_is_default, b_is_default) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b.1.cmp(&a.1),
+            }
+        });
+        all_cats.first().map(|(name, amount, curr, exp)| {
+            format!("{} ({} {})", name, curr, format_amount(*amount, *exp as u32))
+        })
+    };
 
     // 2. Tasks
     let all_tasks = TodoRepository::list_all_user(pool, owner_id, None, 200, 0).await?;
@@ -104,19 +208,55 @@ pub async fn generate_weekly_retrospective(
         0.0
     };
 
-    // 4. Upcoming Bills (next 7 days)
+    // 4. Upcoming Bills (next 7 days) — Group by currency, never sum across currencies.
     let bills = RecurringBillRepository::list_by_owner(pool, owner_id).await?;
     let mut upcoming_bills_count = 0;
-    let mut upcoming_bills_total_minor: i64 = 0;
+    let mut bills_by_currency: HashMap<String, (i64, i64)> = HashMap::new();
 
     for b in &bills {
         if b.status == "active"
             && b.next_due_at.as_str() <= next_period_end.as_str()
         {
             upcoming_bills_count += 1;
-            upcoming_bills_total_minor += b.amount_minor;
+            let entry = bills_by_currency
+                .entry(b.currency.to_uppercase())
+                .or_insert((0, b.currency_exponent as i64));
+            entry.0 += b.amount_minor;
         }
     }
+
+    let mut upcoming_bills_by_currency: Vec<UpcomingBillsSummary> = bills_by_currency
+        .into_iter()
+        .map(|(curr, (total_minor, exp))| UpcomingBillsSummary {
+            currency: curr,
+            currency_exponent: exp,
+            total_minor,
+        })
+        .collect();
+    upcoming_bills_by_currency.sort_by(|a, b| a.currency.cmp(&b.currency));
+
+    let upcoming_bills_total_minor = if let Some(primary_bill) =
+        upcoming_bills_by_currency.iter().find(|b| b.currency == default_currency)
+    {
+        primary_bill.total_minor
+    } else if let Some(first_bill) = upcoming_bills_by_currency.first() {
+        first_bill.total_minor
+    } else {
+        0
+    };
+
+    let formatted_upcoming_bills = if upcoming_bills_by_currency.is_empty() {
+        format!("{} 0.00", default_currency)
+    } else {
+        upcoming_bills_by_currency
+            .iter()
+            .map(|b| {
+                let dec = format_amount(b.total_minor, b.currency_exponent as u32);
+                format!("{} {}", b.currency, dec)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
 
     // 5. Upcoming Reminders (next 7 days)
     let reminders = ReminderRepository::list_user_pending(pool, owner_id, 50, 0).await?;
@@ -142,21 +282,16 @@ pub async fn generate_weekly_retrospective(
         .max_by_key(|(_, count)| *count)
         .map(|(m, _)| m);
 
-    // 7. Format Markdown
-    let spent_dec = format!("{:.2}", (total_spent_minor as f64) / 100.0);
-    let income_dec = format!("{:.2}", (total_income_minor as f64) / 100.0);
-    let net_dec = format!("{:.2}", (net_cashflow_minor as f64) / 100.0);
-    let bills_dec = format!("{:.2}", (upcoming_bills_total_minor as f64) / 100.0);
-
+    // 7. Format Markdown & HTML
     let top_cat_display = top_expense_category.as_deref().unwrap_or("None");
     let mood_display = dominant_mood.as_deref().unwrap_or("Unrecorded");
 
     let formatted_markdown = format!(
         "### 🌟 Weekly Executive Retrospective ({period_start} to {period_end})\n\n\
          **💰 Financial Velocity**\n\
-         - **Total Spent**: `{currency} {spent_dec}`\n\
-         - **Total Income**: `{currency} {income_dec}`\n\
-         - **Net Cashflow**: `{currency} {net_dec}`\n\
+         - **Total Spent**: `{formatted_spent}`\n\
+         - **Total Income**: `{formatted_income}`\n\
+         - **Net Cashflow**: `{formatted_net}`\n\
          - **Top Category**: {top_cat_display}\n\n\
          **📋 Productivity & Habits**\n\
          - **Tasks Completed**: {completed_tasks_count} (Active remaining: {active_tasks_count})\n\
@@ -165,7 +300,7 @@ pub async fn generate_weekly_retrospective(
          - **Days Logged**: {days_logged_count} of 7 days\n\
          - **Dominant Mood**: {mood_display}\n\n\
          **📅 Upcoming Focus (Next 7 Days)**\n\
-         - **Due Bills**: {upcoming_bills_count} bills (`{currency} {bills_dec}`)\n\
+         - **Due Bills**: {upcoming_bills_count} bills (`{formatted_upcoming_bills}`)\n\
          - **Pending Reminders**: {upcoming_reminders_count} reminders scheduled\n"
     );
 
@@ -176,6 +311,12 @@ pub async fn generate_weekly_retrospective(
         total_income_minor,
         net_cashflow_minor,
         currency,
+        spends_by_currency,
+        upcoming_bills_by_currency,
+        formatted_spent,
+        formatted_income,
+        formatted_net,
+        formatted_upcoming_bills,
         top_expense_category,
         completed_tasks_count,
         active_tasks_count,
@@ -193,21 +334,21 @@ pub async fn generate_weekly_retrospective(
 pub async fn handle_retrospective_command(pool: &SqlitePool, owner_id: &str) -> String {
     match generate_weekly_retrospective(pool, owner_id).await {
         Ok(retro) => {
-            let spent_dec = format!("{:.2}", (retro.total_spent_minor as f64) / 100.0);
-            let income_dec = format!("{:.2}", (retro.total_income_minor as f64) / 100.0);
-            let net_dec = format!("{:.2}", (retro.net_cashflow_minor as f64) / 100.0);
-            let bills_dec = format!("{:.2}", (retro.upcoming_bills_total_minor as f64) / 100.0);
             let top_cat = html_escape(retro.top_expense_category.as_deref().unwrap_or("None"));
             let mood = html_escape(retro.dominant_mood.as_deref().unwrap_or("Unrecorded"));
+            let formatted_spent = html_escape(&retro.formatted_spent);
+            let formatted_income = html_escape(&retro.formatted_income);
+            let formatted_net = html_escape(&retro.formatted_net);
+            let formatted_bills = html_escape(&retro.formatted_upcoming_bills);
 
             let html = format!(
                 "<h3>🌟 Weekly Executive Retrospective</h3>\
                  <p><strong>Period:</strong> {period_start} to {period_end}</p>\
                  <h4>💰 Financial Velocity</h4>\
                  <ul>\
-                   <li><strong>Total Spent:</strong> <code>{curr} {spent_dec}</code></li>\
-                   <li><strong>Total Income:</strong> <code>{curr} {income_dec}</code></li>\
-                   <li><strong>Net Flow:</strong> <code>{curr} {net_dec}</code></li>\
+                   <li><strong>Total Spent:</strong> <code>{formatted_spent}</code></li>\
+                   <li><strong>Total Income:</strong> <code>{formatted_income}</code></li>\
+                   <li><strong>Net Flow:</strong> <code>{formatted_net}</code></li>\
                    <li><strong>Top Category:</strong> {top_cat}</li>\
                  </ul>\
                  <h4>📋 Productivity & Habits</h4>\
@@ -222,15 +363,14 @@ pub async fn handle_retrospective_command(pool: &SqlitePool, owner_id: &str) -> 
                  </ul>\
                  <h4>📅 Upcoming Focus (Next 7 Days)</h4>\
                  <ul>\
-                   <li><strong>Due Bills:</strong> {bills_cnt} (<code>{curr} {bills_dec}</code>)</li>\
+                   <li><strong>Due Bills:</strong> {bills_cnt} (<code>{formatted_bills}</code>)</li>\
                    <li><strong>Pending Reminders:</strong> {reminders_cnt}</li>\
                  </ul>",
                 period_start = html_escape(&retro.period_start),
                 period_end = html_escape(&retro.period_end),
-                curr = html_escape(&retro.currency),
-                spent_dec = spent_dec,
-                income_dec = income_dec,
-                net_dec = net_dec,
+                formatted_spent = formatted_spent,
+                formatted_income = formatted_income,
+                formatted_net = formatted_net,
                 top_cat = top_cat,
                 completed = retro.completed_tasks_count,
                 active = retro.active_tasks_count,
@@ -239,7 +379,7 @@ pub async fn handle_retrospective_command(pool: &SqlitePool, owner_id: &str) -> 
                 days_logged = retro.days_logged_count,
                 mood = mood,
                 bills_cnt = retro.upcoming_bills_count,
-                bills_dec = bills_dec,
+                formatted_bills = formatted_bills,
                 reminders_cnt = retro.upcoming_reminders_count,
             );
 
@@ -251,5 +391,165 @@ pub async fn handle_retrospective_command(pool: &SqlitePool, owner_id: &str) -> 
         Err(err) => {
             format!("Failed to compile weekly retrospective: {}", err)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::finance::repository::FinanceRepository;
+    use crate::modules::recurring_bills::models::CreateBillPayload;
+    use crate::modules::recurring_bills::repository::RecurringBillRepository;
+    use crate::modules::settings::models::UserSettings;
+    use crate::modules::settings::repository::SettingsRepository;
+
+    async fn test_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_retrospective_keeps_currencies_strictly_apart() {
+        let pool = test_db().await;
+        let owner = "@user:example.com";
+
+        // User sets default currency to CNY
+        SettingsRepository::upsert(
+            &pool,
+            owner,
+            &UserSettings {
+                timezone: "Asia/Shanghai".to_string(),
+                currency: "CNY".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Add expense: Shake Shack lunch: 16.50 USD (1650 minor)
+        let cat_food = FinanceRepository::create_category(&pool, owner, "Food")
+            .await
+            .unwrap()
+            .unwrap();
+        FinanceRepository::create_transaction(
+            &pool,
+            "room1",
+            owner,
+            "User",
+            "expense",
+            1650,
+            "USD",
+            2,
+            Some(cat_food.id),
+            Some("Lunch at Shake Shack"),
+            None,
+            None,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        // Add expense: Groceries: 45.00 CNY (4500 minor)
+        let cat_groceries = FinanceRepository::create_category(&pool, owner, "Groceries")
+            .await
+            .unwrap()
+            .unwrap();
+        FinanceRepository::create_transaction(
+            &pool,
+            "room1",
+            owner,
+            "User",
+            "expense",
+            4500,
+            "CNY",
+            2,
+            Some(cat_groceries.id),
+            Some("groceries"),
+            None,
+            None,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        // Add upcoming bills in USD and CNY
+        let tomorrow = (Utc::now() + Duration::days(1)).format("%Y-%m-%d").to_string();
+        RecurringBillRepository::create(
+            &pool,
+            "room1",
+            owner,
+            "User",
+            CreateBillPayload {
+                name: "US Service".to_string(),
+                category: "subscription".to_string(),
+                amount_minor: 1000,
+                currency: "USD".to_string(),
+                currency_exponent: Some(2),
+                frequency: Some("monthly".to_string()),
+                due_day: Some(1),
+                next_due_at: tomorrow.clone(),
+                total_installments: None,
+                auto_pay: Some(false),
+                notes: None,
+                remind_before_minutes: Some(60),
+                remind_room_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        RecurringBillRepository::create(
+            &pool,
+            "room1",
+            owner,
+            "User",
+            CreateBillPayload {
+                name: "CN Service".to_string(),
+                category: "subscription".to_string(),
+                amount_minor: 3000,
+                currency: "CNY".to_string(),
+                currency_exponent: Some(2),
+                frequency: Some("monthly".to_string()),
+                due_day: Some(1),
+                next_due_at: tomorrow,
+                total_installments: None,
+                auto_pay: Some(false),
+                notes: None,
+                remind_before_minutes: Some(60),
+                remind_room_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let retro = generate_weekly_retrospective(&pool, owner).await.unwrap();
+
+        // Primary currency is CNY, total_spent_minor must ONLY reflect CNY (4500), NEVER 6150 (1650 + 4500)
+        assert_eq!(retro.currency, "CNY");
+        assert_eq!(retro.total_spent_minor, 4500);
+        assert_eq!(retro.net_cashflow_minor, -4500);
+
+        // spends_by_currency must separate both currencies
+        assert_eq!(retro.spends_by_currency.len(), 2);
+        let cny = retro.spends_by_currency.iter().find(|s| s.currency == "CNY").unwrap();
+        assert_eq!(cny.spent_minor, 4500);
+        let usd = retro.spends_by_currency.iter().find(|s| s.currency == "USD").unwrap();
+        assert_eq!(usd.spent_minor, 1650);
+
+        // Formatted spent must state both currencies explicitly without summing
+        assert!(retro.formatted_spent.contains("CNY 45.00"));
+        assert!(retro.formatted_spent.contains("USD 16.50"));
+        assert!(!retro.formatted_spent.contains("61.50"));
+
+        // Markdown must show formatted spent and upcoming bills without summing
+        assert!(retro.formatted_markdown.contains("**Total Spent**: `CNY 45.00, USD 16.50`"));
+        assert!(retro.formatted_markdown.contains("Due Bills**: 2 bills (`CNY 30.00, USD 10.00`)"));
+
+        // Top category must show category and currency without cross-currency addition
+        assert!(retro.top_expense_category.as_ref().unwrap().contains("Groceries (CNY 45.00)"));
+
+        // Upcoming bills count is 2, and upcoming_bills_by_currency keeps them apart
+        assert_eq!(retro.upcoming_bills_count, 2);
+        assert_eq!(retro.upcoming_bills_by_currency.len(), 2);
     }
 }

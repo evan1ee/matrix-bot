@@ -35,6 +35,20 @@ export interface AiChatResponse {
   tool_calls_executed: string[];
 }
 
+export interface CurrencySpendSummary {
+  currency: string;
+  currency_exponent: number;
+  spent_minor: number;
+  income_minor: number;
+  net_minor: number;
+}
+
+export interface UpcomingBillsSummary {
+  currency: string;
+  currency_exponent: number;
+  total_minor: number;
+}
+
 export interface WeeklyRetrospective {
   period_start: string;
   period_end: string;
@@ -42,6 +56,12 @@ export interface WeeklyRetrospective {
   total_income_minor: number;
   net_cashflow_minor: number;
   currency: string;
+  spends_by_currency?: CurrencySpendSummary[];
+  upcoming_bills_by_currency?: UpcomingBillsSummary[];
+  formatted_spent?: string;
+  formatted_income?: string;
+  formatted_net?: string;
+  formatted_upcoming_bills?: string;
   top_expense_category?: string | null;
   completed_tasks_count: number;
   active_tasks_count: number;

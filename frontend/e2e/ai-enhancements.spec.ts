@@ -11,7 +11,7 @@ test.describe('Smart AI Enhancements: Multi-Action Capture & Executive Retrospec
     await app.getByRole('button', { name: multiPrompt }).click();
 
     // Verify user message in message list
-    await expect(app.locator('.whitespace-pre-wrap', { hasText: multiPrompt })).toBeVisible();
+    await expect(app.getByText(multiPrompt)).toBeVisible();
 
     // Verify multi-action tool execution
     await expect(app.getByText(/Tool Result:/i)).toBeVisible();
@@ -33,11 +33,11 @@ test.describe('Smart AI Enhancements: Multi-Action Capture & Executive Retrospec
     await retroBtn.click();
 
     // Verify Retrospective Modal opens
-    await expect(app.getByRole('heading', { name: 'Weekly Executive Retrospective' })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Weekly Executive Retrospective', exact: true })).toBeVisible();
     await expect(app.getByText('2026-08-29 to 2026-09-05', { exact: true })).toBeVisible();
 
     // Verify stat cards
-    await expect(app.getByText('USD 2374.50', { exact: true })).toBeVisible(); // Net cashflow
+    await expect(app.getByText('USD 2374.50', { exact: true }).first()).toBeVisible(); // Net cashflow
     await expect(app.getByText(/8 done/i)).toBeVisible(); // Completed tasks
     await expect(app.getByText('85.7%', { exact: true })).toBeVisible(); // Habit adherence
     await expect(app.getByText('good', { exact: true })).toBeVisible(); // Dominant mood
@@ -54,7 +54,7 @@ test.describe('Smart AI Enhancements: Multi-Action Capture & Executive Retrospec
     await planBtn.click();
 
     // Modal should close and prompt should be sent to AI
-    await expect(app.getByRole('heading', { name: 'Weekly Executive Retrospective' })).not.toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Weekly Executive Retrospective', exact: true })).not.toBeVisible();
     await expect(app.getByText(/Please analyze my weekly retrospective and suggest 3 high-impact focus areas/i)).toBeVisible();
   });
 
@@ -70,5 +70,66 @@ test.describe('Smart AI Enhancements: Multi-Action Capture & Executive Retrospec
     await expect(app.getByText(/Financial Velocity/i)).toBeVisible();
     await expect(app.getByText(/Productivity & Habits/i)).toBeVisible();
     await expect(app.getByText(/Habit Adherence/i)).toBeVisible();
+  });
+
+  test('renders multi-currency retrospective with isolated totals for USD and CNY without cross-currency summing', async ({ app }) => {
+    await app.route('**/api/v1/ai/retrospective', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          period_start: '2026-08-30',
+          period_end: '2026-09-06',
+          total_spent_minor: 4500,
+          total_income_minor: 0,
+          net_cashflow_minor: -4500,
+          currency: 'CNY',
+          spends_by_currency: [
+            { currency: 'CNY', currency_exponent: 2, spent_minor: 4500, income_minor: 0, net_minor: -4500 },
+            { currency: 'USD', currency_exponent: 2, spent_minor: 1650, income_minor: 0, net_minor: -1650 },
+          ],
+          upcoming_bills_by_currency: [
+            { currency: 'CNY', currency_exponent: 2, total_minor: 3000 },
+            { currency: 'USD', currency_exponent: 2, total_minor: 1000 },
+          ],
+          formatted_spent: 'CNY 45.00, USD 16.50',
+          formatted_income: 'CNY 0.00',
+          formatted_net: 'CNY -45.00, USD -16.50',
+          formatted_upcoming_bills: 'CNY 30.00, USD 10.00',
+          top_expense_category: 'Groceries (CNY 45.00)',
+          completed_tasks_count: 5,
+          active_tasks_count: 2,
+          habits_adherence_percent: 100.0,
+          active_habits_count: 3,
+          upcoming_bills_count: 2,
+          upcoming_bills_total_minor: 3000,
+          upcoming_reminders_count: 1,
+          days_logged_count: 7,
+          dominant_mood: 'great',
+          formatted_markdown:
+            '### 🌟 Weekly Executive Retrospective (2026-08-30 to 2026-09-06)\n\n' +
+            '**💰 Financial Velocity**\n' +
+            '- **Total Spent**: `CNY 45.00, USD 16.50`\n' +
+            '- **Total Income**: `CNY 0.00`\n' +
+            '- **Net Cashflow**: `CNY -45.00, USD -16.50`\n' +
+            '- **Top Category**: Groceries (CNY 45.00)\n\n' +
+            '**📅 Upcoming Focus (Next 7 Days)**\n' +
+            '- **Due Bills**: 2 bills (`CNY 30.00, USD 10.00`)\n',
+        }),
+      });
+    });
+
+    await gotoApp(app);
+    await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+    await app.getByRole('button', { name: 'Weekly Retro', exact: true }).click();
+
+    // Verify modal heading
+    await expect(app.getByRole('heading', { name: 'Weekly Executive Retrospective', exact: true })).toBeVisible();
+
+    // Verify both currencies appear and 61.50 is NEVER displayed
+    await expect(app.getByText('CNY -45.00', { exact: true })).toBeVisible();
+    await expect(app.getByText(/Spent CNY 45\.00, USD 16\.50/)).toBeVisible();
+    await expect(app.getByText('CNY 30.00, USD 10.00', { exact: true })).toBeVisible();
+    await expect(app.getByText(/61\.50/)).not.toBeVisible();
   });
 });

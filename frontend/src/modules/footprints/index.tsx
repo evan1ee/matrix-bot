@@ -101,13 +101,17 @@ const FootprintsView: React.FC<{
     setIsModalOpen(true);
   };
 
-  // Primary spend metric from summary
-  const primarySpend = summaryStats?.spend_by_currency?.[0];
-  const formattedTotalSpend = primarySpend
-    ? `${(primarySpend.total_spend_minor / Math.pow(10, primarySpend.currency_exponent)).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} ${primarySpend.currency}`
+  // Spend metric from summary across all currencies
+  const formattedTotalSpend = summaryStats?.spend_by_currency?.length
+    ? summaryStats.spend_by_currency
+        .map(
+          (s) =>
+            `${(s.total_spend_minor / Math.pow(10, s.currency_exponent)).toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })} ${s.currency}`
+        )
+        .join(' · ')
     : '$0.00';
 
   return (

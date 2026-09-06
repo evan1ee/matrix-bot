@@ -1469,6 +1469,17 @@ export interface components {
             raw_token: string;
             webhook: components["schemas"]["Webhook"];
         };
+        CurrencySpendSummary: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            income_minor: number;
+            /** Format: int64 */
+            net_minor: number;
+            /** Format: int64 */
+            spent_minor: number;
+        };
         /**
          * @description Totals for one currency. Currencies are never combined — without a rate
          *     source, adding EUR to JPY would produce a meaningless number.
@@ -2034,6 +2045,13 @@ export interface components {
         UnlinkRequest: {
             mxid: string;
         };
+        UpcomingBillsSummary: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            total_minor: number;
+        };
         UpdateAiConfigInput: {
             api_base_url?: string | null;
             api_key?: string | null;
@@ -2214,18 +2232,24 @@ export interface components {
             currency: string;
             days_logged_count: number;
             dominant_mood?: string | null;
+            formatted_income: string;
             formatted_markdown: string;
+            formatted_net: string;
+            formatted_spent: string;
+            formatted_upcoming_bills: string;
             /** Format: double */
             habits_adherence_percent: number;
             /** Format: int64 */
             net_cashflow_minor: number;
             period_end: string;
             period_start: string;
+            spends_by_currency: components["schemas"]["CurrencySpendSummary"][];
             top_expense_category?: string | null;
             /** Format: int64 */
             total_income_minor: number;
             /** Format: int64 */
             total_spent_minor: number;
+            upcoming_bills_by_currency: components["schemas"]["UpcomingBillsSummary"][];
             upcoming_bills_count: number;
             /** Format: int64 */
             upcoming_bills_total_minor: number;
