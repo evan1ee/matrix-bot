@@ -20,6 +20,7 @@ fn get_client() -> &'static reqwest::Client {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(BROWSER_USER_AGENT));
         reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
             .default_headers(headers)
             .build()
@@ -166,12 +167,25 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
 
         // Fallback to Yahoo Finance for crypto (e.g. BTC-USD)
         let yf_sym = if clean_sym.contains('-') { clean_sym.clone() } else { format!("{}-USD", clean_sym) };
-        let yf_url = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
-            yf_sym
-        );
+        let session = crate::modules::portfolio::history_feed::get_yahoo_session().await.ok();
+        let yf_url = if let Some((_, ref crumb)) = session {
+            format!(
+                "https://query2.finance.yahoo.com/v8/finance/chart/{}?crumb={}&interval=1d&range=1d",
+                yf_sym, crumb
+            )
+        } else {
+            format!(
+                "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+                yf_sym
+            )
+        };
 
-        let res = client.get(&yf_url).send().await.map_err(|e| e.to_string())?;
+        let mut req = client.get(&yf_url);
+        if let Some((ref cookie, _)) = session {
+            req = req.header(reqwest::header::COOKIE, cookie);
+        }
+
+        let res = req.send().await.map_err(|e| e.to_string())?;
         if !res.status().is_success() {
             return Err(format!("Price lookup failed for {} with status {}", yf_sym, res.status()));
         }
@@ -179,12 +193,25 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
         parse_yahoo_chart_json(&body)
     } else {
         // Stocks / ETFs / Indices
-        let yf_url = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
-            clean_sym
-        );
+        let session = crate::modules::portfolio::history_feed::get_yahoo_session().await.ok();
+        let yf_url = if let Some((_, ref crumb)) = session {
+            format!(
+                "https://query2.finance.yahoo.com/v8/finance/chart/{}?crumb={}&interval=1d&range=1d",
+                clean_sym, crumb
+            )
+        } else {
+            format!(
+                "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+                clean_sym
+            )
+        };
 
-        let res = client.get(&yf_url).send().await.map_err(|e| e.to_string())?;
+        let mut req = client.get(&yf_url);
+        if let Some((ref cookie, _)) = session {
+            req = req.header(reqwest::header::COOKIE, cookie);
+        }
+
+        let res = req.send().await.map_err(|e| e.to_string())?;
         if !res.status().is_success() {
             return Err(format!("Yahoo Finance returned status {} for {}", res.status(), clean_sym));
         }

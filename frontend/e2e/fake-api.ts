@@ -1421,25 +1421,44 @@ export class FakeApi {
 
     // --- portfolio history ---
     if (path.startsWith('/portfolio/history') && method === 'GET') {
+      const urlObj = new URL('http://dummy' + path);
+      const timeframe = urlObj.searchParams.get('timeframe') || '1m';
+      const numDays = timeframe === '7d' ? 7 : timeframe === '3m' ? 90 : timeframe === '1y' ? 365 : 30;
       const totalCash = this.cash.reduce((acc, c) => acc + c.balance_minor, 0);
       const totalHoldings = this.holdings.reduce((acc, h) => {
         const p = h.current_price_minor ?? h.avg_cost_minor;
         return acc + Math.trunc((h.quantity_minor * p) / 10 ** QUANTITY_EXPONENT);
       }, 0);
-      const total = totalCash + totalHoldings;
-      const today = new Date().toISOString().split('T')[0];
+
+      const points = [];
+      const now = new Date();
+      for (let i = numDays - 1; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 86400000);
+        const dateStr = d.toISOString().split('T')[0];
+        const factor = 1.0 - (i / numDays) * 0.05 + Math.sin(i) * 0.01;
+        const hVal = Math.trunc(totalHoldings * factor);
+        points.push({
+          date: dateStr,
+          holdings_value_minor: hVal,
+          cash_minor: totalCash,
+          total_net_worth_minor: hVal + totalCash,
+        });
+      }
+
+      const starting = points[0].total_net_worth_minor;
+      const current = points[points.length - 1].total_net_worth_minor;
+      const change = current - starting;
+      const pct = starting > 0 ? (change / starting) * 100 : 0;
+
       return json(route, 200, {
         currency: 'USD',
         currency_exponent: 2,
-        timeframe: '1m',
-        points: [
-          { date: '2026-08-01', holdings_value_minor: Math.trunc(totalHoldings * 0.9), cash_minor: totalCash, total_net_worth_minor: Math.trunc(total * 0.95) },
-          { date: today, holdings_value_minor: totalHoldings, cash_minor: totalCash, total_net_worth_minor: total },
-        ],
-        starting_value_minor: Math.trunc(total * 0.95),
-        current_value_minor: total,
-        period_change_minor: Math.trunc(total * 0.05),
-        period_change_pct: 5.26,
+        timeframe,
+        points,
+        starting_value_minor: starting,
+        current_value_minor: current,
+        period_change_minor: change,
+        period_change_pct: pct,
       });
     }
 

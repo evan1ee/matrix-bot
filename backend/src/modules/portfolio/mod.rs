@@ -17,6 +17,7 @@ pub mod cash;
 pub mod cash_repo;
 pub mod handler;
 pub mod history;
+pub mod history_feed;
 pub mod models;
 pub mod price_feed;
 pub mod repository;

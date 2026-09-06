@@ -174,7 +174,9 @@ impl HistoryRepository {
         let mut live_holdings_value = 0i64;
         let mut currency_exponent = 2i64;
 
-        for h in holdings.iter().filter(|h| h.currency == norm_currency) {
+        let cur_holdings: Vec<&Holding> = holdings.iter().filter(|h| h.currency == norm_currency).collect();
+
+        for h in &cur_holdings {
             currency_exponent = h.currency_exponent;
             if let Some(price) = h.current_price_minor {
                 live_holdings_value += (h.quantity_minor as i128 * price as i128 / 100_000_000) as i64;
@@ -193,42 +195,118 @@ impl HistoryRepository {
         let live_total = live_holdings_value + live_cash;
         let today_str = now.format("%Y-%m-%d").to_string();
 
-        let mut points: Vec<PortfolioHistoryPoint> = snapshots
-            .drain(..)
-            .filter(|s| s.snapshot_date != today_str)
-            .map(|s| PortfolioHistoryPoint {
-                date: s.snapshot_date,
-                holdings_value_minor: s.holdings_value_minor,
-                cash_minor: s.cash_minor,
-                total_net_worth_minor: s.total_net_worth_minor,
-            })
-            .collect();
+        // If user has active holdings, fetch their real historical price curves
+        let mut holding_series: Vec<(&Holding, std::collections::BTreeMap<String, i64>)> = Vec::new();
+        let mut all_dates: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
-        // If no prior snapshots exist, generate backfilled starting points from audit activity log
-        if points.is_empty() {
-            let audit_entries = sqlx::query_as::<_, (DateTime<Utc>, i64, String)>(
-                r#"
-                SELECT created_at, amount_minor, action
-                FROM portfolio_audit_log
-                WHERE owner_id = ? AND currency = ?
-                ORDER BY created_at ASC;
-                "#,
-            )
-            .bind(owner_id)
-            .bind(&norm_currency)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+        for h in &cur_holdings {
+            if let Ok(series) = crate::modules::portfolio::history_feed::fetch_historical_prices(&h.symbol, timeframe).await {
+                let mut map = std::collections::BTreeMap::new();
+                for (date, price) in series {
+                    if let Some(created) = h.created_at {
+                        let created_date = created.format("%Y-%m-%d").to_string();
+                        if date < created_date {
+                            continue;
+                        }
+                    }
+                    let price_minor = crate::modules::portfolio::price_feed::price_to_minor(price, h.currency_exponent);
+                    let val_minor = crate::modules::portfolio::models::scale_product(h.quantity_minor, price_minor);
+                    all_dates.insert(date.clone());
+                    map.insert(date, val_minor);
+                }
+                if !map.is_empty() {
+                    holding_series.push((h, map));
+                }
+            }
+        }
 
-            if !audit_entries.is_empty() {
-                let first_date = audit_entries[0].0.format("%Y-%m-%d").to_string();
-                if first_date != today_str {
-                    points.push(PortfolioHistoryPoint {
-                        date: first_date,
-                        holdings_value_minor: 0,
-                        cash_minor: audit_entries[0].1,
-                        total_net_worth_minor: audit_entries[0].1,
-                    });
+        let mut points: Vec<PortfolioHistoryPoint> = Vec::new();
+
+        if !holding_series.is_empty() && !all_dates.is_empty() {
+            // Forward-fill per holding so weekends or missing quotes don't create false dips
+            let mut last_known_vals: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+
+            for date in all_dates {
+                if date == today_str {
+                    continue;
+                }
+
+                let mut total_holdings_for_date = 0i64;
+                for (h, map) in &holding_series {
+                    if let Some(&val) = map.get(&date) {
+                        last_known_vals.insert(h.symbol.clone(), val);
+                        total_holdings_for_date += val;
+                    } else if let Some(&last_val) = last_known_vals.get(&h.symbol) {
+                        total_holdings_for_date += last_val;
+                    }
+                }
+
+                let date_cash = snapshots
+                    .iter()
+                    .find(|s| s.snapshot_date == date)
+                    .map(|s| s.cash_minor)
+                    .unwrap_or(live_cash);
+
+                let total_net_worth = total_holdings_for_date + date_cash;
+
+                // Cache/persist snapshot
+                let _ = Self::record_snapshot(
+                    pool,
+                    owner_id,
+                    &date,
+                    &norm_currency,
+                    currency_exponent,
+                    total_holdings_for_date,
+                    date_cash,
+                )
+                .await;
+
+                points.push(PortfolioHistoryPoint {
+                    date,
+                    holdings_value_minor: total_holdings_for_date,
+                    cash_minor: date_cash,
+                    total_net_worth_minor: total_net_worth,
+                });
+            }
+        } else {
+            // Fall back to recorded snapshots
+            points = snapshots
+                .drain(..)
+                .filter(|s| s.snapshot_date != today_str)
+                .map(|s| PortfolioHistoryPoint {
+                    date: s.snapshot_date,
+                    holdings_value_minor: s.holdings_value_minor,
+                    cash_minor: s.cash_minor,
+                    total_net_worth_minor: s.total_net_worth_minor,
+                })
+                .collect();
+
+            // If no prior snapshots exist, generate backfilled starting points from audit activity log
+            if points.is_empty() {
+                let audit_entries = sqlx::query_as::<_, (DateTime<Utc>, i64, String)>(
+                    r#"
+                    SELECT created_at, amount_minor, action
+                    FROM portfolio_audit_log
+                    WHERE owner_id = ? AND currency = ?
+                    ORDER BY created_at ASC;
+                    "#,
+                )
+                .bind(owner_id)
+                .bind(&norm_currency)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+
+                if !audit_entries.is_empty() {
+                    let first_date = audit_entries[0].0.format("%Y-%m-%d").to_string();
+                    if first_date != today_str {
+                        points.push(PortfolioHistoryPoint {
+                            date: first_date,
+                            holdings_value_minor: 0,
+                            cash_minor: audit_entries[0].1,
+                            total_net_worth_minor: audit_entries[0].1,
+                        });
+                    }
                 }
             }
         }
@@ -240,6 +318,9 @@ impl HistoryRepository {
             cash_minor: live_cash,
             total_net_worth_minor: live_total,
         });
+
+        points.sort_by(|a, b| a.date.cmp(&b.date));
+        points.dedup_by(|a, b| a.date == b.date);
 
         let starting_value_minor = points.first().map(|p| p.total_net_worth_minor).unwrap_or(0);
         let current_value_minor = points.last().map(|p| p.total_net_worth_minor).unwrap_or(0);

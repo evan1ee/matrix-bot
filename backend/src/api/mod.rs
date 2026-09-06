@@ -272,6 +272,7 @@ pub async fn start_api_server(
         // (measured at ~6s against one such setup), and a connect timeout tighter
         // than that silently breaks profile and media lookups.
         reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(HTTP_TOTAL_TIMEOUT)
             .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .build()

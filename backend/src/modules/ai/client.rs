@@ -87,6 +87,7 @@ pub struct AiClient {
 impl AiClient {
     pub fn new() -> Self {
         let http_client = reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(Duration::from_secs(120))
             .build()
             .expect("Failed to build HTTP client for AI assistant");

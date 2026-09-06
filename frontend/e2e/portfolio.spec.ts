@@ -369,16 +369,58 @@ test.describe('per-currency summary', () => {
     await expect(app.getByRole('button', { name: '1M' })).toBeVisible();
     await expect(app.getByRole('button', { name: '1Y' })).toBeVisible();
 
-    // Capture focused Performance Chart screenshot
+    const chartCard = app.getByText('NET WORTH HISTORY (USD)').locator('xpath=ancestor::div[contains(@class, "rounded-xl")]').first();
+    const chartSvg = chartCard.locator('svg.select-none').first();
+    const header = chartCard.locator('> div').first();
+
+    for (const vpWidth of [375, 500, 640, 768, 1024, 1280]) {
+      await app.setViewportSize({ width: vpWidth, height: 800 });
+      await app.waitForTimeout(200);
+
+      // Move mouse away to unhover
+      await app.mouse.move(0, 0);
+      await app.waitForTimeout(100);
+
+      const boxBefore = await chartCard.boundingBox();
+      const svgBefore = await chartSvg.boundingBox();
+      const headerBefore = await header.boundingBox();
+
+      // Hover over chart
+      await chartSvg.scrollIntoViewIfNeeded();
+      await chartSvg.hover({ position: { x: 100, y: 50 } });
+      await app.waitForTimeout(200);
+
+      const boxHover = await chartCard.boundingBox();
+      const svgHover = await chartSvg.boundingBox();
+      const headerHover = await header.boundingBox();
+
+      const diff = (boxHover?.height ?? 0) - (boxBefore?.height ?? 0);
+      const svgDiff = (svgHover?.height ?? 0) - (svgBefore?.height ?? 0);
+      const headerDiff = (headerHover?.height ?? 0) - (headerBefore?.height ?? 0);
+      console.log(`WIDTH ${vpWidth}: cardDiff=${diff} (before=${boxBefore?.height}, after=${boxHover?.height}), svgDiff=${svgDiff}, headerDiff=${headerDiff}`);
+      expect(diff).toBe(0);
+      expect(headerDiff).toBe(0);
+      expect(svgDiff).toBe(0);
+    }
+
+    // Capture focused Performance Chart screenshot in unhovered and hovered states
     const artifactDir = process.env.BRAIN_DIR;
     if (artifactDir && fs.existsSync(artifactDir)) {
-      const chartCard = app.getByText('NET WORTH HISTORY (USD)').locator('xpath=ancestor::div[contains(@class, "rounded-xl")]').first();
+      await app.setViewportSize({ width: 1280, height: 800 });
+      await app.mouse.move(0, 0);
+      await app.waitForTimeout(100);
+      await chartCard.scrollIntoViewIfNeeded();
       await chartCard.screenshot({
-        path: `${artifactDir}/portfolio_chart_card.png`,
+        path: `${artifactDir}/portfolio_chart_unhovered.png`,
+      });
+
+      await chartSvg.hover({ position: { x: 100, y: 50 } });
+      await app.waitForTimeout(200);
+      await chartCard.screenshot({
+        path: `${artifactDir}/portfolio_chart_hovered.png`,
       });
 
       // Capture main dashboard view scrolled to the chart & holdings
-      await chartCard.scrollIntoViewIfNeeded();
       await app.screenshot({
         path: `${artifactDir}/portfolio_performance_dashboard.png`,
       });

@@ -34,6 +34,12 @@ pub async fn refresh_all_prices(
     )
     .await;
 
+    let _ = crate::modules::portfolio::history::HistoryRepository::capture_current_snapshot_for_owner(
+        &state.db.pool,
+        &owner_id,
+    )
+    .await;
+
     Ok(Json(summary))
 }
 

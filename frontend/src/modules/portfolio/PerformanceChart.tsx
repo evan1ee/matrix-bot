@@ -54,10 +54,14 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
   const innerWidth = width - paddingX * 2;
   const innerHeight = height - paddingTop - paddingBottom;
 
-  // Compute min/max for scale
+  // Compute min/max for scale with margin
   const values = points.map((p: PortfolioHistoryPoint) => p.total_net_worth_minor);
-  const minVal = values.length > 0 ? Math.min(...values) : 0;
-  const maxVal = values.length > 0 ? Math.max(...values) : 1;
+  const minRaw = values.length > 0 ? Math.min(...values) : 0;
+  const maxRaw = values.length > 0 ? Math.max(...values) : 1;
+  const valRange = maxRaw - minRaw;
+  const margin = valRange > 0 ? valRange * 0.08 : (minRaw > 0 ? minRaw * 0.05 : 10);
+  const minVal = Math.max(0, minRaw - margin);
+  const maxVal = maxRaw + margin;
   const range = maxVal - minVal > 0 ? maxVal - minVal : 1;
 
   // Coordinates mapping
@@ -70,30 +74,23 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
     return { x, y, point: p };
   });
 
-  // Construct smooth SVG path using Catmull-Rom or cubic Bezier
-  const linePath = coords.reduce(
-    (
-      acc: string,
-      curr: { x: number; y: number; point: PortfolioHistoryPoint },
-      i: number,
-      arr: { x: number; y: number; point: PortfolioHistoryPoint }[]
-    ) => {
-      if (i === 0) return `M ${curr.x} ${curr.y}`;
-      const prev = arr[i - 1];
-      const cp1x = prev.x + (curr.x - prev.x) / 2;
-      const cp1y = prev.y;
-      const cp2x = prev.x + (curr.x - prev.x) / 2;
-      const cp2y = curr.y;
-      return `${acc} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${curr.x} ${curr.y}`;
-    },
-    ''
-  );
+  // Construct crisp financial polyline path (faithful to actual price moves)
+  const linePath =
+    coords.length === 0
+      ? ''
+      : coords.length === 1
+      ? `M ${paddingX} ${coords[0].y} L ${width - paddingX} ${coords[0].y}`
+      : coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`).join(' ');
 
   const areaPath =
     coords.length > 0
-      ? `${linePath} L ${coords[coords.length - 1].x} ${height - paddingBottom} L ${coords[0].x} ${
-          height - paddingBottom
-        } Z`
+      ? coords.length === 1
+        ? `M ${paddingX} ${coords[0].y} L ${width - paddingX} ${coords[0].y} L ${
+            width - paddingX
+          } ${height - paddingBottom} L ${paddingX} ${height - paddingBottom} Z`
+        : `${linePath} L ${coords[coords.length - 1].x} ${height - paddingBottom} L ${coords[0].x} ${
+            height - paddingBottom
+          } Z`
       : '';
 
   // Active display point (either hovered or the latest point)
@@ -125,25 +122,25 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
 
   return (
     <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between h-full space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-mono">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="h-6 flex items-center gap-1.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-mono shrink-0 leading-none">
               Net Worth History ({currency})
             </h3>
             {hoveredPoint && (
-              <span className="flex items-center gap-1 text-[11px] text-neutral-400 font-mono bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
-                <Calendar className="w-3 h-3" />
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 px-1.5 py-0.5 rounded leading-none shrink-0 font-medium animate-in fade-in duration-100">
+                <Calendar className="w-2.5 h-2.5" />
                 {hoveredPoint.date}
               </span>
             )}
           </div>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-xl sm:text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-sans">
+          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+            <span className="text-xl sm:text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-sans whitespace-nowrap">
               {formatAmount(displayTotal, currencyExponent)} {currency}
             </span>
             <span
-              className={`flex items-center gap-0.5 text-xs font-semibold font-mono ${
+              className={`inline-flex items-center gap-0.5 text-xs font-semibold font-mono whitespace-nowrap ${
                 isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
               }`}
             >
@@ -156,7 +153,7 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
         </div>
 
         {/* Timeframe Buttons */}
-        <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg self-start sm:self-auto">
+        <div className="flex items-center gap-0.5 bg-neutral-100 dark:bg-neutral-800 p-0.5 rounded-md self-start sm:self-auto shrink-0">
           {TIMEFRAMES.map((t) => (
             <button
               key={t.value}
@@ -164,7 +161,7 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
                 setTimeframe(t.value);
                 setHoveredPoint(null);
               }}
-              className={`px-2.5 py-1 rounded text-xs font-mono transition cursor-pointer ${
+              className={`px-1.5 py-0.5 sm:px-2 rounded text-[11px] font-mono transition cursor-pointer ${
                 timeframe === t.value
                   ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 font-bold shadow-xs'
                   : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'

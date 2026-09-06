@@ -225,6 +225,7 @@ pub async fn geocode_proxy(
     Query(params): Query<GeocodeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let client = reqwest::Client::builder()
+        .use_rustls_tls()
         .user_agent("matrix-bot/1.0 (contact: info@mbm.one)")
         .timeout(std::time::Duration::from_secs(10))
         .build()
