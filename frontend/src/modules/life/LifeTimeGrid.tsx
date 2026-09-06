@@ -19,6 +19,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<TimeCategoryId | 'erase'>('deep_work');
   const isMouseDownRef = useRef(false);
   const selectedCategoryRef = useRef<TimeCategoryId | 'erase'>('deep_work');
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const hasAutoScrolledRef = useRef(false);
 
   selectedCategoryRef.current = selectedCategory;
 
@@ -28,7 +30,13 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
       isMouseDownRef.current = false;
     };
     window.addEventListener('pointerup', handleGlobalMouseUp);
-    return () => window.removeEventListener('pointerup', handleGlobalMouseUp);
+    window.addEventListener('pointercancel', handleGlobalMouseUp);
+    window.addEventListener('blur', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalMouseUp);
+      window.removeEventListener('pointercancel', handleGlobalMouseUp);
+      window.removeEventListener('blur', handleGlobalMouseUp);
+    };
   }, []);
 
   // Compute live current 15-minute block index (0..95) if today
@@ -39,6 +47,16 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     const m = now.getMinutes();
     return h * 4 + Math.floor(m / 15);
   }, [isToday]);
+
+  // Auto-scroll timeline container to roughly center current hour on open
+  useEffect(() => {
+    if (isToday && nowBlockIdx !== null && !hasAutoScrolledRef.current && timelineRef.current) {
+      hasAutoScrolledRef.current = true;
+      const currentHour = Math.floor(nowBlockIdx / 4);
+      const targetScrollTop = Math.max(0, (currentHour - 3) * 28);
+      timelineRef.current.scrollTop = targetScrollTop;
+    }
+  }, [isToday, nowBlockIdx]);
 
   // Compute hours allocated per category
   const stats = useMemo(() => {
@@ -79,8 +97,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     onChange(next);
   };
 
-  const handleBlockPointerDown = (idx: number) => {
-    if (readOnly) return;
+  const handleBlockPointerDown = (e: React.PointerEvent, idx: number) => {
+    if (readOnly || e.button !== 0) return;
     isMouseDownRef.current = true;
     paintBlock(idx, selectedCategoryRef.current);
   };
@@ -201,24 +219,14 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
         </div>
       )}
 
-      {/* 3. Category Breakdown Pill Badges */}
-      {stats.categoryStats.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {stats.categoryStats.map((s) => (
-            <span
-              key={s.catId}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border ${s.cfg.badgeClass}`}
-            >
-              <span>{s.cfg.emoji}</span>
-              <span className="font-sans font-medium">{s.cfg.label}:</span>
-              <span className="font-bold tabular-nums">{s.hours}h</span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* 4. 24-Hour Timeline Grid Container (Scrollable) */}
-      <div className="max-h-64 overflow-y-auto pr-1 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 bg-white dark:bg-zinc-900 space-y-1">
+      {/* 3. 24-Hour Timeline Grid Container (Scrollable) */}
+      <div
+        ref={timelineRef}
+        onPointerLeave={() => {
+          isMouseDownRef.current = false;
+        }}
+        className="max-h-64 overflow-y-auto pr-1 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 bg-white dark:bg-zinc-900 space-y-1"
+      >
         {Array.from({ length: 24 }).map((_, hour) => {
           const hourStr = String(hour).padStart(2, '0') + ':00';
           const isCurrentHour = nowBlockIdx !== null && Math.floor(nowBlockIdx / 4) === hour;
@@ -252,8 +260,11 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
                       key={quarter}
                       data-block-idx={blockIdx}
                       data-testid="time-block"
-                      onPointerDown={() => handleBlockPointerDown(blockIdx)}
+                      onPointerDown={(e) => handleBlockPointerDown(e, blockIdx)}
                       onPointerEnter={() => handleBlockPointerEnter(blockIdx)}
+                      onPointerUp={() => {
+                        isMouseDownRef.current = false;
+                      }}
                       title={`${timeLabel} - ${cfg ? `${cfg.label} (${cfg.emoji})` : 'Unallocated'}`}
                       className={`h-5 rounded border transition-all flex items-center justify-center text-[10px] select-none ${
                         readOnly ? 'cursor-default' : 'cursor-pointer'
@@ -282,6 +293,22 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
           );
         })}
       </div>
+
+      {/* 4. Category Breakdown Pill Badges (Positioned below grid to maintain layout stability) */}
+      {stats.categoryStats.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {stats.categoryStats.map((s) => (
+            <span
+              key={s.catId}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border ${s.cfg.badgeClass}`}
+            >
+              <span>{s.cfg.emoji}</span>
+              <span className="font-sans font-medium">{s.cfg.label}:</span>
+              <span className="font-bold tabular-nums">{s.hours}h</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

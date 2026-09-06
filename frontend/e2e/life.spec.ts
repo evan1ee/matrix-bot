@@ -278,6 +278,21 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
     await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
 
+    // Verify clicking a single block paints ONLY that block and does not select upper block
+    const block53 = app.locator('[data-block-idx="53"]');
+    await expect(block53).toBeVisible();
+    await block53.click();
+    // Exactly 0.3h tracked (1 block * 0.25 = 0.3h)
+    await expect(app.getByText(/0\.3h \/ 24h tracked/i)).toBeVisible();
+    // Verify upper block (block 49, one row up in same quarter column) is NOT selected
+    const block49 = app.locator('[data-block-idx="49"]');
+    await expect(block49).toContainText(':15');
+
+    // Reset with Clear preset
+    const clearPreset = app.getByRole('button', { name: /clear/i }).first();
+    await clearPreset.click();
+    await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
+
     // Test quick preset: Sleep
     const sleepPreset = app.getByRole('button', { name: /sleep/i }).first();
     await sleepPreset.click();
