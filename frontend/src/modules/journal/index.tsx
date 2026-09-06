@@ -277,11 +277,11 @@ export const JournalView: React.FC = () => {
   return (
     <div className="space-y-6 pb-12">
       {/* Header & Date Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-              <NotebookPen className="w-5 h-5 text-zinc-700 dark:text-zinc-300" />
+            <h1 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+              <NotebookPen className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
               <span>Daily Log</span>
             </h1>
             {selectedDate === todayStr && (
@@ -295,60 +295,64 @@ export const JournalView: React.FC = () => {
               </span>
             )}
           </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 font-sans">
             {formattedDate}
           </p>
         </div>
 
         {/* Date Navigator Controls */}
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => shiftDate(-1)}
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer shrink-0"
-            title="Previous day"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => shiftDate(-1)}
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              title="Previous day"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
 
-          <DatePicker
-            value={selectedDate}
-            onChange={(val) => val && setSelectedDate(val)}
-            size="sm"
-            align="right"
-            required
-            className="w-34 sm:w-36 shrink-0"
-          />
+            <DatePicker
+              value={selectedDate}
+              onChange={(val) => val && setSelectedDate(val)}
+              size="sm"
+              align="right"
+              required
+              className="w-34 sm:w-36 shrink-0"
+            />
 
-          <button
-            type="button"
-            onClick={() => shiftDate(1)}
-            className="h-8 w-8 flex items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer shrink-0"
-            title="Next day"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={() => shiftDate(1)}
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              title="Next day"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setSelectedDate(todayStr)}
-            disabled={selectedDate === todayStr}
-            className="h-8 px-2.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
-          >
-            Today
-          </button>
+          {/* Show "Back to today" ONLY if the date is not today */}
+          {selectedDate !== todayStr && (
+            <button
+              type="button"
+              onClick={() => setSelectedDate(todayStr)}
+              className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1 shadow-2xs"
+            >
+              <span>Back to today</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-6 border-b border-zinc-200 dark:border-zinc-800 text-xs">
+      <div className="flex items-center gap-6 border-b border-neutral-200 dark:border-neutral-800 text-xs">
         <button
           type="button"
           onClick={() => setActiveTab('summary')}
           className={`py-2.5 -mb-px flex items-center gap-1.5 border-b-2 font-medium transition-colors cursor-pointer ${
             activeTab === 'summary'
-              ? 'border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100'
-              : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
+              : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
           }`}
         >
           <Sparkles className="w-3.5 h-3.5" />
@@ -360,14 +364,14 @@ export const JournalView: React.FC = () => {
           onClick={() => setActiveTab('time')}
           className={`py-2.5 -mb-px flex items-center gap-1.5 border-b-2 font-medium transition-colors cursor-pointer ${
             activeTab === 'time'
-              ? 'border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100'
-              : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
+              : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
           }`}
         >
           <Clock className="w-3.5 h-3.5" />
           <span>24h Time Grid</span>
           {Number(timeTrackedHours) > 0 && (
-            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
               {timeTrackedHours}h
             </span>
           )}
@@ -389,9 +393,9 @@ export const JournalView: React.FC = () => {
           <div className="lg:col-span-6 space-y-6">
             {isLogged ? (
               /* Sealed/Logged View */
-              <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 bg-white dark:bg-zinc-900 space-y-4">
+              <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
                     Sealed Daily Reflection
                   </span>
                   <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
@@ -404,7 +408,7 @@ export const JournalView: React.FC = () => {
                   className={`flex items-center gap-3 p-3.5 rounded-lg border ${
                     loggedMoodCfg
                       ? `${loggedMoodCfg.bgClass} ${loggedMoodCfg.textClass} font-semibold shadow-xs`
-                      : 'bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200'
+                      : 'bg-neutral-50 dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200'
                   }`}
                 >
                   <span className="text-3xl">{loggedMoodCfg?.emoji || '✨'}</span>
@@ -417,10 +421,10 @@ export const JournalView: React.FC = () => {
                 {/* Weather */}
                 {dayLog?.weather && (
                   <div>
-                    <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-zinc-500 mb-1">
+                    <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
                       Weather
                     </div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-800 dark:text-neutral-200">
                       <span className="text-sm">{loggedWeatherCfg?.emoji || '🌤️'}</span>
                       <span>{loggedWeatherCfg?.label || dayLog.weather}</span>
                     </div>
@@ -430,7 +434,7 @@ export const JournalView: React.FC = () => {
                 {/* Activities */}
                 {dayLog?.activities && dayLog.activities.length > 0 && (
                   <div>
-                    <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-zinc-500 mb-1">
+                    <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
                       Activities & Milestones
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -439,7 +443,7 @@ export const JournalView: React.FC = () => {
                         return (
                           <span
                             key={actId}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
                           >
                             <span>{act?.emoji || '📌'}</span>
                             <span>{act?.label || actId}</span>
@@ -452,15 +456,15 @@ export const JournalView: React.FC = () => {
 
                 {/* Reflection Note */}
                 <div>
-                  <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-zinc-500 mb-1">
+                  <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
                     Notes & Reflection
                   </div>
                   {dayLog?.note ? (
-                    <div className="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">
+                    <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap leading-relaxed">
                       "{dayLog.note}"
                     </div>
                   ) : (
-                    <div className="p-3 rounded-md bg-zinc-50/50 dark:bg-zinc-800/30 border border-zinc-200/80 dark:border-zinc-800/80 text-xs text-zinc-400 dark:text-zinc-500 italic">
+                    <div className="p-3 rounded-md bg-neutral-50/50 dark:bg-neutral-800/30 border border-neutral-200/80 dark:border-neutral-800/80 text-xs text-neutral-400 dark:text-neutral-500 italic">
                       No reflection notes were recorded for this day.
                     </div>
                   )}
@@ -476,7 +480,7 @@ export const JournalView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setConfirmingClear(false)}
-                        className="px-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
+                        className="px-2.5 py-1 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded"
                       >
                         Cancel
                       </button>
@@ -491,7 +495,7 @@ export const JournalView: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+                  <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
                     <button
                       type="button"
                       onClick={() => setConfirmingClear(true)}
@@ -507,20 +511,20 @@ export const JournalView: React.FC = () => {
               /* Editable Reflection Form */
               <form
                 onSubmit={handleSave}
-                className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 bg-white dark:bg-zinc-900 space-y-4"
+                className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
                     Record Daily Reflection
                   </span>
-                  <span className="text-[10px] font-mono text-zinc-400">
+                  <span className="text-[10px] font-mono text-neutral-400">
                     Unrecorded
                   </span>
                 </div>
 
                 {/* Mood Selector */}
                 <div>
-                  <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1.5">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
                     Primary Mood
                   </label>
                   <div className="grid grid-cols-5 gap-2">
@@ -534,8 +538,8 @@ export const JournalView: React.FC = () => {
                           onClick={() => setSelectedMood(moodKey)}
                           className={`flex flex-col items-center justify-center p-2 rounded-lg border text-xs transition-all cursor-pointer ${
                             isSelected
-                              ? `${config.bgClass} ${config.textClass} font-semibold ring-1 ring-zinc-900 dark:ring-zinc-100 shadow-xs`
-                              : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                              ? `${config.bgClass} ${config.textClass} font-semibold ring-1 ring-neutral-900 dark:ring-neutral-100 shadow-xs`
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                           }`}
                         >
                           <span className="text-2xl mb-1">{config.emoji}</span>
@@ -548,7 +552,7 @@ export const JournalView: React.FC = () => {
 
                 {/* Weather */}
                 <div>
-                  <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
                     Weather (optional)
                   </label>
                   <div className="flex flex-wrap gap-1.5">
@@ -562,8 +566,8 @@ export const JournalView: React.FC = () => {
                           onClick={() => setSelectedWeather(isSelected ? null : wKey)}
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                             isSelected
-                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100'
-                              : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                           }`}
                         >
                           <span>{w.emoji}</span>
@@ -576,7 +580,7 @@ export const JournalView: React.FC = () => {
 
                 {/* Activities */}
                 <div>
-                  <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
                     Activities & milestones
                   </label>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -589,8 +593,8 @@ export const JournalView: React.FC = () => {
                           onClick={() => handleToggleActivity(act.id)}
                           className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
                             isChecked
-                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100'
-                              : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                           }`}
                         >
                           <span>{act.emoji}</span>
@@ -603,7 +607,7 @@ export const JournalView: React.FC = () => {
 
                 {/* Notes */}
                 <div>
-                  <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
                     Notes & reflection (optional)
                   </label>
                   <textarea
@@ -612,22 +616,22 @@ export const JournalView: React.FC = () => {
                     placeholder="What happened today? Memories, achievements, or learnings..."
                     maxLength={500}
                     rows={3}
-                    className="w-full px-3 py-2 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/50 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"
+                    className="w-full px-3 py-2 rounded-md text-xs border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-800/50 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 resize-none"
                   />
-                  <div className="text-right text-[10px] text-zinc-400 mt-0.5 tabular-nums">
+                  <div className="text-right text-[10px] text-neutral-400 mt-0.5 tabular-nums">
                     {note.length}/500
                   </div>
                 </div>
 
                 {/* Submit Action */}
-                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+                <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
                   <button
                     type="submit"
                     disabled={saveDayMutation.isPending}
-                    className="h-9 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
+                    className="h-9 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
                   >
                     {saveDayMutation.isPending && (
-                      <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-zinc-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-neutral-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                       </svg>
@@ -644,14 +648,14 @@ export const JournalView: React.FC = () => {
             <LifeActivityFeed date={selectedDate} />
 
             {/* Time Grid Quick Jump Card */}
-            <div className="p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between">
+            <div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-center justify-between">
               <div>
-                <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                <div className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
                   {Number(timeTrackedHours) > 0
                     ? `${timeTrackedHours}h Tracked in 24-Hour Timeline`
                     : '24-Hour Time Allocation'}
                 </div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">
+                <div className="text-[11px] text-neutral-500 mt-0.5">
                   {Number(timeTrackedHours) > 0
                     ? 'Mapped across 15-minute intervals'
                     : 'Map deep work, sleep & leisure blocks'}
@@ -660,7 +664,7 @@ export const JournalView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('time')}
-                className="px-3 py-1.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
               >
                 {Number(timeTrackedHours) > 0 ? 'Edit Blocks →' : 'Open Grid →'}
               </button>
@@ -671,15 +675,15 @@ export const JournalView: React.FC = () => {
 
       {/* Tab 2: 24-Hour Time Grid */}
       {activeTab === 'time' && (
-        <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 bg-white dark:bg-zinc-900 space-y-5">
+        <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
           <LifeTimeGrid
             timeAllocation={timeAllocation}
             onChange={setTimeAllocation}
             readOnly={selectedDate !== todayStr && isLogged}
             isToday={selectedDate === todayStr}
           />
-          <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800">
-            <span className="text-xs text-zinc-500">
+          <div className="flex items-center justify-between pt-3 border-t border-neutral-100 dark:border-neutral-800">
+            <span className="text-xs text-neutral-500">
               {timeSaveSuccess
                 ? '✓ Time blocks saved'
                 : selectedDate === todayStr
@@ -694,7 +698,7 @@ export const JournalView: React.FC = () => {
                   type="button"
                   disabled={saveTimeMutation.isPending}
                   onClick={handleSaveTimeOnly}
-                  className="px-3.5 py-1.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+                  className="px-3.5 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {saveTimeMutation.isPending ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}
                 </button>
@@ -702,7 +706,7 @@ export const JournalView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('summary')}
-                className="px-3.5 py-1.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors cursor-pointer"
+                className="px-3.5 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
               >
                 ← Back to Day Summary
               </button>

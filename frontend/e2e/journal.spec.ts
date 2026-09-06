@@ -155,6 +155,14 @@ test.describe('Daily Log (Journal Module)', () => {
     const datePickerTrigger = app.locator('[data-testid="datepicker-container"] button');
     await expect(datePickerTrigger).toContainText(todayStr);
 
+    const brainDir = process.env.BRAIN_DIR || '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
+    if (fs.existsSync(brainDir)) {
+      await app.screenshot({ path: path.join(brainDir, 'journal_today_view.png') });
+    }
+
+    // When on today, "Back to today" is not shown
+    await expect(app.getByRole('button', { name: /back to today/i })).not.toBeVisible();
+
     // Click Previous day arrow (<)
     await app.getByRole('button', { name: /previous day/i }).click();
 
@@ -164,13 +172,18 @@ test.describe('Daily Log (Journal Module)', () => {
     const yesterdayStr = yesterday.toISOString().split('T')[0];
     await expect(datePickerTrigger).toContainText(yesterdayStr);
 
-    // Today button should now be enabled
-    const todayBtn = app.getByRole('button', { name: 'Today', exact: true });
-    await expect(todayBtn).toBeEnabled();
+    // "Back to today" button should now be visible when date is not today
+    const backToTodayBtn = app.getByRole('button', { name: /back to today/i });
+    await expect(backToTodayBtn).toBeVisible();
 
-    // Click Today button
-    await todayBtn.click();
+    if (fs.existsSync(brainDir)) {
+      await app.screenshot({ path: path.join(brainDir, 'journal_yesterday_with_back_to_today.png') });
+    }
+
+    // Click "Back to today" button
+    await backToTodayBtn.click();
     await expect(datePickerTrigger).toContainText(todayStr);
+    await expect(app.getByRole('button', { name: /back to today/i })).not.toBeVisible();
 
     // Click Next day arrow (>)
     await app.getByRole('button', { name: /next day/i }).click();
@@ -178,10 +191,15 @@ test.describe('Daily Log (Journal Module)', () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0];
     await expect(datePickerTrigger).toContainText(tomorrowStr);
+    await expect(app.getByRole('button', { name: /back to today/i })).toBeVisible();
 
     // Click DatePicker trigger to open custom popover
     await datePickerTrigger.click();
     await expect(app.locator('[data-testid="datepicker-popover"]')).toBeVisible();
+
+    if (fs.existsSync(brainDir)) {
+      await app.screenshot({ path: path.join(brainDir, 'journal_datepicker_popover.png') });
+    }
 
     // Pick Today from popover
     await app.locator('[data-testid="datepicker-popover"]').getByRole('button', { name: 'Today' }).click();

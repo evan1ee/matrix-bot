@@ -143,7 +143,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
         }`}
       >
         {/* Hour Label */}
-        <div className="w-8 shrink-0 flex items-center gap-0.5 text-[10px] font-mono font-medium text-zinc-500 dark:text-zinc-400 tabular-nums">
+        <div className="w-8 shrink-0 flex items-center gap-0.5 text-[10px] font-mono font-medium text-neutral-500 dark:text-neutral-400 tabular-nums">
           <span>{hourStr}</span>
           {isCurrentHour && (
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" title="Current hour" />
@@ -176,17 +176,17 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
                 } ${
                   cfg
                     ? `${cfg.blockClass} text-white shadow-xs`
-                    : 'bg-zinc-100/70 dark:bg-zinc-800/40 border-zinc-200/80 dark:border-zinc-700/60 hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80'
+                    : 'bg-neutral-100/70 dark:bg-neutral-800/40 border-neutral-200/80 dark:border-neutral-700/60 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/80'
                 } ${
                   isNowBlock
-                    ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-1 dark:ring-offset-zinc-900'
+                    ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-1 dark:ring-offset-neutral-900'
                     : ''
                 }`}
               >
                 {cfg ? (
                   <span className="scale-85 select-none pointer-events-none">{cfg.emoji}</span>
                 ) : (
-                  <span className="text-[8.5px] text-zinc-400/80 dark:text-zinc-600 tabular-nums select-none pointer-events-none">
+                  <span className="text-[8.5px] text-neutral-400/80 dark:text-neutral-600 tabular-nums select-none pointer-events-none">
                     :{String(quarter * 15).padStart(2, '0')}
                   </span>
                 )}
@@ -203,11 +203,11 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
       {/* 1. Header with Stats & Quick Presets */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Clock className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-          <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+          <Clock className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+          <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
             24-Hour Time Allocation
           </span>
-          <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
+          <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 tabular-nums">
             ({stats.totalHours}h / 24h tracked)
           </span>
         </div>
@@ -217,7 +217,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
             <button
               type="button"
               onClick={() => applyPreset('sleep')}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/60 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               title="Fill 23:00 to 07:00 as Sleep"
             >
               <Moon className="w-2.5 h-2.5 text-indigo-500" />
@@ -227,17 +227,17 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
             <button
               type="button"
               onClick={() => applyPreset('workday')}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/60 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
               title="Fill 09:00 to 18:00 as Deep Work"
             >
-              <Briefcase className="w-2.5 h-2.5 text-zinc-600 dark:text-zinc-300" />
+              <Briefcase className="w-2.5 h-2.5 text-neutral-600 dark:text-neutral-300" />
               <span>Workday</span>
             </button>
 
             <button
               type="button"
               onClick={() => applyPreset('clear')}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-500 dark:text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-neutral-200 dark:border-neutral-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-neutral-500 dark:text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
               title="Clear all blocks"
             >
               <Trash2 className="w-2.5 h-2.5" />
@@ -249,7 +249,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
 
       {/* 2. Palette Selector (Only when editable) */}
       {!readOnly && (
-        <div className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 space-y-1">
+        <div className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-800/40 space-y-1">
           <div className="flex flex-wrap gap-1">
             {(Object.keys(TIME_CATEGORIES) as TimeCategoryId[]).map((catId) => {
               const cfg = TIME_CATEGORIES[catId];
@@ -261,8 +261,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
                   onClick={() => setSelectedCategory(catId)}
                   className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium border transition-all cursor-pointer ${
                     isSelected
-                      ? `${cfg.activeClass} shadow-xs ring-1 ring-zinc-900/20 dark:ring-zinc-100/20 font-semibold`
-                      : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                      ? `${cfg.activeClass} shadow-xs ring-1 ring-neutral-900/20 dark:ring-neutral-100/20 font-semibold`
+                      : 'border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                   }`}
                 >
                   <span className="text-xs">{cfg.emoji}</span>
@@ -276,8 +276,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
               onClick={() => setSelectedCategory('erase')}
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium border transition-all cursor-pointer ${
                 selectedCategory === 'erase'
-                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 font-semibold'
-                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100 font-semibold'
+                  : 'border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
               }`}
             >
               <span className="text-xs">🧼</span>
@@ -293,12 +293,12 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
         onPointerLeave={() => {
           isMouseDownRef.current = false;
         }}
-        className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 bg-white dark:bg-zinc-900 space-y-1"
+        className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-2 bg-white dark:bg-neutral-900 space-y-1"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2.5 gap-y-0.5">
           {/* Sub-column 1: 00:00 - 11:45 */}
           <div className="space-y-0.5">
-            <div className="text-[9px] font-mono font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider pb-0.5 border-b border-zinc-100 dark:border-zinc-800 flex justify-between px-1">
+            <div className="text-[9px] font-mono font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
               <span>00:00 – 11:45</span>
               <span>Morning</span>
             </div>
@@ -307,7 +307,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
 
           {/* Sub-column 2: 12:00 - 23:45 */}
           <div className="space-y-0.5">
-            <div className="text-[9px] font-mono font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider pb-0.5 border-b border-zinc-100 dark:border-zinc-800 flex justify-between px-1">
+            <div className="text-[9px] font-mono font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
               <span>12:00 – 23:45</span>
               <span>Evening</span>
             </div>

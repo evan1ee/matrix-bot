@@ -114,11 +114,11 @@ export const TIME_CATEGORIES: Record<
     label: 'Deep Work',
     emoji: '⚡',
     description: 'Focused coding, writing, building',
-    blockClass: 'bg-zinc-900 border-zinc-950 dark:bg-zinc-100 dark:border-white',
+    blockClass: 'bg-neutral-900 border-neutral-950 dark:bg-neutral-100 dark:border-white',
     activeClass:
-      'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-white',
+      'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:border-white',
     badgeClass:
-      'bg-zinc-100 text-zinc-900 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700',
+      'bg-neutral-100 text-neutral-900 border-neutral-300 dark:bg-neutral-800 dark:text-neutral-100 dark:border-neutral-700',
   },
   health: {
     id: 'health',
@@ -158,11 +158,11 @@ export const TIME_CATEGORIES: Record<
     label: 'Chores & Admin',
     emoji: '⏳',
     description: 'Commute, errands, house tasks',
-    blockClass: 'bg-zinc-400/80 border-zinc-500 dark:bg-zinc-600/70 dark:border-zinc-500',
+    blockClass: 'bg-neutral-400/80 border-neutral-500 dark:bg-neutral-600/70 dark:border-neutral-500',
     activeClass:
-      'bg-zinc-200 text-zinc-900 border-zinc-400 dark:bg-zinc-700 dark:text-zinc-200 dark:border-zinc-600',
+      'bg-neutral-200 text-neutral-900 border-neutral-400 dark:bg-neutral-700 dark:text-neutral-200 dark:border-neutral-600',
     badgeClass:
-      'bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-300 dark:border-zinc-700',
+      'bg-neutral-100 text-neutral-700 border-neutral-200 dark:bg-neutral-800/60 dark:text-neutral-300 dark:border-neutral-700',
   },
 };
 

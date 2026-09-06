@@ -27,8 +27,8 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
 
   if (isLoading) {
     return (
-      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 bg-white dark:bg-zinc-900">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500">
+      <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-3 bg-white dark:bg-neutral-900">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500">
           <Activity className="w-3 h-3 animate-pulse" />
           <span>Loading activity…</span>
         </div>
@@ -38,14 +38,14 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
 
   if (!data || data.events.length === 0) {
     return (
-      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 bg-white dark:bg-zinc-900">
+      <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-3 bg-white dark:bg-neutral-900">
         <div className="flex items-center gap-1.5">
-          <Activity className="w-3 h-3 text-zinc-400 dark:text-zinc-500" />
-          <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+          <Activity className="w-3 h-3 text-neutral-400 dark:text-neutral-500" />
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
             Auto-logged Activity
           </span>
         </div>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 italic">
+        <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1 italic">
           No recorded activity from other modules on this day.
         </p>
       </div>
@@ -68,15 +68,15 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
   if (stats.footprints > 0) statPills.push({ label: 'places', count: stats.footprints });
 
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 overflow-hidden">
+    <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg bg-white dark:bg-neutral-900 overflow-hidden">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+      <div className="px-3 py-2 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Activity className="w-3 h-3 text-zinc-500 dark:text-zinc-400" />
-          <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+          <Activity className="w-3 h-3 text-neutral-500 dark:text-neutral-400" />
+          <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
             Auto-logged Activity
           </span>
-          <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
+          <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 tabular-nums">
             ({stats.total_events})
           </span>
         </div>
@@ -84,11 +84,11 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
 
       {/* Stat pills */}
       {statPills.length > 0 && (
-        <div className="px-3 py-1.5 border-b border-zinc-100 dark:border-zinc-800 flex flex-wrap gap-1">
+        <div className="px-3 py-1.5 border-b border-neutral-100 dark:border-neutral-800 flex flex-wrap gap-1">
           {statPills.map((pill) => (
             <span
               key={pill.label}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-50 dark:bg-neutral-800/60 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
             >
               <span className="font-bold tabular-nums">{pill.count}</span>
               <span>{pill.label}</span>
@@ -104,12 +104,12 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
             key={idx}
             className={`flex items-start gap-2 px-3 py-1.5 text-xs ${
               idx < events.length - 1
-                ? 'border-b border-zinc-50 dark:border-zinc-800/60'
+                ? 'border-b border-neutral-50 dark:border-neutral-800/60'
                 : ''
             }`}
           >
             {/* Time */}
-            <span className="w-10 shrink-0 text-[10px] font-mono text-zinc-400 dark:text-zinc-500 tabular-nums pt-px">
+            <span className="w-10 shrink-0 text-[10px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums pt-px">
               {event.time ? event.time.slice(0, 5) : '—'}
             </span>
 
@@ -119,15 +119,15 @@ export const LifeActivityFeed: React.FC<LifeActivityFeedProps> = ({ date }) => {
             {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline gap-1">
-                <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate">
+                <span className="text-neutral-900 dark:text-neutral-100 font-medium truncate">
                   {event.summary}
                 </span>
-                <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500 shrink-0">
+                <span className="text-[10px] font-mono text-neutral-400 dark:text-neutral-500 shrink-0">
                   {MODULE_LABELS[event.module] || event.module}
                 </span>
               </div>
               {event.detail && (
-                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+                <p className="text-[10px] text-neutral-500 dark:text-neutral-400 truncate mt-0.5">
                   {event.detail}
                 </p>
               )}
