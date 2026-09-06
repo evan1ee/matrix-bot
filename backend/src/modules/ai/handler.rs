@@ -202,17 +202,19 @@ pub async fn run_ai_turn(
                 if let Some(choice) = response.choices.into_iter().next() {
                     let msg = choice.message;
                     if let Some(tool_calls) = msg.tool_calls.filter(|t| !t.is_empty()) {
-                        // Persist assistant tool-call message in SQLite
-                        let tool_desc = msg.content.as_deref().unwrap_or("");
-                        let _ = AiRepository::add_message(
-                            pool,
-                            &conversation.id,
-                            "assistant",
-                            tool_desc,
-                            None,
-                            None,
-                        )
-                        .await;
+                        // Persist assistant tool-call message in SQLite only if it contains non-empty text
+                        let tool_desc = msg.content.as_deref().unwrap_or("").trim();
+                        if !tool_desc.is_empty() {
+                            let _ = AiRepository::add_message(
+                                pool,
+                                &conversation.id,
+                                "assistant",
+                                tool_desc,
+                                None,
+                                None,
+                            )
+                            .await;
+                        }
 
                         chat_messages.push(ChatCompletionMessage {
                             role: "assistant".to_string(),
@@ -517,7 +519,7 @@ mod tests {
         let recent = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
             .await
             .unwrap();
-        assert_eq!(recent.len(), 4);
+        assert_eq!(recent.len(), 3);
 
         let mut filtered: Vec<ChatCompletionMessage> = Vec::new();
         for msg in recent {

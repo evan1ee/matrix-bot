@@ -34,6 +34,38 @@ test('clicking a recommended prompt sends immediately and clears input', async (
   }
 });
 
+test('renders markdown table, headers, and filters empty assistant replies', async ({ app }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+
+  const promptText = 'Show a breakdown of my portfolio and cash balance';
+  const suggestionBtn = app.getByRole('button', { name: promptText });
+  await expect(suggestionBtn).toBeVisible();
+
+  await suggestionBtn.click();
+
+  // Tool result should appear
+  await expect(app.getByText('Tool Result:')).toBeVisible();
+  await expect(app.getByText('get_my_portfolio_summary')).toBeVisible();
+
+  // Markdown table should be rendered as HTML table elements, not raw markdown pipes
+  const table = app.locator('table');
+  await expect(table).toBeVisible();
+  await expect(table.locator('th', { hasText: 'Asset' })).toBeVisible();
+  await expect(table.locator('td', { hasText: '$7,998.16' })).toBeVisible();
+
+  // Exactly 2 markdown bubbles should exist: 1 for user prompt, 1 for assistant reply (no empty assistant bubble)
+  const markdownBubbles = app.locator('.markdown-body');
+  await expect(markdownBubbles).toHaveCount(2);
+  await expect(markdownBubbles.nth(0)).toHaveText(promptText);
+  await expect(markdownBubbles.nth(1)).not.toBeEmpty();
+
+  const brainDir = process.env.BRAIN_DIR || '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
+  if (brainDir) {
+    await app.screenshot({ path: `${brainDir}/ai_chat_markdown_rendered.png`, fullPage: false });
+  }
+});
+
 test('shows optimistic user message and clears input while AI is replying', async ({ app }) => {
   await gotoApp(app);
   await app.getByRole('button', { name: TAB.ai, exact: true }).click();

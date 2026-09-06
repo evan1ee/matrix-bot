@@ -9,6 +9,8 @@ import {
 import { AiConversation, AiMessage, AiChatResponse, AiUserConfig } from './types';
 import { AiSettingsModal } from './SettingsModal';
 import { RetrospectiveModal } from './RetrospectiveModal';
+import { MarkdownRenderer } from '../../components/MarkdownRenderer';
+import { useSettings, formatShortTimeInZone, browserTimezone } from '../../core/settings';
 
 export * from './types';
 
@@ -27,6 +29,8 @@ const AiAssistantView: React.FC<{
   autoFocus?: boolean;
 }> = ({ autoFocus }) => {
   const queryClient = useQueryClient();
+  const { timezone } = useSettings();
+  const effectiveTimezone = timezone && timezone !== 'UTC' ? timezone : browserTimezone();
   const [prompt, setPrompt] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -251,7 +255,7 @@ const AiAssistantView: React.FC<{
           </div>
         ) : (
           messages
-            .filter((m) => m.role !== 'system')
+            .filter((m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim().length > 0))
             .map((m) => (
               <div
                 key={m.id}
@@ -284,7 +288,11 @@ const AiAssistantView: React.FC<{
                     </div>
                   ) : null}
 
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  {m.role === 'tool' ? (
+                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  ) : (
+                    <MarkdownRenderer content={m.content} />
+                  )}
 
                   <div
                     className={`text-[10px] font-mono flex items-center gap-1 pt-1 ${
@@ -292,7 +300,7 @@ const AiAssistantView: React.FC<{
                     }`}
                   >
                     <Clock className="w-2.5 h-2.5" />
-                    <span>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>{formatShortTimeInZone(m.created_at, effectiveTimezone)}</span>
                   </div>
                 </div>
 
@@ -308,7 +316,7 @@ const AiAssistantView: React.FC<{
         {chatMutation.isPending && chatMutation.variables && !messages.some((m) => m.role === 'user' && m.content === chatMutation.variables) && (
           <div className="flex gap-3 max-w-3xl ml-auto justify-end animate-in fade-in-0">
             <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs">
-              <div className="whitespace-pre-wrap break-words">{chatMutation.variables}</div>
+              <MarkdownRenderer content={chatMutation.variables} />
               <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-300 dark:text-neutral-600 justify-end">
                 <Clock className="w-2.5 h-2.5" />
                 <span>Sending...</span>

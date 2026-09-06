@@ -139,14 +139,23 @@ export function formatInZone(
   timezone: string,
   options: Intl.DateTimeFormatOptions
 ): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
+  if (!iso) return '';
+  const trimmed = iso.trim();
+  const normalized = trimmed.includes('Z') || /[+-]\d{2}(?::?\d{2})?$/.test(trimmed)
+    ? trimmed
+    : trimmed.includes('T')
+      ? `${trimmed}Z`
+      : `${trimmed.replace(' ', 'T')}Z`;
+
+  const date = new Date(normalized);
+  const validDate = Number.isNaN(date.getTime()) ? new Date(iso) : date;
+  if (Number.isNaN(validDate.getTime())) return '';
 
   try {
-    return date.toLocaleString(undefined, { ...options, timeZone: timezone });
+    return validDate.toLocaleString(undefined, { ...options, timeZone: timezone });
   } catch {
     // A zone the browser rejects must not blank the timestamp entirely.
-    return date.toLocaleString(undefined, options);
+    return validDate.toLocaleString(undefined, options);
   }
 }
 
@@ -163,6 +172,11 @@ export function formatDateInZone(iso: string, timezone: string): string {
 /** Time only, e.g. `18:30:00`. */
 export function formatTimeInZone(iso: string, timezone: string): string {
   return formatInZone(iso, timezone, { timeStyle: 'medium' });
+}
+
+/** Short time only, e.g. `10:30 AM`. */
+export function formatShortTimeInZone(iso: string, timezone: string): string {
+  return formatInZone(iso, timezone, { hour: '2-digit', minute: '2-digit' });
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');

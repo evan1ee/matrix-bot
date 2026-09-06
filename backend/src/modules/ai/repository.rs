@@ -236,7 +236,7 @@ impl AiRepository {
             r#"
             SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
             FROM ai_messages
-            WHERE conversation_id = ?
+            WHERE conversation_id = ? AND (role != 'assistant' OR TRIM(content) != '')
             ORDER BY created_at DESC
             LIMIT ?
             "#,
@@ -370,6 +370,15 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].role, "user");
         assert_eq!(list[1].role, "assistant");
+
+        // An empty assistant message (e.g. intermediate tool call) should be filtered out
+        let _empty_msg = AiRepository::add_message(&db.pool, &conv.id, "assistant", "   ", None, None)
+            .await
+            .unwrap();
+        let filtered_list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
+            .await
+            .unwrap();
+        assert_eq!(filtered_list.len(), 2);
 
         let deleted = AiRepository::delete_conversation(&db.pool, &conv.id, &owner)
             .await

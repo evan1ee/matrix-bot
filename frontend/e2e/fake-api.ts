@@ -1594,6 +1594,7 @@ export class FakeApi {
       const isMultiAction = lowerPrompt.includes('shake shack') || (lowerPrompt.includes('spent') && (lowerPrompt.includes('habit') || lowerPrompt.includes('remind')));
       const isRetroPrompt = lowerPrompt.includes('retro') || lowerPrompt.includes('retrospective');
       const isTaskQuestion = !isMultiAction && !isRetroPrompt && lowerPrompt.includes('task');
+      const isPortfolioPrompt = !isMultiAction && !isRetroPrompt && !isTaskQuestion && lowerPrompt.includes('portfolio');
 
       const toolCalls: string[] = [];
       let botReply = `I received your prompt: "${body?.prompt}". How can I help further?`;
@@ -1619,6 +1620,20 @@ export class FakeApi {
       } else if (isRetroPrompt) {
         toolCalls.push('get_weekly_retrospective');
         botReply = "### 🌟 Weekly Executive Retrospective (2026-08-29 to 2026-09-05)\n\n**💰 Financial Velocity**\n- **Total Spent**: `USD 125.50`\n- **Total Income**: `USD 2500.00`\n- **Net Cashflow**: `USD 2374.50`\n\n**📋 Productivity & Habits**\n- **Tasks Completed**: 8\n- **Habit Adherence**: 85.7%\n\n**🧬 Life & Wellness**\n- **Days Logged**: 6 of 7 days\n- **Dominant Mood**: Good";
+      } else if (isPortfolioPrompt) {
+        toolCalls.push('get_my_portfolio_summary');
+        this.aiMessages.push({
+          id: `msg_${this.nextAiMsgId++}`,
+          conversation_id: conv.id,
+          role: 'tool',
+          content: JSON.stringify([
+            { currency: 'USD', cost_basis_minor: 650000, market_value_minor: 799816, cash_minor: 0 },
+          ]),
+          tool_call_id: 'call_port',
+          tool_name: 'get_my_portfolio_summary',
+          created_at: new Date().toISOString(),
+        });
+        botReply = "**Portfolio & cash breakdown**\n\n### USD\n| Asset | Value |\n|---|---|\n| **Cash** | $0.00 |\n| **Holdings** | 1 priced position |\n| **Cost basis** | $6,500.00 |\n| **Market value** | $7,998.16 |\n| **Unrealized P&L** | **+$1,498.16** |";
       } else if (isTaskQuestion) {
         toolCalls.push('get_my_tasks');
         this.aiMessages.push({

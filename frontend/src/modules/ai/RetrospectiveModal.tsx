@@ -6,6 +6,7 @@ import {
   Calendar, DollarSign, CheckCircle2, TrendingUp,
   Smile, Bell, Copy, Check, X, RefreshCw, Sparkles
 } from 'lucide-react';
+import { MarkdownRenderer } from '../../components/MarkdownRenderer';
 
 interface RetrospectiveModalProps {
   isOpen: boolean;
@@ -185,8 +186,8 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
                 <h4 className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
                   Consolidated Brief
                 </h4>
-                <div className="text-xs font-mono whitespace-pre-wrap leading-relaxed text-neutral-800 dark:text-neutral-200 bg-white dark:bg-neutral-900 p-3.5 rounded border border-neutral-200 dark:border-neutral-800">
-                  {retro.formatted_markdown}
+                <div className="text-xs leading-relaxed text-neutral-800 dark:text-neutral-200 bg-white dark:bg-neutral-900 p-3.5 rounded border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
+                  <MarkdownRenderer content={retro.formatted_markdown} />
                 </div>
               </div>
             </>
