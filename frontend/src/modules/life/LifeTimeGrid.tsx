@@ -18,6 +18,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<TimeCategoryId | 'erase'>('deep_work');
   const isMouseDownRef = useRef(false);
+  const lastPaintedIdxRef = useRef<number | null>(null);
   const selectedCategoryRef = useRef<TimeCategoryId | 'erase'>('deep_work');
   const timelineRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false);
@@ -28,6 +29,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
   useEffect(() => {
     const handleGlobalMouseUp = () => {
       isMouseDownRef.current = false;
+      lastPaintedIdxRef.current = null;
     };
     window.addEventListener('pointerup', handleGlobalMouseUp);
     window.addEventListener('pointercancel', handleGlobalMouseUp);
@@ -100,11 +102,13 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
   const handleBlockPointerDown = (e: React.PointerEvent, idx: number) => {
     if (readOnly || e.button !== 0) return;
     isMouseDownRef.current = true;
+    lastPaintedIdxRef.current = idx;
     paintBlock(idx, selectedCategoryRef.current);
   };
 
   const handleBlockPointerEnter = (idx: number) => {
-    if (readOnly || !isMouseDownRef.current) return;
+    if (readOnly || !isMouseDownRef.current || lastPaintedIdxRef.current === idx) return;
+    lastPaintedIdxRef.current = idx;
     paintBlock(idx, selectedCategoryRef.current);
   };
 
@@ -127,49 +131,116 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     onChange(next);
   };
 
+  const renderHourRow = (hour: number) => {
+    const hourStr = String(hour).padStart(2, '0') + ':00';
+    const isCurrentHour = nowBlockIdx !== null && Math.floor(nowBlockIdx / 4) === hour;
+
+    return (
+      <div
+        key={hour}
+        className={`flex items-center gap-1.5 h-6 px-1 rounded transition-colors ${
+          isCurrentHour ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+        }`}
+      >
+        {/* Hour Label */}
+        <div className="w-8 shrink-0 flex items-center gap-0.5 text-[10px] font-mono font-medium text-zinc-500 dark:text-zinc-400 tabular-nums">
+          <span>{hourStr}</span>
+          {isCurrentHour && (
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" title="Current hour" />
+          )}
+        </div>
+
+        {/* 4 Quarter Blocks (:00, :15, :30, :45) */}
+        <div className="grid grid-cols-4 gap-1 flex-1">
+          {[0, 1, 2, 3].map((quarter) => {
+            const blockIdx = hour * 4 + quarter;
+            const catId = (timeAllocation[blockIdx] || null) as TimeCategoryId | null;
+            const cfg = catId ? TIME_CATEGORIES[catId] : null;
+            const isNowBlock = nowBlockIdx === blockIdx;
+            const timeLabel = `${String(hour).padStart(2, '0')}:${String(quarter * 15).padStart(2, '0')}`;
+
+            return (
+              <div
+                key={quarter}
+                data-block-idx={blockIdx}
+                data-testid="time-block"
+                onPointerDown={(e) => handleBlockPointerDown(e, blockIdx)}
+                onPointerEnter={() => handleBlockPointerEnter(blockIdx)}
+                onPointerUp={() => {
+                  isMouseDownRef.current = false;
+                  lastPaintedIdxRef.current = null;
+                }}
+                title={`${timeLabel} - ${cfg ? `${cfg.label} (${cfg.emoji})` : 'Unallocated'}`}
+                className={`h-5 rounded border transition-all flex items-center justify-center text-[10px] select-none ${
+                  readOnly ? 'cursor-default' : 'cursor-pointer'
+                } ${
+                  cfg
+                    ? `${cfg.blockClass} text-white shadow-xs`
+                    : 'bg-zinc-100/70 dark:bg-zinc-800/40 border-zinc-200/80 dark:border-zinc-700/60 hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80'
+                } ${
+                  isNowBlock
+                    ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-1 dark:ring-offset-zinc-900'
+                    : ''
+                }`}
+              >
+                {cfg ? (
+                  <span className="scale-85 select-none pointer-events-none">{cfg.emoji}</span>
+                ) : (
+                  <span className="text-[8.5px] text-zinc-400/80 dark:text-zinc-600 tabular-nums select-none pointer-events-none">
+                    :{String(quarter * 15).padStart(2, '0')}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-3 select-none">
+    <div className="space-y-2 select-none">
       {/* 1. Header with Stats & Quick Presets */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
           <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
             24-Hour Time Allocation
           </span>
-          <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
+          <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
             ({stats.totalHours}h / 24h tracked)
           </span>
         </div>
 
         {!readOnly && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => applyPreset('sleep')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
               title="Fill 23:00 to 07:00 as Sleep"
             >
-              <Moon className="w-3 h-3 text-indigo-500" />
+              <Moon className="w-2.5 h-2.5 text-indigo-500" />
               <span>Sleep</span>
             </button>
 
             <button
               type="button"
               onClick={() => applyPreset('workday')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
               title="Fill 09:00 to 18:00 as Deep Work"
             >
-              <Briefcase className="w-3 h-3 text-zinc-600 dark:text-zinc-300" />
+              <Briefcase className="w-2.5 h-2.5 text-zinc-600 dark:text-zinc-300" />
               <span>Workday</span>
             </button>
 
             <button
               type="button"
               onClick={() => applyPreset('clear')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-500 dark:text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-500 dark:text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
               title="Clear all blocks"
             >
-              <Trash2 className="w-3 h-3" />
+              <Trash2 className="w-2.5 h-2.5" />
               <span>Clear</span>
             </button>
           </div>
@@ -178,11 +249,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
 
       {/* 2. Palette Selector (Only when editable) */}
       {!readOnly && (
-        <div className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 space-y-1.5">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-            Paint Palette (Click or Drag across blocks)
-          </div>
-          <div className="flex flex-wrap gap-1.5">
+        <div className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 space-y-1">
+          <div className="flex flex-wrap gap-1">
             {(Object.keys(TIME_CATEGORIES) as TimeCategoryId[]).map((catId) => {
               const cfg = TIME_CATEGORIES[catId];
               const isSelected = selectedCategory === catId;
@@ -191,13 +259,13 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
                   key={catId}
                   type="button"
                   onClick={() => setSelectedCategory(catId)}
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border transition-all cursor-pointer ${
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium border transition-all cursor-pointer ${
                     isSelected
                       ? `${cfg.activeClass} shadow-xs ring-1 ring-zinc-900/20 dark:ring-zinc-100/20 font-semibold`
                       : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <span>{cfg.emoji}</span>
+                  <span className="text-xs">{cfg.emoji}</span>
                   <span>{cfg.label}</span>
                 </button>
               );
@@ -206,92 +274,46 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
             <button
               type="button"
               onClick={() => setSelectedCategory('erase')}
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium border transition-all cursor-pointer ${
                 selectedCategory === 'erase'
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 font-semibold'
                   : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
               }`}
             >
-              <span>🧼</span>
+              <span className="text-xs">🧼</span>
               <span>Eraser</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* 3. 24-Hour Timeline Grid Container (Scrollable) */}
+      {/* 3. 24-Hour Timeline Grid Container (2 Columns: AM & PM, No scroll needed) */}
       <div
         ref={timelineRef}
         onPointerLeave={() => {
           isMouseDownRef.current = false;
         }}
-        className="max-h-64 overflow-y-auto pr-1 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 bg-white dark:bg-zinc-900 space-y-1"
+        className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 bg-white dark:bg-zinc-900 space-y-1"
       >
-        {Array.from({ length: 24 }).map((_, hour) => {
-          const hourStr = String(hour).padStart(2, '0') + ':00';
-          const isCurrentHour = nowBlockIdx !== null && Math.floor(nowBlockIdx / 4) === hour;
-
-          return (
-            <div
-              key={hour}
-              className={`flex items-center gap-2 py-0.5 px-1 rounded transition-colors ${
-                isCurrentHour ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
-              }`}
-            >
-              {/* Hour Label */}
-              <div className="w-11 shrink-0 flex items-center gap-1 text-[11px] font-mono font-medium text-zinc-500 dark:text-zinc-400 tabular-nums">
-                <span>{hourStr}</span>
-                {isCurrentHour && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" title="Current hour" />
-                )}
-              </div>
-
-              {/* 4 Quarter Blocks (:00, :15, :30, :45) */}
-              <div className="grid grid-cols-4 gap-1 flex-1">
-                {[0, 1, 2, 3].map((quarter) => {
-                  const blockIdx = hour * 4 + quarter;
-                  const catId = (timeAllocation[blockIdx] || null) as TimeCategoryId | null;
-                  const cfg = catId ? TIME_CATEGORIES[catId] : null;
-                  const isNowBlock = nowBlockIdx === blockIdx;
-                  const timeLabel = `${String(hour).padStart(2, '0')}:${String(quarter * 15).padStart(2, '0')}`;
-
-                  return (
-                    <div
-                      key={quarter}
-                      data-block-idx={blockIdx}
-                      data-testid="time-block"
-                      onPointerDown={(e) => handleBlockPointerDown(e, blockIdx)}
-                      onPointerEnter={() => handleBlockPointerEnter(blockIdx)}
-                      onPointerUp={() => {
-                        isMouseDownRef.current = false;
-                      }}
-                      title={`${timeLabel} - ${cfg ? `${cfg.label} (${cfg.emoji})` : 'Unallocated'}`}
-                      className={`h-5 rounded border transition-all flex items-center justify-center text-[10px] select-none ${
-                        readOnly ? 'cursor-default' : 'cursor-pointer'
-                      } ${
-                        cfg
-                          ? `${cfg.blockClass} text-white shadow-xs`
-                          : 'bg-zinc-100/70 dark:bg-zinc-800/40 border-zinc-200/80 dark:border-zinc-700/60 hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80'
-                      } ${
-                        isNowBlock
-                          ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-1 dark:ring-offset-zinc-900'
-                          : ''
-                      }`}
-                    >
-                      {cfg ? (
-                        <span className="scale-90 select-none pointer-events-none">{cfg.emoji}</span>
-                      ) : (
-                        <span className="text-[9px] text-zinc-400/80 dark:text-zinc-600 tabular-nums select-none pointer-events-none">
-                          :{String(quarter * 15).padStart(2, '0')}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2.5 gap-y-0.5">
+          {/* Sub-column 1: 00:00 - 11:45 */}
+          <div className="space-y-0.5">
+            <div className="text-[9px] font-mono font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider pb-0.5 border-b border-zinc-100 dark:border-zinc-800 flex justify-between px-1">
+              <span>00:00 – 11:45</span>
+              <span>Morning</span>
             </div>
-          );
-        })}
+            {Array.from({ length: 12 }).map((_, i) => renderHourRow(i))}
+          </div>
+
+          {/* Sub-column 2: 12:00 - 23:45 */}
+          <div className="space-y-0.5">
+            <div className="text-[9px] font-mono font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider pb-0.5 border-b border-zinc-100 dark:border-zinc-800 flex justify-between px-1">
+              <span>12:00 – 23:45</span>
+              <span>Evening</span>
+            </div>
+            {Array.from({ length: 12 }).map((_, i) => renderHourRow(i + 12))}
+          </div>
+        </div>
       </div>
 
       {/* 4. Category Breakdown Pill Badges (Positioned below grid to maintain layout stability) */}

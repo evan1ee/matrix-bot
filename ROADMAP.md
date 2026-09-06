@@ -1,322 +1,292 @@
 # Product Roadmap
 
-Product discovery written against the tree at `742259f` (branch `e2e-test`).
-Findings are drawn from the backend crate, the SPA, and the e2e suite; every one
-cites the code that causes it.
+Written against `4412157` (branch `visualizing-life`), by reading the tree rather
+than the previous roadmap. Every claim below cites the code that causes it, and
+every "does not exist" is a grep that returned zero hits at that commit.
 
-A styled version of this document is published at
-<https://claude.ai/code/artifact/dc9cef3a-e719-4855-a60c-4bc8078528b7>.
+This document replaces the previous `ROADMAP.md` and `BRAINSTORMING.md`, which
+had both drifted badly — they still described bill-to-ledger sync, price feeds,
+bookmarks, habits, footprints and the AI module as unbuilt. Keeping one document
+instead of three is deliberate: the drift was caused by three overlapping files
+aging independently.
 
-Companion documents: `FEATURE_PROPOSALS.md` covers four candidate features in
-implementation detail. This document is the layer above it — what users need,
-what the product currently fails to deliver, and in what order to fix it.
+`FEATURE_PROPOSALS.md` survives as the implementation-detail layer. Its §1
+(room-shared lists) is still unbuilt and still the hard one; see §5 below.
 
 ---
 
 ## Thesis
 
-The product's promise, from `README.md`, is that **every feature is reachable two
-ways — as a chat command or through the web UI — and both land on the same data.**
+The product's promise is that **every feature is reachable two ways — as a chat
+command or through the web UI — and both land on the same data.**
 
-The data half of that is true and well built. The reachability half is not.
+The data half is true and well built. The delivery half is still not.
 **The web app can store anything and deliver nothing.** Every notification this
 product sends travels through Matrix, so a user who signs in with a passkey and
 never links a Matrix account owns a reminder app that cannot remind them.
 
-Everything below is ordered around closing that gap first.
+That was the previous roadmap's finding #1 and it is unchanged. What *has*
+changed is the cost of leaving it open: eight modules have shipped since, each
+adding something that wants to reach the user — habit nudges, price alerts, bill
+warnings, weekly retrospectives — and none of them can.
 
 ---
 
-## 1. Who is actually using this
+## What shipped since the last roadmap
 
-Derived from what the code makes possible, not from aspiration.
+Recorded so the next reader does not re-propose them.
 
-### The Matrix-native self-hoster — well served
+| Feature | Where |
+|---|---|
+| Bookmarks + reader view | `modules/bookmarks/`, `metadata.rs` extracts OpenGraph |
+| Habits + heatmap | `modules/habits/`, `frontend/.../HabitHeatmap.tsx` |
+| Footprints + Leaflet map | `modules/footprints/`, `FootprintsMap.tsx` |
+| Life grid / memento mori | `modules/life/`, `LifeHorizonMinimap.tsx` |
+| AI chat, 34 tools, retrospective | `modules/ai/`, `tools/definitions*.rs` |
+| Webhooks in + out | `modules/webhook/`, `api/webhooks.rs` |
+| Portfolio price feed | `modules/portfolio/price_feed.rs` |
+| Portfolio alerts / history / audit chain | `alerts.rs`, `history.rs`, `audit.rs` |
+| **Bill payment posts to the ledger** | `recurring_bills/repository.rs:205` |
 
-Runs the binary on their own box, already lives in Element all day, wants life
-admin without opening another app. They get the full product: todos, reminders,
-a ledger, bills, holdings and settings, all as chat commands, with reminders
-arriving as messages in a room they already read. This is the person the
-codebase was built for and it shows.
-
-### The household or shared room — half built
-
-A couple or flatshare with the bot in a shared room: a joint grocery list, whose
-turn it is to pay the internet bill. Chat supports it — `!todo room` is a genuine
-room-wide view. The web UI has no concept of a shared list at all, so the moment
-anyone opens the browser the shared view disappears. The feature exists on one
-side of the product only.
-
-### The web-first passkey user — poorly served
-
-The auth system actively recruits this person: one button, no username field, no
-password, no Matrix account required. They can sign up in ten seconds and then
-receive nothing — no reminder, no bill warning, no due-date nudge — unless they
-happen to have the tab open at the moment it fires. The product invites a user
-it has no way to reach.
+The last one closed the previous finding #2; the price feed closed #9.
 
 ---
 
-## 2. Findings
+## 1. A reminder with no Matrix room is still silently dropped
 
-Ordered by user impact.
-
-### 1. A reminder with no Matrix room is silently dropped
+**Impact:** critical · **Frequency:** daily · **Effort:** M
 
 A reminder created in the web UI is stored with the literal string `web` where a
-room ID belongs. When it fires, the scheduler cannot parse that as a room, so it
-returns *delivered* and moves on. The only delivery is an SSE broadcast to open
-browser tabs. Close the tab and the reminder fires into nothing — no retry, no
-error, no trace. The same block appears in the todo view: without a Matrix room,
-the UI refuses to let you attach a due reminder at all.
+room ID belongs. `deliver_to_matrix` cannot parse that as a room and returns
+`true` — delivered — without sending anything. The docstring states the intent
+outright: *"for those the SSE broadcast is the delivery, so there is nothing to
+fail here."* Close the tab and the reminder fires into nothing.
+
+- `backend/src/modules/reminder/scheduler.rs:52-60` — `web` sentinel returns `true`
+- `backend/src/api/reminders.rs` — `room_id.unwrap_or_else(|| "web")`
+- `frontend/public/` — favicon only: no manifest, no service worker
+- `grep -ri "vapid\|serviceworker\|web-push"` — **zero hits**
+
+### The fix is an abstraction, not a feature
+
+Four separate places reach directly for the Matrix `Client` to tell a user
+something: `bot/notify.rs`, `reminder/scheduler.rs`, `portfolio/alerts.rs`,
+`recurring_bills/due_reminder.rs`. Adding push as a fifth special case in each
+is how this stays broken.
+
+Introduce a `Notification` trait with two implementations — Matrix DM and Web
+Push — resolved per owner from their linked identities and push subscriptions.
+Store subscriptions in `web_push_subscriptions` keyed by `owner_id`, the same
+key every other table uses. The trait is the deliverable; push is the second
+impl, and any future channel is the third.
+
+Ship the PWA manifest in the same change, and with it **`share_target`**: share
+a URL from mobile Safari straight into `bookmarks`, which already fetches
+OpenGraph metadata and extracts reader content. Small once the manifest exists.
+
+---
+
+## 2. Work that is already written and merely not scheduled
+
+**Impact:** high · **Frequency:** weekly · **Effort:** S
+
+`ai/retrospective.rs:60` generates a full weekly retrospective — spending versus
+prior week, top category, completed tasks, habit consistency, upcoming bills. It
+is reachable only by pulling: `handle_retrospective_command` and
+`GET /ai/retrospective`. Nothing pushes it. 555 lines of finished analysis that
+a user has to remember to ask for.
+
+The reminder scheduler already runs a 5s tick with the `Client`, `Database` and
+broadcaster in hand (`spawn_background_workers`). Hanging a Sunday 20:00 send off
+it is a small change against a large piece of existing work.
+
+The same loop gives you the **daily digest** for free — today's due todos,
+uncompleted habits, bills due within three days, the life-grid progress line.
+Every one of those queries exists in a repository already; the digest is
+composition, not new capability.
+
+---
+
+## 3. Matrix is still used as a text box, not a platform
+
+**Impact:** high · **Frequency:** daily · **Effort:** S–M
+
+`bot/handler.rs::register_handlers` registers exactly two handlers: auto-join on
+invite, and room messages. Fourteen modules of chat commands and no way to do
+anything without typing.
+
+- `grep -ri "reaction"` — **zero hits**
+- `grep -ri "m\.location\|LocationMessageEvent"` — **zero hits**
+
+**Reactions (✅ ⏰ 🗑️).** Capture the `event_id` when the bot sends a todo or
+reminder, handle `OriginalSyncReactionEvent`, map the key to complete / snooze /
+delete. This is the highest quality-of-life return per line in the document —
+it makes the product usable one-handed on a phone, which is where life admin
+actually happens.
+
+**`m.location` → footprints.** This was speculative when first proposed; it is
+not now. `modules/footprints/` has models, a repository and a Leaflet map all
+waiting for input that currently must be typed. Drop a native pin in the DM,
+reverse-geocode through Nominatim, and the row appears on the map.
+
+---
+
+## 4. Finance records the past and predicts nothing
 
 **Impact:** critical · **Frequency:** daily · **Effort:** M
 
-- `backend/src/api/reminders.rs:128` — `room_id.unwrap_or_else(|| "web")`
-- `backend/src/modules/reminder/scheduler.rs:58` — unparseable room returns `true`
-- `frontend/src/modules/todo/index.tsx:361` — `noRoomsAvailable` blocks the reminder
-- `frontend/public/` — favicon only; no manifest, no service worker, no push anywhere
+Bill payments now post to the ledger, so the ledger is finally *accurate*. It is
+still not *forward-looking*.
 
-### 2. Paying a bill never reaches the ledger
+- `grep -ri "budget"` — 6 hits, every one a reminder **retry** budget
+- `grep -ri "income" modules/recurring_bills/` — **zero hits**
 
-Marking a recurring bill paid advances the due date, increments the instalment
-count and re-arms the reminder. It does not write a transaction. Rent,
-subscriptions and loan instalments are usually the largest and most predictable
-share of someone's spending, so the ledger is systematically wrong by exactly
-the amount the product already knows about — and the only fix available to the
-user is to type every bill in twice. Portfolio cash is a third disconnected pot:
-money moved in or out of it never appears in finance either.
+Two gaps, one theme. There are no budgets, so there is no target to be on track
+against. And `recurring_bills` has no concept of income — salary, the single
+most predictable transaction anyone has, cannot be modelled at all, even though
+`Direction::Income` already exists on the transaction side
+(`finance/models.rs:11`). The recurring engine is right there; it just assumes
+everything recurring is a cost.
 
-**Impact:** critical · **Frequency:** weekly · **Effort:** S
+Both are small schema changes: a `direction` column on `recurring_bills`, and a
+`budgets` table with per-category caps plus 80% / 100% alerts routed through the
+new notification trait from §1. Together they turn the ledger from journaling
+into a question the product can answer.
 
-- `backend/src/modules/recurring_bills/repository.rs:152` — `mark_paid` touches one table
-- `backend/src/api/recurring_bills.rs:265` — `pay_bill` emits events, writes no transaction
-- `grep "transaction" modules/recurring_bills/` — zero hits
+### Multi-currency is a wall across three modules
 
-### 3. The ledger records the past but predicts nothing
+There is no rate source anywhere (`grep -ri "exchange_rate\|fx_rate"` — zero
+hits), and every module handles that correctly by refusing to guess: `finance`
+never sums across currencies, `portfolio` rejects a second currency for a held
+symbol (`BuyOutcome::CurrencyMismatch`), and the retrospective keeps currencies
+strictly apart.
 
-Finance answers "what did I spend between these two dates, grouped by currency".
-It never answers the question people actually open a money app for: *am I on
-track, and what is left?* There are no budgets, no month-over-month comparison,
-and no way to model recurring income — salary, the single most predictable
-transaction anyone has, cannot be represented. Expense tracking without a target
-is journaling, and journaling is what expense trackers get abandoned for.
+Correct, and also the reason the product cannot state a single net-worth number
+across its three pots — ledger, cash balances, holdings. `price_feed.rs` already
+establishes that calling an external feed on a schedule is acceptable here. One
+daily fetch into an `fx_rates` table, with conversion applied at the presentation
+layer only and the stored minor units left untouched, unlocks it.
 
-**Impact:** critical · **Frequency:** daily · **Effort:** M
+---
 
-- `backend/src/api/finance.rs:287` — `summary` is a date range, grouped by currency
-- `grep "budget"` — 6 hits, all describing reminder retry budgets
-- `grep "income" modules/recurring_bills/` — zero hits
+## 5. Filters lie, and the fix is smaller than previously recorded
 
-### 4. The bot promises an export the product does not have
+**Impact:** high · **Frequency:** daily · **Effort:** XS
 
-Type `!export` and the bot replies that this action needs the web app. The web
-app has no export button. There is no CSV writer anywhere in the codebase, and
-the security event that would record such an export is defined but constructed
-nowhere. For a self-hosted finance tool, data portability is both table stakes
-and the trust argument for self-hosting in the first place — and right now the
-product actively directs users to a door that isn't there.
+Both the todo and finance views filter client-side, over the rows already
+fetched, while the API paginates. Switch to "Completed" and you see the completed
+items *on this page*, not the completed items.
 
-`CLAUDE.md` already acknowledges this as reserved-but-unbuilt. The finding is
-that the user-facing copy does not.
+The previous roadmap called this M-sized and blamed the API. That was wrong.
+**The API already supports both filters server-side** — the frontend simply does
+not pass them:
+
+- `backend/src/api/todos.rs:20-27` — `TodoQuery.completed`, threaded to
+  `list_all_user` **and** `count_all_user` so the total matches the filter
+- `backend/src/modules/todo/repository.rs:132-139` — `completed_clause` in SQL
+- `frontend/src/modules/todo/index.tsx:455` — client-side `.filter()` instead
+- `backend/src/api/finance.rs:21-26` — `LedgerQuery.direction`
+- `backend/src/modules/finance/repository.rs:207-210` — `list(.., direction, ..)`
+- `frontend/src/modules/finance/index.tsx:385` — client-side `.filter()` instead
+
+Two frontend changes, no backend work. Do this first; it is nearly free.
+
+### Search does not exist at all
+
+`grep -ri "global_search\|commandpalette"` — zero hits. Fourteen modules, no
+`Cmd+K`, no `!search`. A transaction from four months ago is reachable only by
+paging to it. SQLite FTS5 over todos, transactions, bookmarks, footprints and
+life notes is a single virtual table and one endpoint, and it is the feature that
+stops the module count from becoming a navigation cost.
+
+---
+
+## 6. The bot still promises an export the product does not have
 
 **Impact:** high · **Frequency:** rare · **Effort:** S
 
-- `backend/src/modules/account/mod.rs` — `WEB_ONLY` lists `!export`
-- `grep "csv"` — zero hits across backend and frontend
-- `SecurityEventKind::FinancialDataExported` — declared, never constructed
+Unchanged from the previous roadmap, and now a year older.
 
-### 5. Filters only filter the page you are looking at
+- `modules/account/mod.rs` — `WEB_ONLY` still lists `!export`
+- `accounts/security_events.rs:33` — `FinancialDataExported` is **declared,
+  tested, and constructed nowhere**
+- `grep -ri "csv"` — zero hits across backend and frontend
 
-Both the todo and finance views filter in the browser, over the rows already
-fetched — but the API paginates. Switch to "Completed" and you see the completed
-items *on this page*, not the completed items. The mismatch is invisible at ten
-rows and misleading at five hundred, which is exactly the todo ceiling the
-backend enforces. There is no text search anywhere in the product, so a
-transaction from four months ago can only be reached by paging to it.
+`CLAUDE.md` documents this as reserved-but-unbuilt, which is honest. The
+user-facing copy is not: `!export` directs people to a web button that does not
+exist. Behind `VerifiedUser`, per the reservation's original intent.
 
-**Impact:** high · **Frequency:** daily · **Effort:** M
+---
 
-- `frontend/src/modules/finance/index.tsx:384` — client-side `tx.direction` filter
-- `frontend/src/modules/todo/index.tsx:456` — client-side completed filter
-- `backend/src/modules/todo/handler.rs:15` — `MAX_ROOM_TASKS = 500`
-
-### 6. Sign-up is one button, and then the user is on their own
-
-The passkey ceremony is the best-executed thing in the product — discoverable
-credentials, no username, nothing to leak. Then the app drops the new user into
-empty views with no prompt to link Matrix, set a timezone, or save recovery
-codes. Recovery codes in particular are only minted if the user goes looking for
-them, which means the average account has no recovery path at all. The `!link`
-flow is genuinely well designed and almost nobody will discover it unaided.
-
-**Impact:** high · **Frequency:** once · **Effort:** S
-
-- `POST /account/recovery-codes` — on demand only, never prompted
-- `frontend/src/App.tsx` — no first-run state between sign-in and the dashboard
-
-### 7. Shared lists work in chat and vanish on the web
-
-The backend carries room-scoped todos, and they are more genuinely *shared* than
-`FEATURE_PROPOSALS.md` currently records. `list_by_room` selects on `room_id`
-with **no owner filter**, and `!todo clear room` deletes every completed row in
-the room regardless of who created it. So room-wide reads and deletes already
-cross the ownership boundary `CLAUDE.md` describes as absolute.
-
-The web UI is strictly per-owner and shows no room scope anywhere. A household
-that builds a shared grocery list in chat cannot see it in the browser, which
-reads as data loss rather than a missing view — and one member can already clear
-another's completed items with no web-side record that it happened.
-
-This is a decision, not just a gap. Either the shared list is a product or it
-isn't, and right now it is half of one with an undocumented ownership exception.
-
-**Impact:** medium · **Frequency:** weekly · **Effort:** M
-
-- `backend/src/modules/todo/repository.rs:116` — room read, no `owner_id` predicate
-- `backend/src/modules/todo/repository.rs:316` — room clear, no `owner_id` predicate
-- `frontend/src/modules/todo/index.tsx` — owner-scoped only, no room view
-- `FEATURE_PROPOSALS.md` §1 — proposes shared lists as new work; partly already shipped
-
-### 8. Anyone who can reach the port can create an account
-
-Registration requires an invite secret only if one is configured, and nothing
-forces that in production. `Config::validate` already refuses to boot with
-localhost WebAuthn defaults — it applies the same care to the origin but not to
-who may sign up. For a personal instance exposed to the internet, open
-registration is almost never what the operator intended, and there is no admin
-view that would show them it happened.
+## 7. Registration is open by default
 
 **Impact:** medium · **Frequency:** once · **Effort:** XS
 
-- `backend/src/api/auth/webauthn.rs:74` — `check_invite` returns `Ok` when unset
-- `backend/src/config.rs` — `validate` guards WebAuthn defaults, not registration
-
-### 9. The most sophisticated module has the least sustainable input
-
-Portfolio is the strongest engineering in the codebase: weighted-average cost,
-realised P&L in 128-bit arithmetic, a cash balance that gates every buy inside a
-single call so no concurrent purchase can race it. All of it hangs off a price
-the user has to type in by hand, and market value stays undefined until they do.
-The engine deserves a feed; without one, the module is a spreadsheet with a
-command syntax, and it will be the first thing people stop updating.
-
-**Impact:** medium · **Frequency:** weekly · **Effort:** M
-
-- `backend/src/modules/portfolio/` — market value and P&L are `Option` until priced
-- `CLAUDE.md` — "there is no live price feed anywhere in this codebase"
-
-### 10. The room picker asks a question the user answers once
-
-Setting a reminder or a due date in the web UI means choosing a destination room
-each time, from a list most users will have exactly one entry in. It is a
-per-item decision that belongs in settings, alongside timezone and default
-currency, where the same pattern already works well.
-
-**Impact:** low · **Frequency:** daily · **Effort:** XS
-
-- `frontend/src/modules/reminder/index.tsx:273`, `todo/index.tsx:208` — per-item pickers
-- `backend/src/modules/settings/` — the pattern a default would follow
+`check_invite` returns `Ok` when no invite secret is configured
+(`api/auth/webauthn.rs:70-74`), and nothing forces one in production.
+`Config::validate` already refuses to boot on localhost WebAuthn defaults — it
+applies that care to the origin but not to who may sign up. For a personal
+instance on the open internet, open registration is almost never intended, and
+there is no admin view that would reveal it happened.
 
 ---
 
-## 3. Prioritisation
+## 8. New modules, ranked by fit
 
-Rank is user impact weighted by how often the need recurs, divided by build
-cost. The top three are all cheap relative to what they unblock.
+Not by novelty. Each is judged on how much existing machinery it reuses.
 
-| Rank | Work | Impact | Frequency | Effort | Unblocks |
-|-----:|------|--------|-----------|--------|----------|
-| 1 | Bill payment writes a transaction | Critical | Weekly | S | A ledger that is actually correct |
-| 2 | Web push notifications + installable app | Critical | Daily | M | The entire web-first segment |
-| 3 | CSV export behind step-up | High | Rare | S | Trust; keeps an existing promise |
-| 4 | Require an invite secret in production | Medium | Once | XS | Safe public deployment |
-| 5 | Budgets per category, month to date | Critical | Daily | M | The reason to open the app daily |
-| 6 | Recurring income & cash-flow forecast | High | Weekly | M | "What is left" as a real answer |
-| 7 | Server-side search and filtering | High | Daily | M | Usability past ~100 rows |
-| 8 | First-run checklist | High | Once | S | Activation; recovery coverage |
-| 9 | Shared room views on the web | Medium | Weekly | M | The household segment |
-| 10 | Portfolio price feed | Medium | Weekly | M | Portfolio staying current |
+**Journal / notes — build first.** There are life-day notes, bookmark reader
+content and AI conversations, but nowhere to simply write. It is also the best
+available corpus for the AI module, which today reasons only over structured
+tool output and cannot answer anything about what the user actually thought.
 
-**The ordering argument.** Push notifications are ranked below the bill fix only
-because the bill fix is a few hours of work against a systematic data error.
-Everything else in this roadmap is worth less than it looks until push ships — a
-budget you are not warned about, a bill reminder that cannot arrive, and a
-forecast nobody sees are all features that store value rather than deliver it.
+**Warranty & expiry guardian.** Passports, insurance, domains, registrations.
+Structurally it is `recurring_bills` with a different due-date policy and no
+amount; the scheduler is reusable as-is.
 
----
+**Focus / Pomodoro.** Feeds `habits`, and more interestingly feeds the
+`time_allocation` grid now landing on `visualizing-life` (§9).
 
-## 4. Roadmap
-
-Sized for a small team, in the layered style the project already follows: never
-trade a working product for unfinished complexity.
-
-### P0 — Now (~3 weeks): keep the promises already made
-
-Nothing here is a new feature. Each item makes an existing one true.
-
-- **Bill payment posts to the ledger.** `mark_paid` writes a transaction
-  carrying the bill's category and currency, with a link back to the bill so it
-  can be traced or reversed. The same treatment for portfolio cash movements.
-- **Web push and an installable app.** A VAPID subscription table, a service
-  worker, and a `deliver_to_web` sibling to `deliver_to_matrix` so the scheduler
-  has a second real channel instead of a sentinel it silently discards. This
-  deletes the `noRoomsAvailable` block outright.
-- **CSV export behind `VerifiedUser`.** The step-up boundary and the audit event
-  are already built and waiting for it; `!export` starts telling the truth.
-- **Refuse to boot production without an invite secret**, in the same
-  `Config::validate` that already refuses localhost WebAuthn defaults.
-
-### P1 — Next (~5 weeks): close the money loop
-
-Turn a record of the past into a question the app can answer every morning.
-
-- **Budgets per category.** A monthly target, month-to-date progress on the
-  dashboard, a push when a category crosses 80% and again at 100%, and a
-  `!budget` command for parity. This is the single change most likely to make
-  the app a daily habit.
-- **Recurring income.** A direction flag on the recurring-bills model reuses the
-  schedule, instalment and reminder machinery almost entirely, and unlocks a
-  forecast: committed outgoings against expected income, for the rest of the month.
-- **Search and filtering on the server.** Move the direction, status and text
-  filters behind the pagination boundary so a filter means what it says at any
-  data size.
-
-### P2 — Then (~3 weeks): finish what is half built
-
-Two features currently exist on one side of the product only; pick a side for each.
-
-- **First-run checklist.** Four steps after the first sign-in: link Matrix, set
-  timezone and currency, enable notifications, save recovery codes. Dismissible,
-  never blocking, and it fixes the accounts-with-no-recovery-path problem at the
-  source.
-- **Shared lists on the web** — a room-scoped todo view matching `!todo room`,
-  and a documented ownership exception for room-wide reads and deletes. If
-  shared lists are not a product direction, remove the room scope from chat
-  instead; leaving it visible in one client and absent in the other is the worst
-  of both. See `FEATURE_PROPOSALS.md` §1 for the implementation shape.
-- **A default reminder destination in settings**, retiring the per-item room pickers.
-
-### P3 — Later (scoped after P1): decide what portfolio is
-
-A deliberate call, not a backlog item — the module's cost is already paid and
-its value depends entirely on this.
-
-- **Either a pluggable price source** — one trait, one optional provider, prices
-  refreshed on a schedule alongside the reminder tick — **or an explicit
-  repositioning** as a manual position tracker, with the UI saying so and no
-  further investment.
-- **Revisit after budgets ship.** If usage shows portfolio prices going stale
-  within a month of entry, that is the answer, and the cheap option is the right one.
+**Household expense splitter — defer.** Room-scoped todos *already* cross the
+ownership boundary that `CLAUDE.md` describes as absolute: `list_by_room` selects
+on `room_id` with no `owner_id` predicate, and `!todo clear room` deletes every
+completed row in the room regardless of author. Splitting would add a second and
+deeper exception to a model that has one undocumented one already. Settle the
+shared-data story — `FEATURE_PROPOSALS.md` §1 — before adding to it.
 
 ---
 
-## 5. What to stop
+## 9. On the branch this was written from
 
-| Verdict | Surface |
-|---------|---------|
-| **Cut** | `!hello` and the greeting handler. It was the first command in a "hello bot" and it has outlived that; it dilutes `!help` for a product that now runs someone's money. |
-| **Cut** | Per-item room pickers, once a default destination exists in settings. |
-| **Decide** | Room-scoped todos. Finish them on the web or remove them from chat — the current split reads to a household as data that disappeared. |
-| **Freeze** | Cross-signing and self-verification. Correct, hard-won, and worth every line — but it is infrastructure with no user-visible feature attached. Treat it as a fixed cost that is now paid, and resist further investment unless something breaks. |
-| **Keep** | The account model. One owner, several access paths, ownership carried rather than derived. It is the reason a single fix to bill payment lands correctly for both front doors, and it is what makes every item in P0 and P1 cheap. |
+`visualizing-life` adds a 24-slot `time_allocation` per day plus deep-work and
+average-sleep aggregates (`schema_life.rs`, `life/models.rs`,
+`LifeTimeGrid.tsx`). Two consequences worth deciding on deliberately:
+
+**It is the first quantitative time series in the life module.** Mood is
+categorical; hours are not. Correlating allocation against mood and habit
+completion is analysis the AI module has no data to perform today —
+`get_life_profile` returns aggregates only. A `get_time_allocation` tool would
+let it answer "your low-mood days average 5.4h sleep," which is the kind of claim
+the whole life module exists to make possible.
+
+**It overlaps with `habits`.** A "Deep work" habit checkbox and a deep-work hour
+block are the same fact recorded twice, in two tables, with two streak notions.
+Decide whether time allocation *derives* habit completion before both grow
+independently — this is much cheaper to settle now than after either has users.
+
+---
+
+## Recommended order
+
+| # | Item | Effort | Why here |
+|---|---|:---:|---|
+| 1 | Server-side filters (§5) | XS | Backend already supports it; two frontend lines |
+| 2 | Notification trait + Web Push + PWA (§1) | M | Unblocks every module; nothing else competes |
+| 3 | Matrix reactions (§3) | S | Largest UX return per line in this document |
+| 4 | Schedule the retrospective + digest (§2) | S | 555 lines already written and unreachable |
+| 5 | Budgets + recurring income (§4) | M | Turns the ledger from record into forecast |
+| 6 | Export (§6) | S | Closes an active falsehood in the UI |
+| 7 | `m.location` → footprints (§3) | S | Map is built and waiting for input |
+| 8 | FTS5 search (§5) | M | Caps the navigation cost of 14 modules |
+
+§7 (registration) is XS and independent — take it whenever it is convenient.
