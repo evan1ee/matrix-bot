@@ -46,15 +46,6 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   // Simple hover tracking
   const hoveredCellRef = useRef<{ col: number | null; row: number | null }>({ col: null, row: null });
 
-  const [selectedDecade, setSelectedDecade] = useState<number | null>(null);
-
-  const currentColsRef = useRef(100);
-  const currentRowsRef = useRef(100);
-  const currentCellWidthRef = useRef(4);
-  const currentCellHeightRef = useRef(4);
-  const currentWRef = useRef(0);
-  const currentHRef = useRef(0);
-
   // Extract distinct decades for quick jump bar
   const decades = useMemo(() => {
     const set = new Set<number>();
@@ -63,6 +54,48 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
     }
     return Array.from(set).sort((a, b) => a - b);
   }, [days]);
+
+  // Determine current decade matching today's present day or current calendar year
+  const currentDecade = useMemo(() => {
+    const presentDay = days.find((d) => d.status === 'present');
+    if (presentDay) {
+      return Math.floor(presentDay.year / 10) * 10;
+    }
+    const currentYearDecade = Math.floor(new Date().getFullYear() / 10) * 10;
+    if (decades.includes(currentYearDecade)) {
+      return currentYearDecade;
+    }
+    return decades.length > 0 ? decades[0] : null;
+  }, [days, decades]);
+
+  const [selectedDecade, setSelectedDecade] = useState<number | null>(() => {
+    const presentDay = days.find((d) => d.status === 'present');
+    if (presentDay) {
+      return Math.floor(presentDay.year / 10) * 10;
+    }
+    const currentYearDecade = Math.floor(new Date().getFullYear() / 10) * 10;
+    for (const d of days) {
+      if (Math.floor(d.year / 10) * 10 === currentYearDecade) {
+        return currentYearDecade;
+      }
+    }
+    return null;
+  });
+
+  const hasInitializedRef = useRef(false);
+  useEffect(() => {
+    if (!hasInitializedRef.current && currentDecade !== null) {
+      setSelectedDecade(currentDecade);
+      hasInitializedRef.current = true;
+    }
+  }, [currentDecade]);
+
+  const currentColsRef = useRef(100);
+  const currentRowsRef = useRef(100);
+  const currentCellWidthRef = useRef(4);
+  const currentCellHeightRef = useRef(4);
+  const currentWRef = useRef(0);
+  const currentHRef = useRef(0);
 
   // Filter days by selected decade if active
   const displayedDays = useMemo(() => {
@@ -371,7 +404,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   const handleSelectToday = () => {
     const todayStr = new Date().toISOString().split('T')[0];
     const currentYearDecade = Math.floor(new Date().getFullYear() / 10) * 10;
-    if (selectedDecade !== null && selectedDecade !== currentYearDecade) {
+    if (selectedDecade !== currentYearDecade) {
       setSelectedDecade(currentYearDecade);
     }
     onSelectDate(todayStr);
