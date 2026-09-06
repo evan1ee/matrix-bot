@@ -62,6 +62,8 @@ pub async fn handle_todo_command(
         handle_due(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("clear") {
         handle_clear(pool, room_id, owner_id, sender_name, args_body).await
+    } else if args_lower.starts_with("delete") || args_lower.starts_with("rm") {
+        handle_delete(pool, owner_id, args_body).await
     } else if args_lower.starts_with("room") {
         handle_list_room(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("list") || args_lower.starts_with("my") || args_lower.starts_with("all") || args_lower.starts_with("global") || args_lower.is_empty() {
@@ -69,7 +71,7 @@ pub async fn handle_todo_command(
     } else {
         Some("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
               <code>all</code>, <code>room</code>, <code>done</code>, <code>edit</code>, <code>priority</code>, \
-              <code>due</code>, <code>clear</code>".to_string())
+              <code>due</code>, <code>clear</code>, <code>delete</code>".to_string())
     }
 }
 
@@ -373,6 +375,43 @@ async fn handle_clear(
     }
 }
 
+async fn handle_delete(
+    pool: &SqlitePool,
+    owner_id: &str,
+    args_body: &str,
+) -> Option<String> {
+    let id_str = args_body
+        .trim_start_matches("delete")
+        .trim_start_matches("rm")
+        .trim();
+    if id_str.is_empty() {
+        return Some("⚠️ Usage: <code>!todo delete &lt;id&gt;</code> (or <code>!todo rm &lt;id&gt;</code>)".to_string());
+    }
+
+    let Ok(id) = id_str.parse::<i64>() else {
+        return Some("⚠️ Task ID must be a number.".to_string());
+    };
+
+    match TodoRepository::find_owned(pool, id, owner_id).await {
+        Ok(Some(item)) => {
+            due_reminder::tear_down(pool, None, id).await.ok();
+            match TodoRepository::delete(pool, id).await {
+                Ok(true) => Some(format!(
+                    "🗑️ Deleted Task <b>#{}</b>: <i>\"{}\"</i>",
+                    id,
+                    html_escape(&item.text)
+                )),
+                _ => Some(format!("⚠️ Failed to delete task <b>#{}</b>.", id)),
+            }
+        }
+        Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(err) => {
+            error!("Failed to delete task {}: {:?}", id, err);
+            Some("❌ Database error deleting task.".to_string())
+        }
+    }
+}
+
 async fn handle_list_room(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) -> Option<String> {
     let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
     let page: i64 = rest.parse().unwrap_or(1).max(1);
@@ -542,5 +581,22 @@ mod tests {
             .await
             .unwrap();
         assert!(res.contains("too long"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_todo_delete() {
+        let pool = setup_test_db().await;
+
+        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Task to remove").await;
+        let res_del = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo delete 1")
+            .await
+            .unwrap();
+        assert!(res_del.contains("Deleted Task"));
+
+        // Alice tries to delete non-existent task
+        let res_notfound = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1")
+            .await
+            .unwrap();
+        assert!(res_notfound.contains("not found"));
     }
 }

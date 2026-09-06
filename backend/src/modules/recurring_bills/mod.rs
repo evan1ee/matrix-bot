@@ -65,7 +65,7 @@ impl BotModule for RecurringBillsModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        if ctx.command == "bill" || ctx.command == "recurring" {
+        if ctx.command == "bill" || ctx.command == "bills" || ctx.command == "recurring" {
             handler::handle_bill_command(ctx, db, broadcaster).await
         } else {
             None

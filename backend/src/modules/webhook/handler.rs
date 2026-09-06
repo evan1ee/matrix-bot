@@ -30,17 +30,17 @@ pub async fn handle_webhook_command(
     let sub = parts.get(1).map(|s| s.to_lowercase());
 
     match sub.as_deref() {
-        Some("list") => handle_list(pool, owner_id, sender_name).await,
+        Some("list") | None | Some("") => handle_list(pool, owner_id, sender_name).await,
         Some("create") | Some("add") => {
             let name = parts.get(2).unwrap_or(&"Unnamed Webhook");
             let target_room = parts.get(3).unwrap_or(&room_id);
             handle_create(pool, owner_id, name, target_room, broadcaster).await
         }
-        Some("revoke") | Some("delete") => {
+        Some("revoke") | Some("delete") | Some("rm") => {
             if let Some(id) = parts.get(2) {
                 handle_revoke(pool, owner_id, id, broadcaster).await
             } else {
-                Some("⚠️ Usage: <code>!webhook revoke &lt;webhook_id&gt;</code>".to_string())
+                Some("⚠️ Usage: <code>!webhook revoke &lt;webhook_id&gt;</code> (or <code>!webhook rm &lt;id&gt;</code>)".to_string())
             }
         }
         Some("test") | Some("ping") => {

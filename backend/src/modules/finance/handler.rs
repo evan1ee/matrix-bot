@@ -35,6 +35,8 @@ pub async fn handle_finance_command(
         ("expense", rest)
     } else if let Some(rest) = strip_command(&lower, body, "income") {
         ("income", rest)
+    } else if let Some(rest) = strip_command(&lower, body, "finance") {
+        ("expense", rest)
     } else {
         let rest = strip_command(&lower, body, "category")?;
         ("category", rest)
@@ -54,7 +56,7 @@ pub async fn handle_finance_command(
     if rest_lower.starts_with("summary") {
         return handle_summary(pool, owner_id, sender_name).await;
     }
-    if rest_lower.starts_with("delete") || rest_lower.starts_with("remove") {
+    if rest_lower.starts_with("delete") || rest_lower.starts_with("remove") || rest_lower.starts_with("rm") {
         let id_str = rest.split_whitespace().nth(1).unwrap_or("");
         return handle_delete(pool, owner_id, id_str).await;
     }
@@ -455,5 +457,23 @@ mod tests {
         assert_eq!(strip_command("expense list", "expense list", "expense"), Some("list"));
         assert_eq!(strip_command("!expense", "!expense", "expense"), Some(""));
         assert_eq!(strip_command("!todo add x", "!todo add x", "expense"), None);
+    }
+
+    #[tokio::test]
+    async fn test_finance_alias_and_rm() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        // Add expense via !expense add
+        let add_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense add 12.50 USD lunch").await.unwrap();
+        assert!(add_res.contains("Logged"));
+
+        // Query via !finance
+        let fin_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!finance").await.unwrap();
+        assert!(fin_res.contains("lunch"));
+
+        // Delete via !expense rm 1
+        let del_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense rm 1").await.unwrap();
+        assert!(del_res.contains("Removed entry"));
     }
 }

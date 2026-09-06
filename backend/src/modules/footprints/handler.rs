@@ -24,7 +24,7 @@ pub async fn handle_footprint_command(
     let trimmed = raw_args.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("list") {
         Some(handle_list(pool, owner_id).await)
-    } else if let Some(rest) = trimmed.strip_prefix("delete") {
+    } else if let Some(rest) = trimmed.strip_prefix("delete").or_else(|| trimmed.strip_prefix("rm")) {
         Some(handle_delete(pool, broadcaster, owner_id, rest.trim()).await)
     } else if let Some(rest) = trimmed.strip_prefix("add") {
         Some(handle_add(pool, broadcaster, owner_id, rest.trim()).await)

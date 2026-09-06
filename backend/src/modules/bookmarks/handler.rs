@@ -131,6 +131,7 @@ pub async fn handle_bookmark_subcommands(
     let sub = parts.next().unwrap_or("");
 
     match sub {
+        "" | "list" => handle_list_command(ctx, pool).await,
         "fav" | "star" | "favorite" => {
             let id = parts.next().and_then(|s| s.parse::<i64>().ok());
             let Some(id) = id else {

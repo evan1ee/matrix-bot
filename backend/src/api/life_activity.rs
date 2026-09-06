@@ -50,6 +50,46 @@ pub struct DayActivityResponse {
     pub stats: ActivityStats,
 }
 
+pub async fn collect_day_activity(
+    pool: &SqlitePool,
+    owner: &str,
+    date: &str,
+) -> DayActivityResponse {
+    let mut events: Vec<ActivityEvent> = Vec::new();
+    let mut stats = ActivityStats::default();
+
+    // --- Todos ---
+    query_todos(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Finance Transactions ---
+    query_finance(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Portfolio Audit Log ---
+    query_portfolio(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Habits ---
+    query_habits(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Reminders ---
+    query_reminders(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Bookmarks ---
+    query_bookmarks(pool, owner, date, &mut events, &mut stats).await;
+
+    // --- Footprints ---
+    query_footprints(pool, owner, date, &mut events, &mut stats).await;
+
+    // Sort chronologically (nulls last)
+    events.sort_by(|a, b| a.time.cmp(&b.time));
+    stats.total_events = events.len();
+
+    DayActivityResponse {
+        date: date.to_string(),
+        events,
+        stats,
+    }
+}
+
 pub async fn get_day_activity(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -59,42 +99,8 @@ pub async fn get_day_activity(
         return Err(ApiError::bad_request("Invalid date format. Use YYYY-MM-DD."));
     }
 
-    let pool = &state.db.pool;
-    let owner = &user.account_id;
-
-    let mut events: Vec<ActivityEvent> = Vec::new();
-    let mut stats = ActivityStats::default();
-
-    // --- Todos ---
-    query_todos(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Finance Transactions ---
-    query_finance(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Portfolio Audit Log ---
-    query_portfolio(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Habits ---
-    query_habits(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Reminders ---
-    query_reminders(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Bookmarks ---
-    query_bookmarks(pool, owner, &date, &mut events, &mut stats).await;
-
-    // --- Footprints ---
-    query_footprints(pool, owner, &date, &mut events, &mut stats).await;
-
-    // Sort chronologically (nulls last)
-    events.sort_by(|a, b| a.time.cmp(&b.time));
-    stats.total_events = events.len();
-
-    Ok(Json(DayActivityResponse {
-        date,
-        events,
-        stats,
-    }))
+    let response = collect_day_activity(&state.db.pool, &user.account_id, &date).await;
+    Ok(Json(response))
 }
 
 // ─── Per-module query helpers ───────────────────────────────────────────

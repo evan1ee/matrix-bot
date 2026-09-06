@@ -78,6 +78,7 @@ impl MatrixBot {
         registry.register(FootprintsModule::new());
         registry.register(HabitsModule::new());
         registry.register(LifeModule::new());
+        registry.register(crate::modules::journal::JournalModule::new());
         registry.register(crate::modules::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());

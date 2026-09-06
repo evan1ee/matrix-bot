@@ -38,12 +38,12 @@ impl BotModule for ReminderModule {
             },
             CommandHelp {
                 name: "remind list".to_string(),
-                usage: "!remind list".to_string(),
+                usage: "!remind list / !reminders".to_string(),
                 description: "List your active pending reminders".to_string(),
             },
             CommandHelp {
                 name: "remind cancel".to_string(),
-                usage: "!remind cancel <id>".to_string(),
+                usage: "!remind cancel <id> / !remind rm <id>".to_string(),
                 description: "Cancel a pending reminder".to_string(),
             },
         ]

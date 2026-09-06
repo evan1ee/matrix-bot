@@ -16,7 +16,15 @@ pub async fn handle_reminder_command(
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
-    if !(clean_lower.starts_with("remind") || clean_lower.starts_with("!remind")) {
+    if !(clean_lower == "remind"
+        || clean_lower == "!remind"
+        || clean_lower == "reminders"
+        || clean_lower == "!reminders"
+        || clean_lower.starts_with("remind ")
+        || clean_lower.starts_with("!remind ")
+        || clean_lower.starts_with("reminders ")
+        || clean_lower.starts_with("!reminders "))
+    {
         return None;
     }
 
@@ -24,13 +32,22 @@ pub async fn handle_reminder_command(
     // settings query.
     let tz = SettingsRepository::get_or_default(pool, owner_id).await.tz();
 
-    // 1. !remind list [page]
-    if clean_lower == "remind list"
+    let is_list = clean_lower == "remind"
+        || clean_lower == "!remind"
+        || clean_lower == "reminders"
+        || clean_lower == "!reminders"
+        || clean_lower == "remind list"
         || clean_lower == "!remind list"
+        || clean_lower == "reminders list"
+        || clean_lower == "!reminders list"
         || clean_lower.starts_with("remind list ")
         || clean_lower.starts_with("!remind list ")
-    {
-        let rest = clean_body.split_whitespace().nth(2).unwrap_or("1");
+        || clean_lower.starts_with("reminders list ")
+        || clean_lower.starts_with("!reminders list ");
+
+    // 1. !remind list [page] / bare !remind / !reminders
+    if is_list {
+        let rest = clean_body.split_whitespace().last().unwrap_or("1");
         let page: i64 = rest.parse().unwrap_or(1).max(1);
         let offset = (page - 1) * 25;
 
@@ -68,15 +85,18 @@ pub async fn handle_reminder_command(
             }
         }
     }
-    // 2. !remind cancel <id>
-    else if clean_lower.starts_with("remind cancel") || clean_lower.starts_with("!remind cancel") {
+    // 2. !remind cancel <id> / delete <id> / rm <id>
+    else if clean_lower.contains(" cancel")
+        || clean_lower.contains(" delete")
+        || clean_lower.contains(" rm")
+    {
         let id_str = clean_body
-            .trim_start_matches("!remind cancel")
-            .trim_start_matches("remind cancel")
-            .trim();
+            .split_whitespace()
+            .last()
+            .unwrap_or("");
 
         if id_str.is_empty() {
-            return Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code>".to_string());
+            return Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code> (or <code>!remind rm &lt;id&gt;</code>)".to_string());
         }
 
         if let Ok(id) = id_str.parse::<i64>() {
@@ -89,7 +109,7 @@ pub async fn handle_reminder_command(
                 }
             }
         } else {
-            Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code>".to_string())
+            Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code> (or <code>!remind rm &lt;id&gt;</code>)".to_string())
         }
     }
     // 3. !remind [daily|weekly] <time> <message>
@@ -208,9 +228,21 @@ mod tests {
             .unwrap();
         assert!(res_cancel.contains("Cancelled reminder"));
 
-        let res_empty_args = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind")
+        let res_bare = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind")
             .await
             .unwrap();
-        assert!(res_empty_args.contains("Usage:"));
+        assert!(res_bare.contains("no pending reminders"));
+
+        let res_reminders = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!reminders")
+            .await
+            .unwrap();
+        assert!(res_reminders.contains("no pending reminders"));
+
+        // Add a reminder and cancel via rm
+        handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 20s Check water").await;
+        let res_rm = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2")
+            .await
+            .unwrap();
+        assert!(res_rm.contains("Cancelled reminder"));
     }
 }

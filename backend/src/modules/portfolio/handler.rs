@@ -49,7 +49,7 @@ pub async fn handle_portfolio_command(
     if rest_lower.starts_with("note") {
         return Some(handle_note(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
-    if rest_lower.starts_with("remove") || rest_lower.starts_with("delete") {
+    if rest_lower.starts_with("remove") || rest_lower.starts_with("delete") || rest_lower.starts_with("rm") {
         let symbol = rest.split_whitespace().nth(1).unwrap_or("");
         return Some(handle_remove(pool, owner_id, symbol, broadcaster).await);
     }

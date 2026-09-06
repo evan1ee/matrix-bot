@@ -68,6 +68,11 @@ impl BotModule for TodoModule {
                 usage: "!todo clear [room]".to_string(),
                 description: "Remove completed tasks".to_string(),
             },
+            CommandHelp {
+                name: "todo delete".to_string(),
+                usage: "!todo delete <id> / !todo rm <id>".to_string(),
+                description: "Delete a task".to_string(),
+            },
         ]
     }
 

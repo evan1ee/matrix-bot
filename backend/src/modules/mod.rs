@@ -15,6 +15,7 @@ pub mod due_reminder;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod journal;
 pub mod life;
 pub mod portfolio;
 pub mod recurring_bills;
