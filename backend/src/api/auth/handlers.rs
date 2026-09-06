@@ -86,12 +86,16 @@ pub async fn get_current_user(
         }
     }
 
+    let final_display_name = if !auth_user.display_name.trim().is_empty() {
+        Some(auth_user.display_name.clone())
+    } else {
+        display_name.or(Some(auth_user.display_name.clone()))
+    };
+
     Ok(Json(UserProfileResponse {
         account_id: auth_user.account_id,
         username: auth_user.display_name.clone(),
-        // The homeserver's own display name wins when there is one, because it
-        // is what the user maintains; otherwise the account's name stands.
-        display_name: display_name.or(Some(auth_user.display_name)),
+        display_name: final_display_name,
         avatar_url,
         linked_mxids: linked,
     }))

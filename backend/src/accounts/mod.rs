@@ -63,8 +63,21 @@ pub const OWNED_TABLES: &[&str] = &[
     "recurring_bills",
     "portfolio_holdings",
     "portfolio_cash_balances",
+    "portfolio_audit_log",
+    "portfolio_daily_snapshots",
+    "portfolio_price_alerts",
     "finance_categories",
     "user_settings",
+    "bookmarks",
+    "habits",
+    "habit_logs",
+    "life_day_logs",
+    "life_profiles",
+    "footprints",
+    "ai_conversations",
+    "ai_user_configs",
+    "webhooks",
+    "webhook_outbox",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -171,8 +184,11 @@ mod tests {
     /// of tables that carry ownership, or one of them silently misses rows.
     #[test]
     fn test_owned_tables_covers_every_ownership_carrying_table() {
-        assert_eq!(OWNED_TABLES.len(), 8);
-        for table in ["todos", "reminders", "transactions", "user_settings"] {
+        assert_eq!(OWNED_TABLES.len(), 21);
+        for table in [
+            "todos", "reminders", "transactions", "user_settings",
+            "bookmarks", "habits", "life_day_logs", "footprints", "ai_conversations"
+        ] {
             assert!(OWNED_TABLES.contains(&table), "{table} must be re-pointed on merge");
         }
     }

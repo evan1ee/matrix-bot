@@ -38,6 +38,15 @@ pub struct MergePreview {
     pub portfolio_cash_balances: i64,
     pub finance_categories: i64,
     pub user_settings: i64,
+    pub bookmarks: i64,
+    pub habits: i64,
+    pub habit_logs: i64,
+    pub life_day_logs: i64,
+    pub life_profiles: i64,
+    pub footprints: i64,
+    pub ai_conversations: i64,
+    pub webhooks: i64,
+    pub other: i64,
 }
 
 impl MergePreview {
@@ -50,6 +59,15 @@ impl MergePreview {
             + self.portfolio_cash_balances
             + self.finance_categories
             + self.user_settings
+            + self.bookmarks
+            + self.habits
+            + self.habit_logs
+            + self.life_day_logs
+            + self.life_profiles
+            + self.footprints
+            + self.ai_conversations
+            + self.webhooks
+            + self.other
     }
 
     pub fn is_empty(&self) -> bool {
@@ -66,7 +84,15 @@ impl MergePreview {
             "portfolio_cash_balances" => self.portfolio_cash_balances = count,
             "finance_categories" => self.finance_categories = count,
             "user_settings" => self.user_settings = count,
-            other => tracing::error!("No merge preview field for table {other}"),
+            "bookmarks" => self.bookmarks = count,
+            "habits" => self.habits = count,
+            "habit_logs" => self.habit_logs = count,
+            "life_day_logs" => self.life_day_logs = count,
+            "life_profiles" => self.life_profiles = count,
+            "footprints" => self.footprints = count,
+            "ai_conversations" => self.ai_conversations = count,
+            "webhooks" => self.webhooks = count,
+            _ => self.other += count,
         }
     }
 }
@@ -412,13 +438,39 @@ mod tests {
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES (?, 'USD', 5000)")
             .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO portfolio_audit_log (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency) VALUES (?, 'BUY', 'AAPL', 100, 150, 15000, 'USD')")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES (?, '2026-09-06', 'USD', 100, 100, 200)")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES (?, 'AAPL', 20000, 'USD', 'ABOVE')")
+            .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES (?, 'food')")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')")
             .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO bookmarks (owner_id, url, title) VALUES (?, 'https://example.com', 'Example')")
+            .bind(&from).execute(&pool).await.unwrap();
+        let habit_id: i64 = sqlx::query_scalar("INSERT INTO habits (owner_id, name, frequency) VALUES (?, 'Exercise', 'daily') RETURNING id")
+            .bind(&from).fetch_one(&pool).await.unwrap();
+        sqlx::query("INSERT INTO habit_logs (habit_id, owner_id, log_date) VALUES (?, ?, '2026-09-06')")
+            .bind(habit_id).bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES (?, '2026-09-06', 'happy')")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO life_profiles (owner_id, birthday, target_age) VALUES (?, '1990-01-01', 90)")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO footprints (owner_id, title, latitude, longitude, visited_at) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO ai_conversations (owner_id, title) VALUES (?, 'Test')")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO ai_user_configs (owner_id, personality) VALUES (?, 'concise')")
+            .bind(&from).execute(&pool).await.unwrap();
+        let wh_id: i64 = sqlx::query_scalar("INSERT INTO webhooks (owner_id, name, secret) VALUES (?, 'hook', 'sec') RETURNING id")
+            .bind(&from).fetch_one(&pool).await.unwrap();
+        sqlx::query("INSERT INTO webhook_outbox (owner_id, webhook_id, payload, destination_url) VALUES (?, ?, '{}', 'https://example.com')")
+            .bind(&from).bind(wh_id).execute(&pool).await.unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 8, "one row per owned table");
+        assert_eq!(preview.total(), 21, "one row per owned table");
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
