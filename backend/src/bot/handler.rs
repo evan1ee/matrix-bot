@@ -53,7 +53,7 @@ pub fn register_handlers(
 
             let formatted_body = text_content.formatted.as_ref().map(|f| f.body.as_str());
 
-            let is_direct = room.is_direct().await.unwrap_or(false);
+            let is_direct = room.is_direct().await.unwrap_or(false) || room.active_members_count() <= 2;
 
             let parsed = if let Some(parsed) = CommandParser::parse_message(
                 &text_content.body,
