@@ -53,7 +53,7 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
             r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "get_my_financial_summary".to_string(),
-                description: "Fetch financial summaries including expense and income totals broken down by category and currency.".to_string(),
+                description: "Fetch financial summaries including expense and income totals broken down by category and currency. Currencies are separate and must never be summed together without exchange rates.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {},

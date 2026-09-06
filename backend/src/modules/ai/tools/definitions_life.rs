@@ -146,7 +146,7 @@ pub fn life_and_habits_tool_definitions() -> Vec<ToolDefinition> {
             r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "get_weekly_retrospective".to_string(),
-                description: "Fetch a comprehensive weekly executive retrospective aggregating finances, completed tasks, habit consistency, upcoming bills, and mood tracking.".to_string(),
+                description: "Fetch a comprehensive weekly executive retrospective aggregating finances, completed tasks, habit consistency, upcoming bills, and mood tracking. Currencies are isolated per-currency and must never be summed together without exchange rates.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {},
