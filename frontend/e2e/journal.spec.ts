@@ -147,4 +147,45 @@ test.describe('Daily Log (Journal Module)', () => {
     const exists = api.lifeDayLogs.some((l) => l.log_date === todayStr);
     expect(exists).toBe(false);
   });
+
+  test('navigates dates using stepping arrows, custom DatePicker popover, and Today jump button', async ({ app }) => {
+    await gotoJournal(app);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const datePickerTrigger = app.locator('[data-testid="datepicker-container"] button');
+    await expect(datePickerTrigger).toContainText(todayStr);
+
+    // Click Previous day arrow (<)
+    await app.getByRole('button', { name: /previous day/i }).click();
+
+    // Verify date changed to yesterday, not today
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    await expect(datePickerTrigger).toContainText(yesterdayStr);
+
+    // Today button should now be enabled
+    const todayBtn = app.getByRole('button', { name: 'Today', exact: true });
+    await expect(todayBtn).toBeEnabled();
+
+    // Click Today button
+    await todayBtn.click();
+    await expect(datePickerTrigger).toContainText(todayStr);
+
+    // Click Next day arrow (>)
+    await app.getByRole('button', { name: /next day/i }).click();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    await expect(datePickerTrigger).toContainText(tomorrowStr);
+
+    // Click DatePicker trigger to open custom popover
+    await datePickerTrigger.click();
+    await expect(app.locator('[data-testid="datepicker-popover"]')).toBeVisible();
+
+    // Pick Today from popover
+    await app.locator('[data-testid="datepicker-popover"]').getByRole('button', { name: 'Today' }).click();
+    await expect(app.locator('[data-testid="datepicker-popover"]')).not.toBeVisible();
+    await expect(datePickerTrigger).toContainText(todayStr);
+  });
 });

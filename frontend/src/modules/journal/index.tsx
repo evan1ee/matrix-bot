@@ -25,6 +25,7 @@ import {
 } from './types';
 import { LifeTimeGrid } from '../life/LifeTimeGrid';
 import { LifeActivityFeed } from '../life/LifeActivityFeed';
+import { DatePicker } from '../../components/DatePicker';
 
 export const JournalView: React.FC = () => {
   const queryClient = useQueryClient();
@@ -41,6 +42,18 @@ export const JournalView: React.FC = () => {
   const [timeSaveSuccess, setTimeSaveSuccess] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Listen for navigation events with specific dates
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        setSelectedDate(detail.date);
+      }
+    };
+    window.addEventListener('app:navigate', onNavigate);
+    return () => window.removeEventListener('app:navigate', onNavigate);
+  }, []);
 
   // Fetch day log for selectedDate
   const { data: dayLog, isLoading: isLoadingDay } = useQuery<LifeDayItem | null>({
@@ -288,42 +301,42 @@ export const JournalView: React.FC = () => {
         </div>
 
         {/* Date Navigator Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => shiftDate(-1)}
-            className="p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer shrink-0"
             title="Previous day"
           >
             <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          <DatePicker
+            value={selectedDate}
+            onChange={(val) => val && setSelectedDate(val)}
+            size="sm"
+            align="right"
+            required
+            className="w-34 sm:w-36 shrink-0"
+          />
+
+          <button
+            type="button"
+            onClick={() => shiftDate(1)}
+            className="h-8 w-8 flex items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer shrink-0"
+            title="Next day"
+          >
+            <ChevronRight className="w-4 h-4" />
           </button>
 
           <button
             type="button"
             onClick={() => setSelectedDate(todayStr)}
             disabled={selectedDate === todayStr}
-            className="px-2.5 py-1 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 transition-colors disabled:opacity-40 cursor-pointer"
+            className="h-8 px-2.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
           >
             Today
           </button>
-
-          <button
-            type="button"
-            onClick={() => shiftDate(1)}
-            className="p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
-            title="Next day"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          <div className="relative">
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-              className="text-xs font-mono px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 cursor-pointer focus:outline-hidden"
-            />
-          </div>
         </div>
       </div>
 

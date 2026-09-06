@@ -12,6 +12,9 @@ export interface DatePickerProps {
   disabled?: boolean;
   required?: boolean;
   id?: string;
+  size?: 'sm' | 'default';
+  align?: 'left' | 'right';
+  displayValue?: string;
 }
 
 const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -63,6 +66,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   disabled = false,
   required = false,
   id,
+  size = 'default',
+  align = 'left',
+  displayValue,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isYearPickerOpen, setIsYearPickerOpen] = useState(false);
@@ -130,8 +136,10 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         top = topUp >= margin ? topUp : Math.max(margin, vh - popoverHeight - margin);
       }
 
-      let left = rect.left;
-      if (left + popoverWidth > vw - margin) {
+      let left = align === 'right' ? rect.right - popoverWidth : rect.left;
+      if (left < margin) {
+        left = margin;
+      } else if (left + popoverWidth > vw - margin) {
         left = Math.max(margin, vw - popoverWidth - margin);
       }
 
@@ -187,7 +195,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   }, [min, max]);
 
   return (
-    <div ref={containerRef} data-testid="datepicker-container" className={`relative w-full ${className}`}>
+    <div ref={containerRef} data-testid="datepicker-container" className={`relative ${className.includes('w-') ? '' : 'w-full'} ${className}`}>
       {/* Hidden input for form validation, accessible label binding & automated test fill compatibility */}
       <input
         ref={hiddenInputRef}
@@ -213,12 +221,12 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           setIsOpen((prev) => !prev);
           setIsYearPickerOpen(false);
         }}
-        className={`w-full h-9 flex items-center justify-between gap-2 px-3 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700/60 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition shadow-xs cursor-pointer ${
+        className={`w-full ${size === 'sm' ? 'h-8 px-2.5' : 'h-9 px-3'} flex items-center justify-between gap-2 rounded-md text-xs border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700/60 focus:outline-hidden focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition shadow-xs cursor-pointer ${
           disabled ? 'opacity-50 cursor-not-allowed' : ''
         }`}
       >
         <span className={`truncate font-mono ${value ? 'font-medium' : 'text-zinc-400 dark:text-zinc-500 font-normal'}`}>
-          {value || placeholder}
+          {displayValue || value || placeholder}
         </span>
         <div className="flex items-center gap-1 shrink-0">
           {value && !required && !disabled && (
