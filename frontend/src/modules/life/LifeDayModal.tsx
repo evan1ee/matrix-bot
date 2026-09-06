@@ -24,6 +24,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   const [note, setNote] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const isLogged = Boolean(day?.mood);
@@ -44,16 +45,25 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     }
   }, [day]);
 
-  // Keyboard accessibility: Escape closes modal
+  // Reset confirmation state when day or modal changes
+  useEffect(() => {
+    setConfirmingClear(false);
+  }, [day?.date, isOpen]);
+
+  // Keyboard accessibility: Escape closes modal or cancels confirmation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        onClose();
+        if (confirmingClear) {
+          setConfirmingClear(false);
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, confirmingClear]);
 
   if (!isOpen || !day) return null;
 
@@ -85,20 +95,19 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     }
   };
 
-  const handleDelete = async () => {
+  const handleConfirmDelete = async () => {
     if (!day || !day.mood) return;
-    if (window.confirm(`Clear record for ${day.date}?`)) {
-      setIsDeleting(true);
-      setSaveError(null);
-      try {
-        await onDelete(day.date);
-        onClose();
-      } catch (err: any) {
-        console.error('Failed to clear day log:', err);
-        setSaveError(err?.message || 'Failed to clear day record');
-      } finally {
-        setIsDeleting(false);
-      }
+    setIsDeleting(true);
+    setSaveError(null);
+    try {
+      await onDelete(day.date);
+      setConfirmingClear(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to clear day log:', err);
+      setSaveError(err?.message || 'Failed to clear day record');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -233,26 +242,68 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
               </div>
             )}
 
-            {/* Footer Actions for Logged Day: Only Clear and Close */}
-            <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800">
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:underline transition-colors disabled:opacity-50 cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{isDeleting ? 'Clearing...' : 'Clear record'}</span>
-              </button>
+            {/* Confirmation Box or Footer Actions for Logged Day */}
+            {confirmingClear ? (
+              <div className="p-3.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 space-y-3 animate-in fade-in duration-150">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1.5 rounded-md bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-semibold text-rose-900 dark:text-rose-200">
+                      Clear record for {day.date}?
+                    </h4>
+                    <p className="text-[11px] text-rose-700/90 dark:text-rose-300/90 leading-relaxed">
+                      This will permanently remove your logged mood, weather, activities, and reflection note for this day. This action cannot be undone.
+                    </p>
+                  </div>
+                </div>
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-9 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-200/50 dark:border-rose-900/40">
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={() => setConfirmingClear(false)}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={handleConfirmDelete}
+                    className="px-3.5 py-1.5 rounded-md text-xs font-medium bg-rose-600 hover:bg-rose-700 text-white transition-colors disabled:opacity-50 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                  >
+                    {isDeleting && (
+                      <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                      </svg>
+                    )}
+                    <span>{isDeleting ? 'Clearing...' : 'Yes, clear record'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setConfirmingClear(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:underline transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear record</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="h-9 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           /* --- RECORD FORM: For unrecorded days --- */

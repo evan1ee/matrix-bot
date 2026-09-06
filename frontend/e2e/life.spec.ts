@@ -244,11 +244,19 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    // Handle confirmation dialog and click clear
-    app.once('dialog', async (dialog) => {
-      await dialog.accept();
-    });
+    // Click Clear record to open in-app confirmation box
     await clearBtn.click();
+    await expect(app.getByText(/Clear record for/i)).toBeVisible();
+    await expect(app.getByText(/This will permanently remove your logged mood/i)).toBeVisible();
+
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'life_logged_day_confirm_clear.png'),
+      });
+    }
+
+    // Click confirm clear button
+    await app.getByRole('button', { name: /yes, clear record/i }).click();
 
     // Modal should close
     await expect(app.getByText(/Once logged, records cannot be edited, only cleared/i)).not.toBeVisible();
