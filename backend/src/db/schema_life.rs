@@ -19,6 +19,7 @@ pub async fn run_life_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             weather TEXT,
             activities TEXT,
             note TEXT,
+            time_allocation TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(owner_id, log_date)
@@ -30,6 +31,10 @@ pub async fn run_life_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    let _ = sqlx::query("ALTER TABLE life_day_logs ADD COLUMN time_allocation TEXT;")
+        .execute(pool)
+        .await;
 
     Ok(())
 }

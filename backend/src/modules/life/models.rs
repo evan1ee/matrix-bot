@@ -19,6 +19,7 @@ pub struct LifeDayLog {
     pub weather: Option<String>,
     pub activities: Option<String>,
     pub note: Option<String>,
+    pub time_allocation: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -37,12 +38,19 @@ pub struct UpsertLifeDayLogInput {
     pub weather: Option<String>,
     pub activities: Option<Vec<String>>,
     pub note: Option<String>,
+    pub time_allocation: Option<Vec<Option<String>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateTimeAllocationInput {
+    pub time_allocation: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
 pub struct LifeHorizonDay {
     pub date: String,
     pub mood: String,
+    pub time_allocation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -53,6 +61,8 @@ pub struct LifeProfileStats {
     pub days_lived_percent: f64,
     pub total_logged_days: i64,
     pub dominant_mood: Option<String>,
+    pub total_deep_work_hours: f64,
+    pub average_sleep_hours: f64,
     pub today_date: String,
 }
 

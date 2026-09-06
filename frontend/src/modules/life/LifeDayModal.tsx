@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { X, Trash2 } from 'lucide-react';
-import type { LifeDayItem, MoodType, WeatherType, UpsertDayPayload } from './types';
+import type { LifeDayItem, MoodType, WeatherType, UpsertDayPayload, TimeAllocation } from './types';
 import { MOOD_CONFIG, WEATHER_CONFIG, ACTIVITY_OPTIONS } from './types';
+import { LifeTimeGrid } from './LifeTimeGrid';
 
 interface LifeDayModalProps {
   day: LifeDayItem | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: (payload: UpsertDayPayload) => Promise<void>;
+  onSaveTimeAllocation?: (date: string, allocation: TimeAllocation) => Promise<void>;
   onDelete: (date: string) => Promise<void>;
 }
 
@@ -16,13 +18,17 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onSaveTimeAllocation,
   onDelete,
 }) => {
   const [selectedMood, setSelectedMood] = useState<MoodType>('good');
   const [selectedWeather, setSelectedWeather] = useState<WeatherType | null>(null);
   const [selectedActivities, setSelectedActivities] = useState<string[]>([]);
   const [note, setNote] = useState('');
+  const [timeAllocation, setTimeAllocation] = useState<TimeAllocation>(() => Array(96).fill(null));
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingTime, setIsSavingTime] = useState(false);
+  const [timeSaveSuccess, setTimeSaveSuccess] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -42,6 +48,15 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
       setSelectedActivities(day.activities || []);
       setNote(day.note || '');
       setSaveError(null);
+      setTimeSaveSuccess(false);
+
+      if (Array.isArray(day.time_allocation) && day.time_allocation.length > 0) {
+        const full = [...day.time_allocation];
+        while (full.length < 96) full.push(null);
+        setTimeAllocation(full);
+      } else {
+        setTimeAllocation(Array(96).fill(null));
+      }
     }
   }, [day]);
 
@@ -73,6 +88,22 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     );
   };
 
+  const handleSaveTimeOnly = async () => {
+    if (!day || !onSaveTimeAllocation) return;
+    setIsSavingTime(true);
+    setSaveError(null);
+    try {
+      await onSaveTimeAllocation(day.date, timeAllocation);
+      setTimeSaveSuccess(true);
+      setTimeout(() => setTimeSaveSuccess(false), 2500);
+    } catch (err: any) {
+      console.error('Failed to save time allocation:', err);
+      setSaveError(err?.message || 'Failed to save time allocation');
+    } finally {
+      setIsSavingTime(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!day) return;
@@ -85,6 +116,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
         weather: selectedWeather,
         activities: selectedActivities,
         note: note.trim() || null,
+        time_allocation: timeAllocation,
       });
       onClose();
     } catch (err: any) {
@@ -122,7 +154,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in">
       <div
-        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg w-full max-w-lg overflow-hidden shadow-lg transition-all"
+        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-lg transition-all"
         role="dialog"
         aria-modal="true"
       >
@@ -162,6 +194,31 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
         {isLogged ? (
           /* --- READ-ONLY VIEW: Once logged, cannot edit, only clear --- */
           <div className="p-5 space-y-4">
+            {/* 0. 24-Hour Time Allocation Grid */}
+            <div className="pb-3 border-b border-zinc-100 dark:border-zinc-800">
+              <LifeTimeGrid
+                timeAllocation={timeAllocation}
+                onChange={setTimeAllocation}
+                readOnly={day.day_type !== 'present'}
+                isToday={day.day_type === 'present'}
+              />
+              {day.day_type === 'present' && onSaveTimeAllocation && (
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-[11px] text-zinc-500">
+                    {timeSaveSuccess ? '✓ Time blocks saved' : 'Update your intraday blocks anytime today'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSavingTime}
+                    onClick={handleSaveTimeOnly}
+                    className="px-2.5 py-1 rounded text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingTime ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* 1. Mood Card */}
             <div>
               <div className="text-[11px] font-mono font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
@@ -308,6 +365,30 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
         ) : (
           /* --- RECORD FORM: For unrecorded days --- */
           <form onSubmit={handleSave} className="p-5 space-y-4">
+            {/* 0. 24-Hour Time Allocation Grid */}
+            <div className="pb-3 border-b border-zinc-100 dark:border-zinc-800">
+              <LifeTimeGrid
+                timeAllocation={timeAllocation}
+                onChange={setTimeAllocation}
+                isToday={day.day_type === 'present'}
+              />
+              {onSaveTimeAllocation && (
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-[11px] text-zinc-500">
+                    {timeSaveSuccess ? '✓ Time blocks saved' : 'Track intraday or seal below'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSavingTime}
+                    onClick={handleSaveTimeOnly}
+                    className="px-2.5 py-1 rounded text-xs font-medium border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingTime ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* 1. Primary Mood */}
             <div>
               <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-2">

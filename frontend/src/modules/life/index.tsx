@@ -70,7 +70,21 @@ export const LifeView: React.FC = () => {
           weather: payload.weather ?? null,
           activities: payload.activities ?? null,
           note: payload.note ?? null,
+          time_allocation: payload.time_allocation ?? null,
         }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['life-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['life-horizon'] });
+    },
+  });
+
+  const saveTimeMutation = useMutation({
+    mutationFn: async ({ date, allocation }: { date: string; allocation: (string | null)[] }) => {
+      return fetchApi(`/life/days/${date}/time`, {
+        method: 'PUT',
+        body: JSON.stringify({ time_allocation: allocation }),
       });
     },
     onSuccess: () => {
@@ -110,13 +124,24 @@ export const LifeView: React.FC = () => {
         } catch {
           acts = [];
         }
+
+        let parsedTimeAlloc: (string | null)[] | null = null;
+        if (log.time_allocation) {
+          try {
+            parsedTimeAlloc = JSON.parse(log.time_allocation);
+          } catch {
+            parsedTimeAlloc = null;
+          }
+        }
+
         setSelectedDay({
           date: log.log_date,
           day_type: dayType,
-          mood: log.mood,
+          mood: log.mood || null,
           weather: log.weather,
           activities: acts,
           note: log.note,
+          time_allocation: parsedTimeAlloc,
         });
         setIsDayModalOpen(true);
         return;
@@ -160,6 +185,8 @@ export const LifeView: React.FC = () => {
       life_lived_percentage: lifeLived,
       days_logged: loggedCount,
       dominant_mood: dominantMood,
+      total_deep_work_hours: profileData.total_deep_work_hours ?? profileData.stats?.total_deep_work_hours ?? 0,
+      average_sleep_hours: profileData.average_sleep_hours ?? profileData.stats?.average_sleep_hours ?? 0,
     };
   }, [profileData, profile]);
 
@@ -172,9 +199,9 @@ export const LifeView: React.FC = () => {
     const endYear = birthYear + lifespan - 1;
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const loggedMap = new Map<string, string>();
+    const loggedMap = new Map<string, { mood: string | null; time_allocation?: string | null }>();
     for (const d of horizonDays) {
-      if (d.date && d.mood) loggedMap.set(d.date, d.mood);
+      if (d.date) loggedMap.set(d.date, { mood: d.mood, time_allocation: d.time_allocation });
     }
 
     const result: LifeHorizonDay[] = [];
@@ -186,7 +213,8 @@ export const LifeView: React.FC = () => {
       for (let d = 0; d < daysInYear; d++) {
         const dateStr = curDate.toISOString().split('T')[0];
         let status: 'past_empty' | 'past_logged' | 'present' | 'future' = 'past_empty';
-        const loggedMood = loggedMap.get(dateStr) || null;
+        const loggedEntry = loggedMap.get(dateStr);
+        const loggedMood = loggedEntry?.mood || null;
         if (dateStr === todayStr) {
           status = 'present';
         } else if (dateStr > todayStr) {
@@ -200,6 +228,7 @@ export const LifeView: React.FC = () => {
           date: dateStr,
           status,
           mood: loggedMood,
+          time_allocation: loggedEntry?.time_allocation || null,
         });
         curDate.setUTCDate(curDate.getUTCDate() + 1);
       }
@@ -297,6 +326,9 @@ export const LifeView: React.FC = () => {
         }}
         onSave={async (payload) => {
           await saveDayMutation.mutateAsync(payload);
+        }}
+        onSaveTimeAllocation={async (date, allocation) => {
+          await saveTimeMutation.mutateAsync({ date, allocation });
         }}
         onDelete={async (date) => {
           await deleteDayMutation.mutateAsync(date);

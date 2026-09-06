@@ -249,6 +249,10 @@ pub fn api_routes() -> Router<auth::ApiState> {
             "/life/days/:date",
             get(life::get_day).delete(life::delete_day),
         )
+        .route(
+            "/life/days/:date/time",
+            put(life::update_time_allocation),
+        )
 }
 
 pub async fn start_api_server(

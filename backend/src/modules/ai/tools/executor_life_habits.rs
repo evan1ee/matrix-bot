@@ -125,6 +125,7 @@ pub async fn execute_life_habits_tool(
                 weather,
                 activities_json.as_deref(),
                 note,
+                None,
             )
             .await
             .map_err(|e| e.to_string())?;

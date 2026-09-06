@@ -10,7 +10,7 @@ use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::life::models::{
     normalize_mood, LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
-    UpsertLifeDayLogInput, UpsertLifeProfileInput,
+    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
 };
 use crate::modules::life::repository::LifeRepository;
 
@@ -103,10 +103,12 @@ pub async fn upsert_day(
     let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, date_str)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    if existing.is_some() {
-        return Err(ApiError::bad_request(
-            "This day has already been logged and cannot be edited. It can only be cleared.",
-        ));
+    if let Some(ref ex) = existing {
+        if !ex.mood.is_empty() {
+            return Err(ApiError::bad_request(
+                "This day has already been logged and cannot be edited. It can only be cleared.",
+            ));
+        }
     }
 
     if let Some(ref note) = payload.note {
@@ -120,6 +122,16 @@ pub async fn upsert_day(
         None => None,
     };
 
+    let time_allocation_json = match payload.time_allocation {
+        Some(ref blocks) => {
+            if blocks.len() > 96 {
+                return Err(ApiError::bad_request("Time allocation cannot exceed 96 blocks."));
+            }
+            serde_json::to_string(blocks).ok()
+        }
+        None => None,
+    };
+
     let log = LifeRepository::upsert_day_log(
         &state.db.pool,
         &user.account_id,
@@ -128,6 +140,51 @@ pub async fn upsert_day(
         payload.weather.as_deref(),
         activities_json.as_deref(),
         payload.note.as_deref(),
+        time_allocation_json.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    state.broadcaster.send(SystemEvent::LifeDayLogged(log.clone()));
+
+    Ok(Json(log))
+}
+
+pub async fn update_time_allocation(
+    user: AuthUser,
+    State(state): State<ApiState>,
+    Path(date): Path<String>,
+    Json(payload): Json<UpdateTimeAllocationInput>,
+) -> Result<Json<LifeDayLog>, ApiError> {
+    if NaiveDate::parse_from_str(&date, "%Y-%m-%d").is_err() {
+        return Err(ApiError::bad_request("Invalid date format. Use YYYY-MM-DD."));
+    }
+
+    if payload.time_allocation.len() > 96 {
+        return Err(ApiError::bad_request("Time allocation cannot exceed 96 blocks."));
+    }
+
+    let today = get_today_string();
+    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    if let Some(ref ex) = existing {
+        if !ex.mood.is_empty() && date < today {
+            return Err(ApiError::bad_request(
+                "Past sealed days cannot be edited. Only today can be updated intraday.",
+            ));
+        }
+    }
+
+    let time_allocation_json = serde_json::to_string(&payload.time_allocation)
+        .map_err(|e| ApiError::bad_request(format!("Invalid time allocation format: {e}")))?;
+
+    let log = LifeRepository::update_time_allocation(
+        &state.db.pool,
+        &user.account_id,
+        &date,
+        &time_allocation_json,
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -243,6 +300,7 @@ mod tests {
                 weather: Some("sunny".to_string()),
                 activities: Some(vec!["workout".to_string(), "reading".to_string()]),
                 note: Some("Great progress today!".to_string()),
+                time_allocation: None,
             }),
         )
         .await
@@ -259,6 +317,7 @@ mod tests {
                 weather: None,
                 activities: None,
                 note: None,
+                time_allocation: None,
             }),
         )
         .await
@@ -266,11 +325,36 @@ mod tests {
         assert_eq!(edit_err.status, axum::http::StatusCode::BAD_REQUEST);
         assert!(edit_err.message.contains("cannot be edited"));
 
+        // 3c. Update time allocation intraday
+        let mut blocks = vec![None; 96];
+        blocks[0] = Some("sleep".to_string());
+        blocks[1] = Some("sleep".to_string());
+        blocks[36] = Some("deep_work".to_string());
+        blocks[37] = Some("deep_work".to_string());
+        let updated_time = update_time_allocation(
+            user.clone(),
+            State(state.clone()),
+            Path(get_today_string()),
+            Json(UpdateTimeAllocationInput {
+                time_allocation: blocks,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(updated_time.time_allocation.is_some());
+
         // 4. Get Year View
         let year_view = get_year_view(user.clone(), State(state.clone()), Path(2026))
             .await
             .unwrap();
-        assert_eq!(year_view.total_logged_days, 1);
+        assert_eq!(year_view.total_logged_days, 2);
+
+        // 4b. Verify Stats includes deep work and sleep hours
+        let stats = get_profile_and_stats(user.clone(), State(state.clone()))
+            .await
+            .unwrap();
+        assert_eq!(stats.total_deep_work_hours, 0.5);
+        assert_eq!(stats.average_sleep_hours, 0.5);
 
         // 5. Delete Day
         let del = delete_day(user.clone(), State(state.clone()), Path("2026-09-04".to_string()))

@@ -62,7 +62,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     // Toggle Workout and Deep Work
     await app.getByRole('button', { name: /Workout/i }).click();
-    await app.getByRole('button', { name: /Deep Work/i }).click();
+    await app.getByRole('button', { name: '💻 Deep Work' }).click();
 
     // Fill note
     await app.getByPlaceholder(/What happened today/i).fill('Shipped the Visualizing Life feature! Feel great.');
@@ -264,6 +264,74 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     // Entry should be deleted from API state
     const stillExists = api.lifeDayLogs.some((l) => l.log_date === todayStr);
     expect(stillExists).toBe(false);
+  });
+
+  test('allocates intraday 96-block time grid with presets and updates lifespan metrics', async ({ app, api }) => {
+    api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
+
+    await gotoLife(app);
+
+    // Open Today
+    await app.getByRole('button', { name: /log today/i }).click();
+
+    // Verify 24-Hour Time Allocation grid is rendered
+    await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
+    await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
+
+    // Test quick preset: Sleep
+    const sleepPreset = app.getByRole('button', { name: /sleep/i }).first();
+    await sleepPreset.click();
+    await expect(app.getByText(/8\.0h \/ 24h tracked/i)).toBeVisible();
+
+    // Test quick preset: Workday
+    const workdayPreset = app.getByRole('button', { name: /workday/i }).first();
+    await workdayPreset.click();
+    await expect(app.getByText(/17\.0h \/ 24h tracked/i)).toBeVisible();
+
+    // Test selecting Health palette and painting a block
+    await app.getByRole('button', { name: /🏃 Health/i }).click();
+    const block30 = app.locator('[data-block-idx="30"]');
+    await expect(block30).toBeVisible();
+    await block30.click();
+
+    // Save time blocks intraday (before sealing mood)
+    const saveTimeBtn = app.getByRole('button', { name: /save time blocks/i });
+    await expect(saveTimeBtn).toBeVisible();
+    await saveTimeBtn.click();
+    await expect(app.getByText(/time blocks saved|✓ Saved/i).first()).toBeVisible();
+
+    // Verify API state was updated with time_allocation even without mood
+    const todayStr = new Date().toISOString().split('T')[0];
+    const intradayLog = api.lifeDayLogs.find((l) => l.log_date === todayStr);
+    expect(intradayLog).toBeDefined();
+    expect(intradayLog?.time_allocation).toContain('deep_work');
+    expect(intradayLog?.time_allocation).toContain('sleep');
+
+    // Screenshot of 96-block time grid in modal
+    const brainDir = process.env.BRAIN_DIR;
+    if (brainDir && fs.existsSync(brainDir)) {
+      await app.screenshot({
+        path: path.join(brainDir, 'life_time_grid_intraday.png'),
+      });
+    }
+
+    // Now seal the day by choosing mood and saving record
+    await app.getByRole('button', { name: /Amazing/i }).click();
+    await app.getByRole('button', { name: /save record/i }).click();
+
+    // Modal closes; verify stats strip now displays deep work and sleep hours
+    await expect(app.getByText(/⚡ 9\.0h/i)).toBeVisible();
+    await expect(app.getByText(/💤 8\.0h/i)).toBeVisible();
+
+    // Hover over interactive grid canvas
+    const canvas = app.locator('canvas').last();
+    await expect(canvas).toBeVisible();
+    await canvas.scrollIntoViewIfNeeded();
+    const box = await canvas.boundingBox();
+    if (box) {
+      await app.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+      await app.waitForTimeout(300);
+    }
   });
 });
 

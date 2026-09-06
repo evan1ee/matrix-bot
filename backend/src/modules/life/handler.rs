@@ -173,6 +173,7 @@ async fn handle_log(
         None,
         None,
         note_raw,
+        None,
     )
     .await
     {

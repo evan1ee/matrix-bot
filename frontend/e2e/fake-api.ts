@@ -177,6 +177,7 @@ export interface FakeLifeDayLog {
   weather: string | null;
   activities: string | null;
   note: string | null;
+  time_allocation?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -422,6 +423,7 @@ export class FakeApi {
       weather: partial.weather ?? 'sunny',
       activities: partial.activities ?? JSON.stringify(['Workout', 'Deep Work']),
       note: partial.note ?? 'Great day of progress!',
+      time_allocation: partial.time_allocation ?? null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1980,11 +1982,13 @@ export class FakeApi {
       const ageInDays = Math.max(0, Math.floor((today.getTime() - birth.getTime()) / (1000 * 3600 * 24)));
       const totalLifeDays = Math.floor(this.lifeProfile.expected_lifespan_years * 365.25);
       const lifeLived = totalLifeDays > 0 ? Math.round((ageInDays / totalLifeDays) * 10000) / 100 : 0;
-      const daysLogged = this.lifeDayLogs.length;
+      const daysLogged = this.lifeDayLogs.filter((l) => !!l.mood).length;
 
       const moodCounts: Record<string, number> = {};
       for (const l of this.lifeDayLogs) {
-        moodCounts[l.mood] = (moodCounts[l.mood] || 0) + 1;
+        if (l.mood) {
+          moodCounts[l.mood] = (moodCounts[l.mood] || 0) + 1;
+        }
       }
       let dominantMood: string | null = null;
       let maxCount = 0;
@@ -1994,6 +1998,35 @@ export class FakeApi {
           dominantMood = m;
         }
       }
+
+      let totalWorkBlocks = 0;
+      let totalSleepBlocks = 0;
+      let sleepDayCount = 0;
+      for (const l of this.lifeDayLogs) {
+        if (l.time_allocation) {
+          try {
+            const parsed = JSON.parse(l.time_allocation);
+            const blocks = Array.isArray(parsed)
+              ? parsed
+              : Array.isArray(parsed?.blocks)
+              ? parsed.blocks
+              : [];
+            let daySleep = 0;
+            for (const b of blocks) {
+              if (b === 'deep_work') totalWorkBlocks++;
+              else if (b === 'sleep') {
+                totalSleepBlocks++;
+                daySleep++;
+              }
+            }
+            if (daySleep > 0) sleepDayCount++;
+          } catch {
+            // Ignore parse errors in mock
+          }
+        }
+      }
+      const totalDeepWorkHours = totalWorkBlocks * 0.25;
+      const averageSleepHours = sleepDayCount > 0 ? (totalSleepBlocks * 0.25) / sleepDayCount : null;
 
       return json(route, 200, {
         profile: this.lifeProfile,
@@ -2011,6 +2044,8 @@ export class FakeApi {
           life_lived_percentage: Math.min(100, lifeLived),
           days_logged: daysLogged,
           dominant_mood: dominantMood,
+          total_deep_work_hours: totalDeepWorkHours,
+          average_sleep_hours: averageSleepHours !== null ? Math.round(averageSleepHours * 10) / 10 : null,
         },
       });
     }
@@ -2059,10 +2094,11 @@ export class FakeApi {
         days.push({
           date: dateStr,
           day_type,
-          mood: log?.mood,
+          mood: log?.mood || undefined,
           weather: log?.weather ?? undefined,
           activities: log?.activities ? JSON.parse(log.activities) : undefined,
           note: log?.note ?? undefined,
+          time_allocation: log?.time_allocation ?? undefined,
         });
         curDate.setUTCDate(curDate.getUTCDate() + 1);
       }
@@ -2092,7 +2128,7 @@ export class FakeApi {
           status = 'present';
         } else if (dateStr > todayStr) {
           status = 'future';
-        } else if (log) {
+        } else if (log && log.mood) {
           status = 'past_logged';
         }
         horizon.push({
@@ -2101,6 +2137,7 @@ export class FakeApi {
           date: dateStr,
           status,
           mood: log?.mood ?? null,
+          time_allocation: log?.time_allocation ?? null,
         });
         cur.setUTCDate(cur.getUTCDate() + 1);
       }
@@ -2114,12 +2151,30 @@ export class FakeApi {
       }
       const existingIdx = this.lifeDayLogs.findIndex((l) => l.log_date === logDate);
       if (existingIdx >= 0) {
-        return json(route, 400, {
-          error: 'This day has already been logged and cannot be edited. It can only be cleared.',
-          code: 400,
-        });
+        const ex = this.lifeDayLogs[existingIdx];
+        if (ex.mood && ex.mood.length > 0) {
+          return json(route, 400, {
+            error: 'This day has already been logged and cannot be edited. It can only be cleared.',
+            code: 400,
+          });
+        }
       }
       const activitiesStr = body.activities ? JSON.stringify(body.activities) : null;
+      const timeAllocationStr = body.time_allocation ? JSON.stringify(body.time_allocation) : null;
+
+      if (existingIdx >= 0) {
+        const ex = this.lifeDayLogs[existingIdx];
+        ex.mood = body.mood;
+        ex.weather = body.weather ?? ex.weather;
+        ex.activities = activitiesStr ?? ex.activities;
+        ex.note = body.note ?? ex.note;
+        if (timeAllocationStr) {
+          ex.time_allocation = timeAllocationStr;
+        }
+        ex.updated_at = new Date().toISOString();
+        return json(route, 200, ex);
+      }
+
       const saved: FakeLifeDayLog = {
         id: this.nextLifeDayLogId++,
         owner_id: OWNER,
@@ -2128,11 +2183,38 @@ export class FakeApi {
         weather: body.weather ?? null,
         activities: activitiesStr,
         note: body.note ?? null,
+        time_allocation: timeAllocationStr,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
       this.lifeDayLogs.push(saved);
       return json(route, 200, saved);
+    }
+
+    const dayTimeMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})\/time$/);
+    if (dayTimeMatch && method === 'PUT') {
+      const date = dayTimeMatch[1];
+      const timeAllocationStr = body?.time_allocation ? JSON.stringify(body.time_allocation) : null;
+      let log = this.lifeDayLogs.find((l) => l.log_date === date);
+      if (log) {
+        log.time_allocation = timeAllocationStr;
+        log.updated_at = new Date().toISOString();
+      } else {
+        log = {
+          id: this.nextLifeDayLogId++,
+          owner_id: OWNER,
+          log_date: date,
+          mood: '',
+          weather: null,
+          activities: null,
+          note: null,
+          time_allocation: timeAllocationStr,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.lifeDayLogs.push(log);
+      }
+      return json(route, 200, log);
     }
 
     const dayMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})$/);

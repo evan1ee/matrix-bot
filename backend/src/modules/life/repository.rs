@@ -52,7 +52,7 @@ impl LifeRepository {
     ) -> Result<Option<LifeDayLog>, sqlx::Error> {
         sqlx::query_as::<_, LifeDayLog>(
             r#"
-            SELECT id, owner_id, log_date, mood, weather, activities, note, created_at, updated_at
+            SELECT id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             FROM life_day_logs
             WHERE owner_id = ? AND log_date = ?
             "#,
@@ -71,18 +71,20 @@ impl LifeRepository {
         weather: Option<&str>,
         activities: Option<&str>,
         note: Option<&str>,
+        time_allocation: Option<&str>,
     ) -> Result<LifeDayLog, sqlx::Error> {
         sqlx::query_as::<_, LifeDayLog>(
             r#"
-            INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(owner_id, log_date) DO UPDATE SET
                 mood = excluded.mood,
                 weather = excluded.weather,
                 activities = excluded.activities,
                 note = excluded.note,
+                time_allocation = COALESCE(excluded.time_allocation, life_day_logs.time_allocation),
                 updated_at = datetime('now')
-            RETURNING id, owner_id, log_date, mood, weather, activities, note, created_at, updated_at
+            RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             "#,
         )
         .bind(owner_id)
@@ -91,6 +93,30 @@ impl LifeRepository {
         .bind(weather)
         .bind(activities)
         .bind(note)
+        .bind(time_allocation)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn update_time_allocation(
+        pool: &SqlitePool,
+        owner_id: &str,
+        log_date: &str,
+        time_allocation: &str,
+    ) -> Result<LifeDayLog, sqlx::Error> {
+        sqlx::query_as::<_, LifeDayLog>(
+            r#"
+            INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
+            VALUES (?, ?, '', NULL, NULL, NULL, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(owner_id, log_date) DO UPDATE SET
+                time_allocation = excluded.time_allocation,
+                updated_at = datetime('now')
+            RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
+            "#,
+        )
+        .bind(owner_id)
+        .bind(log_date)
+        .bind(time_allocation)
         .fetch_one(pool)
         .await
     }
@@ -122,7 +148,7 @@ impl LifeRepository {
         let prefix = format!("{year}-%");
         let logs = sqlx::query_as::<_, LifeDayLog>(
             r#"
-            SELECT id, owner_id, log_date, mood, weather, activities, note, created_at, updated_at
+            SELECT id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             FROM life_day_logs
             WHERE owner_id = ? AND log_date LIKE ?
             ORDER BY log_date ASC
@@ -148,7 +174,7 @@ impl LifeRepository {
     ) -> Result<Vec<LifeHorizonDay>, sqlx::Error> {
         sqlx::query_as::<_, LifeHorizonDay>(
             r#"
-            SELECT log_date AS date, mood
+            SELECT log_date AS date, mood, time_allocation
             FROM life_day_logs
             WHERE owner_id = ?
             ORDER BY log_date ASC
@@ -168,7 +194,7 @@ impl LifeRepository {
 
         let total_logged: (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM life_day_logs WHERE owner_id = ?
+            SELECT COUNT(*) FROM life_day_logs WHERE owner_id = ? AND mood != ''
             "#,
         )
         .bind(owner_id)
@@ -178,7 +204,7 @@ impl LifeRepository {
         let dominant_mood_row: Option<(String,)> = sqlx::query_as(
             r#"
             SELECT mood FROM life_day_logs
-            WHERE owner_id = ?
+            WHERE owner_id = ? AND mood != ''
             GROUP BY mood
             ORDER BY COUNT(*) DESC
             LIMIT 1
@@ -189,6 +215,48 @@ impl LifeRepository {
         .await?;
 
         let dominant_mood = dominant_mood_row.map(|r| r.0);
+
+        let allocations: Vec<(Option<String>,)> = sqlx::query_as(
+            r#"
+            SELECT time_allocation FROM life_day_logs
+            WHERE owner_id = ? AND time_allocation IS NOT NULL
+            "#,
+        )
+        .bind(owner_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut deep_work_blocks: i64 = 0;
+        let mut total_sleep_blocks: i64 = 0;
+        let mut days_with_sleep: i64 = 0;
+
+        for (alloc_json_opt,) in allocations {
+            if let Some(ref alloc_json) = alloc_json_opt {
+                if let Ok(blocks) = serde_json::from_str::<Vec<Option<String>>>(alloc_json) {
+                    let mut day_sleep: i64 = 0;
+                    for b in blocks {
+                        if let Some(cat) = b {
+                            if cat == "deep_work" {
+                                deep_work_blocks += 1;
+                            } else if cat == "sleep" {
+                                day_sleep += 1;
+                            }
+                        }
+                    }
+                    if day_sleep > 0 {
+                        total_sleep_blocks += day_sleep;
+                        days_with_sleep += 1;
+                    }
+                }
+            }
+        }
+
+        let total_deep_work_hours = (deep_work_blocks as f64 * 0.25 * 10.0).round() / 10.0;
+        let average_sleep_hours = if days_with_sleep > 0 {
+            ((total_sleep_blocks as f64 / days_with_sleep as f64 * 0.25) * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
 
         let (age_days, total_expected_days, days_lived_percent) = if let Some(ref p) = profile {
             if let (Ok(birth), Ok(today)) = (
@@ -217,6 +285,8 @@ impl LifeRepository {
             days_lived_percent,
             total_logged_days: total_logged.0,
             dominant_mood,
+            total_deep_work_hours,
+            average_sleep_hours,
             today_date: today_date_str.to_string(),
         })
     }
@@ -270,17 +340,36 @@ mod tests {
             Some("sunny"),
             Some("[\"workout\",\"family\"]"),
             Some("A great productive day"),
+            Some("[\"sleep\",\"sleep\",\"deep_work\",\"deep_work\"]"),
         )
         .await
         .unwrap();
 
         assert_eq!(log.mood, "amazing");
         assert_eq!(log.weather.as_deref(), Some("sunny"));
+        assert!(log.time_allocation.is_some());
 
         let stats = LifeRepository::get_stats(&pool, owner, "2026-09-04").await.unwrap();
         assert_eq!(stats.total_logged_days, 1);
         assert_eq!(stats.dominant_mood.as_deref(), Some("amazing"));
+        assert_eq!(stats.total_deep_work_hours, 0.5);
+        assert_eq!(stats.average_sleep_hours, 0.5);
         assert!(stats.age_days > 9000);
+
+        // Test updating time allocation intraday
+        let updated_time = LifeRepository::update_time_allocation(
+            &pool,
+            owner,
+            "2026-09-04",
+            "[\"deep_work\",\"deep_work\",\"deep_work\",\"deep_work\"]",
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated_time.mood, "amazing");
+        assert_eq!(
+            updated_time.time_allocation.as_deref(),
+            Some("[\"deep_work\",\"deep_work\",\"deep_work\",\"deep_work\"]")
+        );
 
         let year_view = LifeRepository::get_year_view(&pool, owner, 2026).await.unwrap();
         assert_eq!(year_view.logs.len(), 1);

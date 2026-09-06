@@ -40,6 +40,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const tooltipDateRef = useRef<HTMLSpanElement | null>(null);
   const tooltipBadgeRef = useRef<HTMLSpanElement | null>(null);
+  const tooltipTimeRef = useRef<HTMLSpanElement | null>(null);
 
   const animFrameRef = useRef<number | null>(null);
 
@@ -297,6 +298,29 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         el.textContent = 'Future';
       }
     }
+
+    if (tooltipTimeRef.current) {
+      let timeSummary = '';
+      if (d.time_allocation) {
+        try {
+          const blocks: (string | null)[] = JSON.parse(d.time_allocation);
+          let deepWork = 0;
+          let sleep = 0;
+          for (const b of blocks) {
+            if (b === 'deep_work') deepWork += 1;
+            else if (b === 'sleep') sleep += 1;
+          }
+          const parts = [];
+          if (deepWork > 0) parts.push(`⚡ ${(deepWork * 0.25).toFixed(1)}h`);
+          if (sleep > 0) parts.push(`💤 ${(sleep * 0.25).toFixed(1)}h`);
+          timeSummary = parts.join(' · ');
+        } catch {
+          timeSummary = '';
+        }
+      }
+      tooltipTimeRef.current.textContent = timeSummary;
+      tooltipTimeRef.current.style.display = timeSummary ? 'inline' : 'none';
+    }
   }, []);
 
   // 4. Ultra-Fast Pointer Move (ZERO React re-renders)
@@ -517,6 +541,11 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
           <div className="flex items-center gap-2">
             <span ref={tooltipDateRef} className="font-mono font-bold tracking-tight text-sm"></span>
             <span ref={tooltipBadgeRef}></span>
+            <span
+              ref={tooltipTimeRef}
+              style={{ display: 'none' }}
+              className="text-[11px] font-mono text-zinc-300 dark:text-zinc-600 ml-0.5"
+            ></span>
           </div>
         </div>
       </div>

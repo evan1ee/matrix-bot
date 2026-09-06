@@ -65,9 +65,17 @@ export const LifeStatStrip: React.FC<LifeStatStripProps> = ({ stats, onOpenSetti
             {stats.days_logged.toLocaleString()}
           </p>
         </div>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
-          Out of ~{stats.total_life_days.toLocaleString()} total days
-        </p>
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500">
+          <span>Out of ~{stats.total_life_days.toLocaleString()} days</span>
+          {(stats.total_deep_work_hours ?? 0) > 0 && (
+            <>
+              <span>·</span>
+              <span className="text-zinc-700 dark:text-zinc-300 font-mono font-medium">
+                ⚡ {(stats.total_deep_work_hours ?? 0).toFixed(1)}h
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 4. Dominant Mood & Settings */}
@@ -97,12 +105,19 @@ export const LifeStatStrip: React.FC<LifeStatStripProps> = ({ stats, onOpenSetti
             <p className="text-sm text-zinc-400">No records yet</p>
           )}
         </div>
-        <button
-          onClick={onOpenSettings}
-          className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 text-left mt-2 transition-colors"
-        >
-          Lifespan: {stats.expected_lifespan_years} years
-        </button>
+        <div className="flex items-center justify-between text-xs text-zinc-400 dark:text-zinc-500 mt-2">
+          <button
+            onClick={onOpenSettings}
+            className="hover:text-zinc-600 dark:hover:text-zinc-300 text-left transition-colors"
+          >
+            Lifespan: {stats.expected_lifespan_years} years
+          </button>
+          {(stats.average_sleep_hours ?? 0) > 0 && (
+            <span className="font-mono text-zinc-700 dark:text-zinc-300 font-medium">
+              💤 {(stats.average_sleep_hours ?? 0).toFixed(1)}h
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
