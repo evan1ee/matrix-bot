@@ -15,6 +15,7 @@ import type { CreateHabitPayload, HabitStatsSummary, HabitWithStatus, HeatmapDay
 import { HabitHeatmap } from './HabitHeatmap';
 import { HabitRow } from './HabitRow';
 import { HabitModal } from './HabitModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 const CATEGORIES = ['all', 'wellness', 'fitness', 'learning', 'productivity', 'mindfulness'] as const;
 
@@ -24,6 +25,7 @@ export const HabitsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<HabitWithStatus | null>(null);
+  const [habitToDelete, setHabitToDelete] = useState<HabitWithStatus | null>(null);
 
   // Queries
   const { data: habits = [], isLoading: isLoadingHabits } = useQuery<HabitWithStatus[]>({
@@ -297,10 +299,8 @@ export const HabitsView: React.FC = () => {
                   setEditingHabit(h);
                   setIsModalOpen(true);
                 }}
-                onDelete={(id) => {
-                  if (window.confirm(`Delete habit "${habit.name}"?`)) {
-                    deleteMutation.mutate(id);
-                  }
+                onDelete={() => {
+                  setHabitToDelete(habit);
                 }}
               />
             ))}
@@ -319,6 +319,31 @@ export const HabitsView: React.FC = () => {
         onSave={async (payload, id) => {
           await saveMutation.mutateAsync({ payload, id });
         }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!habitToDelete}
+        title="Delete Habit"
+        message={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+              "{habitToDelete?.name}"
+            </span>
+            ? All logged streaks and progress for this habit will be permanently removed.
+          </>
+        }
+        confirmLabel="Delete habit"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+        onConfirm={async () => {
+          if (habitToDelete) {
+            await deleteMutation.mutateAsync(habitToDelete.id);
+            setHabitToDelete(null);
+          }
+        }}
+        onClose={() => setHabitToDelete(null)}
       />
     </div>
   );

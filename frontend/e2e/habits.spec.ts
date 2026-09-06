@@ -105,8 +105,19 @@ test.describe('Daily Cadence & Heatmap Habits', () => {
     await gotoHabits(app);
     await expect(app.getByText('Obsolete Habit')).toBeVisible();
 
-    app.on('dialog', (dialog) => dialog.accept());
     await app.getByRole('button', { name: /Delete Obsolete Habit/i }).click();
+
+    // Confirm modal opens
+    const modal = app.locator('[data-testid="confirm-modal"]');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText(/Are you sure you want to delete/i)).toBeVisible();
+
+    const artifactDir = '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
+    if (fs.existsSync(artifactDir)) {
+      await app.screenshot({ path: path.join(artifactDir, 'confirm_modal_habit_delete.png') });
+    }
+
+    await modal.getByRole('button', { name: 'Delete habit' }).click();
 
     await expect(app.getByText('No habits found')).toBeVisible();
     expect(api.habits.length).toBe(0);

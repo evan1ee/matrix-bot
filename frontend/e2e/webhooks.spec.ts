@@ -45,18 +45,21 @@ test('rotates webhook secret token and deletes webhook', async ({ app, api }) =>
   await gotoApp(app);
   await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
 
-  // Handle confirm dialog for rotation
-  app.on('dialog', async (dialog) => {
-    await dialog.accept();
-  });
-
   await app.getByRole('button', { name: /rotate secret/i }).click();
+  const rotateModal = app.locator('[data-testid="confirm-modal"]');
+  await expect(rotateModal).toBeVisible();
+  await rotateModal.getByRole('button', { name: 'Rotate Secret' }).click();
+
   await expect(app.getByText('Webhook Secret Generated')).toBeVisible();
   await app.getByRole('button', { name: 'I Have Saved My Secret' }).click();
 
   // Delete
   await app.locator('button[title="Delete webhook"]').click();
-  await expect(app.getByText('Legacy Hook')).not.toBeVisible();
+  const deleteModal = app.locator('[data-testid="confirm-modal"]');
+  await expect(deleteModal).toBeVisible();
+  await deleteModal.getByRole('button', { name: 'Delete Webhook' }).click();
+  await expect(deleteModal).not.toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Legacy Hook' })).not.toBeVisible();
 });
 
 test('opens webhook history and inspects delivery logs', async ({ app, api }) => {

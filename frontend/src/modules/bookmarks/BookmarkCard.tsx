@@ -151,11 +151,7 @@ export const BookmarkCard: React.FC<BookmarkCardProps> = ({
           </a>
           <button
             type="button"
-            onClick={() => {
-              if (window.confirm(`Delete bookmark "${bookmark.title}"?`)) {
-                onDelete(bookmark.id);
-              }
-            }}
+            onClick={() => onDelete(bookmark.id)}
             title="Delete bookmark"
             className="p-1 rounded text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition cursor-pointer"
           >

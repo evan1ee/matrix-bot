@@ -173,7 +173,7 @@ test.describe('Bookmarks & Read-it-Later Library', () => {
     await expect(app.getByText('React Documentation')).not.toBeVisible();
   });
 
-  test('deletes a bookmark after window confirmation', async ({ app, api }) => {
+  test('deletes a bookmark after confirmation', async ({ app, api }) => {
     const bm = api.seedBookmark({
       url: 'https://temporary.example.com',
       title: 'Temporary Article to Delete',
@@ -183,15 +183,16 @@ test.describe('Bookmarks & Read-it-Later Library', () => {
     await gotoBookmarks(app);
     await expect(app.getByText('Temporary Article to Delete')).toBeVisible();
 
-    // Auto-accept confirmation dialog
-    app.on('dialog', async (dialog) => {
-      await dialog.accept();
-    });
-
     const card = app.getByTestId(`bookmark-card-${bm.id}`);
     await card.getByTitle('Delete bookmark').click();
 
-    await expect(app.getByText('Temporary Article to Delete')).not.toBeVisible();
+    // Confirm modal opens
+    const modal = app.locator('[data-testid="confirm-modal"]');
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Delete bookmark' }).click();
+    await expect(modal).not.toBeVisible();
+
+    await expect(app.getByRole('heading', { name: 'Temporary Article to Delete' })).not.toBeVisible();
     expect(api.bookmarks.find((b) => b.id === bm.id)).toBeUndefined();
   });
 });

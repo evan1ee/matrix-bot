@@ -15,6 +15,7 @@ import {
 import { SecretModal } from './SecretModal';
 import { WebhookLogsModal } from './WebhookLogsModal';
 import { CreateWebhookModal } from './CreateWebhookModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 export * from './types';
 
@@ -29,6 +30,9 @@ const WebhooksView: React.FC<{
   // Modal shown once when a token is generated/rotated
   const [secretModalData, setSecretModalData] = useState<CreatedWebhookResponse | null>(null);
   const [testStatus, setTestStatus] = useState<{ id: string; message: string; ok: boolean } | null>(null);
+
+  const [hookToRotate, setHookToRotate] = useState<WebhookItem | null>(null);
+  const [hookToDelete, setHookToDelete] = useState<WebhookItem | null>(null);
 
   // Logs viewer state
   const [activeLogsWebhook, setActiveLogsWebhook] = useState<WebhookItem | null>(null);
@@ -265,16 +269,12 @@ const WebhooksView: React.FC<{
                   </button>
 
                   <button
-                    onClick={() => {
-                      if (confirm(`Rotate secret token for "${hook.name}"? The previous token will immediately stop working.`)) {
-                        rotateMutation.mutate(hook.id);
-                      }
-                    }}
+                    onClick={() => setHookToRotate(hook)}
                     disabled={rotateMutation.isPending}
                     title="Regenerate secret token"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${rotateMutation.isPending ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 ${rotateMutation.isPending && hookToRotate?.id === hook.id ? 'animate-spin' : ''}`} />
                     Rotate Secret
                   </button>
 
@@ -287,11 +287,7 @@ const WebhooksView: React.FC<{
                   </button>
 
                   <button
-                    onClick={() => {
-                      if (confirm(`Permanently delete webhook "${hook.name}"?`)) {
-                        deleteMutation.mutate(hook.id);
-                      }
-                    }}
+                    onClick={() => setHookToDelete(hook)}
                     title="Delete webhook"
                     className="p-1.5 text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
                   >
@@ -346,6 +342,56 @@ const WebhooksView: React.FC<{
           onClose={() => setSecretModalData(null)}
         />
       )}
+
+      {/* Rotate Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!hookToRotate}
+        title="Rotate Secret Token"
+        message={
+          <>
+            Rotate secret token for{' '}
+            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+              "{hookToRotate?.name}"
+            </span>
+            ? The previous token will immediately stop working.
+          </>
+        }
+        confirmLabel="Rotate Secret"
+        isDestructive={false}
+        isLoading={rotateMutation.isPending}
+        onConfirm={async () => {
+          if (hookToRotate) {
+            await rotateMutation.mutateAsync(hookToRotate.id);
+            setHookToRotate(null);
+          }
+        }}
+        onClose={() => setHookToRotate(null)}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!hookToDelete}
+        title="Delete Webhook"
+        message={
+          <>
+            Permanently delete webhook{' '}
+            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+              "{hookToDelete?.name}"
+            </span>
+            ? Incoming requests to this URL will be rejected.
+          </>
+        }
+        confirmLabel="Delete Webhook"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+        onConfirm={async () => {
+          if (hookToDelete) {
+            await deleteMutation.mutateAsync(hookToDelete.id);
+            setHookToDelete(null);
+          }
+        }}
+        onClose={() => setHookToDelete(null)}
+      />
     </div>
   );
 };

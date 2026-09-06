@@ -18,6 +18,7 @@ import type { Bookmark, BookmarkStats, CreateBookmarkInput, BookmarkFilterTab } 
 import { BookmarkCard } from './BookmarkCard';
 import { ReaderModal } from './ReaderModal';
 import { AddBookmarkModal } from './AddBookmarkModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 export const BookmarksView: React.FC = () => {
   const queryClient = useQueryClient();
@@ -26,6 +27,7 @@ export const BookmarksView: React.FC = () => {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [readingBookmark, setReadingBookmark] = useState<Bookmark | null>(null);
+  const [bookmarkToDelete, setBookmarkToDelete] = useState<Bookmark | null>(null);
 
   // Derive query parameters
   const queryParams = useMemo(() => {
@@ -339,7 +341,7 @@ export const BookmarksView: React.FC = () => {
               onOpenReader={(b) => setReadingBookmark(b)}
               onToggleFavorite={(id) => toggleFavoriteMutation.mutate(id)}
               onToggleArchive={(id) => toggleArchiveMutation.mutate(id)}
-              onDelete={(id) => deleteMutation.mutate(id)}
+              onDelete={() => setBookmarkToDelete(bookmark)}
               onSelectTag={(t) => setSelectedTag(t)}
             />
           ))}
@@ -362,6 +364,31 @@ export const BookmarksView: React.FC = () => {
         onSave={async (payload) => {
           await createMutation.mutateAsync(payload);
         }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!bookmarkToDelete}
+        title="Delete Bookmark"
+        message={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+              "{bookmarkToDelete?.title}"
+            </span>
+            ?
+          </>
+        }
+        confirmLabel="Delete bookmark"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+        onConfirm={async () => {
+          if (bookmarkToDelete) {
+            await deleteMutation.mutateAsync(bookmarkToDelete.id);
+            setBookmarkToDelete(null);
+          }
+        }}
+        onClose={() => setBookmarkToDelete(null)}
       />
     </div>
   );
