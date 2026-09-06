@@ -348,5 +348,43 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       await app.waitForTimeout(300);
     }
   });
+
+  test('auto-logs activities from todos, transactions, and habits in day modal feed', async ({ app, api }) => {
+    api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Seed a todo created today
+    api.seedTodo({
+      text: 'Deploy to production server',
+      priority: 'high',
+      completed: true,
+      created_at: `${todayStr}T10:30:00Z`,
+    });
+
+    // Seed a transaction today
+    api.seedTransaction({
+      direction: 'expense',
+      amount_minor: 3550,
+      currency: 'USD',
+      note: 'Team lunch catering',
+      occurred_at: `${todayStr}T12:45:00Z`,
+    });
+
+    // Seed a completed habit today
+    const habit = api.seedHabit({ name: 'Morning Meditation' });
+    api.seedHabitLog({ habit_id: habit.id, log_date: todayStr, completed: true });
+
+    await gotoLife(app);
+
+    // Open Today modal
+    await app.getByRole('button', { name: /log today/i }).click();
+
+    // Verify auto-logged activity feed is visible
+    await expect(app.getByText('Auto-logged Activity')).toBeVisible();
+    await expect(app.getByText(/Deploy to production server/i).first()).toBeVisible();
+    await expect(app.getByText(/Team lunch catering/i)).toBeVisible();
+    await expect(app.getByText(/Morning Meditation/i)).toBeVisible();
+  });
 });
 

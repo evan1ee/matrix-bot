@@ -3,6 +3,7 @@ import { X, Trash2 } from 'lucide-react';
 import type { LifeDayItem, MoodType, WeatherType, UpsertDayPayload, TimeAllocation } from './types';
 import { MOOD_CONFIG, WEATHER_CONFIG, ACTIVITY_OPTIONS } from './types';
 import { LifeTimeGrid } from './LifeTimeGrid';
+import { LifeActivityFeed } from './LifeActivityFeed';
 
 interface LifeDayModalProps {
   day: LifeDayItem | null;
@@ -218,6 +219,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
                     </button>
                   </div>
                 )}
+                <LifeActivityFeed date={day.date} />
               </div>
 
               {/* Right Column: Sealed Mood, Weather, Activities & Notes */}
@@ -395,6 +397,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
                     </button>
                   </div>
                 )}
+                <LifeActivityFeed date={day.date} />
               </div>
 
               {/* Right Column: Mood, Weather, Activities & Notes */}

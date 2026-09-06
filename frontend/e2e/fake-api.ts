@@ -2217,6 +2217,85 @@ export class FakeApi {
       return json(route, 200, log);
     }
 
+    const dayActivityMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})\/activity$/);
+    if (dayActivityMatch && method === 'GET') {
+      const date = dayActivityMatch[1];
+      const events: any[] = [];
+      const stats = {
+        total_events: 0,
+        todos_created: 0,
+        todos_completed: 0,
+        todos_due: 0,
+        expenses: 0,
+        income: 0,
+        portfolio_trades: 0,
+        habits_done: 0,
+        reminders_fired: 0,
+        bookmarks_saved: 0,
+        bills_paid: 0,
+        footprints: 0,
+      };
+
+      for (const todo of this.todos) {
+        if (todo.created_at && todo.created_at.startsWith(date)) {
+          events.push({
+            time: todo.created_at.split('T')[1]?.slice(0, 8) || null,
+            module: 'todo',
+            action: 'created',
+            emoji: '📝',
+            summary: todo.text,
+            detail: `priority: ${todo.priority}`,
+          });
+          stats.todos_created++;
+        }
+        if (todo.completed && todo.created_at && todo.created_at.startsWith(date)) {
+          events.push({
+            time: todo.created_at.split('T')[1]?.slice(0, 8) || null,
+            module: 'todo',
+            action: 'completed',
+            emoji: '✔️',
+            summary: todo.text,
+            detail: null,
+          });
+          stats.todos_completed++;
+        }
+      }
+
+      for (const tx of this.transactions) {
+        if (tx.occurred_at && tx.occurred_at.startsWith(date)) {
+          const isExpense = tx.direction === 'expense';
+          events.push({
+            time: tx.occurred_at.split('T')[1]?.slice(0, 8) || null,
+            module: 'finance',
+            action: tx.direction,
+            emoji: isExpense ? '💸' : '💰',
+            summary: `${isExpense ? '-' : '+'}${tx.currency}${(tx.amount_minor / 100).toFixed(2)}`,
+            detail: tx.note || null,
+          });
+          if (isExpense) stats.expenses++;
+          else stats.income++;
+        }
+      }
+
+      for (const hl of this.habitLogs) {
+        if (hl.log_date === date) {
+          const habit = this.habits.find((h) => h.id === hl.habit_id);
+          events.push({
+            time: null,
+            module: 'habit',
+            action: 'checked',
+            emoji: '✅',
+            summary: habit?.name || 'Habit',
+            detail: hl.note || null,
+          });
+          stats.habits_done++;
+        }
+      }
+
+      stats.total_events = events.length;
+      return json(route, 200, { date, events, stats });
+    }
+
     const dayMatch = path.match(/^\/life\/days\/(\d{4}-\d{2}-\d{2})$/);
     if (dayMatch && method === 'GET') {
       const date = dayMatch[1];

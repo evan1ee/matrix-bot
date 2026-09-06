@@ -26,6 +26,7 @@ pub mod footprints;
 pub mod habits;
 pub mod health;
 pub mod life;
+pub mod life_activity;
 pub mod openapi;
 pub mod portfolio;
 pub mod portfolio_alerts;
@@ -252,6 +253,10 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route(
             "/life/days/:date/time",
             put(life::update_time_allocation),
+        )
+        .route(
+            "/life/days/:date/activity",
+            get(life_activity::get_day_activity),
         )
 }
 
