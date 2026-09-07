@@ -63,7 +63,6 @@ pub const OWNED_TABLES: &[&str] = &[
     "recurring_bills",
     "portfolio_holdings",
     "portfolio_cash_balances",
-    "portfolio_audit_log",
     "portfolio_daily_snapshots",
     "portfolio_price_alerts",
     "finance_categories",
@@ -184,7 +183,7 @@ mod tests {
     /// of tables that carry ownership, or one of them silently misses rows.
     #[test]
     fn test_owned_tables_covers_every_ownership_carrying_table() {
-        assert_eq!(OWNED_TABLES.len(), 21);
+        assert_eq!(OWNED_TABLES.len(), 20);
         for table in [
             "todos", "reminders", "transactions", "user_settings",
             "bookmarks", "habits", "life_day_logs", "footprints", "ai_conversations"

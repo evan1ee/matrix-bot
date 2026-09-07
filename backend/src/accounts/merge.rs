@@ -438,8 +438,6 @@ mod tests {
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES (?, 'USD', 5000)")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO portfolio_audit_log (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency) VALUES (?, 'BUY', 'AAPL', 100, 150, 15000, 'USD')")
-            .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES (?, '2026-09-06', 'USD', 100, 100, 200)")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES (?, 'AAPL', 20000, 'USD', 'ABOVE')")
@@ -448,7 +446,7 @@ mod tests {
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO bookmarks (owner_id, url, title) VALUES (?, 'https://example.com', 'Example')")
+        sqlx::query("INSERT INTO bookmarks (owner_id, url, title, domain) VALUES (?, 'https://example.com', 'Example', 'example.com')")
             .bind(&from).execute(&pool).await.unwrap();
         let habit_id: i64 = sqlx::query_scalar("INSERT INTO habits (owner_id, name, frequency) VALUES (?, 'Exercise', 'daily') RETURNING id")
             .bind(&from).fetch_one(&pool).await.unwrap();
@@ -456,21 +454,21 @@ mod tests {
             .bind(habit_id).bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES (?, '2026-09-06', 'happy')")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO life_profiles (owner_id, birthday, target_age) VALUES (?, '1990-01-01', 90)")
+        sqlx::query("INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES (?, '1990-01-01', 90)")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO footprints (owner_id, title, latitude, longitude, visited_at) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')")
+        sqlx::query("INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO ai_conversations (owner_id, title) VALUES (?, 'Test')")
+        sqlx::query("INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', ?, '!r:x')")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO ai_user_configs (owner_id, personality) VALUES (?, 'concise')")
+        sqlx::query("INSERT INTO ai_user_configs (owner_id, model_name) VALUES (?, 'gemini')")
             .bind(&from).execute(&pool).await.unwrap();
-        let wh_id: i64 = sqlx::query_scalar("INSERT INTO webhooks (owner_id, name, secret) VALUES (?, 'hook', 'sec') RETURNING id")
-            .bind(&from).fetch_one(&pool).await.unwrap();
-        sqlx::query("INSERT INTO webhook_outbox (owner_id, webhook_id, payload, destination_url) VALUES (?, ?, '{}', 'https://example.com')")
-            .bind(&from).bind(wh_id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', ?, 'hook', 'thash', 'pref', '!r:x')")
+            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)")
+            .bind(&from).execute(&pool).await.unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 21, "one row per owned table");
+        assert_eq!(preview.total(), 20, "one row per owned table");
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
