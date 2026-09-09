@@ -250,7 +250,7 @@ mod tests {
         SettingsRepository::upsert(
             &db.pool,
             "@alice:a",
-            &UserSettings { timezone: "UTC".to_string(), currency: "CNY".to_string() },
+            &UserSettings { timezone: "UTC".to_string(), currency: "CNY".to_string(), dev_room_id: None },
         )
         .await
         .unwrap();

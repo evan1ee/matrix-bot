@@ -4,6 +4,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod alert;
 pub mod client;
 pub mod handler;
 pub mod models;
@@ -11,17 +12,23 @@ pub mod repository;
 pub mod retrospective;
 pub mod tools;
 
-pub struct AiModule;
+use matrix_sdk::Client;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+pub struct AiModule {
+    client_handle: Arc<RwLock<Option<Client>>>,
+}
 
 impl Default for AiModule {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(RwLock::new(None)))
     }
 }
 
 impl AiModule {
-    pub fn new() -> Self {
-        Self
+    pub fn new(client_handle: Arc<RwLock<Option<Client>>>) -> Self {
+        Self { client_handle }
     }
 }
 
@@ -70,6 +77,7 @@ impl BotModule for AiModule {
         handler::handle_ai_command(
             &db.pool,
             broadcaster,
+            Some(&self.client_handle),
             &ctx.room_id,
             &ctx.owner_id,
             &ctx.sender_name,
@@ -88,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_advertises_its_commands() {
-        let module = AiModule::new();
+        let module = AiModule::default();
         assert_eq!(module.name(), "AI Assistant");
         let commands = module.commands();
         assert_eq!(commands.len(), 5);

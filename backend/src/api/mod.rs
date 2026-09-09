@@ -73,6 +73,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/account/recovery/cancel", post(account::recovery::cancel_recovery))
         .route("/account/security-events", get(account::audit::list_security_events))
         .route("/rooms", get(rooms::list_rooms))
+        .route("/rooms/sync", post(rooms::sync_rooms))
         .route("/settings", get(settings::get_settings).put(settings::update_settings))
         .route("/events", get(sse::sse_handler))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))

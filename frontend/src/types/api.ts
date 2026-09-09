@@ -1146,6 +1146,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rooms/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sync_rooms"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -1568,8 +1584,10 @@ export interface components {
             title?: string | null;
         };
         JoinedRoomInfo: {
+            is_direct: boolean;
             name: string;
             room_id: string;
+            updated_at?: string | null;
         };
         LedgerQuery: {
             /** @description `expense` or `income`. Omit for both. */
@@ -1610,7 +1628,23 @@ export interface components {
          */
         MergePreview: {
             /** Format: int64 */
+            ai_conversations: number;
+            /** Format: int64 */
+            bookmarks: number;
+            /** Format: int64 */
             finance_categories: number;
+            /** Format: int64 */
+            footprints: number;
+            /** Format: int64 */
+            habit_logs: number;
+            /** Format: int64 */
+            habits: number;
+            /** Format: int64 */
+            life_day_logs: number;
+            /** Format: int64 */
+            life_profiles: number;
+            /** Format: int64 */
+            other: number;
             /** Format: int64 */
             portfolio_cash_balances: number;
             /** Format: int64 */
@@ -1625,6 +1659,8 @@ export interface components {
             transactions: number;
             /** Format: int64 */
             user_settings: number;
+            /** Format: int64 */
+            webhooks: number;
         };
         PasskeySummary: {
             /** Format: date-time */
@@ -2111,6 +2147,8 @@ export interface components {
         UpdateSettingsRequest: {
             /** @description ISO 4217 code, e.g. `CNY`. */
             currency: string;
+            /** @description Optional Matrix room ID for development and error notifications. */
+            dev_room_id?: string | null;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. */
             timezone: string;
         };
@@ -2164,6 +2202,8 @@ export interface components {
         UserSettings: {
             /** @description ISO 4217 code, e.g. `CNY`. Validated on write. */
             currency: string;
+            /** @description Matrix room ID where development errors and alerts are sent. */
+            dev_room_id?: string | null;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
             timezone: string;
         };
@@ -4896,7 +4936,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List Matrix rooms joined by bot */
+            /** @description List Matrix rooms joined by bot (cached in database) */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4907,6 +4947,44 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    sync_rooms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Synchronize Matrix rooms from homeserver and update database */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinedRoomInfo"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Matrix bot client not connected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

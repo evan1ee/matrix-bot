@@ -12,7 +12,7 @@ impl SettingsRepository {
     /// still get a usable answer.
     pub async fn get(pool: &SqlitePool, owner_id: &str) -> Result<UserSettings, sqlx::Error> {
         let found = sqlx::query_as::<_, UserSettings>(
-            "SELECT timezone, currency FROM user_settings WHERE owner_id = ?",
+            "SELECT timezone, currency, dev_room_id FROM user_settings WHERE owner_id = ?",
         )
         .bind(owner_id)
         .fetch_optional(pool)
@@ -37,26 +37,25 @@ impl SettingsRepository {
         }
     }
 
-    /// Writes both preferences, creating the row if it does not exist.
-    ///
-    /// Settings are always saved as a pair, so this is a whole-row upsert rather
-    /// than a per-field update — there is no partial-write path to get wrong.
+    /// Writes preferences, creating the row if it does not exist.
     pub async fn upsert(
         pool: &SqlitePool,
         owner_id: &str,
         settings: &UserSettings,
     ) -> Result<UserSettings, sqlx::Error> {
         sqlx::query(
-            "INSERT INTO user_settings (owner_id, timezone, currency, updated_at) \
-             VALUES (?, ?, ?, CURRENT_TIMESTAMP) \
+            "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, updated_at) \
+             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
              ON CONFLICT(owner_id) DO UPDATE SET \
                 timezone = excluded.timezone, \
                 currency = excluded.currency, \
+                dev_room_id = excluded.dev_room_id, \
                 updated_at = CURRENT_TIMESTAMP",
         )
         .bind(owner_id)
         .bind(&settings.timezone)
         .bind(&settings.currency)
+        .bind(&settings.dev_room_id)
         .execute(pool)
         .await?;
 
@@ -90,21 +89,31 @@ mod tests {
         let created = SettingsRepository::upsert(
             &pool,
             "@evan:mbm.one",
-            &UserSettings { timezone: "Asia/Shanghai".to_string(), currency: "CNY".to_string() },
+            &UserSettings {
+                timezone: "Asia/Shanghai".to_string(),
+                currency: "CNY".to_string(),
+                dev_room_id: Some("!dev:mbm.one".to_string()),
+            },
         )
         .await
         .unwrap();
         assert_eq!(created.timezone, "Asia/Shanghai");
         assert_eq!(created.currency, "CNY");
+        assert_eq!(created.dev_room_id.as_deref(), Some("!dev:mbm.one"));
 
         let updated = SettingsRepository::upsert(
             &pool,
             "@evan:mbm.one",
-            &UserSettings { timezone: "Europe/Berlin".to_string(), currency: "EUR".to_string() },
+            &UserSettings {
+                timezone: "Europe/Berlin".to_string(),
+                currency: "EUR".to_string(),
+                dev_room_id: None,
+            },
         )
         .await
         .unwrap();
         assert_eq!(updated.timezone, "Europe/Berlin");
+        assert_eq!(updated.dev_room_id, None);
 
         // The upsert must update the existing row, never accumulate rows.
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_settings")
@@ -124,7 +133,11 @@ mod tests {
         SettingsRepository::upsert(
             &pool,
             "@evan:mbm.one",
-            &UserSettings { timezone: "Asia/Shanghai".to_string(), currency: "CNY".to_string() },
+            &UserSettings {
+                timezone: "Asia/Shanghai".to_string(),
+                currency: "CNY".to_string(),
+                dev_room_id: Some("!dev:mbm.one".to_string()),
+            },
         )
         .await
         .unwrap();

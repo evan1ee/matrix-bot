@@ -1,7 +1,9 @@
 use sqlx::SqlitePool;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
 use super::client::{AiClient, ResolvedAiConfig};
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 use super::repository::AiRepository;
@@ -32,6 +34,7 @@ pub struct AiTurnResult {
 pub async fn handle_ai_command(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
+    client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
     room_id: &str,
     owner_id: &str,
     _sender_name: &str,
@@ -74,12 +77,14 @@ pub async fn handle_ai_command(
         }
 
         match run_ai_turn(pool, broadcaster, owner_id, room_id, None, trimmed).await {
-            Ok(result) => Some(format_response(&result.message, &result.model_used)),
+            Ok(result) => {
+                clear_ai_error_state();
+                Some(format_response(&result.message, &result.model_used))
+            }
             Err(err) => {
                 error!("AI execution failed: {}", err);
-                Some(format_error(
-                    "Unable to reach the AI model provider. Please verify your AI settings or endpoint.",
-                ))
+                notify_dev_room_ai_error(pool, client_handle, owner_id, &err).await;
+                None
             }
         }
     } else {
@@ -358,6 +363,7 @@ async fn handle_set_model(
 
     match AiRepository::upsert_user_config(pool, owner_id, &input).await {
         Ok(cfg) => {
+            clear_ai_error_state();
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::AiConfigUpdated {
                     owner_id: owner_id.to_string(),
@@ -417,6 +423,7 @@ mod tests {
         let help = handle_ai_command(
             &db.pool,
             None,
+            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -431,6 +438,7 @@ mod tests {
 
         let config = handle_ai_command(
             &db.pool,
+            None,
             None,
             "!room:mbm.one",
             &owner,
@@ -452,6 +460,7 @@ mod tests {
         let res = handle_ai_command(
             &db.pool,
             None,
+            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -467,6 +476,7 @@ mod tests {
         let reset = handle_ai_command(
             &db.pool,
             None,
+            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -478,6 +488,52 @@ mod tests {
         .await
         .unwrap();
         assert!(reset.contains("conversation history reset"));
+    }
+
+    #[tokio::test]
+    async fn test_ai_error_suppressed_from_chat_and_sent_once() {
+        let (db, owner) = setup_test().await;
+        clear_ai_error_state();
+        assert!(!is_ai_error_alerted());
+
+        // In test mode without external API server, calling !ai prompt will fail
+        let result1 = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:general",
+            &owner,
+            "User",
+            "ai",
+            "hello world",
+            "",
+            false,
+        )
+        .await;
+
+        // Must return None so error is never posted to general chat room
+        assert!(result1.is_none());
+        assert!(is_ai_error_alerted(), "Error state should be marked as alerted");
+
+        // Second failure during same outage
+        let result2 = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:general",
+            &owner,
+            "User",
+            "ai",
+            "second prompt",
+            "",
+            false,
+        )
+        .await;
+        assert!(result2.is_none());
+
+        // Reset clears it
+        clear_ai_error_state();
+        assert!(!is_ai_error_alerted());
     }
 
     #[tokio::test]

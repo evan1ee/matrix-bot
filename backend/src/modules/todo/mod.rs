@@ -169,7 +169,11 @@ mod tests {
         SettingsRepository::upsert(
             &db.pool,
             "@alice:a",
-            &UserSettings { timezone: "Asia/Shanghai".to_string(), currency: "CNY".to_string() },
+            &UserSettings {
+                timezone: "Asia/Shanghai".to_string(),
+                currency: "CNY".to_string(),
+                dev_room_id: None,
+            },
         )
         .await
         .unwrap();

@@ -26,6 +26,9 @@ pub struct UserSettings {
     pub timezone: String,
     /// ISO 4217 code, e.g. `CNY`. Validated on write.
     pub currency: String,
+    /// Matrix room ID where development errors and alerts are sent.
+    #[serde(default)]
+    pub dev_room_id: Option<String>,
 }
 
 impl Default for UserSettings {
@@ -33,6 +36,7 @@ impl Default for UserSettings {
         Self {
             timezone: DEFAULT_TIMEZONE.to_string(),
             currency: DEFAULT_CURRENCY.to_string(),
+            dev_room_id: None,
         }
     }
 }
@@ -67,6 +71,7 @@ mod tests {
         let settings = UserSettings::default();
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
+        assert_eq!(settings.dev_room_id, None);
         assert_eq!(settings.tz(), Tz::UTC);
     }
 
@@ -94,6 +99,7 @@ mod tests {
         let settings = UserSettings {
             timezone: "Nowhere/Nothing".to_string(),
             currency: "USD".to_string(),
+            dev_room_id: None,
         };
         assert_eq!(settings.tz(), Tz::UTC);
     }

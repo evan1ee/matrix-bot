@@ -38,6 +38,9 @@ pub async fn handle_settings_command(
         "" => Some(show(pool, owner_id).await),
         "timezone" | "tz" => Some(set_timezone(pool, owner_id, value, broadcaster).await),
         "currency" | "cur" => Some(set_currency(pool, owner_id, value, broadcaster).await),
+        "dev_room" | "dev" | "devroom" | "error_room" => {
+            Some(set_dev_room(pool, owner_id, value, broadcaster).await)
+        }
         other => Some(format!(
             "⚠️ Unknown setting <code>{}</code>.<br/>{}",
             html_escape(other),
@@ -64,7 +67,8 @@ fn usage() -> String {
     format!(
         "Usage: <code>!settings</code>, \
          <code>!settings timezone &lt;IANA zone&gt;</code>, \
-         <code>!settings currency &lt;CODE&gt;</code><br/>\
+         <code>!settings currency &lt;CODE&gt;</code>, \
+         <code>!settings dev_room &lt;room_id|none&gt;</code><br/>\
          <i>Zones: {}</i>",
         SUGGESTED_ZONES.join(", ")
     )
@@ -73,14 +77,21 @@ fn usage() -> String {
 async fn show(pool: &SqlitePool, owner_id: &str) -> String {
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
     let now = format_datetime(&chrono::Utc::now(), &settings.tz());
+    let dev_room_display = settings
+        .dev_room_id
+        .as_deref()
+        .map(|r| format!("<code>{}</code>", html_escape(r)))
+        .unwrap_or_else(|| "<i>Not configured</i>".to_string());
 
     format!(
         "⚙️ <b>Your settings</b><br/>\
          • Timezone: <b>{}</b> — it is currently {}<br/>\
-         • Default currency: <b>{}</b><br/><br/>{}",
+         • Default currency: <b>{}</b><br/>\
+         • Dev room: {}<br/><br/>{}",
         html_escape(&settings.timezone),
         html_escape(&now),
         html_escape(&settings.currency),
+        dev_room_display,
         usage()
     )
 }
@@ -107,6 +118,7 @@ async fn set_timezone(
     let updated = UserSettings {
         timezone: tz.name().to_string(),
         currency: current.currency,
+        dev_room_id: current.dev_room_id,
     };
 
     match save(pool, owner_id, updated, broadcaster).await {
@@ -140,7 +152,11 @@ async fn set_currency(
     };
 
     let current = SettingsRepository::get_or_default(pool, owner_id).await;
-    let updated = UserSettings { timezone: current.timezone, currency };
+    let updated = UserSettings {
+        timezone: current.timezone,
+        currency,
+        dev_room_id: current.dev_room_id,
+    };
 
     match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
@@ -150,6 +166,40 @@ async fn set_currency(
             html_escape(&saved.currency)
         ),
         Err(()) => "❌ Database error saving your currency.".to_string(),
+    }
+}
+
+async fn set_dev_room(
+    pool: &SqlitePool,
+    owner_id: &str,
+    value: &str,
+    broadcaster: Option<&EventBroadcaster>,
+) -> String {
+    let current = SettingsRepository::get_or_default(pool, owner_id).await;
+    let dev_room_id = if value.is_empty()
+        || value.eq_ignore_ascii_case("none")
+        || value.eq_ignore_ascii_case("clear")
+    {
+        None
+    } else {
+        Some(value.to_string())
+    };
+
+    let updated = UserSettings {
+        timezone: current.timezone,
+        currency: current.currency,
+        dev_room_id,
+    };
+
+    match save(pool, owner_id, updated, broadcaster).await {
+        Ok(saved) => match saved.dev_room_id {
+            Some(ref room) => format!(
+                "✅ Dev / Error alert room set to <code>{}</code>.",
+                html_escape(room)
+            ),
+            None => "✅ Dev / Error alert room cleared (none).".to_string(),
+        },
+        Err(()) => "❌ Database error saving your dev room.".to_string(),
     }
 }
 
@@ -296,5 +346,22 @@ mod tests {
             .unwrap();
 
         assert!(rx.try_recv().is_err(), "a read or a rejection must not broadcast");
+    }
+
+    #[tokio::test]
+    async fn test_sets_dev_room_and_clears_it() {
+        let pool = pool().await;
+
+        let reply = run(&pool, "!settings dev_room !room123:mbm.one").await;
+        assert!(reply.contains("!room123:mbm.one"), "{reply}");
+
+        let shown = run(&pool, "!settings").await;
+        assert!(shown.contains("!room123:mbm.one"), "{shown}");
+
+        let clear_reply = run(&pool, "!settings dev none").await;
+        assert!(clear_reply.contains("cleared"), "{clear_reply}");
+
+        let shown2 = run(&pool, "!settings").await;
+        assert!(shown2.contains("Not configured"), "{shown2}");
     }
 }

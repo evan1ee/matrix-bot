@@ -45,6 +45,7 @@ use crate::modules::settings::UserSettings;
         auth::get_current_user,
         auth::media_proxy,
         rooms::list_rooms,
+        rooms::sync_rooms,
         settings::get_settings,
         settings::update_settings,
         todos::list_todos,

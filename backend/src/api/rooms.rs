@@ -2,17 +2,75 @@ use axum::{extract::State, Json};
 use matrix_sdk::room::Room;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::{OwnedUserId, UserId};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sqlx::{Row, SqlitePool};
 use tracing::warn;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JoinedRoomInfo {
     pub room_id: String,
     pub name: String,
+    pub is_direct: bool,
+    pub updated_at: Option<String>,
+}
+
+/// Reads cached rooms for an account from SQLite.
+pub async fn get_cached_rooms(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Vec<JoinedRoomInfo>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT room_id, name, is_direct, updated_at FROM account_rooms WHERE account_id = ? ORDER BY LOWER(name) ASC;",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+
+    let rooms = rows
+        .into_iter()
+        .map(|r| JoinedRoomInfo {
+            room_id: r.get::<String, _>("room_id"),
+            name: r.get::<String, _>("name"),
+            is_direct: r.get::<bool, _>("is_direct"),
+            updated_at: r.try_get::<String, _>("updated_at").ok(),
+        })
+        .collect();
+
+    Ok(rooms)
+}
+
+/// Replaces cached rooms for an account in SQLite.
+pub async fn save_cached_rooms(
+    pool: &SqlitePool,
+    account_id: &str,
+    rooms: &[JoinedRoomInfo],
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM account_rooms WHERE account_id = ?;")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for room in rooms {
+        sqlx::query(
+            "INSERT INTO account_rooms (account_id, room_id, name, is_direct, updated_at) \
+             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP);",
+        )
+        .bind(account_id)
+        .bind(&room.room_id)
+        .bind(&room.name)
+        .bind(room.is_direct)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Whether `user_id` is currently joined to `room`.
@@ -24,77 +82,75 @@ async fn is_joined_member(room: &Room, user_id: &UserId) -> bool {
 }
 
 /// Describes a joined room for the web room picker.
-///
-/// One-to-one chats with the bot are included — for a single-user deployment
-/// that DM is usually the *only* room, so excluding it leaves the picker empty.
-/// Names fall back through `m.room.name`, the canonical alias, and finally the
-/// SDK's computed display name, so a room is never dropped merely for lacking an
-/// explicit title.
-async fn describe_room(room: &Room) -> Option<JoinedRoomInfo> {
+async fn describe_room(room: &Room, bot_id: &UserId) -> Option<JoinedRoomInfo> {
     if room.is_space() {
         return None;
     }
 
-    if room.is_direct().await.unwrap_or(false) {
-        return None;
-    }
+    let is_direct = room.is_direct().await.unwrap_or(false);
 
-    let name = match room.name() {
-        Some(name) => name,
-        None => match room.canonical_alias() {
-            Some(alias) => alias.to_string(),
-            None => return None,
-        },
+    // If it's a direct message room, resolve the other member's name (e.g. "evan")
+    let mut resolved_name = if is_direct {
+        None
+    } else {
+        room.name()
     };
 
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
+    // If still unresolved, try display_name()
+    if resolved_name.is_none() {
+        if let Ok(dn) = room.display_name().await {
+            let s = dn.to_string();
+            if !s.is_empty() && s != "Empty Room" {
+                resolved_name = Some(s);
+            }
+        }
     }
+
+    // If still unresolved or is_direct, look for the other joined member's display name or localpart
+    if resolved_name.is_none() || is_direct {
+        if let Ok(members) = room.members_no_sync(matrix_sdk::RoomMemberships::JOIN).await {
+            for m in &members {
+                if m.user_id() != bot_id {
+                    let member_name = m
+                        .display_name()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| m.user_id().localpart().to_string());
+                    if !member_name.is_empty() {
+                        resolved_name = Some(member_name);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Try canonical alias
+    if resolved_name.is_none() {
+        resolved_name = room.canonical_alias().map(|a| a.to_string());
+    }
+
+    let final_name = resolved_name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| room.room_id().to_string());
 
     Some(JoinedRoomInfo {
         room_id: room.room_id().to_string(),
-        name: name.to_string(),
+        name: final_name,
+        is_direct,
+        updated_at: None,
     })
 }
 
-#[utoipa::path(
-    get,
-    path = "/api/v1/rooms",
-    responses(
-        (status = 200, description = "List Matrix rooms joined by bot", body = Vec<JoinedRoomInfo>),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("session_cookie" = []))
-)]
-pub async fn list_rooms(
-    State(state): State<ApiState>,
-    user: AuthUser,
-) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
-    // Everything here comes from the bot's synced SDK state. The bot's own
-    // membership is implied by `joined_rooms()` — that list is exactly the rooms
-    // the account in MATRIX_USERNAME has joined — so there is no bot user ID to
-    // guess and no access token to hand around.
-    let Some(client) = state.bot_client.read().await.clone() else {
-        return Ok(Json(Vec::new()));
-    };
-
-    // The caller must be in the room too. Without this the endpoint hands every
-    // registered account the names of every room the bot belongs to, including
-    // ones the caller has nothing to do with.
-    //
-    // An account can have several linked Matrix identities, so "the caller" is
-    // a set, not one MXID. A room qualifies if *any* of them is a joined
-    // member — the account is one person however many identities they use.
-    //
-    // An account with no linked Matrix identity shares no rooms with the bot
-    // and gets an empty list, which is the honest answer rather than an error.
-    let linked = crate::accounts::AccountRepository::linked_mxids(
-        &state.db.pool,
-        &user.account_id,
-    )
-    .await
-    .unwrap_or_default();
+/// Discovers Matrix rooms where both the bot and at least one linked Matrix account of the user are joined.
+pub async fn discover_rooms_for_account(
+    pool: &SqlitePool,
+    client: &matrix_sdk::Client,
+    account_id: &str,
+) -> Vec<JoinedRoomInfo> {
+    let linked = crate::accounts::AccountRepository::linked_mxids(pool, account_id)
+        .await
+        .unwrap_or_default();
 
     let callers: Vec<OwnedUserId> = linked
         .iter()
@@ -108,10 +164,9 @@ pub async fn list_rooms(
         .collect();
 
     if callers.is_empty() {
-        return Ok(Json(Vec::new()));
+        return Vec::new();
     }
 
-    // Accept pending invitations so a freshly invited room shows up here.
     for room in client.invited_rooms() {
         if let Err(err) = room.join().await {
             warn!("Failed to join invited room {}: {:?}", room.room_id(), err);
@@ -120,7 +175,7 @@ pub async fn list_rooms(
 
     let bot_id = match client.user_id() {
         Some(id) => id,
-        None => return Ok(Json(Vec::new())),
+        None => return Vec::new(),
     };
 
     let mut rooms = Vec::new();
@@ -141,14 +196,81 @@ pub async fn list_rooms(
         if !caller_is_member {
             continue;
         }
-        if let Some(info) = describe_room(&room).await {
+        if let Some(info) = describe_room(&room, bot_id).await {
             rooms.push(info);
         }
     }
 
     rooms.sort_by_key(|a| a.name.to_lowercase());
+    rooms
+}
 
-    Ok(Json(rooms))
+#[utoipa::path(
+    get,
+    path = "/api/v1/rooms",
+    responses(
+        (status = 200, description = "List Matrix rooms joined by bot (cached in database)", body = Vec<JoinedRoomInfo>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn list_rooms(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
+    // 1. Check database cache first — instantaneous response without network delay
+    let cached = get_cached_rooms(&state.db.pool, &user.account_id)
+        .await
+        .unwrap_or_default();
+
+    if !cached.is_empty() {
+        return Ok(Json(cached));
+    }
+
+    // 2. If database has no cached rooms, perform initial discovery once and cache
+    let Some(client) = state.bot_client.read().await.clone() else {
+        return Ok(Json(Vec::new()));
+    };
+
+    let discovered = discover_rooms_for_account(&state.db.pool, &client, &user.account_id).await;
+    if !discovered.is_empty() {
+        let _ = save_cached_rooms(&state.db.pool, &user.account_id, &discovered).await;
+        if let Ok(saved) = get_cached_rooms(&state.db.pool, &user.account_id).await {
+            return Ok(Json(saved));
+        }
+    }
+
+    Ok(Json(discovered))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/rooms/sync",
+    responses(
+        (status = 200, description = "Synchronize Matrix rooms from homeserver and update database", body = Vec<JoinedRoomInfo>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 503, description = "Matrix bot client not connected", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn sync_rooms(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
+    let Some(client) = state.bot_client.read().await.clone() else {
+        return Err(ApiError::bad_request("Matrix bot client not connected"));
+    };
+
+    let discovered = discover_rooms_for_account(&state.db.pool, &client, &user.account_id).await;
+    save_cached_rooms(&state.db.pool, &user.account_id, &discovered)
+        .await
+        .map_err(|e| ApiError::internal(format!("Failed to save cached rooms: {}", e)))?;
+
+    let refreshed = get_cached_rooms(&state.db.pool, &user.account_id)
+        .await
+        .map_err(|e| ApiError::internal(format!("Failed to read cached rooms: {}", e)))?;
+
+    Ok(Json(refreshed))
 }
 
 #[cfg(test)]
@@ -158,8 +280,6 @@ mod tests {
     use crate::events::EventBroadcaster;
     use sqlx::SqlitePool;
 
-    /// With no bot client connected the endpoint is empty rather than erroring —
-    /// and, unlike the previous implementation, reaches no network at all.
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -175,5 +295,61 @@ mod tests {
 
         let res = list_rooms(State(state), user).await.unwrap();
         assert!(res.0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cached_rooms_crud_and_list() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // Create account
+        crate::accounts::AccountRepository::create_with_id(
+            &pool,
+            "acct_test_rooms",
+            "Tester",
+            crate::accounts::STATUS_ACTIVE,
+        )
+        .await
+        .unwrap();
+
+        let initial = get_cached_rooms(&pool, "acct_test_rooms").await.unwrap();
+        assert!(initial.is_empty());
+
+        let rooms = vec![
+            JoinedRoomInfo {
+                room_id: "!room1:example.com".to_string(),
+                name: "General".to_string(),
+                is_direct: false,
+                updated_at: None,
+            },
+            JoinedRoomInfo {
+                room_id: "!room2:example.com".to_string(),
+                name: "DEV".to_string(),
+                is_direct: false,
+                updated_at: None,
+            },
+        ];
+
+        save_cached_rooms(&pool, "acct_test_rooms", &rooms).await.unwrap();
+
+        let cached = get_cached_rooms(&pool, "acct_test_rooms").await.unwrap();
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].name, "DEV");
+        assert_eq!(cached[1].name, "General");
+        assert!(cached[0].updated_at.is_some());
+
+        // Test list_rooms hits cache directly without bot client
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let user = AuthUser::for_account("acct_test_rooms");
+
+        let res = list_rooms(State(state), user).await.unwrap();
+        assert_eq!(res.0.len(), 2);
+        assert_eq!(res.0[0].name, "DEV");
     }
 }

@@ -4,7 +4,7 @@ use matrix_sdk::{
         member::{MembershipState, StrippedRoomMemberEvent},
         message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
     },
-    Client, RoomState,
+    Client, RoomMemberships, RoomState,
 };
 use std::sync::Arc;
 use tracing::{error, info};
@@ -53,7 +53,14 @@ pub fn register_handlers(
 
             let formatted_body = text_content.formatted.as_ref().map(|f| f.body.as_str());
 
-            let is_direct = room.is_direct().await.unwrap_or(false) || room.active_members_count() <= 2;
+            let is_direct = match room.members(RoomMemberships::JOIN).await {
+                Ok(members) if members.len() == 2 => {
+                    members.iter().any(|m| m.user_id() == own_id)
+                        && members.iter().any(|m| m.user_id() == ev.sender)
+                }
+                Ok(_) => false,
+                Err(_) => room.is_direct().await.unwrap_or(false),
+            };
 
             let parsed = if let Some(parsed) = CommandParser::parse_message(
                 &text_content.body,

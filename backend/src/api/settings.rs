@@ -16,6 +16,9 @@ pub struct UpdateSettingsRequest {
     pub timezone: String,
     /// ISO 4217 code, e.g. `CNY`.
     pub currency: String,
+    /// Optional Matrix room ID for development and error notifications.
+    #[serde(default)]
+    pub dev_room_id: Option<String>,
 }
 
 #[utoipa::path(
@@ -62,10 +65,23 @@ pub async fn update_settings(
     let currency = normalise_currency(&payload.currency)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
+    let dev_room_id = payload.dev_room_id.and_then(|r| {
+        let trimmed = r.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+
     let settings = SettingsRepository::upsert(
         &state.db.pool,
         &user.owner_id(),
-        &UserSettings { timezone: timezone.name().to_string(), currency },
+        &UserSettings {
+            timezone: timezone.name().to_string(),
+            currency,
+            dev_room_id,
+        },
     )
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -102,6 +118,7 @@ mod tests {
         UpdateSettingsRequest {
             timezone: timezone.to_string(),
             currency: currency.to_string(),
+            dev_room_id: None,
         }
     }
 
@@ -130,9 +147,18 @@ mod tests {
         // The currency is normalised on the way in, so the stored value is canonical.
         assert_eq!(saved.currency, "CNY");
         assert_eq!(saved.timezone, "Asia/Shanghai");
+        assert_eq!(saved.dev_room_id, None);
 
-        let read = get_settings(State(state), user).await.unwrap();
+        let read = get_settings(State(state.clone()), user.clone()).await.unwrap();
         assert_eq!(read.0, saved.0);
+
+        // Update dev_room_id
+        let mut req = body("Asia/Shanghai", "CNY");
+        req.dev_room_id = Some("!dev:mbm.one".to_string());
+        let saved2 = update_settings(State(state.clone()), user.clone(), Json(req))
+            .await
+            .unwrap();
+        assert_eq!(saved2.dev_room_id.as_deref(), Some("!dev:mbm.one"));
     }
 
     /// An unknown zone must be refused at the boundary. Accepting it would store

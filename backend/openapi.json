@@ -3741,7 +3741,7 @@
         "operationId": "list_rooms",
         "responses": {
           "200": {
-            "description": "List Matrix rooms joined by bot",
+            "description": "List Matrix rooms joined by bot (cached in database)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3755,6 +3755,54 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rooms/sync": {
+      "post": {
+        "tags": [
+          "rooms"
+        ],
+        "operationId": "sync_rooms",
+        "responses": {
+          "200": {
+            "description": "Synchronize Matrix rooms from homeserver and update database",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JoinedRoomInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Matrix bot client not connected",
             "content": {
               "application/json": {
                 "schema": {
@@ -5142,14 +5190,22 @@
         "type": "object",
         "required": [
           "room_id",
-          "name"
+          "name",
+          "is_direct"
         ],
         "properties": {
+          "is_direct": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
           "room_id": {
             "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -5259,10 +5315,51 @@
           "portfolio_holdings",
           "portfolio_cash_balances",
           "finance_categories",
-          "user_settings"
+          "user_settings",
+          "bookmarks",
+          "habits",
+          "habit_logs",
+          "life_day_logs",
+          "life_profiles",
+          "footprints",
+          "ai_conversations",
+          "webhooks",
+          "other"
         ],
         "properties": {
+          "ai_conversations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bookmarks": {
+            "type": "integer",
+            "format": "int64"
+          },
           "finance_categories": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "footprints": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "habit_logs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "habits": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "life_day_logs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "life_profiles": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "other": {
             "type": "integer",
             "format": "int64"
           },
@@ -5291,6 +5388,10 @@
             "format": "int64"
           },
           "user_settings": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "webhooks": {
             "type": "integer",
             "format": "int64"
           }
@@ -6529,6 +6630,11 @@
             "type": "string",
             "description": "ISO 4217 code, e.g. `CNY`."
           },
+          "dev_room_id": {
+            "type": "string",
+            "description": "Optional Matrix room ID for development and error notifications.",
+            "nullable": true
+          },
           "timezone": {
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`."
@@ -6638,6 +6744,11 @@
           "currency": {
             "type": "string",
             "description": "ISO 4217 code, e.g. `CNY`. Validated on write."
+          },
+          "dev_room_id": {
+            "type": "string",
+            "description": "Matrix room ID where development errors and alerts are sent.",
+            "nullable": true
           },
           "timezone": {
             "type": "string",

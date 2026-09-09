@@ -7,11 +7,17 @@ export interface UserSettings {
   timezone: string;
   /** ISO 4217 code, e.g. `CNY`. */
   currency: string;
+  /** Matrix room ID where development errors and alerts are routed. */
+  dev_room_id?: string | null;
 }
 
 /** Matches the server's own fallback, so an unauthenticated or still-loading UI
  *  renders the same values a fresh account would get. */
-export const DEFAULT_SETTINGS: UserSettings = { timezone: 'UTC', currency: 'USD' };
+export const DEFAULT_SETTINGS: UserSettings = {
+  timezone: 'UTC',
+  currency: 'USD',
+  dev_room_id: null,
+};
 
 export const SETTINGS_QUERY_KEY = ['settings'] as const;
 

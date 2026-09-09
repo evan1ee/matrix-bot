@@ -31,6 +31,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::db::schema_habits::create_tables(pool).await?;
     crate::db::schema_life::run_life_schema(pool).await?;
     crate::db::schema_bookmarks::create_tables(pool).await?;
+    crate::db::schema_rooms::create_tables(pool).await?;
 
     sqlx::query(
         r#"
@@ -91,12 +92,17 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             owner_id TEXT PRIMARY KEY,
             timezone TEXT NOT NULL DEFAULT 'UTC',
             currency TEXT NOT NULL DEFAULT 'USD',
+            dev_room_id TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         "#,
     )
     .execute(pool)
     .await?;
+
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN dev_room_id TEXT;")
+        .execute(pool)
+        .await;
 
     // Investment holdings. One row per (owner, symbol) — `quantity_minor` and
     // `avg_cost_minor` are integers so weighted-average cost math never touches

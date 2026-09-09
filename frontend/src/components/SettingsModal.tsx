@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Clock, Coins, Search, X } from 'lucide-react';
+import { Check, Clock, Coins, Search, Terminal, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { CustomSelect } from './CustomSelect';
+import { RoomsPanel } from './RoomsPanel';
 import { SecurityPanel } from './SecurityPanel';
+import { fetchApi } from '../core/apiClient';
 import {
   browserTimezone,
   CURRENCY_OPTIONS,
@@ -17,6 +20,11 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
+interface JoinedRoom {
+  room_id: string;
+  name: string;
+}
+
 /** How many zones the list renders before asking the user to narrow the filter.
  *  The full tzdata list is several hundred names; rendering all of them makes
  *  the popover scroll for a very long time to no benefit. */
@@ -26,11 +34,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const saved = useSettings();
   const { mutateAsync, isPending } = useUpdateSettings();
 
-  const [tab, setTab] = useState<'preferences' | 'security'>('preferences');
+  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security'>('preferences');
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
+  const [devRoomId, setDevRoomId] = useState(saved.dev_room_id ?? '');
   const [filter, setFilter] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const { data: rooms = [] } = useQuery<JoinedRoom[]>({
+    queryKey: ['rooms'],
+    queryFn: () => fetchApi<JoinedRoom[]>('/rooms'),
+    enabled: isOpen,
+  });
 
   // Reopening must show what is actually saved, not whatever was left half-typed
   // when the modal was dismissed.
@@ -38,10 +53,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (isOpen) {
       setTimezone(saved.timezone);
       setCurrency(saved.currency);
+      setDevRoomId(saved.dev_room_id ?? '');
       setFilter('');
       setErrorMsg(null);
     }
-  }, [isOpen, saved.timezone, saved.currency]);
+  }, [isOpen, saved.timezone, saved.currency, saved.dev_room_id]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -64,14 +80,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     return pool;
   }, [zones, filter, timezone]);
 
+  const roomOptions = useMemo(() => {
+    const list = [
+      { value: '', label: 'None (default / room named DEV)' },
+      ...rooms.map((r) => ({
+        value: r.room_id,
+        label: `${r.name} (${r.room_id})`,
+      })),
+    ];
+    if (devRoomId && !list.some((o) => o.value === devRoomId)) {
+      list.push({ value: devRoomId, label: `Custom (${devRoomId})` });
+    }
+    return list;
+  }, [rooms, devRoomId]);
+
   if (!isOpen) return null;
 
-  const dirty = timezone !== saved.timezone || currency !== saved.currency;
+  const dirty =
+    timezone !== saved.timezone ||
+    currency !== saved.currency ||
+    (devRoomId.trim() || null) !== (saved.dev_room_id ?? null);
 
   const handleSave = async () => {
     setErrorMsg(null);
     try {
-      await mutateAsync({ timezone, currency });
+      await mutateAsync({
+        timezone,
+        currency,
+        dev_room_id: devRoomId.trim() || null,
+      });
       onClose();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Could not save settings');
@@ -91,7 +128,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <h3 id="settings-modal-title" className="sr-only">
               Settings
             </h3>
-            {(['preferences', 'security'] as const).map((t) => (
+            {(['preferences', 'rooms', 'security'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -118,6 +155,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
         {tab === 'security' ? (
           <SecurityPanel />
+        ) : tab === 'rooms' ? (
+          <RoomsPanel />
         ) : (
         <>
         {errorMsg && (
@@ -216,6 +255,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <p className="text-[11px] font-mono text-neutral-500">
             Pre-selected for new entries, and used by <code>!expense add</code> when the
             command names no currency.
+          </p>
+        </div>
+
+        {/* Dev / Error alert room */}
+        <div className="space-y-2">
+          <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400">
+            <Terminal className="w-3.5 h-3.5" />
+            Dev / Error alert room
+          </label>
+          <CustomSelect
+            value={devRoomId}
+            onChange={setDevRoomId}
+            options={roomOptions}
+            mono
+            showCheckmark
+            className="w-full"
+          />
+          <p className="text-[11px] font-mono text-neutral-500">
+            System errors and AI failure notices will only be sent to this room (sent once per outage incident).
           </p>
         </div>
 
