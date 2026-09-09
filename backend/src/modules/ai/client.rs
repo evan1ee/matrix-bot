@@ -29,11 +29,27 @@ pub struct ResolvedAiConfig {
 
 impl ResolvedAiConfig {
     pub fn from_user_config(user_config: Option<&AiUserConfig>) -> Self {
-        let env_base = std::env::var("AI_API_BASE")
+        let env_base = std::env::var("AI_ENDPOINT")
+            .or_else(|_| std::env::var("AI_API_BASE"))
+            .or_else(|_| std::env::var("AI_BASE_URL"))
+            .or_else(|_| std::env::var("OPENAI_API_BASE"))
+            .or_else(|_| std::env::var("OPENAI_BASE_URL"))
             .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-        let env_key = std::env::var("AI_API_KEY").ok().filter(|s| !s.trim().is_empty());
+        let env_key = std::env::var("AI_API_KEY")
+            .or_else(|_| std::env::var("XAI_API_KEY"))
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .ok()
+            .filter(|s| !s.trim().is_empty());
         let env_model = std::env::var("AI_MODEL")
-            .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+            .or_else(|_| std::env::var("XAI_MODEL"))
+            .or_else(|_| std::env::var("OPENAI_MODEL"))
+            .unwrap_or_else(|_| {
+                if env_base.contains("x.ai") {
+                    "grok-4.6".to_string()
+                } else {
+                    "gpt-4o-mini".to_string()
+                }
+            });
 
         let api_base_url = user_config
             .and_then(|c| c.api_base_url.as_ref())

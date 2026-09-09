@@ -144,12 +144,24 @@ pub async fn get_ai_config(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
+    let resolved = ResolvedAiConfig::from_user_config(None);
     let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
-        .map(|c| c.redacted())
+        .map(|c| {
+            let mut redacted = c.redacted();
+            if redacted.api_base_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                redacted.api_base_url = Some(resolved.api_base_url.clone());
+            }
+            if redacted.model_name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                redacted.model_name = Some(resolved.model_name.clone());
+            }
+            if !redacted.has_api_key && resolved.api_key.is_some() {
+                redacted.has_api_key = true;
+            }
+            redacted
+        })
         .unwrap_or_else(|| {
-            let resolved = ResolvedAiConfig::from_user_config(None);
             AiUserConfig {
                 owner_id: user.account_id.clone(),
                 api_base_url: Some(resolved.api_base_url),
@@ -159,7 +171,7 @@ pub async fn get_ai_config(
                 temperature: Some(resolved.temperature),
                 max_tokens: Some(resolved.max_tokens),
                 updated_at: String::new(),
-                has_api_key: false,
+                has_api_key: resolved.api_key.is_some(),
             }
         });
 
