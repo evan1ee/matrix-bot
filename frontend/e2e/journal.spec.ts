@@ -8,7 +8,7 @@ test.describe('Daily Log (Journal Module)', () => {
   test('navigates dates, logs daily reflection with mood and notes', async ({ app, api }) => {
     await gotoJournal(app);
 
-    await expect(app.getByRole('main').getByRole('heading', { name: /daily log/i })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Daily Log' })).toBeVisible();
     await expect(app.getByText('Today', { exact: true }).first()).toBeVisible();
 
     // Select Amazing mood

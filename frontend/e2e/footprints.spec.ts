@@ -8,7 +8,7 @@ test.describe('Footprints (Travel & Places Visited)', () => {
   test('renders empty footprints view with map, stats, and add prompt', async ({ app }) => {
     await gotoFootprints(app);
 
-    await expect(app.getByRole('heading', { name: /Footprints & Travel Journal/i })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Footprints' })).toBeVisible();
     await expect(app.getByText('Places Visited')).toBeVisible();
     await expect(app.getByText('Countries')).toBeVisible();
     await expect(app.getByText('Days Traveled')).toBeVisible();

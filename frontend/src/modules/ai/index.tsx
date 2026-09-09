@@ -223,23 +223,13 @@ const AiAssistantView: React.FC<{
 
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2 font-sans">
-              AI Assistant
-              <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
-                {config?.model_name || 'gpt-4o-mini'}
-              </span>
-            </h1>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-sans">
-              Conversational assistant with access to tasks, reminders, bills, portfolio, and finances.
-            </p>
-          </div>
+      {/* Top Toolbar */}
+      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Model</span>
+          <span className="font-mono text-xs font-medium px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
+            {config?.model_name || 'gpt-4o-mini'}
+          </span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -247,7 +237,7 @@ const AiAssistantView: React.FC<{
             type="button"
             onClick={() => setIsRetroOpen(true)}
             title="Weekly Executive Retrospective"
-            className="h-9 inline-flex items-center gap-1.5 px-3.5 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer"
+            className="h-8 inline-flex items-center gap-1.5 px-3 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer shadow-2xs"
           >
             <Calendar className="w-3.5 h-3.5 text-neutral-500" />
             <span>Weekly Retro</span>
@@ -259,7 +249,7 @@ const AiAssistantView: React.FC<{
               onClick={() => resetMutation.mutate(activeConversationId)}
               disabled={resetMutation.isPending}
               title="Reset current conversation"
-              className="h-9 inline-flex items-center gap-1.5 px-3.5 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer"
+              className="h-8 inline-flex items-center gap-1.5 px-3 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer shadow-2xs"
             >
               <Trash2 className="w-3.5 h-3.5 text-neutral-400" />
               <span>New Chat</span>
@@ -270,7 +260,7 @@ const AiAssistantView: React.FC<{
             type="button"
             onClick={() => setIsSettingsOpen(true)}
             title="Configure AI model & API keys"
-            className="h-9 w-9 flex items-center justify-center text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition cursor-pointer"
+            className="h-8 w-8 flex items-center justify-center text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition cursor-pointer shadow-2xs"
           >
             <Settings className="w-4 h-4" />
           </button>

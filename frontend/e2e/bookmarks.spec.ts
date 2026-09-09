@@ -6,8 +6,7 @@ test.describe('Bookmarks & Read-it-Later Library', () => {
   test('renders empty bookmarks view with masthead, stat strip, and empty state prompt', async ({ app }) => {
     await gotoBookmarks(app);
 
-    await expect(app.getByRole('heading', { name: /Bookmarks & Reading List/i })).toBeVisible();
-    await expect(app.getByText(/Clean reader view, metadata extraction, and tag categorization/i)).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Bookmarks' })).toBeVisible();
 
     await expect(app.getByText('Unread', { exact: true })).toBeVisible();
     await expect(app.getByText('Favorites', { exact: true })).toBeVisible();

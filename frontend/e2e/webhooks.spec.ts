@@ -3,7 +3,7 @@ import { test, expect, gotoApp, TAB } from './fixtures';
 test('navigates to webhooks and displays empty state', async ({ app }) => {
   await gotoApp(app);
   await app.getByRole('button', { name: TAB.webhooks, exact: true }).click();
-  await expect(app.getByRole('heading', { name: 'Inbound Webhooks', exact: true })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Webhooks', exact: true })).toBeVisible();
   await expect(app.getByText(/No inbound webhooks configured/i)).toBeVisible();
 });
 

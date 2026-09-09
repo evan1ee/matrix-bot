@@ -9,7 +9,9 @@ import {
   Search,
   Plus,
   Compass,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 
 interface FootprintsListProps {
   footprints: Footprint[];
@@ -82,13 +84,29 @@ export const FootprintsList: React.FC<FootprintsListProps> = ({
           />
         </div>
 
-        <button
-          onClick={onOpenAddModal}
-          className="h-9 inline-flex items-center justify-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition shrink-0 cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add Place</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Review my travel footprints and visited locations. Write a brief narrative summary of my travel journey and suggest future travel ideas.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI travel log"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Travel Log</span>
+          </button>
+
+          <button
+            onClick={onOpenAddModal}
+            className="h-9 inline-flex items-center justify-center gap-1.5 px-3.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition shrink-0 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Place</span>
+          </button>
+        </div>
       </div>
 
       {/* Category Filter Tabs */}

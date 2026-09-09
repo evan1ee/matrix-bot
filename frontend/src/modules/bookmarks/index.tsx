@@ -155,44 +155,6 @@ export const BookmarksView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Masthead */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-200 dark:border-neutral-800">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 font-sans">
-            Bookmarks & Reading List
-          </h1>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-sans">
-            Clean reader view, metadata extraction, and tag categorization.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() =>
-              triggerAiPrompt(
-                'Review my unread and favorite bookmarks. Recommend which article or guide I should read next and summarize why it is relevant.'
-              )
-            }
-            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
-            title="Ask AI for reading suggestions"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
-            <span>AI Suggestion</span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="save-bookmark-btn"
-            onClick={() => setIsAddModalOpen(true)}
-            className="h-9 inline-flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-neutral-100 dark:hover:bg-neutral-200 dark:text-neutral-900 text-xs font-medium transition shadow-xs cursor-pointer shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Save Link</span>
-          </button>
-        </div>
-      </div>
-
       {/* Sourced Stat Strip (Vercel-style) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200/80 dark:border-neutral-800/80">
@@ -221,11 +183,11 @@ export const BookmarksView: React.FC = () => {
         </div>
       </div>
 
-      {/* Navigation Tabs and Search */}
+      {/* Navigation Tabs, Search and Actions */}
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Tabs */}
-          <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 pb-px">
+          <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 pb-px overflow-x-auto">
             <button
               type="button"
               data-testid="tab-unread"
@@ -276,16 +238,42 @@ export const BookmarksView: React.FC = () => {
             </button>
           </div>
 
-          {/* Search box */}
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search title, URL, or tags..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-9 pl-8 pr-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search box */}
+            <div className="relative w-full sm:w-56">
+              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search title, URL, or tags..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-9 pl-8 pr-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 font-sans"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Review my unread and favorite bookmarks. Recommend which article or guide I should read next and summarize why it is relevant.'
+                )
+              }
+              className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs shrink-0"
+              title="Ask AI for reading suggestions"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+              <span>AI Suggestion</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="save-bookmark-btn"
+              onClick={() => setIsAddModalOpen(true)}
+              className="h-9 inline-flex items-center gap-1.5 px-3.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-neutral-100 dark:hover:bg-neutral-200 dark:text-neutral-900 text-xs font-medium transition shadow-xs cursor-pointer shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Save Link</span>
+            </button>
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Hourglass, NotebookPen, Calendar, Sparkles } from 'lucide-react';
+import { NotebookPen, Calendar, Sparkles } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
@@ -198,52 +198,40 @@ export const LifeView: React.FC = () => {
 
   return (
     <div className="space-y-5 pb-8">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-            <Hourglass className="w-5 h-5 text-zinc-700 dark:text-zinc-300" />
-            <span>Visualizing Life</span>
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Every block represents one day of your life. Future is white, today is the beacon, past holds your memories.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {profile && (
-            <button
-              onClick={() =>
-                triggerAiPrompt(
-                  'Give me a high-level perspective on my life progress across habits, projects, time allocation, and milestones. Offer thoughtful reflection on intentional living.'
-                )
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer shadow-2xs"
-              title="Ask AI for life perspective"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-zinc-500" />
-              <span>AI Perspective</span>
-            </button>
-          )}
-
-          {profile && (
-            <button
-              onClick={handleLogToday}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
-            >
-              <NotebookPen className="w-3.5 h-3.5" />
-              <span>Daily Log →</span>
-            </button>
-          )}
-
+      {/* Action Toolbar */}
+      <div className="flex items-center justify-end gap-2">
+        {profile && (
           <button
-            onClick={() => setIsProfileModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors"
+            onClick={() =>
+              triggerAiPrompt(
+                'Give me a high-level perspective on my life progress across habits, projects, time allocation, and milestones. Offer thoughtful reflection on intentional living.'
+              )
+            }
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer shadow-2xs"
+            title="Ask AI for life perspective"
           >
-            <Calendar className="w-3.5 h-3.5 text-zinc-500" />
-            <span>{profile ? 'Edit profile' : 'Set birth date'}</span>
+            <Sparkles className="w-3.5 h-3.5 text-zinc-500" />
+            <span>AI Perspective</span>
           </button>
-        </div>
+        )}
+
+        {profile && (
+          <button
+            onClick={handleLogToday}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
+          >
+            <NotebookPen className="w-3.5 h-3.5" />
+            <span>Daily Log →</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => setIsProfileModalOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
+        >
+          <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+          <span>{profile ? 'Edit profile' : 'Set birth date'}</span>
+        </button>
       </div>
 
       {/* Onboarding Banner if no profile exists */}

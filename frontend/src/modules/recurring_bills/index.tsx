@@ -160,46 +160,6 @@ export const RecurringBillsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Vercel Editorial Header */}
-      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-white flex items-center gap-2">
-            <RefreshCcw className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
-            Bills & Subscriptions
-          </h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            Overview of active subscriptions, fixed overhead, installment schedules, and automated transfers.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              triggerAiPrompt(
-                'Audit my recurring bills and subscriptions. Summarize my monthly overhead, upcoming payments due soon, and highlight any potential duplicates or cancellation candidates.'
-              )
-            }
-            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
-            title="Ask AI to audit recurring bills"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
-            <span>AI Audit</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setEditingBill(null);
-              setFormError(null);
-              setIsModalOpen(true);
-            }}
-            className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Add Item
-          </button>
-        </div>
-      </div>
-
       {/* Neutral Stat Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
@@ -249,30 +209,60 @@ export const RecurringBillsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 overflow-x-auto">
-        {[
-          { id: 'all', label: 'All', count: bills.length },
-          { id: 'subscription', label: 'Subscriptions', count: subscriptionsCount },
-          { id: 'fixed_bill', label: 'Fixed Bills', count: fixedBillsCount },
-          { id: 'installment', label: 'Installment Payments', count: installmentsCount },
-          { id: 'recurring_transfer', label: 'Recurring Transfers', count: transfersCount },
-        ].map((tab) => (
+      {/* Navigation Tabs & Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-2">
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {[
+            { id: 'all', label: 'All', count: bills.length },
+            { id: 'subscription', label: 'Subscriptions', count: subscriptionsCount },
+            { id: 'fixed_bill', label: 'Fixed Bills', count: fixedBillsCount },
+            { id: 'installment', label: 'Installment Payments', count: installmentsCount },
+            { id: 'recurring_transfer', label: 'Recurring Transfers', count: transfersCount },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as 'all' | BillCategory)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors cursor-pointer ${
+                activeTab === tab.id
+                  ? 'border-neutral-900 text-neutral-900 dark:border-white dark:text-white font-semibold'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span className="px-1.5 py-0.2 text-xs rounded bg-neutral-100 dark:bg-neutral-800 font-mono text-neutral-600 dark:text-neutral-300">
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as 'all' | BillCategory)}
-            className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === tab.id
-                ? 'border-neutral-900 text-neutral-900 dark:border-white dark:text-white font-semibold'
-                : 'border-transparent text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
-            }`}
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Audit my recurring bills and subscriptions. Summarize my monthly overhead, upcoming payments due soon, and highlight any potential duplicates or cancellation candidates.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI to audit recurring bills"
           >
-            <span>{tab.label}</span>
-            <span className="px-1.5 py-0.2 text-xs rounded bg-neutral-100 dark:bg-neutral-800 font-mono text-neutral-600 dark:text-neutral-300">
-              {tab.count}
-            </span>
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Audit</span>
           </button>
-        ))}
+
+          <button
+            onClick={() => {
+              setEditingBill(null);
+              setFormError(null);
+              setIsModalOpen(true);
+            }}
+            className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Add Item
+          </button>
+        </div>
       </div>
 
       {/* Ledger Table */}

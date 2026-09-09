@@ -279,26 +279,21 @@ export const JournalView: React.FC = () => {
     <div className="space-y-6 pb-12">
       {/* Header & Date Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-              <NotebookPen className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
-              <span>Daily Log</span>
-            </h1>
-            {selectedDate === todayStr && (
-              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900/60">
-                Today
-              </span>
-            )}
-            {isLogged && (
-              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60">
-                Logged
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 font-sans">
+        <div className="flex items-center gap-2.5">
+          <NotebookPen className="w-4 h-4 text-neutral-600 dark:text-neutral-300" />
+          <span className="text-base font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
             {formattedDate}
-          </p>
+          </span>
+          {selectedDate === todayStr && (
+            <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900/60">
+              Today
+            </span>
+          )}
+          {isLogged && (
+            <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60">
+              Logged
+            </span>
+          )}
         </div>
 
         {/* Date Navigator Controls */}

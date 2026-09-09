@@ -8,7 +8,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
   test('renders onboarding banner when no profile exists', async ({ app }) => {
     await gotoLife(app);
 
-    await expect(app.getByRole('heading', { name: 'Visualizing Life' })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Life Grid' })).toBeVisible();
     await expect(app.getByText('Start visualizing your lifespan')).toBeVisible();
     await expect(app.getByRole('button', { name: /set birth date now/i })).toBeVisible();
   });
@@ -52,7 +52,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await app.getByRole('button', { name: /daily log →/i }).click();
 
     // Verify navigation to Daily Log module
-    await expect(app.getByRole('main').getByRole('heading', { name: /daily log/i })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Daily Log' })).toBeVisible();
 
     // Navigate back to Life Grid
     await gotoLife(app);
@@ -207,7 +207,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await todayBtn.click();
 
     // Verify Read-Only View is shown with Logged badge
-    await expect(app.getByText('Logged', { exact: true })).toBeVisible();
+    await expect(app.getByRole('dialog').getByText('Logged', { exact: true })).toBeVisible();
     await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).toBeVisible();
     await expect(app.getByText('A memorable milestone day')).toBeVisible();
     await expect(app.getByText('Sunny')).toBeVisible();
@@ -235,7 +235,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     // Modal should close and Daily Log module should be opened
     await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).not.toBeVisible();
-    await expect(app.getByRole('main').getByRole('heading', { name: /daily log/i })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Daily Log' })).toBeVisible();
     await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
     await expect(app.getByText('A memorable milestone day')).toBeVisible();
   });

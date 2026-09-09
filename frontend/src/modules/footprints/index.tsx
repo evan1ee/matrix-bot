@@ -3,11 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Footprint, CreateFootprintInput, FootprintsSummaryStats } from './types';
-import { triggerAiPrompt } from '../ai';
 import { FootprintsMap } from './FootprintsMap';
 import { FootprintsList } from './FootprintsList';
 import { FootprintModal } from './FootprintModal';
-import { Compass, MapPin, Globe, Calendar, DollarSign, Plus, Sparkles } from 'lucide-react';
 
 export * from './types';
 
@@ -117,33 +115,7 @@ const FootprintsView: React.FC<{
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Header & Description */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2 tracking-tight">
-            <Compass className="w-5 h-5 text-neutral-600 dark:text-neutral-300" />
-            <span>Footprints &amp; Travel Journal</span>
-          </h1>
-          <p className="text-xs text-neutral-500 font-sans mt-0.5">
-            Track everywhere you've been on an interactive star map with memories and spending stats.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() =>
-              triggerAiPrompt(
-                'Review my travel footprints and visited locations. Write a brief narrative summary of my travel journey and suggest future travel ideas.'
-              )
-            }
-            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
-            title="Ask AI travel log"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
-            <span>AI Travel Log</span>
-          </button>
-        </div>
-      </div>
+
 
       {/* Vercel Stat Strip (Design.md vbg-stat-strip) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">

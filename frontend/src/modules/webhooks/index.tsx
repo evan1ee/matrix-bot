@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import {
-  Webhook as WebhookIcon, Plus, Trash2, RefreshCw, Send,
+  Plus, Trash2, RefreshCw, Send,
   Radio, CheckCircle2, Globe, History, Sparkles
 } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
@@ -141,43 +141,32 @@ const WebhooksView: React.FC<{
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <WebhookIcon className="w-6 h-6 text-neutral-700 dark:text-neutral-300" />
-            Inbound Webhooks
-          </h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            Trigger Matrix notifications from external servers, monitoring daemons, cron jobs, or Telegram bots.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              triggerAiPrompt(
-                'List my configured inbound webhooks and check recent delivery logs. Help me format an incoming curl payload example for sending alerts.'
-              )
-            }
-            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
-            title="Ask AI about webhooks"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
-            <span>AI Webhook Guide</span>
-          </button>
+      {/* Action Bar */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            triggerAiPrompt(
+              'List my configured inbound webhooks and check recent delivery logs. Help me format an incoming curl payload example for sending alerts.'
+            )
+          }
+          className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+          title="Ask AI about webhooks"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+          <span>AI Webhook Guide</span>
+        </button>
 
-          <button
-            onClick={() => {
-              setIsCreateOpen(true);
-              setFormError(null);
-            }}
-            className="h-9 inline-flex items-center gap-2 px-3.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-xs rounded-md hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Create Webhook
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            setIsCreateOpen(true);
+            setFormError(null);
+          }}
+          className="h-9 inline-flex items-center gap-2 px-3.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 font-medium text-xs rounded-md hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors shadow-xs cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Create Webhook</span>
+        </button>
       </div>
 
       {/* Main List Content */}
