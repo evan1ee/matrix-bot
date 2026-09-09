@@ -71,6 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModuleId,
   onSelectModule,
+  isConnected,
   user,
   onOpenAuth,
   onOpenSettings,
@@ -117,6 +118,71 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const displayName = user?.display_name || user?.username || 'User';
   const isDark = currentTheme === 'dark';
+
+  const statusLabel = !user ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting';
+  const statusColor = !user
+    ? 'bg-neutral-400 dark:bg-neutral-600'
+    : isConnected
+    ? 'bg-emerald-500'
+    : 'bg-amber-500';
+  const statusDesc = !user
+    ? 'Sign in to establish real-time event streaming.'
+    : isConnected
+    ? 'Real-time event stream is connected and receiving background updates.'
+    : 'Attempting to re-establish connection to live event stream.';
+
+  const renderDetailCard = () => (
+    <div className="p-3 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl text-left font-sans text-xs">
+      <div className="flex items-center justify-between pb-2 border-b border-neutral-100 dark:border-neutral-800 mb-2">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
+          <span className="font-semibold text-neutral-900 dark:text-neutral-100 text-xs">
+            {statusLabel}
+          </span>
+        </div>
+        <span className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+          SSE
+        </span>
+      </div>
+      <div className="space-y-1.5 text-[11px]">
+        <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+          <span>Protocol</span>
+          <span className="font-mono text-[10px] text-neutral-700 dark:text-neutral-300">Server-Sent Events</span>
+        </div>
+        <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+          <span>Endpoint</span>
+          <span className="font-mono text-[10px] text-neutral-700 dark:text-neutral-300">/api/v1/events</span>
+        </div>
+        <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+          <span>Sync Scope</span>
+          <span className="text-neutral-700 dark:text-neutral-300">Tasks, Reminders, Bills, AI</span>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400 border-t border-neutral-100 dark:border-neutral-800 pt-2">
+        {statusDesc}
+      </p>
+    </div>
+  );
+
+  /** Standalone connection status dot button for expanded mode */
+  const renderConnectionStatus = () => (
+    <div className="relative group flex items-center justify-center">
+      <button
+        type="button"
+        data-testid="connection-status-dot"
+        aria-label={`Connection status: ${statusLabel}`}
+        title={`Connection status: ${statusLabel}`}
+        className="p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer flex items-center justify-center"
+      >
+        <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+      </button>
+
+      {/* Hover detail card positioned neatly above the bottom bar */}
+      <div className="pointer-events-none absolute bottom-full right-[-52px] mb-2 w-[236px] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 z-50">
+        {renderDetailCard()}
+      </div>
+    </div>
+  );
 
   /** Inline theme toggle button */
   const renderThemeBtn = (compact: boolean) => (
@@ -248,14 +314,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </button>
 
-              {/* Settings */}
-              <button
-                onClick={onOpenSettings}
-                className="w-9 h-9 flex items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
-                title="Settings"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+              {/* Settings with connection dot in collapsed mode */}
+              <div className="relative group flex items-center justify-center">
+                <button
+                  onClick={onOpenSettings}
+                  className="w-9 h-9 flex items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer relative"
+                  title="Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span
+                    data-testid="connection-status-dot"
+                    aria-label={`Connection status: ${statusLabel}`}
+                    title={`Connection status: ${statusLabel}`}
+                    className="absolute top-1.5 right-1.5 flex items-center justify-center"
+                  >
+                    <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                  </span>
+                </button>
+
+                <div className="pointer-events-none absolute left-full bottom-0 ml-2 w-64 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 z-50">
+                  {renderDetailCard()}
+                </div>
+              </div>
 
               {/* Theme */}
               {renderThemeBtn(true)}
@@ -283,10 +363,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
 
               {/* Utility buttons */}
-              <div className="flex items-center shrink-0 gap-0">
+              <div className="flex items-center shrink-0 gap-0.5">
+                {renderConnectionStatus()}
                 <button
                   onClick={onOpenSettings}
-                  className="p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] transition duration-150 cursor-pointer"
+                  className="p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition duration-150 cursor-pointer"
                   title="Settings"
                 >
                   <Settings className="w-3.5 h-3.5" />
@@ -305,6 +386,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <LogIn className="w-4 h-4 shrink-0" />
               </button>
+              {/* Connection status in collapsed logged out */}
+              <div className="relative group flex items-center justify-center">
+                <button
+                  type="button"
+                  data-testid="connection-status-dot"
+                  aria-label={`Connection status: ${statusLabel}`}
+                  title={`Connection status: ${statusLabel}`}
+                  className="w-9 h-9 flex items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] transition duration-150 cursor-pointer"
+                >
+                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                </button>
+                <div className="pointer-events-none absolute left-full bottom-0 ml-2 w-64 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 z-50">
+                  {renderDetailCard()}
+                </div>
+              </div>
               {renderThemeBtn(true)}
             </>
           ) : (
@@ -317,6 +413,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <LogIn className="w-4 h-4 shrink-0" />
                 <span>Sign In</span>
               </button>
+              {renderConnectionStatus()}
               {renderThemeBtn(false)}
             </div>
           )

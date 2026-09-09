@@ -47,7 +47,10 @@ test('shows live counts in the header stats', async ({ app, api }) => {
 test('shows the live-stream connection state', async ({ app }) => {
   await gotoApp(app);
 
-  await expect(app.getByText(/SSE Live|Reconnecting|Auth Required/i).first()).toBeVisible();
+  const dot = app.locator('aside [data-testid="connection-status-dot"]');
+  await expect(dot).toBeVisible();
+  await dot.hover();
+  await expect(app.locator('aside').getByText(/SSE Live|Reconnecting|Auth Required/i)).toBeVisible();
 });
 
 test('persists the chosen theme across reloads', async ({ app }) => {

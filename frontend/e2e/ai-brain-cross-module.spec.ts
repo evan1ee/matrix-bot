@@ -1,11 +1,9 @@
 import { test, expect, gotoApp, TAB } from './fixtures';
 
 test.describe('AI Brain Central Integration & Cross-Module Triggers', () => {
-  test('header "Ask Brain" action navigates to AI assistant from another module', async ({ app }) => {
+  test('navigating to AI assistant opens AI Brain from another module', async ({ app }) => {
     await gotoApp(app, TAB.todo);
-    await expect(app.getByRole('button', { name: 'Ask Brain' })).toBeVisible();
-
-    await app.getByRole('button', { name: 'Ask Brain' }).click();
+    await app.getByRole('button', { name: TAB.ai }).click();
 
     // Verify lands on AI Assistant
     await expect(app.getByRole('heading', { name: 'AI Assistant', exact: true })).toBeVisible();
