@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule } from '../../core/types';
@@ -15,7 +15,9 @@ import {
   Pencil,
   Zap,
   BellRing,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { BillModal } from './BillModal';
 import {
   BillCategory,
@@ -126,15 +128,22 @@ export const RecurringBillsView: React.FC = () => {
     (b) => activeTab === 'all' || b.category === activeTab
   );
 
-  // Statistics calculation
-  const totalMonthlyCommitment = bills.reduce((sum, b) => {
-    let monthlyAmount = b.amount_minor / 100;
-    if (b.frequency === 'yearly') monthlyAmount /= 12;
-    else if (b.frequency === 'weekly') monthlyAmount *= 4.33;
-    else if (b.frequency === 'quarterly') monthlyAmount /= 3;
-    else if (b.frequency === 'daily') monthlyAmount *= 30;
-    return sum + monthlyAmount;
-  }, 0);
+  // Statistics calculation grouped per currency (currencies are never added together)
+  const monthlyCommitments = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of bills) {
+      const cur = (b.currency || displayCurrency).toUpperCase();
+      let monthly = b.amount_minor / Math.pow(10, b.currency_exponent ?? 2);
+      if (b.frequency === 'yearly') monthly /= 12;
+      else if (b.frequency === 'weekly') monthly *= 4.33;
+      else if (b.frequency === 'quarterly') monthly /= 3;
+      else if (b.frequency === 'daily') monthly *= 30;
+      map.set(cur, (map.get(cur) || 0) + monthly);
+    }
+    const list = Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }));
+    list.sort((a, b) => (a.currency === displayCurrency ? -1 : b.currency === displayCurrency ? 1 : a.currency.localeCompare(b.currency)));
+    return list;
+  }, [bills, displayCurrency]);
 
   const subscriptionsCount = bills.filter((b) => b.category === 'subscription').length;
   const fixedBillsCount = bills.filter((b) => b.category === 'fixed_bill').length;
@@ -162,17 +171,33 @@ export const RecurringBillsView: React.FC = () => {
             Overview of active subscriptions, fixed overhead, installment schedules, and automated transfers.
           </p>
         </div>
-        <button
-          onClick={() => {
-            setEditingBill(null);
-            setFormError(null);
-            setIsModalOpen(true);
-          }}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-lg shadow-sm transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Add Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              triggerAiPrompt(
+                'Audit my recurring bills and subscriptions. Summarize my monthly overhead, upcoming payments due soon, and highlight any potential duplicates or cancellation candidates.'
+              )
+            }
+            className="h-9 inline-flex items-center gap-1.5 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer shadow-2xs"
+            title="Ask AI to audit recurring bills"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+            <span>AI Audit</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEditingBill(null);
+              setFormError(null);
+              setIsModalOpen(true);
+            }}
+            className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 rounded-md shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Add Item
+          </button>
+        </div>
       </div>
 
       {/* Neutral Stat Strip */}
@@ -181,10 +206,16 @@ export const RecurringBillsView: React.FC = () => {
           <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-mono">
             Monthly Commitment
           </div>
-          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white">
-            {displayCurrency} {totalMonthlyCommitment.toFixed(2)}
+          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white truncate">
+            {monthlyCommitments.length === 0
+              ? `${displayCurrency} 0.00`
+              : `${monthlyCommitments[0].currency} ${monthlyCommitments[0].amount.toFixed(2)}`}
           </div>
-          <p className="mt-1 text-[11px] text-neutral-500 font-mono">Normalized monthly cost</p>
+          <p className="mt-1 text-[11px] text-neutral-500 font-mono truncate">
+            {monthlyCommitments.length > 1
+              ? `+ ${monthlyCommitments.slice(1).map((c) => `${c.currency} ${c.amount.toFixed(2)}`).join(' · ')}`
+              : 'Normalized monthly cost'}
+          </p>
         </div>
 
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
@@ -295,7 +326,7 @@ export const RecurringBillsView: React.FC = () => {
                             )}
                             {bill.remind_before_minutes ? (
                               <span
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-xs font-mono bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-xs font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded border border-neutral-200 dark:border-neutral-700"
                                 title={`Reminder ${leadLabel(bill.remind_before_minutes)}`}
                               >
                                 <BellRing className="w-3 h-3" /> {leadLabel(bill.remind_before_minutes)}

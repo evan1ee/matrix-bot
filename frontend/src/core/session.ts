@@ -24,7 +24,7 @@ export function useSession() {
     queryKey: SESSION_QUERY_KEY,
     queryFn: async () => {
       try {
-        return await fetchApi<SessionUser>('/auth/me');
+        return await fetchApi<SessionUser>('/auth/me', { suppressAuthEvent: true });
       } catch {
         // A 401 here is the ordinary signed-out state, not an error worth
         // retrying or surfacing.

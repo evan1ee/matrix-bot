@@ -1,5 +1,6 @@
 import { SessionUser } from '../core/session';
 import React, { useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { registry } from '../core/registry';
 import { SystemEvent } from '../core/types';
 import { Theme } from '../core/theme';
@@ -25,9 +26,14 @@ const MODULE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
   todo: 'Tasks',
   reminder: 'Reminders',
+  bookmarks: 'Bookmarks',
   finance: 'Expenses',
   portfolio: 'Portfolio',
   recurring_bills: 'Bills',
+  footprints: 'Footprints',
+  journal: 'Daily Log',
+  life: 'Life Grid',
+  ai: 'AI Assistant',
   core: 'System Overview',
 };
 
@@ -83,19 +89,32 @@ export const AppShell: React.FC<AppShellProps> = ({
           <h1 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
             {moduleLabel}
           </h1>
-          <div className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-tertiary)]">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                !user
-                  ? 'bg-neutral-400 dark:bg-neutral-600'
-                  : isConnected
-                  ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
-                  : 'bg-amber-500 dark:bg-amber-400'
-              }`}
-            />
-            <span>
-              {!user ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting…'}
-            </span>
+          <div className="flex items-center gap-3">
+            {activeModuleId !== 'ai' && (
+              <button
+                type="button"
+                onClick={() => onSelectModule('ai')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-sans font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 border border-neutral-200 dark:border-neutral-700/60 rounded-md transition-colors shadow-xs"
+                title="Open AI Brain"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+                <span>Ask Brain</span>
+              </button>
+            )}
+            <div className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-tertiary)]">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  !user
+                    ? 'bg-neutral-400 dark:bg-neutral-600'
+                    : isConnected
+                    ? 'bg-emerald-500 dark:bg-emerald-400'
+                    : 'bg-amber-500 dark:bg-amber-400'
+                }`}
+              />
+              <span>
+                {!user ? 'Auth Required' : isConnected ? 'SSE Live' : 'Reconnecting…'}
+              </span>
+            </div>
           </div>
         </header>
 

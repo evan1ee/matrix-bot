@@ -4,8 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
-  Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock,
-  Wallet, TrendingUp, Receipt, Settings, LogIn, Sun, Moon, LucideIcon
+  Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
+  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, NotebookPen, Settings, LogIn, Sun, Moon, LucideIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -39,6 +39,9 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'todo', label: 'Tasks', icon: CheckSquare },
       { id: 'reminder', label: 'Reminders', icon: Clock },
+      { id: 'bookmarks', label: 'Bookmarks', icon: Bookmark },
+      { id: 'habits', label: 'Habits', icon: Zap },
+      { id: 'ai', label: 'AI Assistant', icon: Sparkles },
     ],
   },
   {
@@ -47,6 +50,20 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'finance', label: 'Expenses', icon: Wallet },
       { id: 'portfolio', label: 'Portfolio', icon: TrendingUp },
       { id: 'recurring_bills', label: 'Bills', icon: Receipt },
+    ],
+  },
+  {
+    title: 'Lifestyle',
+    items: [
+      { id: 'journal', label: 'Daily Log', icon: NotebookPen },
+      { id: 'footprints', label: 'Footprints', icon: Compass },
+      { id: 'life', label: 'Life Grid', icon: Hourglass },
+    ],
+  },
+  {
+    title: 'Integrations',
+    items: [
+      { id: 'webhooks', label: 'Webhooks', icon: Webhook },
     ],
   },
 ];

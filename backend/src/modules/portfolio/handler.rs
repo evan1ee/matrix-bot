@@ -34,18 +34,27 @@ pub async fn handle_portfolio_command(
     if rest_lower.starts_with("buy") {
         return Some(handle_buy(pool, owner_id, rest[3..].trim(), broadcaster).await);
     }
+    if rest_lower.starts_with("record") || rest_lower.starts_with("import") {
+        return Some(handle_record(pool, owner_id, rest[6..].trim(), broadcaster).await);
+    }
     if rest_lower.starts_with("sell") {
         return Some(handle_sell(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("price") {
         return Some(handle_price(pool, owner_id, rest[5..].trim(), broadcaster).await);
     }
+    if rest_lower.starts_with("refresh") || rest_lower.starts_with("update") {
+        return Some(handle_refresh(pool, owner_id, broadcaster).await);
+    }
     if rest_lower.starts_with("note") {
         return Some(handle_note(pool, owner_id, rest[4..].trim(), broadcaster).await);
     }
-    if rest_lower.starts_with("remove") || rest_lower.starts_with("delete") {
+    if rest_lower.starts_with("remove") || rest_lower.starts_with("delete") || rest_lower.starts_with("rm") {
         let symbol = rest.split_whitespace().nth(1).unwrap_or("");
         return Some(handle_remove(pool, owner_id, symbol, broadcaster).await);
+    }
+    if rest_lower.starts_with("alert") {
+        return Some(crate::modules::portfolio::alerts_handler::handle_alert_command(pool, owner_id, rest[5..].trim(), broadcaster).await);
     }
 
     Some(usage())
@@ -170,6 +179,56 @@ async fn handle_buy(
         Err(err) => {
             error!("Failed to record a portfolio buy: {:?}", err);
             "❌ Database error recording the purchase.".to_string()
+        }
+    }
+}
+
+async fn handle_record(
+    pool: &SqlitePool,
+    owner_id: &str,
+    args: &str,
+    broadcaster: Option<&EventBroadcaster>,
+) -> String {
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
+    let parsed = match parse_buy(args, &default_currency) {
+        Ok(p) => p,
+        Err(err) => return format!("⚠️ {}.", html_escape(&err)),
+    };
+    let exponent = exponent_for(&parsed.currency);
+
+    match PortfolioRepository::record_holding(
+        pool,
+        owner_id,
+        &parsed.symbol,
+        parsed.quantity_minor,
+        parsed.price_minor,
+        &parsed.currency,
+        exponent as i64,
+        parsed.note.as_deref(),
+    )
+    .await
+    {
+        Ok(Ok(holding)) => {
+            broadcast(broadcaster, SystemEvent::PortfolioHoldingCreated(holding.clone()));
+            format!(
+                "📝 Recorded holding of <b>{} {}</b> @ {} {}. Total position: {} @ avg {} {} (no cash deducted).",
+                html_escape(&format_quantity(parsed.quantity_minor)),
+                html_escape(&parsed.symbol),
+                html_escape(&format_amount(parsed.price_minor, exponent)),
+                html_escape(&parsed.currency),
+                html_escape(&format_quantity(holding.quantity_minor)),
+                html_escape(&format_amount(holding.avg_cost_minor, exponent)),
+                html_escape(&holding.currency),
+            )
+        }
+        Ok(Err(existing_currency)) => format!(
+            "⚠️ <b>{}</b> is already held in <b>{}</b>.",
+            html_escape(&parsed.symbol),
+            html_escape(&existing_currency),
+        ),
+        Err(err) => {
+            error!("Failed to record holding: {:?}", err);
+            "❌ Database error recording position.".to_string()
         }
     }
 }
@@ -333,6 +392,32 @@ async fn handle_price(
     }
 }
 
+async fn handle_refresh(
+    pool: &SqlitePool,
+    owner_id: &str,
+    broadcaster: Option<&EventBroadcaster>,
+) -> String {
+    let summary = super::price_feed::refresh_all_for_owner(pool, broadcaster, owner_id).await;
+    if summary.updated.is_empty() && summary.failed.is_empty() {
+        return "ℹ️ You have no holdings to refresh.".to_string();
+    }
+    let mut msg = String::new();
+    if !summary.updated.is_empty() {
+        msg.push_str(&format!(
+            "🔄 <b>Refreshed market prices for {} holding(s):</b> {}<br/>",
+            summary.updated.len(),
+            summary.updated.iter().map(|s| format!("<code>{}</code>", html_escape(s))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !summary.failed.is_empty() {
+        msg.push_str(&format!(
+            "⚠️ <b>Failed to fetch:</b> {}",
+            summary.failed.iter().map(|s| format!("<code>{}</code>", html_escape(s))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    msg
+}
+
 async fn handle_note(
     pool: &SqlitePool,
     owner_id: &str,
@@ -475,5 +560,33 @@ mod tests {
         assert_eq!(signed_amount(1550, 2), "+15.50");
         assert_eq!(signed_amount(-1550, 2), "-15.50");
         assert_eq!(signed_amount(0, 2), "+0.00");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_empty_holdings() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
+            .await
+            .unwrap();
+        assert!(reply.contains("no holdings to refresh"));
+    }
+
+    #[tokio::test]
+    async fn test_record_holding_without_cash() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio record AAPL 10 @ 150.00 USD initial", None)
+            .await
+            .unwrap();
+        assert!(reply.contains("Recorded holding of"));
+        assert!(reply.contains("no cash deducted"));
+
+        // Verify holding exists in DB
+        let h = PortfolioRepository::find(&pool, "@alice:x", "AAPL").await.unwrap().unwrap();
+        assert_eq!(h.symbol, "AAPL");
+        assert_eq!(h.quantity_minor, 10 * 10i64.pow(QUANTITY_EXPONENT));
     }
 }

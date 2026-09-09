@@ -2,6 +2,8 @@ use chrono::{Months, NaiveDateTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use super::models::{CreateBillPayload, RecurringBill, UpdateBillPayload};
+use crate::modules::finance::models::{Transaction, TransactionSource};
+use crate::modules::finance::repository::FinanceRepository;
 
 pub struct RecurringBillRepository;
 
@@ -153,7 +155,7 @@ impl RecurringBillRepository {
         pool: &SqlitePool,
         id: i64,
         owner_id: &str,
-    ) -> Result<RecurringBill, sqlx::Error> {
+    ) -> Result<(RecurringBill, Transaction), sqlx::Error> {
         let bill = Self::get_by_id(pool, id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
@@ -189,9 +191,36 @@ impl RecurringBillRepository {
         .execute(pool)
         .await?;
 
-        Self::get_by_id(pool, id)
+        let updated = Self::get_by_id(pool, id)
             .await?
-            .ok_or(sqlx::Error::RowNotFound)
+            .ok_or(sqlx::Error::RowNotFound)?;
+
+        let category_id = FinanceRepository::find_or_create_category(pool, &bill.owner_id, &bill.category)
+            .await
+            .ok()
+            .flatten()
+            .map(|c| c.id);
+
+        let note = format!("Recurring bill: {}", bill.name);
+        let tx = FinanceRepository::create_transaction(
+            pool,
+            &bill.room_id,
+            &bill.owner_id,
+            &bill.sender_name,
+            "expense",
+            bill.amount_minor,
+            &bill.currency,
+            bill.currency_exponent as i64,
+            category_id,
+            Some(&note),
+            Some(TransactionSource::RecurringBill.as_str()),
+            Some(bill.id),
+            Utc::now(),
+        )
+        .await
+        .map_err(|e| sqlx::Error::Protocol(format!("Failed to record bill transaction: {}", e)))?;
+
+        Ok((updated, tx))
     }
 }
 
@@ -254,11 +283,15 @@ mod tests {
             .unwrap();
         assert_eq!(list.len(), 1);
 
-        let paid = RecurringBillRepository::mark_paid(&pool, created.id, "@alice:a")
+        let (paid, tx) = RecurringBillRepository::mark_paid(&pool, created.id, "@alice:a")
             .await
             .unwrap();
         assert_eq!(paid.paid_installments, 1);
         assert_eq!(paid.next_due_at, "2026-10-15 00:00:00");
+        assert_eq!(tx.amount_minor, 1599);
+        assert_eq!(tx.direction, "expense");
+        assert_eq!(tx.source_kind.as_deref(), Some("recurring_bill"));
+        assert_eq!(tx.source_id, Some(created.id));
 
         let deleted = RecurringBillRepository::delete(&pool, created.id, "@alice:a")
             .await

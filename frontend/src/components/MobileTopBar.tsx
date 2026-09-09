@@ -42,7 +42,7 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
             !user
               ? 'bg-neutral-400 dark:bg-neutral-600'
               : isConnected
-              ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
+              ? 'bg-emerald-500 dark:bg-emerald-400'
               : 'bg-amber-500 dark:bg-amber-400'
           }`}
           title={!user ? 'Not authenticated' : isConnected ? 'Connected' : 'Reconnecting'}

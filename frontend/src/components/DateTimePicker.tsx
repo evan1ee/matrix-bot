@@ -194,11 +194,11 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
     : placeholder;
 
   return (
-    <div ref={containerRef} data-testid="datetime-picker" className={`relative ${className}`}>
+    <div ref={containerRef} data-testid="datetime-picker" className={`relative w-full ${className}`}>
       <button
         type="button"
         onClick={() => (isOpen ? setIsOpen(false) : open())}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100 hover:bg-neutral-50 dark:hover:bg-neutral-850 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-600 transition shadow-xs cursor-pointer"
+        className="w-full h-9 flex items-center justify-between gap-2 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100 hover:bg-neutral-50 dark:hover:bg-neutral-850 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-600 transition shadow-xs cursor-pointer"
       >
         <span className={`truncate ${selected ? '' : 'text-neutral-400 dark:text-neutral-500'}`}>
           {display}

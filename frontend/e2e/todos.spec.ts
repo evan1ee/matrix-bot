@@ -1,7 +1,7 @@
-import { test, expect, gotoApp, todoRow, chooseOption } from './fixtures';
+import { test, expect, gotoApp, todoRow, chooseOption, TAB } from './fixtures';
 
 test('creates a task and shows it in the list', async ({ app, api }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   await app.getByPlaceholder('What needs to be done?').fill('Write the release notes');
   await app.getByRole('button', { name: 'Add Task' }).click();
 
@@ -10,7 +10,7 @@ test('creates a task and shows it in the list', async ({ app, api }) => {
 });
 
 test('creates a task with a chosen priority', async ({ app, api }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   await app.getByPlaceholder('What needs to be done?').fill('Urgent thing');
   await chooseOption(app.getByRole('button', { name: 'Medium Priority' }), 'High Priority');
   await app.getByRole('button', { name: 'Add Task' }).click();
@@ -22,14 +22,14 @@ test('creates a task with a chosen priority', async ({ app, api }) => {
 });
 
 test('refuses to submit an empty task', async ({ app, api }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   await app.getByRole('button', { name: 'Add Task' }).click();
   // Nothing is sent — the form guards before the request.
   expect(api.requests.filter((r) => r.method === 'POST' && r.url === '/todos')).toHaveLength(0);
 });
 
 test('rejects text past the 500 character limit', async ({ app, api }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   await app.getByPlaceholder('What needs to be done?').fill('x'.repeat(501));
   await app.getByRole('button', { name: 'Add Task' }).click();
 
@@ -38,7 +38,7 @@ test('rejects text past the 500 character limit', async ({ app, api }) => {
 });
 
 test('surfaces a server rejection instead of swallowing it', async ({ app, api }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   api.failNext = { path: /^\/todos$/, status: 400, error: 'Task text required' };
 
   await app.getByPlaceholder('What needs to be done?').fill('Doomed task');
@@ -49,7 +49,7 @@ test('surfaces a server rejection instead of swallowing it', async ({ app, api }
 
 test('toggles a task between active and completed', async ({ app, api }) => {
   api.seedTodo({ text: 'Toggle me' });
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
 
   const row = todoRow(app, 'Toggle me');
   await row.getByRole('button').first().click();
@@ -66,7 +66,7 @@ test('toggles a task between active and completed', async ({ app, api }) => {
 
 test('deletes a task', async ({ app, api }) => {
   api.seedTodo({ text: 'Delete me' });
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
 
   await todoRow(app, 'Delete me').getByTitle('Delete task').click();
 
@@ -77,7 +77,7 @@ test('deletes a task', async ({ app, api }) => {
 test('filters by status', async ({ app, api }) => {
   api.seedTodo({ text: 'Still open' });
   api.seedTodo({ text: 'Already done', completed: true });
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
 
   await expect(todoRow(app, 'Still open')).toBeVisible();
   await expect(todoRow(app, 'Already done')).toBeVisible();
@@ -96,6 +96,6 @@ test('filters by status', async ({ app, api }) => {
 });
 
 test('shows an empty state when there is nothing to show', async ({ app }) => {
-  await gotoApp(app, 'Todos');
+  await gotoApp(app, TAB.todo);
   await expect(app.getByText('No tasks found. Create one above!')).toBeVisible();
 });

@@ -10,13 +10,14 @@ import {
   setDateTime,
   clearDateTime,
   datetimeLocal,
-} from './fixtures';
+  TAB,
+}  from './fixtures';
 
 const HOUR = 60;
 
 test.describe('setting a due date and reminder at creation', () => {
   test('schedules a reminder in the chosen room', async ({ app, api }) => {
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await app.getByPlaceholder('What needs to be done?').fill('Cut the release');
     await setDateTime(dateField(app, 'Due date'), datetimeLocal(6 * HOUR));
@@ -38,7 +39,7 @@ test.describe('setting a due date and reminder at creation', () => {
   });
 
   test('hides the room picker until a reminder is wanted', async ({ app }) => {
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await expect(app.getByText('Send to room')).toHaveCount(0);
     await chooseOption(selectField(app, 'Remind me'), '1 day before');
@@ -46,7 +47,7 @@ test.describe('setting a due date and reminder at creation', () => {
   });
 
   test('will not submit a reminder without a due date', async ({ app, api }) => {
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await app.getByPlaceholder('What needs to be done?').fill('No date');
     await chooseOption(selectField(app, 'Remind me'), '1 hour before');
@@ -60,7 +61,7 @@ test.describe('setting a due date and reminder at creation', () => {
   });
 
   test('will not submit a reminder without a room', async ({ app, api }) => {
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await app.getByPlaceholder('What needs to be done?').fill('No room');
     await setDateTime(dateField(app, 'Due date'), datetimeLocal(6 * HOUR));
@@ -74,7 +75,7 @@ test.describe('setting a due date and reminder at creation', () => {
   });
 
   test('a due date alone needs no room', async ({ app, api }) => {
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await app.getByPlaceholder('What needs to be done?').fill('Just a deadline');
     await setDateTime(dateField(app, 'Due date'), datetimeLocal(3 * HOUR));
@@ -89,7 +90,7 @@ test.describe('setting a due date and reminder at creation', () => {
 
   test('explains why a local account has no rooms to pick', async ({ app, api }) => {
     api.rooms = [];
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await chooseOption(selectField(app, 'Remind me'), '1 hour before');
     await expect(app.getByText(/No Matrix rooms available/)).toBeVisible();
@@ -103,7 +104,7 @@ test.describe('showing due dates in the list', () => {
       due_at: new Date('2030-06-15T14:30:00Z').toISOString(),
       remind_before_minutes: 60,
     });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     const row = todoRow(app, 'Has a deadline');
     // The suite pins the browser to UTC, so the rendered local time is the
@@ -121,7 +122,7 @@ test.describe('showing due dates in the list', () => {
       text: 'Future task',
       due_at: new Date(Date.now() + 3_600_000).toISOString(),
     });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     // Asserted via a data attribute rather than a Tailwind class: the class set
     // varies with the active theme, which made this assertion flaky.
@@ -148,7 +149,7 @@ test.describe('editing an existing task', () => {
       room_id: '!ops:mbm.one',
       message: `Task #${todo.id} is due: ${todo.text}`,
     });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Original text').getByTitle('Edit task').click();
 
@@ -171,7 +172,7 @@ test.describe('editing an existing task', () => {
 
   test('adds a due date and reminder to a task that had none', async ({ app, api }) => {
     const todo = api.seedTodo({ text: 'Bare task' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Bare task').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -189,7 +190,7 @@ test.describe('editing an existing task', () => {
 
   test('requires a room when adding a first reminder to a web task', async ({ app, api }) => {
     api.seedTodo({ text: 'Needs a room' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Needs a room').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -211,7 +212,7 @@ test.describe('editing an existing task', () => {
       remind_before_minutes: 60,
     });
     api.seedReminder({ todo_id: todo.id, room_id: '!general:mbm.one' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Reschedule me').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -242,7 +243,7 @@ test.describe('editing an existing task', () => {
       remind_before_minutes: 60,
     });
     api.seedReminder({ todo_id: todo.id });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Drop the reminder').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -264,7 +265,7 @@ test.describe('editing an existing task', () => {
       remind_before_minutes: 60,
     });
     api.seedReminder({ todo_id: todo.id });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Drop the date').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -279,7 +280,7 @@ test.describe('editing an existing task', () => {
 
   test('cancelling an edit discards the changes', async ({ app, api }) => {
     api.seedTodo({ text: 'Keep me as I am' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Keep me as I am').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -293,7 +294,7 @@ test.describe('editing an existing task', () => {
 
   test('rejects an empty task text on edit', async ({ app, api }) => {
     api.seedTodo({ text: 'Has text' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Has text').getByTitle('Edit task').click();
     const form = todoEditForm(app);
@@ -306,7 +307,7 @@ test.describe('editing an existing task', () => {
 
   test('shows a server error inside the row and keeps editing open', async ({ app, api }) => {
     api.seedTodo({ text: 'Server will refuse' });
-    await gotoApp(app, 'Todos');
+    await gotoApp(app, TAB.todo);
 
     await todoRow(app, 'Server will refuse').getByTitle('Edit task').click();
     const form = todoEditForm(app);

@@ -161,11 +161,33 @@ impl LinkRepository {
                 }
             }
             None => {
+                let previous_account = sqlx::query_scalar::<_, String>(
+                    "SELECT account_id FROM security_events \
+                     WHERE kind = 'matrix_unlinked' AND detail = ? \
+                     ORDER BY id DESC LIMIT 1",
+                )
+                .bind(mxid)
+                .fetch_optional(pool)
+                .await?;
+
                 sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)")
                     .bind(mxid)
                     .bind(&challenge.account_id)
                     .execute(pool)
                     .await?;
+
+                if let Some(prev) = previous_account {
+                    if prev != challenge.account_id {
+                        let preview = super::MergeRepository::preview(pool, &prev).await.unwrap_or_default();
+                        if preview.total() > 0 {
+                            return Ok(LinkOutcome::NeedsMergeConfirmation {
+                                account_id: challenge.account_id,
+                                from_account: prev,
+                            });
+                        }
+                    }
+                }
+
                 Ok(LinkOutcome::Linked { account_id: challenge.account_id })
             }
         }

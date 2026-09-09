@@ -1,0 +1,325 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use utoipa::ToSchema;
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct AiUserConfig {
+    pub owner_id: String,
+    pub api_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    pub model_name: Option<String>,
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    pub updated_at: String,
+    #[sqlx(default)]
+    pub has_api_key: bool,
+}
+
+impl AiUserConfig {
+    pub fn redacted(mut self) -> Self {
+        self.has_api_key = self.api_key.as_ref().map(|k| !k.trim().is_empty()).unwrap_or(false);
+        self.api_key = None;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VerifyAiKeyInput {
+    pub api_base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub model_name: Option<String>,
+}
+
+impl VerifyAiKeyInput {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(ref url_str) = self.api_base_url {
+            let trimmed = url_str.trim();
+            if trimmed.len() > 500 {
+                return Err("API base URL exceeds 500 characters");
+            }
+            if !trimmed.is_empty() {
+                let parsed = url::Url::parse(trimmed)
+                    .map_err(|_| "API base URL is not a valid URL")?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err("API base URL must use http or https scheme");
+                }
+                if let Some(host) = parsed.host_str() {
+                    if host == "169.254.169.254" || host.starts_with("169.254.") {
+                        return Err("API base URL cannot target link-local metadata addresses");
+                    }
+                }
+            }
+        }
+        if let Some(ref key) = self.api_key {
+            if key.len() > 500 {
+                return Err("API key exceeds 500 characters");
+            }
+        }
+        if let Some(ref model) = self.model_name {
+            if model.len() > 500 {
+                return Err("Model name exceeds 500 characters");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VerifyAiKeyResponse {
+    pub valid: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateAiConfigInput {
+    pub api_base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub model_name: Option<String>,
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+}
+
+impl UpdateAiConfigInput {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(ref url_str) = self.api_base_url {
+            let trimmed = url_str.trim();
+            if trimmed.len() > 500 {
+                return Err("API base URL exceeds 500 characters");
+            }
+            if !trimmed.is_empty() {
+                let parsed = url::Url::parse(trimmed)
+                    .map_err(|_| "API base URL is not a valid URL")?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err("API base URL must use http or https scheme");
+                }
+                if let Some(host) = parsed.host_str() {
+                    if host == "169.254.169.254" || host.starts_with("169.254.") {
+                        return Err("API base URL cannot target link-local metadata addresses");
+                    }
+                }
+            }
+        }
+        if let Some(ref key) = self.api_key {
+            if key.len() > 500 {
+                return Err("API key exceeds 500 characters");
+            }
+        }
+        if let Some(ref model) = self.model_name {
+            if model.len() > 500 {
+                return Err("Model name exceeds 500 characters");
+            }
+        }
+        if let Some(ref prompt) = self.system_prompt {
+            if prompt.len() > 2000 {
+                return Err("System prompt exceeds 2000 characters");
+            }
+        }
+        if let Some(temp) = self.temperature {
+            if !(0.0..=2.0).contains(&temp) {
+                return Err("Temperature must be between 0.0 and 2.0");
+            }
+        }
+        if let Some(tokens) = self.max_tokens {
+            if tokens <= 0 || tokens > 32768 {
+                return Err("Max tokens must be between 1 and 32768");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct AiConversation {
+    pub id: String,
+    pub owner_id: String,
+    pub room_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct AiMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content: String,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AiChatRequest {
+    pub prompt: String,
+    pub conversation_id: Option<String>,
+    pub room_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AiChatResponse {
+    pub conversation_id: String,
+    pub message: String,
+    pub model_used: String,
+    pub tool_calls_executed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AiConversationWithMessages {
+    pub conversation: AiConversation,
+    pub messages: Vec<AiMessage>,
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI Protocol Payload Structures
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionRequest {
+    pub model: String,
+    pub messages: Vec<ChatCompletionMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionMessage {
+    pub role: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub r#type: String,
+    pub function: FunctionDefinition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub r#type: String,
+    pub function: FunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionResponse {
+    pub id: Option<String>,
+    pub model: Option<String>,
+    pub choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionChoice {
+    pub index: usize,
+    pub message: ChatCompletionMessage,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionChunk {
+    pub id: Option<String>,
+    pub model: Option<String>,
+    pub choices: Vec<ChatCompletionChunkChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionChunkChoice {
+    pub index: usize,
+    pub delta: ChatCompletionDelta,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionDelta {
+    pub role: Option<String>,
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallChunk>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallChunk {
+    pub index: usize,
+    pub id: Option<String>,
+    pub r#type: Option<String>,
+    pub function: Option<FunctionCallChunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCallChunk {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_api_base_url() {
+        let valid = UpdateAiConfigInput {
+            api_base_url: Some("https://api.openai.com/v1".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_scheme = UpdateAiConfigInput {
+            api_base_url: Some("ftp://example.com".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert_eq!(
+            invalid_scheme.validate().unwrap_err(),
+            "API base URL must use http or https scheme"
+        );
+
+        let ssrf_metadata = UpdateAiConfigInput {
+            api_base_url: Some("http://169.254.169.254/latest/meta-data".to_string()),
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        assert_eq!(
+            ssrf_metadata.validate().unwrap_err(),
+            "API base URL cannot target link-local metadata addresses"
+        );
+    }
+}

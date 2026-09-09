@@ -12,11 +12,15 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
+use crate::modules::footprints::FootprintsModule;
+use crate::modules::habits::HabitsModule;
+use crate::modules::life::LifeModule;
 use crate::modules::portfolio::PortfolioModule;
 use crate::modules::recurring_bills::RecurringBillsModule;
 use crate::modules::reminder::ReminderModule;
 use crate::modules::settings::SettingsModule;
 use crate::modules::todo::TodoModule;
+use crate::modules::webhook::WebhookModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
 pub mod client;
@@ -71,8 +75,15 @@ impl MatrixBot {
         registry.register(ReminderModule::new());
         registry.register(FinanceModule::new());
         registry.register(PortfolioModule::new());
+        registry.register(FootprintsModule::new());
+        registry.register(HabitsModule::new());
+        registry.register(LifeModule::new());
+        registry.register(crate::modules::journal::JournalModule::new());
+        registry.register(crate::modules::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
+        registry.register(WebhookModule::new());
+        registry.register(crate::modules::ai::AiModule::new());
         registry.register(crate::modules::account::AccountModule::new(
             client_handle.clone().unwrap_or_default(),
             config.web_url.clone(),

@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
-use webauthn_rs::prelude::{CredentialID, Passkey};
+use webauthn_rs::prelude::Passkey;
 
 /// A registered passkey, as the account settings screen shows it.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -43,7 +43,7 @@ impl StoredCredential {
 }
 
 /// The stable text form of a credential ID.
-pub fn credential_id_string(id: &CredentialID) -> String {
+pub fn credential_id_string(id: impl AsRef<[u8]>) -> String {
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id.as_ref())
 }

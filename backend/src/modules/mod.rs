@@ -8,14 +8,21 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 
 pub mod account;
+pub mod ai;
+pub mod bookmarks;
 pub mod core;
 pub mod due_reminder;
 pub mod finance;
+pub mod footprints;
+pub mod habits;
+pub mod journal;
+pub mod life;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
 pub mod settings;
 pub mod todo;
+pub mod webhook;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.

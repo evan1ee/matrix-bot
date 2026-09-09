@@ -37,7 +37,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
             {health?.service || 'matrix-bot-api'}
           </div>
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
             <span>Version {health?.version || '0.1.0'}</span>
           </div>
         </div>
@@ -45,7 +45,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
             <span>SQLITE DATABASE</span>
-            <Database className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+            <Database className="w-4 h-4 text-neutral-500" />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100 capitalize">
             {health?.db_status || 'checking...'}

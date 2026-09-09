@@ -14,7 +14,9 @@ import {
   Pencil,
   Check,
   X,
+  Sparkles,
 } from 'lucide-react';
+import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import {
@@ -169,7 +171,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
           type="text"
           value={draftText}
           onChange={(e) => setDraftText(e.target.value)}
-          className="w-full px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
+          className="w-full h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-sans"
         />
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -229,7 +231,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+            className="h-9 inline-flex items-center gap-2 px-3 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
           >
             <Check className="w-3.5 h-3.5" />
             {saving ? 'Saving…' : 'Save'}
@@ -237,7 +239,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
+            className="h-9 inline-flex items-center gap-2 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
             Cancel
@@ -485,7 +487,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
               placeholder="What needs to be done?"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="sm:col-span-2 px-3 py-2 rounded bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
+              className="sm:col-span-2 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-sans"
             />
 
             <CustomSelect
@@ -502,7 +504,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50"
+              className="h-9 inline-flex items-center justify-center gap-2 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>{createMutation.isPending ? 'Adding...' : 'Add Task'}</span>
@@ -577,6 +579,19 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() =>
+                triggerAiPrompt(
+                  'Analyze my pending tasks, deadlines, and priorities. Recommend the top 3 items I should focus on first today and why.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-sans font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 rounded transition-colors shadow-2xs cursor-pointer"
+              title="Ask AI to prioritize tasks"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              <span>AI Prioritize</span>
+            </button>
           </div>
           <span className="text-xs font-mono text-neutral-500 shrink-0">
             {filteredItems.length} items

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { KeyRound, Loader2, ShieldCheck, X } from 'lucide-react';
 import {
   describePasskeyError,
@@ -32,6 +32,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [invite, setInvite] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reopening always starts at sign-in. Without this the dialog remembers the
+  // mode it was last left in, so signing out from a session that began with
+  // registration reopens on the registration form — asking someone who already
+  // has an account to make another one.
+  useEffect(() => {
+    if (isOpen) {
+      setMode('signin');
+      setError(null);
+      setDisplayName('');
+      setInvite('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

@@ -23,6 +23,7 @@ and both land on the same data.
   cash balance that gates every buy. Prices are entered manually; there is no
   price feed in this codebase.
 - 🧾 **Recurring bills** — schedules, instalments, auto-pay, advance reminders.
+- 🔔 **Webhooks** — inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility, and durable retry queue. See [`docs/webhooks.md`](docs/webhooks.md).
 - ⚙️ **Settings** — per-user timezone and default currency, read by every other
   module so a date renders the same wherever it appears.
 - 🔐 **Accounts** — passkey sign-in, linked Matrix identities, recovery.
@@ -78,6 +79,7 @@ all of this on `localhost` with no hardware key.
 | Finance | `!expense add <amount> [CUR] <note> [-c <category>]`, `!income add <amount> [CUR] <note> [-c <category>]`, `!expense list [page]`, `!expense summary`, `!expense delete <id>`, `!category [add\|list\|remove] <name>` |
 | Portfolio | `!portfolio [list]`, `!portfolio summary`, `!portfolio buy <symbol> <qty> @ <price> [CUR] [note]`, `!portfolio sell <symbol> <qty> @ <price>`, `!portfolio price <symbol> <price>`, `!portfolio note <symbol> [text]`, `!portfolio remove <symbol>`, `!portfolio cash [deposit\|withdraw] <amount> [CUR]` |
 | Bills | `!bill add <name> <amount> <currency> <category> [frequency]`, `!bill list`, `!bill pay <id>`, `!bill remind <id> <minutes\|off>`, `!bill delete <id>` |
+| Webhooks | `!webhook list`, `!webhook create <name> [room]`, `!webhook test <id>`, `!webhook revoke <id>` |
 | Settings | `!settings`, `!settings timezone <IANA zone>`, `!settings currency <CODE>` |
 | Account | `!link <code>`, `!recover` |
 

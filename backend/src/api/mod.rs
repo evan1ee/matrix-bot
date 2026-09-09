@@ -18,17 +18,27 @@ const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub mod account;
+pub mod ai;
 pub mod auth;
-pub mod health;
-pub mod openapi;
+pub mod bookmarks;
 pub mod finance;
+pub mod footprints;
+pub mod habits;
+pub mod health;
+pub mod life;
+pub mod life_activity;
+pub mod openapi;
 pub mod portfolio;
+pub mod portfolio_alerts;
+pub mod portfolio_history;
+pub mod portfolio_prices;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
 pub mod settings;
 pub mod sse;
 pub mod todos;
+pub mod webhooks;
 
 /// The API route table.
 ///
@@ -93,11 +103,28 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/portfolio/holdings/:id", delete(portfolio::delete_holding))
         .route("/portfolio/holdings/:id/sell", post(portfolio::sell_holding))
         .route("/portfolio/holdings/:id/price", put(portfolio::set_price))
+        .route("/portfolio/holdings/:id/symbol", put(portfolio_prices::update_holding_symbol))
         .route("/portfolio/holdings/:id/note", put(portfolio::set_note))
+        .route("/portfolio/refresh-prices", post(portfolio_prices::refresh_all_prices))
+        .route(
+            "/portfolio/holdings/:id/refresh-price",
+            post(portfolio_prices::refresh_single_holding_price),
+        )
+        .route("/portfolio/holdings/record", post(portfolio_prices::record_holding_position))
+        .route("/portfolio/search", get(portfolio_prices::search_ticker_symbols))
+        .route("/portfolio/quote", get(portfolio_prices::get_symbol_quote))
+        .route("/portfolio/activity", get(portfolio_prices::get_portfolio_activity))
+        .route("/portfolio/activity/verify", get(portfolio_prices::verify_portfolio_activity_chain))
         .route("/portfolio/summary", get(portfolio::summary))
         .route("/portfolio/cash", get(portfolio::list_cash))
         .route("/portfolio/cash/deposit", post(portfolio::deposit_cash))
         .route("/portfolio/cash/withdraw", post(portfolio::withdraw_cash))
+        .route(
+            "/portfolio/alerts",
+            get(portfolio_alerts::list_alerts).post(portfolio_alerts::create_alert),
+        )
+        .route("/portfolio/alerts/:id", delete(portfolio_alerts::delete_alert))
+        .route("/portfolio/history", get(portfolio_history::get_portfolio_history))
         .route(
             "/recurring-bills",
             get(recurring_bills::list_bills).post(recurring_bills::create_bill),
@@ -109,6 +136,128 @@ pub fn api_routes() -> Router<auth::ApiState> {
                 .delete(recurring_bills::delete_bill),
         )
         .route("/recurring-bills/:id/pay", post(recurring_bills::pay_bill))
+        .route("/webhooks/:token", post(webhooks::inbound_webhook))
+        .route(
+            "/bot:token/sendMessage",
+            get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
+        )
+        .route(
+            "/account/webhooks",
+            get(webhooks::list_webhooks).post(webhooks::create_webhook),
+        )
+        .route(
+            "/account/webhooks/:id",
+            patch(webhooks::update_webhook).delete(webhooks::delete_webhook),
+        )
+        .route(
+            "/account/webhooks/:id/rotate",
+            post(webhooks::rotate_webhook_token),
+        )
+        .route("/account/webhooks/:id/test", post(webhooks::test_webhook))
+        .route("/account/webhooks/:id/logs", get(webhooks::get_webhook_logs))
+        .route("/ai/chat", post(ai::chat))
+        .route("/ai/verify", post(ai::verify_ai_config))
+        .route("/ai/conversations", get(ai::list_conversations))
+        .route(
+            "/ai/conversations/:id",
+            delete(ai::delete_conversation),
+        )
+        .route(
+            "/ai/conversations/:id/messages",
+            get(ai::get_conversation_messages),
+        )
+        .route(
+            "/account/ai-config",
+            get(ai::get_ai_config).put(ai::update_ai_config),
+        )
+        .route("/ai/retrospective", get(ai::get_retrospective))
+        .route(
+            "/bookmarks",
+            get(bookmarks::list_bookmarks).post(bookmarks::create_bookmark),
+        )
+        .route("/bookmarks/stats", get(bookmarks::get_stats))
+        .route(
+            "/bookmarks/:id",
+            get(bookmarks::get_bookmark)
+                .patch(bookmarks::update_bookmark)
+                .delete(bookmarks::delete_bookmark),
+        )
+        .route(
+            "/bookmarks/:id/toggle-favorite",
+            post(bookmarks::toggle_favorite),
+        )
+        .route(
+            "/bookmarks/:id/toggle-archive",
+            post(bookmarks::toggle_archive),
+        )
+        .route(
+            "/footprints",
+            get(footprints::list_footprints).post(footprints::create_footprint),
+        )
+        .route(
+            "/footprints/stats",
+            get(footprints::get_summary_stats),
+        )
+        .route(
+            "/footprints/geocode",
+            get(footprints::geocode_proxy),
+        )
+        .route(
+            "/footprints/:id",
+            get(footprints::get_footprint)
+                .put(footprints::update_footprint)
+                .delete(footprints::delete_footprint),
+        )
+        .route(
+            "/habits",
+            get(habits::list_habits).post(habits::create_habit),
+        )
+        .route(
+            "/habits/heatmap",
+            get(habits::get_heatmap),
+        )
+        .route(
+            "/habits/stats",
+            get(habits::get_stats),
+        )
+        .route(
+            "/habits/:id",
+            put(habits::update_habit).delete(habits::delete_habit),
+        )
+        .route(
+            "/habits/:id/toggle",
+            post(habits::toggle_habit_log),
+        )
+        .route(
+            "/life/profile",
+            get(life::get_profile_and_stats)
+                .put(life::upsert_profile)
+                .post(life::upsert_profile),
+        )
+        .route(
+            "/life/year/:year",
+            get(life::get_year_view),
+        )
+        .route(
+            "/life/horizon",
+            get(life::get_horizon),
+        )
+        .route(
+            "/life/days",
+            post(life::upsert_day),
+        )
+        .route(
+            "/life/days/:date",
+            get(life::get_day).delete(life::delete_day),
+        )
+        .route(
+            "/life/days/:date/time",
+            put(life::update_time_allocation),
+        )
+        .route(
+            "/life/days/:date/activity",
+            get(life_activity::get_day_activity),
+        )
 }
 
 pub async fn start_api_server(
@@ -132,6 +281,7 @@ pub async fn start_api_server(
         // (measured at ~6s against one such setup), and a connect timeout tighter
         // than that silently breaks profile and media lookups.
         reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(HTTP_TOTAL_TIMEOUT)
             .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .build()
@@ -156,7 +306,7 @@ pub async fn start_api_server(
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
     // an explicit allowlist keeps that surface to hosts the operator names.
-    let allowed_origins: Vec<HeaderValue> = config
+    let mut allowed_origins: Vec<HeaderValue> = config
         .cors_allowed_origins
         .iter()
         .filter_map(|origin| match origin.parse::<HeaderValue>() {
@@ -168,10 +318,20 @@ pub async fn start_api_server(
         })
         .collect();
 
+    if allowed_origins.is_empty()
+        && (config.webauthn_rp_id == "localhost" || config.webauthn_origin.contains("localhost"))
+    {
+        for origin in &["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173", "http://127.0.0.1:8080"] {
+            if let Ok(val) = origin.parse::<HeaderValue>() {
+                allowed_origins.push(val);
+            }
+        }
+    }
+
     if allowed_origins.is_empty() {
         info!("CORS: same-origin only (set CORS_ALLOWED_ORIGINS to permit others)");
     } else {
-        info!("CORS: allowing origins {:?}", config.cors_allowed_origins);
+        info!("CORS: allowing origins {:?}", allowed_origins);
     }
 
     let cors = CorsLayer::new()
@@ -192,6 +352,11 @@ pub async fn start_api_server(
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        .route(
+            "/bot:token/sendMessage",
+            get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
+        )
+        .route("/webhooks/:token", post(webhooks::inbound_webhook))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         .fallback_service(ServeDir::new(web_dist))
         .layer(cors)

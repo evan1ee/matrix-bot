@@ -2,11 +2,13 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::modules::finance::models::{Category, Transaction};
+use crate::modules::portfolio::audit::PortfolioAuditEntry;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::reminder::models::Reminder;
 use crate::modules::settings::UserSettings;
 use crate::modules::todo::models::TodoItem;
+use crate::modules::webhook::models::Webhook;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -41,10 +43,34 @@ pub enum SystemEvent {
     /// real row to key off — the event fields are what the SSE stream and the
     /// frontend cache actually key on.
     PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
+    PortfolioAuditLogged(PortfolioAuditEntry),
+    PortfolioAlertCreated(crate::modules::portfolio::alerts::PriceAlert),
+    PortfolioAlertTriggered(crate::modules::portfolio::alerts::PriceAlert),
+    PortfolioAlertDeleted { id: i64, owner_id: String },
     RecurringBillCreated(RecurringBill),
     RecurringBillUpdated(RecurringBill),
     RecurringBillDeleted { id: i64, owner_id: String },
     RecurringBillPaid { id: i64, owner_id: String, next_due_at: String },
+    WebhookCreated(Webhook),
+    WebhookUpdated(Webhook),
+    WebhookDeleted { id: String, owner_id: String },
+    WebhookTriggered { id: String, owner_id: String, outbox_id: String, room_id: String, severity: String },
+    AiConversationUpdated { id: String, owner_id: String },
+    AiConversationDeleted { id: String, owner_id: String },
+    AiConfigUpdated { owner_id: String },
+    FootprintCreated(crate::modules::footprints::models::Footprint),
+    FootprintUpdated(crate::modules::footprints::models::Footprint),
+    FootprintDeleted { id: i64, owner_id: String },
+    HabitCreated(crate::modules::habits::models::Habit),
+    HabitUpdated(crate::modules::habits::models::Habit),
+    HabitDeleted { id: i64, owner_id: String },
+    HabitLogToggled { habit_id: i64, owner_id: String, log_date: String, completed: bool },
+    LifeProfileUpdated { owner_id: String, profile: crate::modules::life::models::LifeProfile },
+    LifeDayLogged(crate::modules::life::models::LifeDayLog),
+    LifeDayCleared { owner_id: String, date: String },
+    BookmarkCreated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkUpdated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkDeleted { id: i64, owner_id: String },
 }
 
 impl SystemEvent {
@@ -76,11 +102,30 @@ impl SystemEvent {
             }
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
+            SystemEvent::PortfolioAuditLogged(entry) => &entry.owner_id,
+            SystemEvent::PortfolioAlertCreated(a) | SystemEvent::PortfolioAlertTriggered(a) => &a.owner_id,
+            SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
                 &b.owner_id
             }
             SystemEvent::RecurringBillDeleted { owner_id, .. }
             | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
+            SystemEvent::WebhookCreated(w) | SystemEvent::WebhookUpdated(w) => &w.owner_id,
+            SystemEvent::WebhookDeleted { owner_id, .. }
+            | SystemEvent::WebhookTriggered { owner_id, .. } => owner_id,
+            SystemEvent::AiConversationUpdated { owner_id, .. }
+            | SystemEvent::AiConversationDeleted { owner_id, .. }
+            | SystemEvent::AiConfigUpdated { owner_id } => owner_id,
+            SystemEvent::FootprintCreated(f) | SystemEvent::FootprintUpdated(f) => &f.owner_id,
+            SystemEvent::FootprintDeleted { owner_id, .. } => owner_id,
+            SystemEvent::HabitCreated(h) | SystemEvent::HabitUpdated(h) => &h.owner_id,
+            SystemEvent::HabitDeleted { owner_id, .. }
+            | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id,
+            SystemEvent::LifeProfileUpdated { owner_id, .. }
+            | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id,
+            SystemEvent::LifeDayLogged(l) => &l.owner_id,
+            SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => &b.owner_id,
+            SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
         }
     }
 }

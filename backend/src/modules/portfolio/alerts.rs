@@ -1,0 +1,306 @@
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, SqlitePool};
+use utoipa::ToSchema;
+
+use crate::utils::html::html_escape;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertCondition {
+    Above,
+    Below,
+}
+
+impl AlertCondition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AlertCondition::Above => "above",
+            AlertCondition::Below => "below",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "above" | ">" | "gte" | ">=" => Some(AlertCondition::Above),
+            "below" | "<" | "lte" | "<=" => Some(AlertCondition::Below),
+            _ => None,
+        }
+    }
+
+    pub fn symbol_str(&self) -> &'static str {
+        match self {
+            AlertCondition::Above => "≥",
+            AlertCondition::Below => "≤",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct PriceAlert {
+    pub id: i64,
+    pub owner_id: String,
+    pub symbol: String,
+    pub target_price_minor: i64,
+    pub currency: String,
+    pub currency_exponent: i32,
+    pub condition: String,
+    pub is_triggered: bool,
+    pub triggered_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl PriceAlert {
+    pub fn parsed_condition(&self) -> AlertCondition {
+        AlertCondition::from_str(&self.condition).unwrap_or(AlertCondition::Above)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreatePriceAlert {
+    pub symbol: String,
+    pub target_price: String,
+    pub currency: Option<String>,
+    pub condition: AlertCondition,
+}
+
+pub struct AlertsRepository;
+
+impl AlertsRepository {
+    pub async fn create(
+        pool: &SqlitePool,
+        owner_id: &str,
+        symbol: &str,
+        target_price_minor: i64,
+        currency: &str,
+        currency_exponent: i32,
+        condition: AlertCondition,
+    ) -> Result<PriceAlert> {
+        let norm_symbol = symbol.trim().to_uppercase();
+        let norm_currency = currency.trim().to_uppercase();
+
+        let id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO portfolio_price_alerts (
+                owner_id, symbol, target_price_minor, currency, currency_exponent, condition
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id;
+            "#,
+        )
+        .bind(owner_id)
+        .bind(&norm_symbol)
+        .bind(target_price_minor)
+        .bind(&norm_currency)
+        .bind(currency_exponent)
+        .bind(condition.as_str())
+        .fetch_one(pool)
+        .await?;
+
+        Self::find_by_id(pool, id, owner_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Alert created but not found"))
+    }
+
+    pub async fn find_by_id(
+        pool: &SqlitePool,
+        id: i64,
+        owner_id: &str,
+    ) -> Result<Option<PriceAlert>> {
+        let alert = sqlx::query_as::<_, PriceAlert>(
+            r#"
+            SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
+                   condition, is_triggered, triggered_at, created_at
+            FROM portfolio_price_alerts
+            WHERE id = ? AND owner_id = ?;
+            "#,
+        )
+        .bind(id)
+        .bind(owner_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(alert)
+    }
+
+    pub async fn list_for_owner(
+        pool: &SqlitePool,
+        owner_id: &str,
+    ) -> Result<Vec<PriceAlert>> {
+        let alerts = sqlx::query_as::<_, PriceAlert>(
+            r#"
+            SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
+                   condition, is_triggered, triggered_at, created_at
+            FROM portfolio_price_alerts
+            WHERE owner_id = ?
+            ORDER BY is_triggered ASC, created_at DESC;
+            "#,
+        )
+        .bind(owner_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(alerts)
+    }
+
+    pub async fn list_active_for_symbol(
+        pool: &SqlitePool,
+        symbol: &str,
+    ) -> Result<Vec<PriceAlert>> {
+        let norm = symbol.trim().to_uppercase();
+        let alerts = sqlx::query_as::<_, PriceAlert>(
+            r#"
+            SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
+                   condition, is_triggered, triggered_at, created_at
+            FROM portfolio_price_alerts
+            WHERE is_triggered = 0 AND (symbol = ? OR symbol LIKE ?);
+            "#,
+        )
+        .bind(&norm)
+        .bind(format!("{}-%", norm))
+        .fetch_all(pool)
+        .await?;
+
+        Ok(alerts)
+    }
+
+    pub async fn list_active_symbols(pool: &SqlitePool) -> Result<Vec<String>> {
+        let symbols = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT symbol FROM portfolio_price_alerts WHERE is_triggered = 0;",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(symbols)
+    }
+
+    pub async fn delete(
+        pool: &SqlitePool,
+        id: i64,
+        owner_id: &str,
+    ) -> Result<bool> {
+        let rows = sqlx::query(
+            "DELETE FROM portfolio_price_alerts WHERE id = ? AND owner_id = ?;",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+
+        Ok(rows > 0)
+    }
+
+    pub async fn mark_triggered(
+        pool: &SqlitePool,
+        id: i64,
+    ) -> Result<bool> {
+        let rows = sqlx::query(
+            "UPDATE portfolio_price_alerts SET is_triggered = 1, triggered_at = CURRENT_TIMESTAMP WHERE id = ?;",
+        )
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+
+        Ok(rows > 0)
+    }
+}
+
+/// Formats a clean, readable notification for a triggered alert (both plain and HTML).
+pub fn format_alert_notification(
+    alert: &PriceAlert,
+    current_price_minor: i64,
+) -> (String, String) {
+    let cond = alert.parsed_condition();
+    let exp = alert.currency_exponent;
+    let target = (alert.target_price_minor as f64) / 10f64.powi(exp);
+    let current = (current_price_minor as f64) / 10f64.powi(exp);
+
+    let (icon, direction_word) = match cond {
+        AlertCondition::Above => ("🚀", "risen above"),
+        AlertCondition::Below => ("⚠️", "dropped below"),
+    };
+
+    let diff_pct = if target > 0.0 {
+        ((current - target) / target) * 100.0
+    } else {
+        0.0
+    };
+
+    let plain = format!(
+        "{} Price Alert: {} has {} target {:.2} {}! Current price: {:.2} {} ({:+.2}%)",
+        icon, alert.symbol, direction_word, target, alert.currency, current, alert.currency, diff_pct
+    );
+
+    let html = format!(
+        r#"<div style="font-family:sans-serif;padding:8px 0;">
+  <p><strong>{} Price Alert: {}</strong></p>
+  <p>{} has <strong>{}</strong> your target of <strong>{:.2} {}</strong>.</p>
+  <p>Current Market Price: <strong>{:.2} {}</strong> (<em>{:+.2}%</em>)</p>
+</div>"#,
+        icon,
+        html_escape(&alert.symbol),
+        html_escape(&alert.symbol),
+        direction_word,
+        target,
+        html_escape(&alert.currency),
+        current,
+        html_escape(&alert.currency),
+        diff_pct
+    );
+
+    (plain, html)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_create_list_delete_alerts() {
+        let pool = pool().await;
+        let owner = "alice";
+
+        let alert = AlertsRepository::create(
+            &pool,
+            owner,
+            "BTC-USD",
+            70000_00,
+            "USD",
+            2,
+            AlertCondition::Above,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(alert.symbol, "BTC-USD");
+        assert_eq!(alert.target_price_minor, 70000_00);
+        assert_eq!(alert.is_triggered, false);
+
+        let list = AlertsRepository::list_for_owner(&pool, owner).await.unwrap();
+        assert_eq!(list.len(), 1);
+
+        let symbols = AlertsRepository::list_active_symbols(&pool).await.unwrap();
+        assert!(symbols.contains(&"BTC-USD".to_string()));
+
+        let active_btc = AlertsRepository::list_active_for_symbol(&pool, "BTC-USD").await.unwrap();
+        assert_eq!(active_btc.len(), 1);
+
+        AlertsRepository::mark_triggered(&pool, alert.id).await.unwrap();
+        let updated = AlertsRepository::find_by_id(&pool, alert.id, owner).await.unwrap().unwrap();
+        assert!(updated.is_triggered);
+
+        let deleted = AlertsRepository::delete(&pool, alert.id, owner).await.unwrap();
+        assert!(deleted);
+        let empty = AlertsRepository::list_for_owner(&pool, owner).await.unwrap();
+        assert!(empty.is_empty());
+    }
+}

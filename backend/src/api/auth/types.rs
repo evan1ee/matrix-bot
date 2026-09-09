@@ -200,6 +200,23 @@ impl ApiState {
         &self.webauthn_origin
     }
 
+    /// Checks whether an Origin header is permitted for state-changing requests.
+    pub fn is_allowed_origin(&self, origin: &str) -> bool {
+        let trimmed = origin.trim_end_matches('/');
+        if trimmed == self.webauthn_origin.trim_end_matches('/') {
+            return true;
+        }
+        if (self.webauthn_origin.contains("localhost") || self.webauthn_origin.contains("127.0.0.1"))
+            && (trimmed == "http://localhost:5173"
+                || trimmed == "http://localhost:8080"
+                || trimmed == "http://127.0.0.1:5173"
+                || trimmed == "http://127.0.0.1:8080")
+        {
+            return true;
+        }
+        false
+    }
+
     /// Files a ceremony away and returns the id the browser quotes back.
     ///
     /// Expired entries are swept here rather than by a timer: ceremonies only
@@ -242,9 +259,20 @@ pub fn build_webauthn(rp_id: &str, origin: &str) -> anyhow::Result<webauthn_rs::
     let parsed = url::Url::parse(origin)
         .map_err(|err| anyhow::anyhow!("WEBAUTHN_ORIGIN '{origin}' is not a URL: {err}"))?;
 
-    Ok(webauthn_rs::WebauthnBuilder::new(rp_id, &parsed)?
-        .rp_name("Matrix Bot")
-        .build()?)
+    let mut builder = webauthn_rs::WebauthnBuilder::new(rp_id, &parsed)?
+        .rp_name("Matrix Bot");
+
+    if rp_id == "localhost" || rp_id == "127.0.0.1" {
+        builder = builder.allow_any_port(true);
+        if let Ok(alt_8080) = url::Url::parse("http://localhost:8080") {
+            builder = builder.append_allowed_origin(&alt_8080);
+        }
+        if let Ok(alt_5173) = url::Url::parse("http://localhost:5173") {
+            builder = builder.append_allowed_origin(&alt_5173);
+        }
+    }
+
+    Ok(builder.build()?)
 }
 
 impl FromRef<ApiState> for Database {

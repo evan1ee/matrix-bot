@@ -24,6 +24,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     crate::db::schema_auth::create_tables(pool).await?;
+    crate::db::schema_webhooks::create_tables(pool).await?;
+    crate::db::schema_ai::create_tables(pool).await?;
+    crate::db::schema_portfolio::create_tables(pool).await?;
+    crate::db::schema_footprints::create_tables(pool).await?;
+    crate::db::schema_habits::create_tables(pool).await?;
+    crate::db::schema_life::run_life_schema(pool).await?;
+    crate::db::schema_bookmarks::create_tables(pool).await?;
 
     sqlx::query(
         r#"
@@ -150,6 +157,61 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Append-only, cryptographically linked immutable audit log for all portfolio activity.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS portfolio_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            symbol TEXT,
+            quantity_minor INTEGER,
+            price_minor INTEGER,
+            amount_minor INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            currency_exponent INTEGER NOT NULL DEFAULT 2,
+            realized_pl_minor INTEGER,
+            note TEXT,
+            prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+            entry_hash TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_audit_log_owner \
+         ON portfolio_audit_log(owner_id, created_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_update
+        BEFORE UPDATE ON portfolio_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit log entries are immutable and cannot be updated');
+        END;
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_delete
+        BEFORE DELETE ON portfolio_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit log entries cannot be deleted');
+        END;
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     // Per-user spending categories. Names are unique per owner, not globally.
     sqlx::query(
         r#"
@@ -187,6 +249,8 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             currency_exponent INTEGER NOT NULL DEFAULT 2,
             category_id INTEGER,
             note TEXT,
+            source_kind TEXT,
+            source_id INTEGER,
             occurred_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -311,6 +375,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Link transactions to external originating sources (e.g. recurring_bill, portfolio_cash).
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_kind TEXT;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_id INTEGER;").execute(pool).await;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions(source_kind, source_id);").execute(pool).await?;
+
     // Migration helpers for recurring_bills columns on existing SQLite DBs
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';").execute(pool).await;
@@ -357,6 +426,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await;
 
+    let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000';")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT '';")
+        .execute(pool)
+        .await;
+
     // One-shot data conversions, kept out of the DDL above because they are a
     // different job: this function describes the shape of the database, and
     // `backfill` rewrites what is already in it.
@@ -389,6 +465,7 @@ mod tests {
         let tables = table_names(&pool).await;
         for expected in [
             "finance_categories",
+            "portfolio_audit_log",
             "portfolio_cash_balances",
             "portfolio_holdings",
             "recurring_bills",

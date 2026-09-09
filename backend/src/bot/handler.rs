@@ -12,7 +12,7 @@ use tracing::{error, info};
 use crate::bot::dispatcher::CommandParser;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::ModuleRegistry;
+use crate::modules::{ModuleRegistry, ParsedCommand};
 
 pub fn register_handlers(
     client: &Client,
@@ -53,19 +53,35 @@ pub fn register_handlers(
 
             let formatted_body = text_content.formatted.as_ref().map(|f| f.body.as_str());
 
-            if let Some(parsed) = CommandParser::parse_message(
+            let is_direct = room.is_direct().await.unwrap_or(false) || room.active_members_count() <= 2;
+
+            let parsed = if let Some(parsed) = CommandParser::parse_message(
                 &text_content.body,
                 formatted_body,
                 &own_id,
                 room.room_id().as_str(),
                 ev.sender.localpart(),
             ) {
-                info!(
-                    "Command received in [{}] from [{}]: command='{}', args='{}'",
-                    parsed.room_id, parsed.sender_name, parsed.command, parsed.raw_args
-                );
+                parsed
+            } else {
+                let trimmed = text_content.body.trim();
+                if is_direct && !trimmed.is_empty() {
+                    ParsedCommand {
+                        room_id: room.room_id().to_string(),
+                        sender_name: ev.sender.localpart().to_string(),
+                        command: "ai".to_string(),
+                        raw_args: trimmed.to_string(),
+                        full_body: trimmed.to_string(),
+                    }
+                } else {
+                    return;
+                }
+            };
 
-                let is_direct = room.is_direct().await.unwrap_or(false);
+            info!(
+                "Command received in [{}] from [{}]: command='{}', args='{}'",
+                parsed.room_id, parsed.sender_name, parsed.command, parsed.raw_args
+            );
 
                 // `!link` is handled *before* the sender is resolved, and that
                 // ordering is load-bearing. Resolving first would provision an
@@ -120,7 +136,6 @@ pub fn register_handlers(
                         error!("Failed to send message to room {}: {:?}", room.room_id(), err);
                     }
                 }
-            }
         }
     });
 }

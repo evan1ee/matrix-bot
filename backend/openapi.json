@@ -9,6 +9,64 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/account/ai-config": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "get_ai_config",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUserConfig"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "update_ai_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAiConfigInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUserConfig"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/account/matrix": {
       "get": {
         "tags": [
@@ -396,6 +454,459 @@
         ]
       }
     },
+    "/api/v1/account/webhooks": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "list_webhooks",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Webhook"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "create_webhook",
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedWebhookResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/webhooks/{id}": {
+      "delete": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "delete_webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "update_webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/webhooks/{id}/logs": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "get_webhook_logs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Webhook ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max entries to return (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset for pagination (default 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookLogsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/webhooks/{id}/rotate": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "rotate_webhook_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedWebhookResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/webhooks/{id}/test": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "test_webhook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundAcceptedResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/chat": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiChatResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/conversations": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "list_conversations",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AiConversation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/conversations/{id}": {
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "delete_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/conversations/{id}/messages": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "get_conversation_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AiMessage"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/retrospective": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "get_retrospective",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyRetrospective"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/verify": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "verify_ai_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyAiKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyAiKeyResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "tags": [
@@ -653,6 +1164,350 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/bookmarks": {
+      "get": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "list_bookmarks",
+        "parameters": [
+          {
+            "name": "archived",
+            "in": "query",
+            "description": "Filter by archived state",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "favorite",
+            "in": "query",
+            "description": "Filter by favorite state",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Filter by tag",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "description": "Filter by domain",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Search query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Page offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Bookmark"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "create_bookmark",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBookmarkInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookmarks/stats": {
+      "get": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "get_stats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkStats"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookmarks/{id}": {
+      "get": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "get_bookmark",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bookmark ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "delete_bookmark",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bookmark ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "update_bookmark",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bookmark ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBookmarkInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookmarks/{id}/toggle-archive": {
+      "post": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "toggle_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bookmark ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookmarks/{id}/toggle-favorite": {
+      "post": {
+        "tags": [
+          "bookmarks"
+        ],
+        "operationId": "toggle_favorite",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bookmark ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
       }
     },
     "/api/v1/events": {
@@ -1148,6 +2003,243 @@
         }
       }
     },
+    "/api/v1/portfolio/activity": {
+      "get": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "get_portfolio_activity",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent portfolio operations audit log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioAuditEntry"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/activity/verify": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Verifies the cryptographic SHA-256 hash chain of the user's audit log.",
+        "operationId": "verify_portfolio_activity_chain",
+        "responses": {
+          "200": {
+            "description": "Cryptographic verification report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerificationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/alerts": {
+      "get": {
+        "tags": [
+          "portfolio_alerts"
+        ],
+        "operationId": "list_alerts",
+        "responses": {
+          "200": {
+            "description": "List of price alerts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PriceAlert"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "portfolio_alerts"
+        ],
+        "operationId": "create_alert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAlertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Alert created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceAlert"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/alerts/{id}": {
+      "delete": {
+        "tags": [
+          "portfolio_alerts"
+        ],
+        "operationId": "delete_alert",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Alert ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Alert deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Alert not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/portfolio/cash": {
       "get": {
         "tags": [
@@ -1296,6 +2388,63 @@
         ]
       }
     },
+    "/api/v1/portfolio/history": {
+      "get": {
+        "tags": [
+          "portfolio_history"
+        ],
+        "operationId": "get_portfolio_history",
+        "parameters": [
+          {
+            "name": "timeframe",
+            "in": "query",
+            "description": "Timeframe: \"7d\", \"1m\", \"3m\", \"1y\", \"all\". Defaults to \"1m\".",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "description": "Currency code, e.g. \"USD\". Defaults to \"USD\".",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical net worth data points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioHistoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/portfolio/holdings": {
       "get": {
         "tags": [
@@ -1361,6 +2510,61 @@
           },
           "400": {
             "description": "Bad request, or insufficient cash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/holdings/record": {
+      "post": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "record_holding_position",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuyHoldingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Position recorded without cash debit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
             "content": {
               "application/json": {
                 "schema": {
@@ -1591,6 +2795,73 @@
         ]
       }
     },
+    "/api/v1/portfolio/holdings/{id}/refresh-price": {
+      "post": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "refresh_single_holding_price",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holding database ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Holding price refreshed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Holding not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Failed to fetch market price",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/portfolio/holdings/{id}/sell": {
       "post": {
         "tags": [
@@ -1666,6 +2937,190 @@
             "session_cookie": []
           }
         ]
+      }
+    },
+    "/api/v1/portfolio/holdings/{id}/symbol": {
+      "put": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "update_holding_symbol",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSymbolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Holding symbol updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Holding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid symbol or symbol already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Holding not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/quote": {
+      "get": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "get_symbol_quote",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current market quote for symbol",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SymbolQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed to fetch quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolio/refresh-prices": {
+      "post": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "refresh_all_prices",
+        "responses": {
+          "200": {
+            "description": "Refreshed prices for all holdings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/portfolio/search": {
+      "get": {
+        "tags": [
+          "portfolio_prices"
+        ],
+        "operationId": "search_ticker_symbols",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticker symbol search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TickerSearchResult"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/portfolio/summary": {
@@ -2647,10 +4102,231 @@
           }
         ]
       }
+    },
+    "/api/v1/webhooks/{token}": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "operationId": "inbound_webhook",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundAcceptedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AiChatRequest": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AiChatResponse": {
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message",
+          "model_used",
+          "tool_calls_executed"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "model_used": {
+            "type": "string"
+          },
+          "tool_calls_executed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AiConversation": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "room_id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AiMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "tool_name": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AiUserConfig": {
+        "type": "object",
+        "required": [
+          "owner_id",
+          "updated_at",
+          "has_api_key"
+        ],
+        "properties": {
+          "api_base_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "api_key": {
+            "type": "string",
+            "nullable": true
+          },
+          "has_api_key": {
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "model_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "type": "string",
+            "nullable": true
+          },
+          "temperature": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AlertCondition": {
+        "type": "string",
+        "enum": [
+          "above",
+          "below"
+        ]
+      },
       "ApiErrorResponse": {
         "type": "object",
         "required": [
@@ -2668,6 +4344,149 @@
           }
         }
       },
+      "AuditVerificationResult": {
+        "type": "object",
+        "required": [
+          "is_valid",
+          "total_verified",
+          "genesis_hash",
+          "message"
+        ],
+        "properties": {
+          "broken_entry_id": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "genesis_hash": {
+            "type": "string"
+          },
+          "head_hash": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_valid": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "total_verified": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Bookmark": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "url",
+          "title",
+          "domain",
+          "reading_time_minutes",
+          "is_favorite",
+          "is_archived",
+          "tags",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "author": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "domain": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "image_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_archived": {
+            "type": "boolean"
+          },
+          "is_favorite": {
+            "type": "boolean"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "reader_content": {
+            "type": "string",
+            "nullable": true
+          },
+          "reading_time_minutes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tags": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "BookmarkStats": {
+        "type": "object",
+        "required": [
+          "total_count",
+          "unread_count",
+          "archived_count",
+          "favorite_count",
+          "tags",
+          "top_domains"
+        ],
+        "properties": {
+          "archived_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "favorite_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "top_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainCount"
+            }
+          },
+          "total_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unread_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "BuyHoldingRequest": {
         "type": "object",
         "description": "Amounts and quantities arrive as decimal strings, never as JSON numbers —\nthe same reason `finance::TransactionRequest` does: a JSON number is an\nIEEE-754 double by the time most clients have parsed it.",
@@ -2681,6 +4500,11 @@
           "currency": {
             "type": "string",
             "description": "ISO 4217 code, e.g. `\"USD\"`."
+          },
+          "executed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "note": {
             "type": "string",
@@ -2714,6 +4538,11 @@
           "currency": {
             "type": "string",
             "description": "ISO 4217 code, e.g. `\"USD\"`."
+          },
+          "executed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       },
@@ -2863,6 +4692,32 @@
           }
         }
       },
+      "CreateAlertRequest": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "target_price",
+          "condition"
+        ],
+        "properties": {
+          "condition": {
+            "$ref": "#/components/schemas/AlertCondition"
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency, e.g. \"USD\". Defaults to \"USD\" if omitted.",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Ticker or crypto pair, e.g. \"BTC-USD\" or \"AAPL\""
+          },
+          "target_price": {
+            "type": "string",
+            "description": "Target price as decimal string, e.g. \"65000.00\""
+          }
+        }
+      },
       "CreateBillPayload": {
         "type": "object",
         "required": [
@@ -2929,6 +4784,28 @@
           }
         }
       },
+      "CreateBookmarkInput": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "CreateReminderRequest": {
         "type": "object",
         "required": [
@@ -2990,6 +4867,75 @@
           }
         }
       },
+      "CreateWebhookInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "default_room_id"
+        ],
+        "properties": {
+          "default_room_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatedWebhookResponse": {
+        "type": "object",
+        "required": [
+          "webhook",
+          "raw_token",
+          "example_curl_json",
+          "example_curl_telegram"
+        ],
+        "properties": {
+          "example_curl_json": {
+            "type": "string"
+          },
+          "example_curl_telegram": {
+            "type": "string"
+          },
+          "raw_token": {
+            "type": "string"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/Webhook"
+          }
+        }
+      },
+      "CurrencySpendSummary": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "spent_minor",
+          "income_minor",
+          "net_minor"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "income_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "net_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "spent_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "CurrencySummary": {
         "type": "object",
         "description": "Totals for one currency. Currencies are never combined — without a rate\nsource, adding EUR to JPY would produce a meaningless number.",
@@ -3037,6 +4983,22 @@
           "expense",
           "income"
         ]
+      },
+      "DomainCount": {
+        "type": "object",
+        "required": [
+          "domain",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "domain": {
+            "type": "string"
+          }
+        }
       },
       "HealthResponse": {
         "type": "object",
@@ -3124,6 +5086,54 @@
           "updated_at": {
             "type": "string",
             "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "InboundAcceptedResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "outbox_id"
+        ],
+        "properties": {
+          "outbox_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "InboundPayload": {
+        "type": "object",
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "format": {
+            "type": "string",
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "room_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
             "nullable": true
           }
         }
@@ -3326,6 +5336,78 @@
           }
         }
       },
+      "PortfolioAuditEntry": {
+        "type": "object",
+        "description": "An immutable, cryptographically signed record of a portfolio activity.",
+        "required": [
+          "id",
+          "owner_id",
+          "action",
+          "amount_minor",
+          "currency",
+          "currency_exponent",
+          "prev_hash",
+          "entry_hash"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Operation kind: \"buy\", \"sell\", \"deposit\", \"withdraw\", \"record\""
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entry_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "prev_hash": {
+            "type": "string"
+          },
+          "price_minor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "quantity_minor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "realized_pl_minor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "PortfolioCurrencySummary": {
         "type": "object",
         "description": "Totals for one currency. Currencies are never combined — without a rate\nsource, adding a USD position to a JPY position produces a meaningless\nnumber, exactly as `finance::models::CurrencySummary` documents.",
@@ -3373,6 +5455,131 @@
             "type": "integer",
             "format": "int64",
             "description": "Unrealized P&L of only the holdings that have a price set."
+          }
+        }
+      },
+      "PortfolioHistoryPoint": {
+        "type": "object",
+        "required": [
+          "date",
+          "holdings_value_minor",
+          "cash_minor",
+          "total_net_worth_minor"
+        ],
+        "properties": {
+          "cash_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "date": {
+            "type": "string"
+          },
+          "holdings_value_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_net_worth_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "PortfolioHistoryResponse": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "timeframe",
+          "points",
+          "starting_value_minor",
+          "current_value_minor",
+          "period_change_minor",
+          "period_change_pct"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "current_value_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "period_change_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "period_change_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioHistoryPoint"
+            }
+          },
+          "starting_value_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "timeframe": {
+            "type": "string"
+          }
+        }
+      },
+      "PriceAlert": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "symbol",
+          "target_price_minor",
+          "currency",
+          "currency_exponent",
+          "condition",
+          "is_triggered",
+          "created_at"
+        ],
+        "properties": {
+          "condition": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_triggered": {
+            "type": "boolean"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "target_price_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "triggered_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       },
@@ -3500,6 +5707,27 @@
           "updated_at": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "RefreshSummary": {
+        "type": "object",
+        "required": [
+          "updated",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -3706,6 +5934,11 @@
           "price"
         ],
         "properties": {
+          "executed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "price": {
             "type": "string"
           },
@@ -3818,6 +6051,49 @@
             "type": "string",
             "format": "date-time",
             "description": "End of the period, exclusive — so month boundaries do not double-count."
+          }
+        }
+      },
+      "SymbolQuoteResponse": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "price",
+          "currency"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "TickerSearchResult": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "properties": {
+          "exchange": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "quote_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string"
           }
         }
       },
@@ -4006,6 +6282,17 @@
           "sender_name": {
             "type": "string",
             "description": "Display only — user-controlled, and collides across identity spaces."
+          },
+          "source_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The ID of the originating entity in that module.",
+            "nullable": true
+          },
+          "source_kind": {
+            "type": "string",
+            "description": "Which module scheduled or generated this transaction (e.g. \"recurring_bill\", \"portfolio_cash\").",
+            "nullable": true
           }
         }
       },
@@ -4058,6 +6345,58 @@
         "properties": {
           "mxid": {
             "type": "string"
+          }
+        }
+      },
+      "UpcomingBillsSummary": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "total_minor"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "UpdateAiConfigInput": {
+        "type": "object",
+        "properties": {
+          "api_base_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "api_key": {
+            "type": "string",
+            "nullable": true
+          },
+          "max_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "model_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "system_prompt": {
+            "type": "string",
+            "nullable": true
+          },
+          "temperature": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
           }
         }
       },
@@ -4128,6 +6467,34 @@
           }
         }
       },
+      "UpdateBookmarkInput": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_archived": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "is_favorite": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "UpdateReminderRequest": {
         "type": "object",
         "description": "Mirrors `CreateReminderRequest` rather than patching individual fields: the\nfire time is expressed as a delay from now, exactly as at creation, so an\nedit and a create mean the same thing by the same arithmetic.",
@@ -4168,6 +6535,17 @@
           }
         }
       },
+      "UpdateSymbolRequest": {
+        "type": "object",
+        "required": [
+          "symbol"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
       "UpdateTodoRequest": {
         "type": "object",
         "description": "A PATCH body.\n\nThe nullable fields are `Option<Option<T>>` so the three cases stay\ndistinguishable on the wire: absent leaves the value alone, `null` clears it,\nand a value sets it. A plain `Option<T>` would make \"clear the due date\"\nunexpressible.",
@@ -4195,6 +6573,23 @@
             "nullable": true
           },
           "text": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateWebhookInput": {
+        "type": "object",
+        "properties": {
+          "default_room_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_active": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "name": {
             "type": "string",
             "nullable": true
           }
@@ -4247,6 +6642,316 @@
           "timezone": {
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`. Validated on write."
+          }
+        }
+      },
+      "VerifyAiKeyInput": {
+        "type": "object",
+        "properties": {
+          "api_base_url": {
+            "type": "string",
+            "nullable": true
+          },
+          "api_key": {
+            "type": "string",
+            "nullable": true
+          },
+          "model_name": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "VerifyAiKeyResponse": {
+        "type": "object",
+        "required": [
+          "valid",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "token_prefix",
+          "default_room_id",
+          "is_active",
+          "total_delivered_count",
+          "failure_count",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "default_room_id": {
+            "type": "string"
+          },
+          "failure_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "last_triggered_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "token_prefix": {
+            "type": "string"
+          },
+          "total_delivered_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "WebhookLogsResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookOutboxItem"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "WebhookOutboxItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "webhook_id",
+          "owner_id",
+          "room_id",
+          "severity",
+          "html_body",
+          "plain_body",
+          "status",
+          "attempts",
+          "max_attempts",
+          "next_attempt_at",
+          "created_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "html_body": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string",
+            "nullable": true
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "plain_body": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "webhook_id": {
+            "type": "string"
+          }
+        }
+      },
+      "WebhookSeverity": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "warning",
+          "info",
+          "success",
+          "default"
+        ]
+      },
+      "WeeklyRetrospective": {
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end",
+          "total_spent_minor",
+          "total_income_minor",
+          "net_cashflow_minor",
+          "currency",
+          "spends_by_currency",
+          "upcoming_bills_by_currency",
+          "formatted_spent",
+          "formatted_income",
+          "formatted_net",
+          "formatted_upcoming_bills",
+          "completed_tasks_count",
+          "active_tasks_count",
+          "habits_adherence_percent",
+          "active_habits_count",
+          "upcoming_bills_count",
+          "upcoming_bills_total_minor",
+          "upcoming_reminders_count",
+          "days_logged_count",
+          "formatted_markdown"
+        ],
+        "properties": {
+          "active_habits_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_tasks_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed_tasks_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "days_logged_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dominant_mood": {
+            "type": "string",
+            "nullable": true
+          },
+          "formatted_income": {
+            "type": "string"
+          },
+          "formatted_markdown": {
+            "type": "string"
+          },
+          "formatted_net": {
+            "type": "string"
+          },
+          "formatted_spent": {
+            "type": "string"
+          },
+          "formatted_upcoming_bills": {
+            "type": "string"
+          },
+          "habits_adherence_percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "net_cashflow_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "period_end": {
+            "type": "string"
+          },
+          "period_start": {
+            "type": "string"
+          },
+          "spends_by_currency": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrencySpendSummary"
+            }
+          },
+          "top_expense_category": {
+            "type": "string",
+            "nullable": true
+          },
+          "total_income_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_spent_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "upcoming_bills_by_currency": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpcomingBillsSummary"
+            }
+          },
+          "upcoming_bills_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "upcoming_bills_total_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "upcoming_reminders_count": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

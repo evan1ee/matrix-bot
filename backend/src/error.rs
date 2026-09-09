@@ -38,6 +38,9 @@ impl ApiError {
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::CONFLICT, message: msg.into() }
     }
+    pub fn too_many_requests(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::TOO_MANY_REQUESTS, message: msg.into() }
+    }
     /// Records the underlying failure and returns an opaque 500.
     ///
     /// Call sites pass raw `sqlx`/IO errors here. Those name tables, columns and

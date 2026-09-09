@@ -8,6 +8,13 @@ import { reminderModule } from './modules/reminder';
 import { financeModule } from './modules/finance';
 import { portfolioModule } from './modules/portfolio';
 import { recurringBillsModule } from './modules/recurring_bills';
+import { webhooksModule } from './modules/webhooks';
+import { aiModule } from './modules/ai';
+import { footprintsModule } from './modules/footprints';
+import { habitsModule } from './modules/habits';
+import { lifeModule } from './modules/life';
+import { journalModule } from './modules/journal';
+import { bookmarksModule } from './modules/bookmarks';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
@@ -17,7 +24,7 @@ import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, todoModule, reminderModule, financeModule, portfolioModule, recurringBillsModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, journalModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
@@ -41,7 +48,7 @@ const AppContent: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
 
-  const { user, isSignedIn } = useSession();
+  const { user, isSignedIn, isLoading } = useSession();
   const refreshSession = useRefreshSession();
 
   const { events, isConnected } = useSystemEvents(isSignedIn);
@@ -50,13 +57,38 @@ const AppContent: React.FC = () => {
     applyTheme(theme);
   }, [theme]);
 
-  // The server rejected the session cookie. Re-read the session — which will
-  // come back signed-out — and prompt, rather than leaving the UI showing data
-  // it can no longer refresh.
+  // Support decoupled module navigation events
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.moduleId) {
+        setActiveModuleId(detail.moduleId);
+      }
+    };
+    const onAiPrompt = () => {
+      setActiveModuleId('ai');
+    };
+    window.addEventListener('app:navigate', onNavigate);
+    window.addEventListener('app:ai-prompt', onAiPrompt);
+    return () => {
+      window.removeEventListener('app:navigate', onNavigate);
+      window.removeEventListener('app:ai-prompt', onAiPrompt);
+    };
+  }, []);
+
+  // Signed out is a state, not an event: derive the prompt from the session
+  // itself so it appears on a cold load as well as on an expiry, and so it
+  // closes on its own once a session exists.
+  useEffect(() => {
+    if (!isLoading) setIsAuthOpen(!isSignedIn);
+  }, [isLoading, isSignedIn]);
+
+  // The server rejected the session cookie on some *other* call. Re-read the
+  // session so the rest of the UI stops showing data it can no longer refresh;
+  // the effect above turns that into a prompt.
   useEffect(() => {
     const onExpired = () => {
       refreshSession();
-      setIsAuthOpen(true);
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);

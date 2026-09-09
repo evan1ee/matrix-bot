@@ -148,6 +148,72 @@ pub struct CashBalance {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+#[allow(clippy::large_enum_variant)]
+pub enum BuyOutcome {
+    Ok { holding: Holding, cash: CashBalance },
+    CurrencyMismatch { existing_currency: String },
+    InsufficientCash { available_minor: i64, needed_minor: i64 },
+}
+
+pub enum SellOutcome {
+    NotFound,
+    ExceedsHolding { held_minor: i64 },
+    Closed { realized_pl_minor: i64, cash: CashBalance },
+    Reduced { holding: Holding, realized_pl_minor: i64, cash: CashBalance },
+}
+
+pub enum WithdrawOutcome {
+    Ok(CashBalance),
+    InsufficientFunds { available_minor: i64 },
+}
+
+/// Builds aggregated currency summaries from holding positions and cash balances.
+pub fn build_summaries(
+    holdings: &[Holding],
+    cash_balances: &[CashBalance],
+) -> Vec<PortfolioCurrencySummary> {
+    let mut summaries: Vec<PortfolioCurrencySummary> = Vec::new();
+
+    let entry_for = |summaries: &mut Vec<PortfolioCurrencySummary>, currency: &str, exponent: i64| {
+        if !summaries.iter().any(|s| s.currency == currency) {
+            summaries.push(PortfolioCurrencySummary {
+                currency: currency.to_string(),
+                currency_exponent: exponent,
+                cost_basis_minor: 0,
+                market_value_minor: 0,
+                unrealized_pl_minor: 0,
+                priced_holdings: 0,
+                unpriced_holdings: 0,
+                cash_minor: 0,
+            });
+        }
+    };
+
+    for holding in holdings {
+        entry_for(&mut summaries, &holding.currency, holding.currency_exponent);
+        let entry = summaries.iter_mut().find(|s| s.currency == holding.currency).expect("just inserted");
+
+        entry.cost_basis_minor += holding.cost_basis_minor();
+        match holding.unrealized_pl_minor() {
+            Some(pl) => {
+                entry.market_value_minor += holding.market_value_minor().unwrap_or(0);
+                entry.unrealized_pl_minor += pl;
+                entry.priced_holdings += 1;
+            }
+            None => entry.unpriced_holdings += 1,
+        }
+    }
+
+    for cash in cash_balances {
+        entry_for(&mut summaries, &cash.currency, cash.currency_exponent);
+        let entry = summaries.iter_mut().find(|s| s.currency == cash.currency).expect("just inserted");
+        entry.cash_minor = cash.balance_minor;
+    }
+
+    summaries.sort_by(|a, b| a.currency.cmp(&b.currency));
+    summaries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

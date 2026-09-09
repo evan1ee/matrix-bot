@@ -54,8 +54,13 @@ impl BotModule for FinanceModule {
             },
             CommandHelp {
                 name: "expense delete".to_string(),
-                usage: "!expense delete <id>".to_string(),
+                usage: "!expense delete <id> / !expense rm <id>".to_string(),
                 description: "Remove a ledger entry".to_string(),
+            },
+            CommandHelp {
+                name: "finance".to_string(),
+                usage: "!finance [summary|list]".to_string(),
+                description: "View financial ledger and summary".to_string(),
             },
             CommandHelp {
                 name: "category".to_string(),

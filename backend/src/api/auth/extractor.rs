@@ -52,7 +52,7 @@ where
                 .and_then(|value| value.to_str().ok());
 
             match origin {
-                Some(value) if value == api_state.webauthn_origin_str() => {}
+                Some(value) if api_state.is_allowed_origin(value) => {}
                 Some(_) => {
                     return Err(ApiError::unauthorized(
                         "This request did not come from this site",

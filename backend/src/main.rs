@@ -88,6 +88,9 @@ async fn run_bot_loop(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env from the project root (or cwd) before anything reads env vars.
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()

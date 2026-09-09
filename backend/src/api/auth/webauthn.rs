@@ -245,7 +245,7 @@ pub async fn login_finish(
     // The credential says which account it belongs to. Nothing was typed, and
     // nothing was guessed — the handle was written into the credential when it
     // was created.
-    let (handle, _cred_id) = state
+    let (handle, cred_id) = state
         .webauthn
         .identify_discoverable_authentication(&payload.credential)
         .map_err(|err| {
@@ -253,7 +253,11 @@ pub async fn login_finish(
             ApiError::unauthorized("Sign-in failed")
         })?;
 
-    let account_id = handle_to_account_id(&handle);
+    let cred_id_str = crate::accounts::credentials::credential_id_string(&cred_id);
+    let account_id = match CredentialRepository::find(&state.db.pool, &cred_id_str).await {
+        Ok(Some(cred)) => cred.account_id,
+        _ => handle_to_account_id(&handle),
+    };
 
     let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
         .await

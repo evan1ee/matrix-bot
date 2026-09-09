@@ -66,9 +66,32 @@ pub struct Transaction {
     #[sqlx(default)]
     pub category_name: Option<String>,
     pub note: Option<String>,
+    /// Which module scheduled or generated this transaction (e.g. "recurring_bill", "portfolio_cash").
+    #[sqlx(default)]
+    pub source_kind: Option<String>,
+    /// The ID of the originating entity in that module.
+    #[sqlx(default)]
+    pub source_id: Option<i64>,
     /// When the money moved — not when the row was written.
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
+}
+
+/// Known automated sources for transactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionSource {
+    RecurringBill,
+    PortfolioCash,
+}
+
+impl TransactionSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TransactionSource::RecurringBill => "recurring_bill",
+            TransactionSource::PortfolioCash => "portfolio_cash",
+        }
+    }
 }
 
 /// Per-category totals within one currency.

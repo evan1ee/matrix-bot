@@ -1,9 +1,13 @@
-import { test, expect, gotoApp, chooseCurrency } from './fixtures';
+import { test, expect, gotoApp, chooseCurrency, TAB } from './fixtures';
+import fs from 'fs';
 
 const holdingRow = (page: import('@playwright/test').Page, text: string) =>
   page.getByTestId('holding-row').filter({ hasText: text });
 
-const gotoPortfolio = (page: import('@playwright/test').Page) => gotoApp(page, 'Portfolio');
+const gotoPortfolio = (page: import('@playwright/test').Page) => gotoApp(page, TAB.portfolio);
+
+const clickBuy = (page: import('@playwright/test').Page) =>
+  page.getByTestId('buy-panel').getByRole('button', { name: 'Buy' }).click();
 
 /** Comfortably more cash than any single test spends. */
 const AMPLE_CASH = 100_000_00;
@@ -16,7 +20,7 @@ test('buys a new position', async ({ app, api }) => {
   await app.getByPlaceholder('10').fill('10');
   await app.getByPlaceholder('150.00').fill('150.00');
   await app.getByPlaceholder('Note (optional)').fill('core position');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   const row = holdingRow(app, 'AAPL');
   await expect(row).toBeVisible();
@@ -38,7 +42,7 @@ test('a fractional quantity is stored exactly', async ({ app, api }) => {
   await app.getByPlaceholder('AAPL').fill('BTC');
   await app.getByPlaceholder('10').fill('0.5');
   await app.getByPlaceholder('150.00').fill('60000');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   await expect(holdingRow(app, 'BTC')).toContainText('0.5');
   expect(api.holdings.find((h) => h.symbol === 'BTC')?.quantity_minor).toBe(0.5 * 10 ** 8);
@@ -52,7 +56,7 @@ test('buying more of the same symbol blends the average cost', async ({ app, api
   await app.getByPlaceholder('AAPL').fill('AAPL');
   await app.getByPlaceholder('10').fill('5');
   await app.getByPlaceholder('150.00').fill('180.00');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   const holding = api.holdings.find((h) => h.symbol === 'AAPL')!;
   expect(holding.quantity_minor).toBe(15 * 10 ** 8);
@@ -69,7 +73,7 @@ test('a currency mismatch for the same symbol is rejected by the server', async 
   await app.getByPlaceholder('10').fill('5');
   await app.getByPlaceholder('150.00').fill('180.00');
   await chooseCurrency(app.getByTestId('buy-panel'), 'EUR');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   await expect(app.getByText(/already held in USD/)).toBeVisible();
   expect(api.holdings).toHaveLength(1);
@@ -83,7 +87,7 @@ test('a buy without enough cash is rejected and creates no position', async ({ a
   await app.getByPlaceholder('AAPL').fill('AAPL');
   await app.getByPlaceholder('10').fill('10');
   await app.getByPlaceholder('150.00').fill('150.00');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   await expect(app.getByText(/Need/)).toBeVisible();
   expect(api.holdings).toHaveLength(0);
@@ -95,7 +99,7 @@ test('surfaces a server rejection for an over-precise price', async ({ app, api 
   await app.getByPlaceholder('AAPL').fill('AAPL');
   await app.getByPlaceholder('10').fill('10');
   await app.getByPlaceholder('150.00').fill('15.501');
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   await expect(app.getByText(/decimal place/)).toBeVisible();
   expect(api.holdings).toHaveLength(0);
@@ -104,7 +108,7 @@ test('surfaces a server rejection for an over-precise price', async ({ app, api 
 test('will not submit without a symbol, quantity, and price', async ({ app, api }) => {
   await gotoPortfolio(app);
 
-  await app.getByRole('button', { name: 'Buy' }).click();
+  await clickBuy(app);
 
   await expect(app.getByText('Enter a symbol, quantity, and price.')).toBeVisible();
   expect(api.holdings).toHaveLength(0);
@@ -232,6 +236,7 @@ test('removes a holding entirely', async ({ app, api }) => {
   await gotoPortfolio(app);
 
   await holdingRow(app, 'AAPL').getByTitle('Remove holding').click();
+  await app.getByRole('button', { name: 'Remove Position' }).click();
 
   await expect(holdingRow(app, 'AAPL')).toHaveCount(0);
   expect(api.holdings).toHaveLength(0);
@@ -279,7 +284,7 @@ test.describe('cash', () => {
     await app.getByPlaceholder('AAPL').fill('AAPL');
     await app.getByPlaceholder('10').fill('10');
     await app.getByPlaceholder('150.00').fill('150.00');
-    await app.getByRole('button', { name: 'Buy' }).click();
+    await clickBuy(app);
 
     // 100000.00 - 1500.00 (10 @ 150.00) = 98500.00.
     await expect(app.getByTestId('cash-balances')).toContainText('98500.00 USD');
@@ -333,5 +338,122 @@ test.describe('per-currency summary', () => {
     const summary = app.getByTestId('portfolio-summary');
     await expect(summary.getByText('GBP PORTFOLIO')).toBeVisible();
     await expect(summary).toContainText('cash 500.00');
+  });
+
+  test('renders net worth performance chart with timeframe toggles and captures screenshots', async ({
+    app,
+    api,
+  }) => {
+    api.seedCash('USD', AMPLE_CASH);
+    api.seedHolding({
+      symbol: 'BTC-USD',
+      currency: 'USD',
+      currency_exponent: 2,
+      quantity_minor: 1 * 10 ** 8,
+      avg_cost_minor: 6000000,
+      current_price_minor: 6850000,
+    });
+    api.seedHolding({
+      symbol: 'NVDA',
+      currency: 'USD',
+      currency_exponent: 2,
+      quantity_minor: 25 * 10 ** 8,
+      avg_cost_minor: 11000,
+      current_price_minor: 12850,
+    });
+    await gotoPortfolio(app);
+
+    // Verify Performance Chart
+    await expect(app.getByText('NET WORTH HISTORY (USD)')).toBeVisible();
+    await expect(app.getByRole('button', { name: '7D' })).toBeVisible();
+    await expect(app.getByRole('button', { name: '1M' })).toBeVisible();
+    await expect(app.getByRole('button', { name: '1Y' })).toBeVisible();
+
+    const chartCard = app.getByText('NET WORTH HISTORY (USD)').locator('xpath=ancestor::div[contains(@class, "rounded-xl")]').first();
+    const chartSvg = chartCard.locator('svg.select-none').first();
+    const header = chartCard.locator('> div').first();
+
+    for (const vpWidth of [375, 500, 640, 768, 1024, 1280]) {
+      await app.setViewportSize({ width: vpWidth, height: 800 });
+      await app.waitForTimeout(200);
+
+      // Move mouse away to unhover
+      await app.mouse.move(0, 0);
+      await app.waitForTimeout(100);
+
+      const boxBefore = await chartCard.boundingBox();
+      const svgBefore = await chartSvg.boundingBox();
+      const headerBefore = await header.boundingBox();
+
+      // Hover over chart
+      await chartSvg.scrollIntoViewIfNeeded();
+      await chartSvg.hover({ position: { x: 100, y: 50 } });
+      await app.waitForTimeout(200);
+
+      const boxHover = await chartCard.boundingBox();
+      const svgHover = await chartSvg.boundingBox();
+      const headerHover = await header.boundingBox();
+
+      const diff = (boxHover?.height ?? 0) - (boxBefore?.height ?? 0);
+      const svgDiff = (svgHover?.height ?? 0) - (svgBefore?.height ?? 0);
+      const headerDiff = (headerHover?.height ?? 0) - (headerBefore?.height ?? 0);
+      console.log(`WIDTH ${vpWidth}: cardDiff=${diff} (before=${boxBefore?.height}, after=${boxHover?.height}), svgDiff=${svgDiff}, headerDiff=${headerDiff}`);
+      expect(diff).toBe(0);
+      expect(headerDiff).toBe(0);
+      expect(svgDiff).toBe(0);
+    }
+
+    // Capture focused Performance Chart screenshot in unhovered and hovered states
+    const artifactDir = process.env.BRAIN_DIR;
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      await app.setViewportSize({ width: 1280, height: 800 });
+      await app.mouse.move(0, 0);
+      await app.waitForTimeout(100);
+      await chartCard.scrollIntoViewIfNeeded();
+      await chartCard.screenshot({
+        path: `${artifactDir}/portfolio_chart_unhovered.png`,
+      });
+
+      await chartSvg.hover({ position: { x: 100, y: 50 } });
+      await app.waitForTimeout(200);
+      await chartCard.screenshot({
+        path: `${artifactDir}/portfolio_chart_hovered.png`,
+      });
+
+      // Capture main dashboard view scrolled to the chart & holdings
+      await app.screenshot({
+        path: `${artifactDir}/portfolio_performance_dashboard.png`,
+      });
+    }
+
+    // Capture holdings list with the Price Alerts toolbar button and holding row bell triggers
+    const holdingsPanel = app.getByText('HOLDINGS').locator('xpath=ancestor::div[contains(@class, "rounded-lg")]').first();
+    await holdingsPanel.scrollIntoViewIfNeeded();
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      await holdingsPanel.screenshot({
+        path: `${artifactDir}/portfolio_holdings_with_alerts_trigger.png`,
+      });
+    }
+
+    // Open Alerts Modal via toolbar button
+    await app.getByRole('button', { name: 'Price Alerts' }).click();
+    await expect(app.getByText('Market Price & Volatility Alerts')).toBeVisible();
+    await expect(app.getByText('Create New Price Alert')).toBeVisible();
+
+    // Fill and create an alert
+    await app.getByPlaceholder('BTC-USD, AAPL').fill('BTC-USD');
+    await app.getByPlaceholder('e.g. 70000').fill('70000');
+    await app.getByRole('button', { name: 'Add', exact: true }).click();
+
+    // Verify alert appears in list
+    await expect(app.getByText('BTC-USD')).toBeVisible();
+    await expect(app.getByText('Active', { exact: true })).toBeVisible();
+
+    // Capture alerts modal screenshot
+    if (artifactDir && fs.existsSync(artifactDir)) {
+      await app.screenshot({
+        path: `${artifactDir}/portfolio_alerts_modal.png`,
+      });
+    }
   });
 });

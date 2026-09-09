@@ -1,10 +1,10 @@
-import { test, expect, gotoApp, chooseOption, chooseCurrency, selectField } from './fixtures';
+import { test, expect, gotoApp, chooseOption, chooseCurrency, selectField, TAB } from './fixtures';
 
 const ledgerRow = (page: import('@playwright/test').Page, text: string) =>
   page.getByTestId('ledger-row').filter({ hasText: text });
 
 test('records an expense', async ({ app, api }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await app.getByPlaceholder('15.50').fill('15.50');
   await chooseCurrency(app, 'EUR');
@@ -20,7 +20,7 @@ test('records an expense', async ({ app, api }) => {
 });
 
 test('records income', async ({ app, api }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await chooseOption(selectField(app, 'Direction'), 'Income');
   await app.getByPlaceholder('15.50').fill('2500');
@@ -34,7 +34,7 @@ test('records income', async ({ app, api }) => {
 
 /// The value that motivates the whole minor-unit design.
 test('an amount with cents is stored exactly', async ({ app, api }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await app.getByPlaceholder('15.50').fill('0.29');
   await chooseCurrency(app, 'EUR');
@@ -56,7 +56,7 @@ test('a zero-decimal currency renders without cents', async ({ app, api }) => {
     currency_exponent: 0,
     amount_minor: 500,
   });
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   const row = ledgerRow(app, 'Ramen');
   await expect(row).toBeVisible();
@@ -64,7 +64,7 @@ test('a zero-decimal currency renders without cents', async ({ app, api }) => {
 });
 
 test('offers exactly the supported currencies', async ({ app }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   const trigger = selectField(app, 'Currency');
   await trigger.click();
@@ -81,7 +81,7 @@ test('offers exactly the supported currencies', async ({ app }) => {
 });
 
 test('surfaces a server rejection for an over-precise amount', async ({ app, api }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await app.getByPlaceholder('15.50').fill('15.501');
   await chooseCurrency(app, 'EUR');
@@ -92,7 +92,7 @@ test('surfaces a server rejection for an over-precise amount', async ({ app, api
 });
 
 test('will not submit without an amount', async ({ app, api }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await app.getByRole('button', { name: 'Record' }).click();
 
@@ -103,7 +103,7 @@ test('will not submit without an amount', async ({ app, api }) => {
 test('filters the ledger by direction', async ({ app, api }) => {
   api.seedTransaction({ note: 'Groceries', direction: 'expense' });
   api.seedTransaction({ note: 'Paycheck', direction: 'income', amount_minor: 250000 });
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await expect(ledgerRow(app, 'Groceries')).toBeVisible();
   await expect(ledgerRow(app, 'Paycheck')).toBeVisible();
@@ -119,7 +119,7 @@ test('filters the ledger by direction', async ({ app, api }) => {
 
 test('deletes an entry', async ({ app, api }) => {
   api.seedTransaction({ note: 'Mistake' });
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await ledgerRow(app, 'Mistake').getByTitle('Delete entry').click();
 
@@ -128,7 +128,7 @@ test('deletes an entry', async ({ app, api }) => {
 });
 
 test('shows an empty state', async ({ app }) => {
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
   await expect(app.getByText('Nothing recorded yet.')).toBeVisible();
 });
 
@@ -141,7 +141,7 @@ test.describe('per-currency summary', () => {
       amount_minor: 300000,
       direction: 'income',
     });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     const summary = app.getByTestId('finance-summary');
     await expect(summary.getByText('EUR THIS MONTH')).toBeVisible();
@@ -154,7 +154,7 @@ test.describe('per-currency summary', () => {
 
 test.describe('categories', () => {
   test('creates a category and assigns it to an entry', async ({ app, api }) => {
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await app.getByRole('button', { name: 'Categories' }).click();
     await app.getByPlaceholder('New category name').fill('food');
@@ -174,7 +174,7 @@ test.describe('categories', () => {
 
   test('rejects a duplicate category name', async ({ app, api }) => {
     api.seedCategory('food');
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await app.getByRole('button', { name: 'Categories' }).click();
     await app.getByPlaceholder('New category name').fill('food');
@@ -192,7 +192,7 @@ test.describe('categories', () => {
       category_id: category.id,
       category_name: 'food',
     });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await expect(ledgerRow(app, 'Lunch')).toContainText('food');
 
@@ -205,7 +205,7 @@ test.describe('categories', () => {
   });
 
   test('an entry can stay uncategorised', async ({ app, api }) => {
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await app.getByPlaceholder('15.50').fill('4.00');
     await chooseCurrency(app, 'EUR');
@@ -222,7 +222,7 @@ test.describe('editing a ledger entry', () => {
 
   test('changes the amount, note and direction', async ({ app, api }) => {
     const tx = api.seedTransaction({ note: 'Wrong amount', amount_minor: 1000 });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await ledgerRow(app, 'Wrong amount').getByTitle('Edit entry').click();
 
@@ -247,7 +247,7 @@ test.describe('editing a ledger entry', () => {
   test('re-categorises an entry', async ({ app, api }) => {
     const category = api.seedCategory('travel');
     const tx = api.seedTransaction({ note: 'Train ticket' });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await ledgerRow(app, 'Train ticket').getByTitle('Edit entry').click();
     const form = editForm(app);
@@ -260,7 +260,7 @@ test.describe('editing a ledger entry', () => {
 
   test('cancelling discards the change', async ({ app, api }) => {
     api.seedTransaction({ note: 'Leave me alone', amount_minor: 500 });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await ledgerRow(app, 'Leave me alone').getByTitle('Edit entry').click();
     const form = editForm(app);
@@ -274,7 +274,7 @@ test.describe('editing a ledger entry', () => {
 
   test('shows a server rejection inside the row', async ({ app, api }) => {
     api.seedTransaction({ note: 'Will fail' });
-    await gotoApp(app, 'Finance');
+    await gotoApp(app, TAB.finance);
 
     await ledgerRow(app, 'Will fail').getByTitle('Edit entry').click();
     const form = editForm(app);
@@ -296,7 +296,7 @@ test('editing an entry preserves a currency outside the picker', async ({ app, a
     currency_exponent: 0,
     amount_minor: 500,
   });
-  await gotoApp(app, 'Finance');
+  await gotoApp(app, TAB.finance);
 
   await ledgerRow(app, 'Ramen').getByTitle('Edit entry').click();
   const form = app.getByTestId('ledger-row-edit');

@@ -8,12 +8,20 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
+pub mod alerts;
+pub mod alerts_handler;
+pub mod audit;
 pub mod cash;
+pub mod cash_repo;
 pub mod handler;
+pub mod history;
+pub mod history_feed;
 pub mod models;
+pub mod price_feed;
 pub mod repository;
+pub mod scheduler;
 pub mod view;
 
 pub struct PortfolioModule;
@@ -41,8 +49,15 @@ impl BotModule for PortfolioModule {
             CommandHelp {
                 name: "portfolio buy".to_string(),
                 usage: "!portfolio buy <symbol> <qty> @ <price> [CUR] [note]".to_string(),
-                description: "Open or add to a position \
+                description: "Open or add to a position using cash \
                               (e.g. !portfolio buy AAPL 10 @ 150.00 USD core position)"
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "portfolio record".to_string(),
+                usage: "!portfolio record <symbol> <qty> @ <price> [CUR] [note]".to_string(),
+                description: "Record already-owned position without spending cash \
+                              (e.g. !portfolio record BTC 0.5 @ 60000 USD cold storage)"
                     .to_string(),
             },
             CommandHelp {
@@ -55,6 +70,11 @@ impl BotModule for PortfolioModule {
                 name: "portfolio price".to_string(),
                 usage: "!portfolio price <symbol> <price>".to_string(),
                 description: "Record the current market price for a holding".to_string(),
+            },
+            CommandHelp {
+                name: "portfolio refresh".to_string(),
+                usage: "!portfolio refresh".to_string(),
+                description: "Automatically fetch and update current market prices for all holdings".to_string(),
             },
             CommandHelp {
                 name: "portfolio note".to_string(),
@@ -104,6 +124,13 @@ impl BotModule for PortfolioModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
+    }
+
+    async fn spawn_background_workers(
+        &self,
+        ctx: &ModuleContext,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
+        vec![scheduler::start_portfolio_price_scheduler(ctx.clone())]
     }
 }
 
@@ -338,6 +365,24 @@ mod tests {
 
         let withdrawn = module.handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &db, None).await.unwrap();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
+
+        // Verify deposit and withdraw transactions were posted to the finance ledger
+        let txs = crate::modules::finance::repository::FinanceRepository::list(
+            &db.pool,
+            "@alice:a",
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(txs.len(), 2);
+        assert_eq!(txs[0].direction, "income");
+        assert_eq!(txs[0].amount_minor, 115000);
+        assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
+        assert_eq!(txs[1].direction, "expense");
+        assert_eq!(txs[1].amount_minor, 100000);
+        assert_eq!(txs[1].source_kind.as_deref(), Some("portfolio_cash"));
     }
 
     /// Withdrawing more than is on hand must be rejected and say why.

@@ -8,12 +8,25 @@ use crate::modules::finance::models::{Category, CategoryTotal, CurrencySummary, 
 /// than N+1.
 const TX_COLUMNS: &str = "t.id, t.room_id, t.owner_id, t.sender_name, t.direction, \
                           t.amount_minor, t.currency, t.currency_exponent, t.category_id, \
-                          c.name AS category_name, t.note, t.occurred_at, t.created_at";
+                          c.name AS category_name, t.note, t.source_kind, t.source_id, \
+                          t.occurred_at, t.created_at";
 
 pub struct FinanceRepository;
 
 impl FinanceRepository {
     // ---- categories ------------------------------------------------------
+
+    /// Finds an existing category by name or creates a new one.
+    pub async fn find_or_create_category(
+        pool: &SqlitePool,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<Option<Category>> {
+        if let Some(cat) = Self::find_category_by_name(pool, owner_id, name).await? {
+            return Ok(Some(cat));
+        }
+        Self::create_category(pool, owner_id, name).await
+    }
 
     /// Creates a category. Returns `None` when the owner already has one by
     /// that name — the unique index is what enforces it, so two concurrent
@@ -128,14 +141,16 @@ impl FinanceRepository {
         currency_exponent: i64,
         category_id: Option<i64>,
         note: Option<&str>,
+        source_kind: Option<&str>,
+        source_id: Option<i64>,
         occurred_at: DateTime<Utc>,
     ) -> Result<Transaction> {
         let res = sqlx::query(
             r#"
             INSERT INTO transactions
                 (room_id, owner_id, sender_name, direction, amount_minor, currency,
-                 currency_exponent, category_id, note, occurred_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 currency_exponent, category_id, note, source_kind, source_id, occurred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(room_id)
@@ -147,6 +162,8 @@ impl FinanceRepository {
         .bind(currency_exponent)
         .bind(category_id)
         .bind(note)
+        .bind(source_kind)
+        .bind(source_id)
         .bind(occurred_at)
         .execute(pool)
         .await?;
@@ -379,7 +396,7 @@ mod tests {
     ) -> Transaction {
         FinanceRepository::create_transaction(
             pool, "web", owner, "tester", direction, minor, currency, exponent, category_id,
-            Some("note"), when,
+            Some("note"), None, None, when,
         )
         .await
         .unwrap()

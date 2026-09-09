@@ -1,6 +1,41 @@
 import { test as base, expect, Locator, Page } from '@playwright/test';
 import { FakeApi } from './fake-api';
 
+/**
+ * A label that only appears once the shell has rendered its dashboard.
+ *
+ * Named rather than inlined because every spec waits on it: when the sidebar
+ * redesign renamed this stat from "Total Tasks", the old string was left in
+ * eight files and the whole suite failed on the first assertion.
+ */
+export const DASHBOARD_READY = 'Active Tasks';
+
+/**
+ * Sidebar labels, as rendered.
+ *
+ * Note these are *not* the modules' own `navTab.label` values — `Sidebar.tsx`
+ * hardcodes its own list, so `todo` renders as "Tasks" while its registry entry
+ * says "Todos", and `finance` renders as "Expenses" against "Finance". Two
+ * sources of truth for one label; the specs follow the one a user actually
+ * sees. Worth collapsing in the app, and this map is the single place the specs
+ * would need to change when that happens.
+ */
+export const TAB = {
+  dashboard: 'Dashboard',
+  todo: 'Tasks',
+  reminder: 'Reminders',
+  bookmarks: 'Bookmarks',
+  habits: 'Habits',
+  finance: 'Expenses',
+  portfolio: 'Portfolio',
+  bills: 'Bills',
+  footprints: 'Footprints',
+  life: 'Life Grid',
+  journal: 'Daily Log',
+  webhooks: 'Webhooks',
+  ai: 'AI Assistant',
+} as const;
+
 interface Fixtures {
   api: FakeApi;
   /** A page with the fake API installed and a session already established. */
@@ -15,17 +50,18 @@ export const test = base.extend<Fixtures>({
   },
 
   anonApp: async ({ page, api }, use) => {
+    api.signedIn = false;
     await api.install(page);
     await use(page);
   },
 
+  // Signed in. There is nothing to seed on the client any more — the session
+  // is an HttpOnly cookie the page cannot read or write, so "signed in" is
+  // decided entirely by whether `/auth/me` answers. `FakeApi.signedIn` is what
+  // controls that.
   app: async ({ page, api }, use) => {
+    api.signedIn = true;
     await api.install(page);
-    // Seed the token before any script runs, so the app boots signed in
-    // instead of racing the login modal.
-    await page.addInitScript(() => {
-      window.localStorage.setItem('matrix_bot_jwt', 'fake-jwt-token');
-    });
     await use(page);
   },
 });
@@ -35,7 +71,7 @@ export { expect };
 /** Opens the app and waits for the shell to be interactive. */
 export async function gotoApp(page: Page, moduleTab?: string) {
   await page.goto('/');
-  await expect(page.getByText('TOTAL TASKS')).toBeVisible();
+  await expect(page.getByText(DASHBOARD_READY)).toBeVisible();
   if (moduleTab) {
     await page.getByRole('button', { name: moduleTab, exact: true }).click();
   }
@@ -115,7 +151,10 @@ export async function setDateTime(picker: Locator, value: string) {
   const targetMonth = datePart.slice(0, 7);
 
   await picker.getByRole('button').first().click();
-  const popover = picker.getByTestId('datetime-popover');
+  // Scoped to the page, not the picker: the popover renders through
+  // `createPortal`, so it is not a descendant of the control that opened it and
+  // a picker-scoped locator can never match. Only one is ever open at a time.
+  const popover = picker.page().getByTestId('datetime-popover');
   const monthLabel = popover.getByTestId('datetime-month');
 
   // Stepped rather than matched against the header text, which is rendered in
@@ -147,5 +186,5 @@ async function pickTimeUnit(field: Locator, label: string) {
 /** Empties a `DateTimePicker`. */
 export async function clearDateTime(picker: Locator) {
   await picker.getByRole('button').first().click();
-  await picker.getByTestId('datetime-popover').getByRole('button', { name: 'Clear' }).click();
+  await picker.page().getByTestId('datetime-popover').getByRole('button', { name: 'Clear' }).click();
 }
