@@ -454,6 +454,35 @@
         ]
       }
     },
+    "/api/v1/account/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "account"
+        ],
+        "operationId": "revoke_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session hash ID to revoke",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session signed out"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/account/webhooks": {
       "get": {
         "tags": [

@@ -844,6 +844,12 @@ export class FakeApi {
       this.sessions = this.sessions.filter((x) => x.current);
       return json(route, 200, revoked);
     }
+    const sessionMatch = path.match(/^\/account\/sessions\/([^/]+)$/);
+    if (sessionMatch && method === 'DELETE') {
+      const id = decodeURIComponent(sessionMatch[1]);
+      this.sessions = this.sessions.filter((x) => x.id !== id);
+      return json(route, 200, true);
+    }
     if (path === '/account/recovery-codes' && method === 'POST') {
       this.recoveryStatus = { ...this.recoveryStatus, codes_remaining: 10 };
       return json(route, 200, {

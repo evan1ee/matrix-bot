@@ -68,6 +68,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .route("/account/matrix/unlink", post(account::links::unlink))
         .route("/account/sessions", get(account::sessions::list_sessions))
         .route("/account/sessions/revoke-others", post(account::sessions::revoke_other_sessions))
+        .route("/account/sessions/:id", delete(account::sessions::revoke_session))
         .route("/account/recovery-codes", post(account::recovery::regenerate_recovery_codes))
         .route("/account/recovery-status", get(account::recovery::recovery_status))
         .route("/account/recovery/cancel", post(account::recovery::cancel_recovery))
@@ -413,6 +414,7 @@ mod step_up_tests {
         ("POST", "/api/v1/account/matrix/unlink"),
         ("POST", "/api/v1/account/matrix/confirm-merge"),
         ("POST", "/api/v1/account/sessions/revoke-others"),
+        ("DELETE", "/api/v1/account/sessions/some-id"),
         ("POST", "/api/v1/account/recovery-codes"),
         ("DELETE", "/api/v1/account/passkeys/some-id"),
         ("PUT", "/api/v1/account/passkeys/some-id"),

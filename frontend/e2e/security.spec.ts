@@ -215,6 +215,34 @@ test.describe('sessions', () => {
     // Still signed in here — the whole point of "other".
     await expect(app.getByRole('dialog')).toBeVisible();
   });
+
+  test('parses raw user agents into friendly device names and allows signing out individual device', async ({ app, api }) => {
+    api.sessions = [
+      {
+        id: 'sess_current',
+        created_at: '2026-09-09T05:33:00Z',
+        last_seen_at: '2026-09-09T05:33:00Z',
+        user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        current: true,
+      },
+      {
+        id: 'sess_mobile',
+        created_at: '2026-09-09T04:00:00Z',
+        last_seen_at: '2026-09-09T04:00:00Z',
+        user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        current: false,
+      },
+    ];
+
+    const dialog = await openSecurity(app);
+    await expect(dialog.getByText('Chrome on Windows')).toBeVisible();
+    await expect(dialog.getByText('this device', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Safari on iPhone')).toBeVisible();
+
+    await dialog.getByRole('button', { name: /sign out safari on iphone/i }).click();
+    await expect(dialog.getByText('Safari on iPhone')).toHaveCount(0);
+    await expect(dialog.getByText('Chrome on Windows')).toBeVisible();
+  });
 });
 
 test.describe('recovery', () => {

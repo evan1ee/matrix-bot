@@ -245,6 +245,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_revoking_single_session_works() {
+        let state = state().await;
+        let user = signed_in(&state, "evan").await;
+        let other = SessionRepository::create(&state.db.pool, &user.account_id, None, None, None)
+            .await
+            .unwrap();
+        let other_hash = hash_token(&other);
+
+        let res = revoke_session(
+            State(state.clone()),
+            Path(other_hash),
+            VerifiedUser(user.clone()),
+        )
+        .await
+        .unwrap();
+        assert!(res.0);
+
+        assert!(SessionRepository::resolve(&state.db.pool, &other).await.unwrap().is_none());
+
+        let left = list_sessions(State(state), user).await.unwrap();
+        assert_eq!(left.0.len(), 1);
+        assert!(left.0[0].current);
+    }
+
+    #[tokio::test]
     async fn test_recovery_codes_are_returned_once_and_counted_after() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;

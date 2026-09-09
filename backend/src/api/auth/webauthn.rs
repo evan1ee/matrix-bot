@@ -326,6 +326,21 @@ async fn issue_session(
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok());
 
+    // If this request already presented an existing session cookie, revoke that previous
+    // session so it does not linger as an orphaned duplicate.
+    if let Some(cookies) = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(old_token) = crate::api::auth::extractor::cookie_value(
+            cookies,
+            crate::accounts::session::COOKIE_NAME,
+        ) {
+            let old_id_hash = crate::accounts::session::hash_token(old_token);
+            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
+        }
+    }
+
     let token = SessionRepository::create(&state.db.pool, account_id, user_agent, None, None)
         .await
         .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;

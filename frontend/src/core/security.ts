@@ -160,6 +160,8 @@ export const securityApi = {
     }),
   revokeOtherSessions: () =>
     fetchApi<number>('/account/sessions/revoke-others', { method: 'POST' }),
+  revokeSession: (id: string) =>
+    fetchApi<boolean>(`/account/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   regenerateRecoveryCodes: () =>
     fetchApi<{ codes: string[] }>('/account/recovery-codes', { method: 'POST' }),
   cancelRecovery: () => fetchApi<number>('/account/recovery/cancel', { method: 'POST' }),

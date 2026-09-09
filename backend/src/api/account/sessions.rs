@@ -73,3 +73,40 @@ pub async fn revoke_other_sessions(
 
     Ok(Json(revoked))
 }
+
+#[utoipa::path(
+    delete,
+    tag = "account",
+    path = "/api/v1/account/sessions/{id}",
+    params(("id" = String, Path, description = "Session hash ID to revoke")),
+    responses((status = 200, description = "Session signed out")),
+    security(("session_cookie" = []))
+)]
+pub async fn revoke_session(
+    State(state): State<ApiState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    user: VerifiedUser,
+) -> Result<Json<bool>, ApiError> {
+    let sessions = SessionRepository::list_for_account(&state.db.pool, &user.account_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    if !sessions.iter().any(|s| s.id_hash == id) {
+        return Err(ApiError::not_found("Session not found"));
+    }
+
+    SessionRepository::revoke(&state.db.pool, &id)
+        .await
+        .map_err(ApiError::from)?;
+
+    SecurityEventRepository::record(
+        &state.db.pool,
+        &user.account_id,
+        SecurityEventKind::SessionsRevoked,
+        Some("1 session"),
+    )
+    .await;
+
+    Ok(Json(true))
+}
+

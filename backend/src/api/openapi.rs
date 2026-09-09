@@ -38,6 +38,7 @@ use crate::modules::settings::UserSettings;
         account::links::unlink,
         account::sessions::list_sessions,
         account::sessions::revoke_other_sessions,
+        account::sessions::revoke_session,
         account::recovery::regenerate_recovery_codes,
         account::recovery::recovery_status,
         account::recovery::cancel_recovery,

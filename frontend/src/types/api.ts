@@ -241,6 +241,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["revoke_session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/webhooks": {
         parameters: {
             query?: never;
@@ -2623,6 +2639,27 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description How many were signed out */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revoke_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session hash ID to revoke */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session signed out */
             200: {
                 headers: {
                     [name: string]: unknown;

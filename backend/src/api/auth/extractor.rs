@@ -13,7 +13,7 @@ use crate::error::ApiError;
 /// Hand-rolled rather than pulling in a cookie crate: there is exactly one
 /// cookie this application reads, and the header grammar for that case is a
 /// semicolon-separated list of `name=value`.
-fn cookie_value<'a>(header_value: &'a str, name: &str) -> Option<&'a str> {
+pub(crate) fn cookie_value<'a>(header_value: &'a str, name: &str) -> Option<&'a str> {
     header_value.split(';').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
         (key.trim() == name).then(|| value.trim())

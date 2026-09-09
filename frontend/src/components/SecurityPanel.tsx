@@ -5,8 +5,11 @@ import {
   KeyRound,
   Link2,
   Loader2,
+  LogOut,
   Monitor,
   ShieldAlert,
+  Smartphone,
+  Tablet,
   Trash2,
 } from 'lucide-react';
 import {
@@ -58,6 +61,93 @@ const Button: React.FC<
   </button>
 );
 
+interface ParsedDevice {
+  name: string;
+  type: 'desktop' | 'mobile' | 'tablet';
+}
+
+function parseDevice(userAgent?: string | null): ParsedDevice {
+  if (!userAgent) {
+    return { name: 'Unknown device', type: 'desktop' };
+  }
+
+  // Preserve pre-formatted strings used in tests like "Chrome on macOS" or "Firefox on Linux"
+  if (userAgent.includes(' on ')) {
+    const isMobile = /iphone|android|mobile/i.test(userAgent);
+    const isTablet = /ipad|tablet/i.test(userAgent);
+    return {
+      name: userAgent,
+      type: isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop',
+    };
+  }
+
+  const ua = userAgent;
+
+  // OS detection
+  let os = '';
+  let type: 'desktop' | 'mobile' | 'tablet' = 'desktop';
+
+  if (/windows nt 10/i.test(ua)) {
+    os = 'Windows';
+  } else if (/windows nt 6\.3/i.test(ua)) {
+    os = 'Windows 8.1';
+  } else if (/windows nt 6\.1/i.test(ua)) {
+    os = 'Windows 7';
+  } else if (/windows/i.test(ua)) {
+    os = 'Windows';
+  } else if (/iphone/i.test(ua)) {
+    os = 'iPhone';
+    type = 'mobile';
+  } else if (/ipad/i.test(ua)) {
+    os = 'iPad';
+    type = 'tablet';
+  } else if (/macintosh|mac os x/i.test(ua)) {
+    os = 'macOS';
+  } else if (/android/i.test(ua)) {
+    if (/mobile/i.test(ua)) {
+      os = 'Android';
+      type = 'mobile';
+    } else {
+      os = 'Android Tablet';
+      type = 'tablet';
+    }
+  } else if (/cros/i.test(ua)) {
+    os = 'ChromeOS';
+  } else if (/linux/i.test(ua)) {
+    os = 'Linux';
+  }
+
+  // Browser detection
+  let browser = '';
+  if (/edg(?:e)?\/([0-9.]+)/i.test(ua)) {
+    browser = 'Edge';
+  } else if (/opr\/|opera\/([0-9.]+)/i.test(ua)) {
+    browser = 'Opera';
+  } else if (/brave/i.test(ua)) {
+    browser = 'Brave';
+  } else if (/chrome\/([0-9.]+)/i.test(ua) && !/chromium/i.test(ua)) {
+    browser = 'Chrome';
+  } else if (/firefox\/([0-9.]+)/i.test(ua)) {
+    browser = 'Firefox';
+  } else if (/version\/([0-9.]+).*safari/i.test(ua)) {
+    browser = 'Safari';
+  } else if (/safari/i.test(ua)) {
+    browser = 'Safari';
+  }
+
+  if (browser && os) {
+    return { name: `${browser} on ${os}`, type };
+  }
+  if (browser) {
+    return { name: browser, type };
+  }
+  if (os) {
+    return { name: `${os} Device`, type };
+  }
+
+  return { name: 'Unknown device', type };
+}
+
 /**
  * Settings → Security.
  *
@@ -99,6 +189,10 @@ export const SecurityPanel: React.FC = () => {
     SECURITY_KEYS.events,
   ]);
   const revokeOthers = useSensitiveAction(securityApi.revokeOtherSessions, [
+    SECURITY_KEYS.sessions,
+    SECURITY_KEYS.events,
+  ]);
+  const revokeSession = useSensitiveAction(securityApi.revokeSession, [
     SECURITY_KEYS.sessions,
     SECURITY_KEYS.events,
   ]);
@@ -275,27 +369,53 @@ export const SecurityPanel: React.FC = () => {
 
       <Section title="Signed-in devices">
         <ul className="flex flex-col gap-2">
-          {sessions.data?.map((session) => (
-            <li
-              key={session.id}
-              className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
-            >
-              <Monitor size={16} className="shrink-0 text-neutral-500" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-neutral-900 dark:text-neutral-100">
-                  {session.user_agent || 'Unknown device'}
-                  {session.current && (
-                    <span className="ml-2 text-xs text-emerald-600 dark:text-emerald-400">
-                      this device
+          {sessions.data?.map((session) => {
+            const device = parseDevice(session.user_agent);
+            const DeviceIcon =
+              device.type === 'mobile'
+                ? Smartphone
+                : device.type === 'tablet'
+                ? Tablet
+                : Monitor;
+
+            return (
+              <li
+                key={session.id}
+                className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2.5 dark:bg-neutral-800"
+              >
+                <DeviceIcon size={16} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100"
+                      title={session.user_agent || undefined}
+                    >
+                      {device.name}
                     </span>
-                  )}
-                </p>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Last active {fmt(session.last_seen_at)}
-                </p>
-              </div>
-            </li>
-          ))}
+                    {session.current && (
+                      <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        this device
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Last active {fmt(session.last_seen_at)}
+                  </p>
+                </div>
+                {!session.current && (
+                  <button
+                    type="button"
+                    aria-label={`Sign out ${device.name}`}
+                    title="Sign out this device"
+                    onClick={() => run(revokeSession, session.id)}
+                    className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700"
+                  >
+                    <LogOut size={15} />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {(sessions.data?.length ?? 0) > 1 && (
           <Button
