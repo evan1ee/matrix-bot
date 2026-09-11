@@ -137,7 +137,8 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                         "direction": { "type": "string", "enum": ["expense", "income"], "description": "Whether money went out (expense) or came in (income)" },
                         "note": { "type": "string", "description": "Description of the expense or income" },
                         "currency": { "type": "string", "description": "3-letter currency code (e.g. USD, EUR, CNY). Defaults to user currency" },
-                        "category": { "type": "string", "description": "Category name (e.g. Food, Transport, Rent)" }
+                        "category": { "type": "string", "description": "Category name (e.g. Food, Transport, Rent)" },
+                        "date": { "type": "string", "description": "Optional date of transaction in YYYY-MM-DD or ISO 8601 format (e.g. '2026-09-10'). Defaults to current time" }
                     },
                     "required": ["amount", "direction", "note"],
                     "additionalProperties": false

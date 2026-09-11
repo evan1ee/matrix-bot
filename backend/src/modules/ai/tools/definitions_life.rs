@@ -131,6 +131,8 @@ pub fn life_and_habits_tool_definitions() -> Vec<ToolDefinition> {
                         "longitude": { "type": "number", "description": "Longitude coordinate" },
                         "city": { "type": "string", "description": "City name" },
                         "country": { "type": "string", "description": "Country name" },
+                        "arrival_date": { "type": "string", "description": "Arrival date in YYYY-MM-DD format (e.g. '2026-09-10'). Defaults to today" },
+                        "departure_date": { "type": "string", "description": "Optional departure date in YYYY-MM-DD format" },
                         "category": { "type": "string", "description": "Category e.g. 'Cafe', 'Restaurant', 'Park'" },
                         "rating": { "type": "integer", "description": "Rating from 1 to 5" },
                         "spend_amount": { "type": "string", "description": "Amount spent, e.g. '12.50'" },

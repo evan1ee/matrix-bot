@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde_json::json;
 use sqlx::SqlitePool;
 
@@ -133,6 +133,18 @@ pub async fn execute_finance_tool(
                 None
             };
 
+            let occurred_at = if let Some(date_str) = args.get("date").and_then(|v| v.as_str()) {
+                if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+                    dt.with_timezone(&Utc)
+                } else if let Ok(naive_date) = NaiveDate::parse_from_str(date_str.trim(), "%Y-%m-%d") {
+                    naive_date.and_hms_opt(12, 0, 0).map(|d| d.and_utc()).unwrap_or_else(Utc::now)
+                } else {
+                    Utc::now()
+                }
+            } else {
+                Utc::now()
+            };
+
             let tx = FinanceRepository::create_transaction(
                 pool,
                 room_id,
@@ -146,7 +158,7 @@ pub async fn execute_finance_tool(
                 Some(note),
                 None,
                 None,
-                Utc::now(),
+                occurred_at,
             )
             .await
             .map_err(|e| e.to_string())?;

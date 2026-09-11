@@ -199,6 +199,8 @@ pub async fn execute_life_habits_tool(
             let currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
             let note = args.get("note").and_then(|v| v.as_str());
             let today_str = Utc::now().format("%Y-%m-%d").to_string();
+            let arrival_date = args.get("arrival_date").and_then(|v| v.as_str()).unwrap_or(&today_str);
+            let departure_date = args.get("departure_date").and_then(|v| v.as_str());
 
             let spend_minor = (spend_str.parse::<f64>().unwrap_or(0.0) * 100.0) as i64;
 
@@ -211,8 +213,8 @@ pub async fn execute_life_habits_tool(
                 country,
                 city,
                 None,
-                &today_str,
-                None,
+                arrival_date,
+                departure_date,
                 spend_minor,
                 currency,
                 2,
