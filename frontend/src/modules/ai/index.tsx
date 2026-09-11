@@ -152,10 +152,13 @@ const AiAssistantView: React.FC<{
 
   useEffect(() => {
     promptListener = (text: string, execute: boolean) => {
-      setPrompt(text);
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length > 4000) return;
       if (execute) {
-        chatMutation.mutate(text);
+        setPrompt('');
+        chatMutation.mutate(trimmed);
       } else {
+        setPrompt(trimmed);
         setTimeout(() => inputRef.current?.focus(), 50);
       }
     };
@@ -163,21 +166,29 @@ const AiAssistantView: React.FC<{
     if (pendingAiPrompt) {
       const { prompt: text, execute } = pendingAiPrompt;
       pendingAiPrompt = null;
-      setPrompt(text);
-      if (execute) {
-        chatMutation.mutate(text);
-      } else {
-        setTimeout(() => inputRef.current?.focus(), 50);
+      const trimmed = text.trim();
+      if (trimmed && trimmed.length <= 4000) {
+        if (execute) {
+          setPrompt('');
+          chatMutation.mutate(trimmed);
+        } else {
+          setPrompt(trimmed);
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
       }
     }
 
     const handleCustomEvent = (e: Event) => {
       const detail = (e as CustomEvent<{ prompt?: string; execute?: boolean }>).detail;
-      if (detail?.prompt) {
-        setPrompt(detail.prompt);
+      const text = detail?.prompt;
+      if (text) {
+        const trimmed = text.trim();
+        if (!trimmed || trimmed.length > 4000) return;
         if (detail.execute !== false) {
-          chatMutation.mutate(detail.prompt);
+          setPrompt('');
+          chatMutation.mutate(trimmed);
         } else {
+          setPrompt(trimmed);
           setTimeout(() => inputRef.current?.focus(), 50);
         }
       } else {
@@ -347,7 +358,9 @@ const AiAssistantView: React.FC<{
                   ) : null}
 
                   {m.role === 'tool' ? (
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    <div className="max-h-40 overflow-y-auto rounded bg-neutral-200/40 dark:bg-neutral-950/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all border border-neutral-200/60 dark:border-neutral-800/60">
+                      {m.content}
+                    </div>
                   ) : (
                     <MarkdownRenderer content={m.content} />
                   )}
@@ -377,7 +390,7 @@ const AiAssistantView: React.FC<{
               <MarkdownRenderer content={chatMutation.variables} />
               <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-300 dark:text-neutral-600 justify-end">
                 <Clock className="w-2.5 h-2.5" />
-                <span>Sending...</span>
+                <span>{formatShortTimeInZone(new Date().toISOString(), effectiveTimezone)}</span>
               </div>
             </div>
             <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5 font-mono text-[11px]">

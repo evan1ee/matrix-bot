@@ -79,4 +79,25 @@ test.describe('AI Brain Central Integration & Cross-Module Triggers', () => {
       app.getByText(/Review my investment portfolio asset allocation, performance/i).first()
     ).toBeVisible();
   });
+
+  test('Footprints module "AI Travel Log" button invokes AI Brain, clears input box, and does not show Sending', async ({ app }) => {
+    await gotoApp(app, TAB.footprints);
+
+    const aiTravelLogBtn = app.getByRole('button', { name: 'AI Travel Log' });
+    await expect(aiTravelLogBtn).toBeVisible();
+    await aiTravelLogBtn.click();
+
+    // Verify AI Assistant view opens and receives prompt
+    await expect(app.getByRole('heading', { name: 'AI Assistant', exact: true })).toBeVisible();
+    await expect(
+      app.getByText(/Review my travel footprints and visited locations/i).first()
+    ).toBeVisible();
+
+    // Input box should NOT contain a copy of the message
+    const input = app.getByPlaceholder(/Ask AI assistant/i);
+    await expect(input).toHaveValue('');
+
+    // Should not show "Sending..."
+    await expect(app.getByText('Sending...')).not.toBeVisible();
+  });
 });
