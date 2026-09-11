@@ -3,7 +3,9 @@ use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::normalise_currency;
-use crate::modules::settings::models::{parse_timezone, UserSettings};
+use crate::modules::settings::models::{
+    parse_timezone, UserSettings, MAX_MAX_HISTORY_TURNS, MIN_MAX_HISTORY_TURNS,
+};
 use crate::modules::settings::repository::SettingsRepository;
 use crate::utils::{format_datetime, html_escape};
 
@@ -41,6 +43,9 @@ pub async fn handle_settings_command(
         "dev_room" | "dev" | "devroom" | "error_room" => {
             Some(set_dev_room(pool, owner_id, value, broadcaster).await)
         }
+        "history" | "turns" | "max_history" => {
+            Some(set_history(pool, owner_id, value, broadcaster).await)
+        }
         other => Some(format!(
             "⚠️ Unknown setting <code>{}</code>.<br/>{}",
             html_escape(other),
@@ -68,7 +73,8 @@ fn usage() -> String {
         "Usage: <code>!settings</code>, \
          <code>!settings timezone &lt;IANA zone&gt;</code>, \
          <code>!settings currency &lt;CODE&gt;</code>, \
-         <code>!settings dev_room &lt;room_id|none&gt;</code><br/>\
+         <code>!settings dev_room &lt;room_id|none&gt;</code>, \
+         <code>!settings history &lt;1-100&gt;</code><br/>\
          <i>Zones: {}</i>",
         SUGGESTED_ZONES.join(", ")
     )
@@ -87,13 +93,52 @@ async fn show(pool: &SqlitePool, owner_id: &str) -> String {
         "⚙️ <b>Your settings</b><br/>\
          • Timezone: <b>{}</b> — it is currently {}<br/>\
          • Default currency: <b>{}</b><br/>\
-         • Dev room: {}<br/><br/>{}",
+         • Dev room: {}<br/>\
+         • Max AI history: <b>{} messages</b><br/><br/>{}",
         html_escape(&settings.timezone),
         html_escape(&now),
         html_escape(&settings.currency),
         dev_room_display,
+        settings.max_history_turns,
         usage()
     )
+}
+
+async fn set_history(
+    pool: &SqlitePool,
+    owner_id: &str,
+    value: &str,
+    broadcaster: Option<&EventBroadcaster>,
+) -> String {
+    if value.is_empty() {
+        return format!("⚠️ How many history messages?<br/>{}", usage());
+    }
+
+    let turns: i64 = match value.parse() {
+        Ok(n) if (MIN_MAX_HISTORY_TURNS..=MAX_MAX_HISTORY_TURNS).contains(&n) => n,
+        _ => {
+            return format!(
+                "⚠️ Max history messages must be an integer between {} and {}.<br/>Example: <code>!settings history 10</code>",
+                MIN_MAX_HISTORY_TURNS, MAX_MAX_HISTORY_TURNS
+            );
+        }
+    };
+
+    let current = SettingsRepository::get_or_default(pool, owner_id).await;
+    let updated = UserSettings {
+        timezone: current.timezone,
+        currency: current.currency,
+        dev_room_id: current.dev_room_id,
+        max_history_turns: turns,
+    };
+
+    match save(pool, owner_id, updated, broadcaster).await {
+        Ok(saved) => format!(
+            "✅ Max AI context history set to <b>{} messages</b>.",
+            saved.max_history_turns
+        ),
+        Err(()) => "❌ Database error saving your setting.".to_string(),
+    }
 }
 
 async fn set_timezone(
@@ -119,6 +164,7 @@ async fn set_timezone(
         timezone: tz.name().to_string(),
         currency: current.currency,
         dev_room_id: current.dev_room_id,
+        max_history_turns: current.max_history_turns,
     };
 
     match save(pool, owner_id, updated, broadcaster).await {
@@ -156,6 +202,7 @@ async fn set_currency(
         timezone: current.timezone,
         currency,
         dev_room_id: current.dev_room_id,
+        max_history_turns: current.max_history_turns,
     };
 
     match save(pool, owner_id, updated, broadcaster).await {
@@ -189,6 +236,7 @@ async fn set_dev_room(
         timezone: current.timezone,
         currency: current.currency,
         dev_room_id,
+        max_history_turns: current.max_history_turns,
     };
 
     match save(pool, owner_id, updated, broadcaster).await {
@@ -363,5 +411,30 @@ mod tests {
 
         let shown2 = run(&pool, "!settings").await;
         assert!(shown2.contains("Not configured"), "{shown2}");
+    }
+
+    #[tokio::test]
+    async fn test_sets_max_history_turns() {
+        let pool = pool().await;
+
+        let reply = run(&pool, "!settings history 25").await;
+        assert!(reply.contains("25 messages"), "{reply}");
+
+        let shown = run(&pool, "!settings").await;
+        assert!(shown.contains("25 messages"), "{shown}");
+
+        // Rejects invalid values
+        let bad = run(&pool, "!settings history 0").await;
+        assert!(bad.contains("between 1 and 100"), "{bad}");
+
+        let bad2 = run(&pool, "!settings history 150").await;
+        assert!(bad2.contains("between 1 and 100"), "{bad2}");
+
+        let bad3 = run(&pool, "!settings history abc").await;
+        assert!(bad3.contains("between 1 and 100"), "{bad3}");
+
+        // Previous setting remains intact
+        let shown2 = run(&pool, "!settings").await;
+        assert!(shown2.contains("25 messages"), "{shown2}");
     }
 }

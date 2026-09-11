@@ -290,6 +290,7 @@ mod tests {
             system_prompt: Some("Custom system prompt".to_string()),
             temperature: Some(0.3),
             max_tokens: Some(1024),
+            max_history_turns: Some(10),
             updated_at: "2026-08-27T00:00:00Z".to_string(),
             has_api_key: true,
         };
@@ -313,6 +314,7 @@ mod tests {
             system_prompt: None,
             temperature: Some(5.0),
             max_tokens: Some(99999),
+            max_history_turns: None,
             updated_at: "2026-08-27T00:00:00Z".to_string(),
             has_api_key: false,
         };

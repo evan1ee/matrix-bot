@@ -6,6 +6,7 @@ export interface AiUserConfig {
   system_prompt?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
+  max_history_turns?: number | null;
   updated_at: string;
   has_api_key?: boolean;
 }

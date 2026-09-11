@@ -12,6 +12,9 @@ pub struct AiUserConfig {
     pub system_prompt: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
+    #[serde(default)]
+    #[sqlx(default)]
+    pub max_history_turns: Option<i64>,
     pub updated_at: String,
     #[sqlx(default)]
     pub has_api_key: bool,
@@ -72,7 +75,7 @@ pub struct VerifyAiKeyResponse {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct UpdateAiConfigInput {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
@@ -80,6 +83,7 @@ pub struct UpdateAiConfigInput {
     pub system_prompt: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
+    pub max_history_turns: Option<i64>,
 }
 
 impl UpdateAiConfigInput {
@@ -125,6 +129,11 @@ impl UpdateAiConfigInput {
         if let Some(tokens) = self.max_tokens {
             if tokens <= 0 || tokens > 32768 {
                 return Err("Max tokens must be between 1 and 32768");
+            }
+        }
+        if let Some(turns) = self.max_history_turns {
+            if !(1..=100).contains(&turns) {
+                return Err("Max history turns must be between 1 and 100");
             }
         }
         Ok(())
@@ -288,21 +297,13 @@ mod tests {
     fn test_validate_api_base_url() {
         let valid = UpdateAiConfigInput {
             api_base_url: Some("https://api.openai.com/v1".to_string()),
-            api_key: None,
-            model_name: None,
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         assert!(valid.validate().is_ok());
 
         let invalid_scheme = UpdateAiConfigInput {
             api_base_url: Some("ftp://example.com".to_string()),
-            api_key: None,
-            model_name: None,
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         assert_eq!(
             invalid_scheme.validate().unwrap_err(),
@@ -311,15 +312,38 @@ mod tests {
 
         let ssrf_metadata = UpdateAiConfigInput {
             api_base_url: Some("http://169.254.169.254/latest/meta-data".to_string()),
-            api_key: None,
-            model_name: None,
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         assert_eq!(
             ssrf_metadata.validate().unwrap_err(),
             "API base URL cannot target link-local metadata addresses"
+        );
+    }
+
+    #[test]
+    fn test_validate_max_history_turns() {
+        let valid = UpdateAiConfigInput {
+            max_history_turns: Some(10),
+            ..Default::default()
+        };
+        assert!(valid.validate().is_ok());
+
+        let too_low = UpdateAiConfigInput {
+            max_history_turns: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(
+            too_low.validate().unwrap_err(),
+            "Max history turns must be between 1 and 100"
+        );
+
+        let too_high = UpdateAiConfigInput {
+            max_history_turns: Some(101),
+            ..Default::default()
+        };
+        assert_eq!(
+            too_high.validate().unwrap_err(),
+            "Max history turns must be between 1 and 100"
         );
     }
 }

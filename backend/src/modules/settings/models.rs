@@ -12,6 +12,14 @@ pub const DEFAULT_TIMEZONE: &str = "UTC";
 /// Assumed when a user has never saved a preference, and when an `!expense add`
 /// names no currency.
 pub const DEFAULT_CURRENCY: &str = "USD";
+/// Default number of recent messages to retain in AI context (turns).
+pub const DEFAULT_MAX_HISTORY_TURNS: i64 = 10;
+pub const MIN_MAX_HISTORY_TURNS: i64 = 1;
+pub const MAX_MAX_HISTORY_TURNS: i64 = 100;
+
+fn default_max_history_turns() -> i64 {
+    DEFAULT_MAX_HISTORY_TURNS
+}
 
 /// One user's display preferences, keyed by the same `owner_id` every other
 /// ownership check uses (`AuthUser::owner_id`, the `owner_id` column).
@@ -29,6 +37,9 @@ pub struct UserSettings {
     /// Matrix room ID where development errors and alerts are sent.
     #[serde(default)]
     pub dev_room_id: Option<String>,
+    /// Number of recent conversation messages included as context for AI turns.
+    #[serde(default = "default_max_history_turns")]
+    pub max_history_turns: i64,
 }
 
 impl Default for UserSettings {
@@ -37,6 +48,7 @@ impl Default for UserSettings {
             timezone: DEFAULT_TIMEZONE.to_string(),
             currency: DEFAULT_CURRENCY.to_string(),
             dev_room_id: None,
+            max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
         }
     }
 }
@@ -72,6 +84,7 @@ mod tests {
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
         assert_eq!(settings.dev_room_id, None);
+        assert_eq!(settings.max_history_turns, DEFAULT_MAX_HISTORY_TURNS);
         assert_eq!(settings.tz(), Tz::UTC);
     }
 
@@ -100,6 +113,7 @@ mod tests {
             timezone: "Nowhere/Nothing".to_string(),
             currency: "USD".to_string(),
             dev_room_id: None,
+            max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
         };
         assert_eq!(settings.tz(), Tz::UTC);
     }

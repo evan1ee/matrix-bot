@@ -12,7 +12,7 @@ impl SettingsRepository {
     /// still get a usable answer.
     pub async fn get(pool: &SqlitePool, owner_id: &str) -> Result<UserSettings, sqlx::Error> {
         let found = sqlx::query_as::<_, UserSettings>(
-            "SELECT timezone, currency, dev_room_id FROM user_settings WHERE owner_id = ?",
+            "SELECT timezone, currency, dev_room_id, max_history_turns FROM user_settings WHERE owner_id = ?",
         )
         .bind(owner_id)
         .fetch_optional(pool)
@@ -44,18 +44,20 @@ impl SettingsRepository {
         settings: &UserSettings,
     ) -> Result<UserSettings, sqlx::Error> {
         sqlx::query(
-            "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, updated_at) \
-             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
+            "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, updated_at) \
+             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
              ON CONFLICT(owner_id) DO UPDATE SET \
                 timezone = excluded.timezone, \
                 currency = excluded.currency, \
                 dev_room_id = excluded.dev_room_id, \
+                max_history_turns = excluded.max_history_turns, \
                 updated_at = CURRENT_TIMESTAMP",
         )
         .bind(owner_id)
         .bind(&settings.timezone)
         .bind(&settings.currency)
         .bind(&settings.dev_room_id)
+        .bind(settings.max_history_turns)
         .execute(pool)
         .await?;
 
@@ -93,6 +95,7 @@ mod tests {
                 timezone: "Asia/Shanghai".to_string(),
                 currency: "CNY".to_string(),
                 dev_room_id: Some("!dev:mbm.one".to_string()),
+                max_history_turns: 15,
             },
         )
         .await
@@ -100,6 +103,7 @@ mod tests {
         assert_eq!(created.timezone, "Asia/Shanghai");
         assert_eq!(created.currency, "CNY");
         assert_eq!(created.dev_room_id.as_deref(), Some("!dev:mbm.one"));
+        assert_eq!(created.max_history_turns, 15);
 
         let updated = SettingsRepository::upsert(
             &pool,
@@ -108,12 +112,14 @@ mod tests {
                 timezone: "Europe/Berlin".to_string(),
                 currency: "EUR".to_string(),
                 dev_room_id: None,
+                max_history_turns: 20,
             },
         )
         .await
         .unwrap();
         assert_eq!(updated.timezone, "Europe/Berlin");
         assert_eq!(updated.dev_room_id, None);
+        assert_eq!(updated.max_history_turns, 20);
 
         // The upsert must update the existing row, never accumulate rows.
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_settings")
@@ -137,6 +143,7 @@ mod tests {
                 timezone: "Asia/Shanghai".to_string(),
                 currency: "CNY".to_string(),
                 dev_room_id: Some("!dev:mbm.one".to_string()),
+                max_history_turns: 10,
             },
         )
         .await

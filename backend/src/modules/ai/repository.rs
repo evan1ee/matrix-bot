@@ -279,6 +279,7 @@ mod tests {
             system_prompt: Some("You are a helpful bot.".to_string()),
             temperature: Some(0.5),
             max_tokens: Some(1024),
+            ..Default::default()
         };
 
         let saved = AiRepository::upsert_user_config(&db.pool, &owner, &input)
@@ -307,6 +308,7 @@ mod tests {
             system_prompt: Some("Original prompt".to_string()),
             temperature: Some(0.3),
             max_tokens: Some(512),
+            ..Default::default()
         };
 
         AiRepository::upsert_user_config(&db.pool, &owner, &initial_input)
@@ -315,12 +317,8 @@ mod tests {
 
         // Partial update: switch model only
         let model_update = UpdateAiConfigInput {
-            api_base_url: None,
-            api_key: None,
             model_name: Some("deepseek-chat".to_string()),
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
 
         let updated = AiRepository::upsert_user_config(&db.pool, &owner, &model_update)

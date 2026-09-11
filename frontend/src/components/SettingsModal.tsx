@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Clock, Coins, Search, Terminal, X } from 'lucide-react';
+import { Check, Clock, Coins, MessageSquare, Search, Terminal, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { CustomSelect } from './CustomSelect';
 import { RoomsPanel } from './RoomsPanel';
@@ -38,6 +38,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
   const [devRoomId, setDevRoomId] = useState(saved.dev_room_id ?? '');
+  const [maxHistoryTurns, setMaxHistoryTurns] = useState(saved.max_history_turns ?? 10);
   const [filter, setFilter] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -54,10 +55,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setTimezone(saved.timezone);
       setCurrency(saved.currency);
       setDevRoomId(saved.dev_room_id ?? '');
+      setMaxHistoryTurns(saved.max_history_turns ?? 10);
       setFilter('');
       setErrorMsg(null);
     }
-  }, [isOpen, saved.timezone, saved.currency, saved.dev_room_id]);
+  }, [isOpen, saved.timezone, saved.currency, saved.dev_room_id, saved.max_history_turns]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -99,7 +101,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const dirty =
     timezone !== saved.timezone ||
     currency !== saved.currency ||
-    (devRoomId.trim() || null) !== (saved.dev_room_id ?? null);
+    (devRoomId.trim() || null) !== (saved.dev_room_id ?? null) ||
+    maxHistoryTurns !== (saved.max_history_turns ?? 10);
 
   const handleSave = async () => {
     setErrorMsg(null);
@@ -108,6 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         timezone,
         currency,
         dev_room_id: devRoomId.trim() || null,
+        max_history_turns: maxHistoryTurns,
       });
       onClose();
     } catch (err: unknown) {
@@ -274,6 +278,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           />
           <p className="text-[11px] font-mono text-neutral-500">
             System errors and AI failure notices will only be sent to this room (sent once per outage incident).
+          </p>
+        </div>
+
+        {/* Max AI context history */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400">
+              <MessageSquare className="w-3.5 h-3.5" />
+              Max AI context history
+            </label>
+            <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300">
+              {maxHistoryTurns} messages
+            </span>
+          </div>
+          <input
+            type="range"
+            min="1"
+            max="50"
+            step="1"
+            value={maxHistoryTurns}
+            onChange={(e) => setMaxHistoryTurns(parseInt(e.target.value, 10))}
+            className="w-full mt-1 accent-neutral-900 dark:accent-neutral-100 cursor-pointer"
+          />
+          <div className="flex justify-between text-[10px] font-mono text-neutral-400">
+            <span>1 (Minimal)</span>
+            <span>10 (Default)</span>
+            <span>50 (Deep context)</span>
+          </div>
+          <p className="text-[11px] font-mono text-neutral-500">
+            Number of recent room or conversation messages included as context when chatting or mentioning the bot.
           </p>
         </div>
 

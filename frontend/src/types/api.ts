@@ -1278,6 +1278,8 @@ export interface components {
             api_key?: string | null;
             has_api_key: boolean;
             /** Format: int64 */
+            max_history_turns?: number | null;
+            /** Format: int64 */
             max_tokens?: number | null;
             model_name?: string | null;
             owner_id: string;
@@ -2108,6 +2110,8 @@ export interface components {
             api_base_url?: string | null;
             api_key?: string | null;
             /** Format: int64 */
+            max_history_turns?: number | null;
+            /** Format: int64 */
             max_tokens?: number | null;
             model_name?: string | null;
             system_prompt?: string | null;
@@ -2165,6 +2169,11 @@ export interface components {
             currency: string;
             /** @description Optional Matrix room ID for development and error notifications. */
             dev_room_id?: string | null;
+            /**
+             * Format: int64
+             * @description Optional max conversation history turns for AI (1-100).
+             */
+            max_history_turns?: number | null;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. */
             timezone: string;
         };
@@ -2220,6 +2229,11 @@ export interface components {
             currency: string;
             /** @description Matrix room ID where development errors and alerts are sent. */
             dev_room_id?: string | null;
+            /**
+             * Format: int64
+             * @description Number of recent conversation messages included as context for AI turns.
+             */
+            max_history_turns?: number;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
             timezone: string;
         };

@@ -152,6 +152,7 @@ pub async fn get_ai_config(
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
     let resolved = ResolvedAiConfig::from_user_config(None);
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
     let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
@@ -166,6 +167,7 @@ pub async fn get_ai_config(
             if !redacted.has_api_key && resolved.api_key.is_some() {
                 redacted.has_api_key = true;
             }
+            redacted.max_history_turns = Some(settings.max_history_turns);
             redacted
         })
         .unwrap_or_else(|| {
@@ -177,6 +179,7 @@ pub async fn get_ai_config(
                 system_prompt: None,
                 temperature: Some(resolved.temperature),
                 max_tokens: Some(resolved.max_tokens),
+                max_history_turns: Some(settings.max_history_turns),
                 updated_at: String::new(),
                 has_api_key: resolved.api_key.is_some(),
             }
@@ -200,6 +203,16 @@ pub async fn update_ai_config(
 ) -> Result<Json<AiUserConfig>, ApiError> {
     input.validate().map_err(ApiError::bad_request)?;
 
+    if let Some(turns) = input.max_history_turns {
+        let mut settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
+        settings.max_history_turns = turns.clamp(1, 100);
+        let _ = crate::modules::settings::repository::SettingsRepository::upsert(&state.db.pool, &user.account_id, &settings).await;
+        state.broadcaster.send(SystemEvent::SettingsUpdated {
+            owner_id: user.account_id.clone(),
+            settings,
+        });
+    }
+
     let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)
         .await
         .map_err(ApiError::from)?;
@@ -208,7 +221,11 @@ pub async fn update_ai_config(
         owner_id: user.account_id.clone(),
     });
 
-    Ok(Json(updated.redacted()))
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
+    let mut redacted = updated.redacted();
+    redacted.max_history_turns = Some(settings.max_history_turns);
+
+    Ok(Json(redacted))
 }
 
 #[utoipa::path(
@@ -315,6 +332,7 @@ mod tests {
             system_prompt: None,
             temperature: Some(0.7),
             max_tokens: Some(1024),
+            max_history_turns: Some(15),
         };
 
         let put_res = update_ai_config(State(state.clone()), user.clone(), Json(update_input))
@@ -322,6 +340,7 @@ mod tests {
             .unwrap();
         assert!(put_res.has_api_key);
         assert_eq!(put_res.api_key, None);
+        assert_eq!(put_res.max_history_turns, Some(15));
 
         let get_res = get_ai_config(State(state.clone()), user.clone())
             .await
@@ -329,6 +348,7 @@ mod tests {
         assert!(get_res.has_api_key);
         assert_eq!(get_res.api_key, None);
         assert_eq!(get_res.model_name.as_deref(), Some("gpt-4o"));
+        assert_eq!(get_res.max_history_turns, Some(15));
     }
 
     #[tokio::test]
@@ -343,12 +363,27 @@ mod tests {
             system_prompt: None,
             temperature: None,
             max_tokens: None,
+            max_history_turns: None,
         };
 
-        let err = update_ai_config(State(state), user, Json(too_long_model))
+        let err = update_ai_config(State(state.clone()), user.clone(), Json(too_long_model))
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let invalid_history = UpdateAiConfigInput {
+            api_base_url: None,
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+            max_history_turns: Some(150),
+        };
+        let err2 = update_ai_config(State(state), user, Json(invalid_history))
+            .await
+            .unwrap_err();
+        assert_eq!(err2.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

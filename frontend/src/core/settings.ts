@@ -9,6 +9,8 @@ export interface UserSettings {
   currency: string;
   /** Matrix room ID where development errors and alerts are routed. */
   dev_room_id?: string | null;
+  /** Number of recent conversation messages included as context for AI. */
+  max_history_turns?: number;
 }
 
 /** Matches the server's own fallback, so an unauthenticated or still-loading UI
@@ -17,6 +19,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   timezone: 'UTC',
   currency: 'USD',
   dev_room_id: null,
+  max_history_turns: 10,
 };
 
 export const SETTINGS_QUERY_KEY = ['settings'] as const;

@@ -81,6 +81,13 @@ pub async fn handle_ai_command(
             }
             return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
         }
+        if let Some(rest) = trimmed.strip_prefix("history").or_else(|| trimmed.strip_prefix("turns")) {
+            let num_arg = rest.trim();
+            if num_arg.is_empty() {
+                return Some(handle_show_config(pool, owner_id).await);
+            }
+            return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
+        }
         trimmed
     } else if is_direct || is_mentioned {
         let trimmed = full_body.trim();
@@ -159,15 +166,17 @@ pub async fn run_ai_turn(
         warn!("Failed to persist user message: {}", e);
     }
 
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    let tz = settings.tz();
+    let max_history = settings.max_history_turns.clamp(1, 100);
+
     // Load recent messages for context
-    let recent_messages = AiRepository::get_recent_messages(pool, &conversation.id, MAX_HISTORY_TURNS)
+    let recent_messages = AiRepository::get_recent_messages(pool, &conversation.id, max_history)
         .await
         .unwrap_or_default();
 
     let mut chat_messages = Vec::new();
 
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
-    let tz = settings.tz();
     let now_utc = chrono::Utc::now();
     let now_local = now_utc.with_timezone(&tz);
     let today_local = now_local.format("%Y-%m-%d").to_string();
@@ -375,6 +384,7 @@ async fn handle_reset(
 async fn handle_show_config(pool: &SqlitePool, owner_id: &str) -> String {
     let user_config = AiRepository::get_user_config(pool, owner_id).await.unwrap_or(None);
     let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
 
     let key_status = if resolved.api_key.is_some() { "Configured (Hidden)" } else { "None" };
 
@@ -383,12 +393,45 @@ async fn handle_show_config(pool: &SqlitePool, owner_id: &str) -> String {
          • <b>Model:</b> <code>{}</code><br/>\
          • <b>Endpoint:</b> <code>{}</code><br/>\
          • <b>API Key:</b> {}<br/>\
-         • <b>Temperature:</b> <code>{}</code>",
+         • <b>Temperature:</b> <code>{}</code><br/>\
+         • <b>Max History Turns:</b> <code>{}</code>",
         html_escape(&resolved.model_name),
         html_escape(&resolved.api_base_url),
         key_status,
-        resolved.temperature
+        resolved.temperature,
+        settings.max_history_turns
     )
+}
+
+async fn handle_set_history(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    turns_str: &str,
+) -> String {
+    let turns: i64 = match turns_str.parse() {
+        Ok(n) if (1..=100).contains(&n) => n,
+        _ => return format_error("Max history turns must be an integer between 1 and 100."),
+    };
+
+    let mut settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    settings.max_history_turns = turns;
+
+    match crate::modules::settings::repository::SettingsRepository::upsert(pool, owner_id, &settings).await {
+        Ok(saved) => {
+            if let Some(b) = broadcaster {
+                b.send(SystemEvent::SettingsUpdated {
+                    owner_id: owner_id.to_string(),
+                    settings: saved.clone(),
+                });
+            }
+            format!("✅ AI max history turns updated to: <code>{}</code>", saved.max_history_turns)
+        }
+        Err(e) => {
+            error!("Failed to update max history turns: {}", e);
+            format_error("Failed to update max history turns setting.")
+        }
+    }
 }
 
 async fn handle_set_model(
@@ -398,12 +441,8 @@ async fn handle_set_model(
     model_name: &str,
 ) -> String {
     let input = crate::modules::ai::models::UpdateAiConfigInput {
-        api_base_url: None,
-        api_key: None,
         model_name: Some(model_name.to_string()),
-        system_prompt: None,
-        temperature: None,
-        max_tokens: None,
+        ..Default::default()
     };
 
     match AiRepository::upsert_user_config(pool, owner_id, &input).await {
@@ -443,6 +482,7 @@ fn format_help() -> String {
      • <code>!ai retro</code> — Generate weekly executive retrospective<br/>\
      • <code>!ai reset</code> — Clear conversational memory in this room<br/>\
      • <code>!ai model &lt;name&gt;</code> — Switch active model<br/>\
+     • <code>!ai history &lt;1-100&gt;</code> — Set max context history messages<br/>\
      • <code>!ai config</code> — View active AI endpoint & model"
         .to_string()
 }
@@ -498,6 +538,7 @@ mod tests {
         .await
         .unwrap();
         assert!(config.contains("AI Assistant Configuration"));
+        assert!(config.contains("Max History Turns"));
     }
 
     #[tokio::test]
@@ -520,6 +561,40 @@ mod tests {
         .await
         .unwrap();
         assert!(res.contains("AI model updated to: <code>gpt-4o-mini</code>"));
+
+        let hist = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "User",
+            "ai",
+            "history 20",
+            "",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(hist.contains("AI max history turns updated to: <code>20</code>"));
+
+        let config2 = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "User",
+            "ai",
+            "config",
+            "",
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(config2.contains("Max History Turns:</b> <code>20</code>"));
 
         let reset = handle_ai_command(
             &db.pool,
@@ -550,9 +625,7 @@ mod tests {
             api_base_url: Some("http://127.0.0.1:1".to_string()),
             api_key: Some("invalid-key".to_string()),
             model_name: Some("test-model".to_string()),
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         AiRepository::upsert_user_config(&db.pool, &owner, &input)
             .await
@@ -934,9 +1007,7 @@ mod tests {
             api_base_url: Some("http://127.0.0.1:1".to_string()),
             api_key: Some("invalid-key".to_string()),
             model_name: Some("test-model".to_string()),
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
+            ..Default::default()
         };
         AiRepository::upsert_user_config(&db.pool, &owner, &input)
             .await

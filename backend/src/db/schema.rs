@@ -93,6 +93,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             timezone TEXT NOT NULL DEFAULT 'UTC',
             currency TEXT NOT NULL DEFAULT 'USD',
             dev_room_id TEXT,
+            max_history_turns INTEGER NOT NULL DEFAULT 10,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         "#,
@@ -101,6 +102,10 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN dev_room_id TEXT;")
+        .execute(pool)
+        .await;
+
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN max_history_turns INTEGER NOT NULL DEFAULT 10;")
         .execute(pool)
         .await;
 

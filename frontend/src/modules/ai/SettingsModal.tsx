@@ -29,6 +29,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
   const [customModelText, setCustomModelText] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [temperature, setTemperature] = useState<number>(0.7);
+  const [maxHistoryTurns, setMaxHistoryTurns] = useState<number>(10);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyAiKeyResponse | null>(null);
 
@@ -51,6 +52,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
       setApiKey('');
       setSystemPrompt(config.system_prompt || '');
       setTemperature(config.temperature ?? 0.7);
+      setMaxHistoryTurns(config.max_history_turns ?? 10);
     } else {
       setProviderId('openai');
       setSelectedModel('gpt-4o-mini');
@@ -59,6 +61,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
       setApiKey('');
       setSystemPrompt('');
       setTemperature(0.7);
+      setMaxHistoryTurns(10);
     }
     setVerifyResult(null);
   }, [config, isOpen]);
@@ -137,6 +140,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
       model_name: finalModel || undefined,
       system_prompt: systemPrompt.trim() || undefined,
       temperature,
+      max_history_turns: maxHistoryTurns,
     });
   };
 
@@ -315,6 +319,35 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
               <span>1.0 (Balanced)</span>
               <span>2.0 (Creative)</span>
             </div>
+          </div>
+
+          {/* Max History Turns */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                Max Context History Messages
+              </label>
+              <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300">
+                {maxHistoryTurns} messages
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="50"
+              step="1"
+              value={maxHistoryTurns}
+              onChange={(e) => setMaxHistoryTurns(parseInt(e.target.value, 10))}
+              className="w-full mt-1 accent-neutral-900 dark:accent-neutral-100 cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] font-mono text-neutral-400 mt-0.5">
+              <span>1 (Minimal)</span>
+              <span>10 (Default)</span>
+              <span>50 (Deep context)</span>
+            </div>
+            <p className="text-[11px] font-mono text-neutral-500 mt-1">
+              Number of recent conversation messages included in context when you chat or mention the AI.
+            </p>
           </div>
 
           {/* System Prompt */}

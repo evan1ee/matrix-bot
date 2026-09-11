@@ -19,6 +19,9 @@ pub struct UpdateSettingsRequest {
     /// Optional Matrix room ID for development and error notifications.
     #[serde(default)]
     pub dev_room_id: Option<String>,
+    /// Optional max conversation history turns for AI (1-100).
+    #[serde(default)]
+    pub max_history_turns: Option<i64>,
 }
 
 #[utoipa::path(
@@ -74,6 +77,16 @@ pub async fn update_settings(
         }
     });
 
+    let current = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
+    let max_history_turns = if let Some(turns) = payload.max_history_turns {
+        if !(1..=100).contains(&turns) {
+            return Err(ApiError::bad_request("max_history_turns must be between 1 and 100"));
+        }
+        turns
+    } else {
+        current.max_history_turns
+    };
+
     let settings = SettingsRepository::upsert(
         &state.db.pool,
         &user.owner_id(),
@@ -81,6 +94,7 @@ pub async fn update_settings(
             timezone: timezone.name().to_string(),
             currency,
             dev_room_id,
+            max_history_turns,
         },
     )
     .await
@@ -119,6 +133,7 @@ mod tests {
             timezone: timezone.to_string(),
             currency: currency.to_string(),
             dev_room_id: None,
+            max_history_turns: None,
         }
     }
 
@@ -130,6 +145,7 @@ mod tests {
             .unwrap();
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
+        assert_eq!(settings.max_history_turns, 10);
     }
 
     #[tokio::test]
@@ -148,17 +164,20 @@ mod tests {
         assert_eq!(saved.currency, "CNY");
         assert_eq!(saved.timezone, "Asia/Shanghai");
         assert_eq!(saved.dev_room_id, None);
+        assert_eq!(saved.max_history_turns, 10);
 
         let read = get_settings(State(state.clone()), user.clone()).await.unwrap();
         assert_eq!(read.0, saved.0);
 
-        // Update dev_room_id
+        // Update dev_room_id and max_history_turns
         let mut req = body("Asia/Shanghai", "CNY");
         req.dev_room_id = Some("!dev:mbm.one".to_string());
+        req.max_history_turns = Some(25);
         let saved2 = update_settings(State(state.clone()), user.clone(), Json(req))
             .await
             .unwrap();
         assert_eq!(saved2.dev_room_id.as_deref(), Some("!dev:mbm.one"));
+        assert_eq!(saved2.max_history_turns, 25);
     }
 
     /// An unknown zone must be refused at the boundary. Accepting it would store
