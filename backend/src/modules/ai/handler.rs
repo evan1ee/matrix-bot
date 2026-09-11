@@ -1,5 +1,7 @@
 use sqlx::SqlitePool;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+#[cfg(not(test))]
+use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -12,10 +14,17 @@ use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
 use crate::utils::html::html_escape;
 
+#[cfg(not(test))]
 static AI_CLIENT: OnceLock<AiClient> = OnceLock::new();
 
-pub fn get_ai_client() -> &'static AiClient {
-    AI_CLIENT.get_or_init(AiClient::new)
+#[cfg(not(test))]
+pub fn get_ai_client() -> AiClient {
+    AI_CLIENT.get_or_init(AiClient::new).clone()
+}
+
+#[cfg(test)]
+pub fn get_ai_client() -> AiClient {
+    AiClient::new()
 }
 
 pub const MAX_HISTORY_TURNS: i64 = 15;
@@ -496,7 +505,19 @@ mod tests {
         clear_ai_error_state();
         assert!(!is_ai_error_alerted());
 
-        // In test mode without external API server, calling !ai prompt will fail
+        // Configure unreachable endpoint to guarantee failure regardless of live environment
+        let input = crate::modules::ai::models::UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("invalid-key".to_string()),
+            model_name: Some("test-model".to_string()),
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+            .await
+            .unwrap();
+
         let result1 = handle_ai_command(
             &db.pool,
             None,
@@ -604,11 +625,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Live integration test with real xAI API
     async fn test_live_xai_grok_tool_calling() {
-        if std::env::var("https_proxy").is_err() {
-            std::env::set_var("https_proxy", "http://127.0.0.1:7897");
-            std::env::set_var("http_proxy", "http://127.0.0.1:7897");
+        let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
+        let _ = dotenvy::from_path(&root_env);
+        let _ = dotenvy::dotenv();
+
+        let config = ResolvedAiConfig::from_user_config(None);
+        if config.api_key.is_none() {
+            return; // Skip test if no live key is provided in env
         }
 
         let (db, owner) = setup_test().await;
@@ -639,24 +663,7 @@ mod tests {
         .await
         .unwrap();
 
-        let api_key = match std::env::var("XAI_API_KEY") {
-            Ok(k) if !k.trim().is_empty() => k,
-            _ => return, // Skip test if no live key is provided in env
-        };
-
-        let input = crate::modules::ai::models::UpdateAiConfigInput {
-            api_base_url: Some("https://api.x.ai/v1".to_string()),
-            api_key: Some(api_key),
-            model_name: Some("grok-4.6".to_string()),
-            system_prompt: None,
-            temperature: Some(0.7),
-            max_tokens: Some(1024),
-        };
-
-        AiRepository::upsert_user_config(&db.pool, &owner, &input)
-            .await
-            .unwrap();
-
+        // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
             &db.pool,
             None,
@@ -668,7 +675,7 @@ mod tests {
         .await
         .expect("Live xAI Grok turn should succeed");
 
-        println!("\n=== Live xAI Grok Result ===");
+        println!("\n=== Live xAI Grok Tool Calling Result ===");
         println!("Model Used: {}", result.model_used);
         println!("Tools Executed: {:?}", result.tool_calls_executed);
         println!("Response:\n{}", result.message);
@@ -682,34 +689,19 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Live integration test with real xAI API for natural language mutations
     async fn test_live_xai_grok_mutation_tools() {
-        if std::env::var("https_proxy").is_err() {
-            std::env::set_var("https_proxy", "http://127.0.0.1:7897");
-            std::env::set_var("http_proxy", "http://127.0.0.1:7897");
+        let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
+        let _ = dotenvy::from_path(&root_env);
+        let _ = dotenvy::dotenv();
+
+        let config = ResolvedAiConfig::from_user_config(None);
+        if config.api_key.is_none() {
+            return;
         }
 
         let (db, owner) = setup_test().await;
 
-        let api_key = match std::env::var("XAI_API_KEY") {
-            Ok(k) if !k.trim().is_empty() => k,
-            _ => return,
-        };
-
-        let input = crate::modules::ai::models::UpdateAiConfigInput {
-            api_base_url: Some("https://api.x.ai/v1".to_string()),
-            api_key: Some(api_key),
-            model_name: Some("grok-4.6".to_string()),
-            system_prompt: None,
-            temperature: Some(0.7),
-            max_tokens: Some(1024),
-        };
-
-        AiRepository::upsert_user_config(&db.pool, &owner, &input)
-            .await
-            .unwrap();
-
-        // 1. Test Natural Language Task Creation
+        // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
             &db.pool,
             None,
@@ -761,5 +753,112 @@ mod tests {
             .unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].expense_minor, 1850);
+    }
+
+    #[tokio::test]
+    async fn test_live_xai_grok_multi_turn_and_context() {
+        let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
+        let _ = dotenvy::from_path(&root_env);
+        let _ = dotenvy::dotenv();
+
+        let config = ResolvedAiConfig::from_user_config(None);
+        if config.api_key.is_none() {
+            return;
+        }
+
+        let (db, owner) = setup_test().await;
+
+        // Turn 1: Add a task
+        let turn1 = run_ai_turn(
+            &db.pool,
+            None,
+            &owner,
+            "!room:mbm.one",
+            None,
+            "I need to finish the quarterly budget review by tomorrow evening. Can you add it as a todo with high priority?",
+        )
+        .await
+        .expect("Turn 1 should succeed");
+
+        println!("\n=== Multi-turn Turn 1 ===");
+        println!("Tools: {:?}", turn1.tool_calls_executed);
+        println!("Response:\n{}", turn1.message);
+        assert!(turn1.tool_calls_executed.contains(&"add_todo".to_string()));
+
+        // Turn 2: Follow-up referencing Turn 1 in the same room
+        let turn2 = run_ai_turn(
+            &db.pool,
+            None,
+            &owner,
+            "!room:mbm.one",
+            None,
+            "What was the task I just asked you to add?",
+        )
+        .await
+        .expect("Turn 2 should succeed");
+
+        println!("\n=== Multi-turn Turn 2 ===");
+        println!("Tools: {:?}", turn2.tool_calls_executed);
+        println!("Response:\n{}", turn2.message);
+        let msg_lower = turn2.message.to_lowercase();
+        assert!(
+            msg_lower.contains("budget") || msg_lower.contains("quarterly"),
+            "Turn 2 should recall the budget task from conversation context"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_live_xai_grok_currency_rules_and_multi_action() {
+        let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
+        let _ = dotenvy::from_path(&root_env);
+        let _ = dotenvy::dotenv();
+
+        let config = ResolvedAiConfig::from_user_config(None);
+        if config.api_key.is_none() {
+            return;
+        }
+
+        let (db, owner) = setup_test().await;
+
+        let result = run_ai_turn(
+            &db.pool,
+            None,
+            &owner,
+            "!room:mbm.one",
+            None,
+            "Log an expense of 45 CNY for coffee, another expense of 12 USD for lunch, and set a reminder in 45 minutes to submit receipts",
+        )
+        .await
+        .expect("Multi-action turn should succeed");
+
+        println!("\n=== Multi-Action Quick Capture Result ===");
+        println!("Tools Executed: {:?}", result.tool_calls_executed);
+        println!("Response:\n{}", result.message);
+
+        // Verify tools executed
+        assert!(result.tool_calls_executed.contains(&"record_finance_entry".to_string()));
+        assert!(result.tool_calls_executed.contains(&"set_reminder".to_string()));
+
+        // Verify DB transactions
+        let from = chrono::Utc::now() - chrono::Duration::days(1);
+        let to = chrono::Utc::now() + chrono::Duration::days(1);
+        let summary = crate::modules::finance::repository::FinanceRepository::summary(&db.pool, &owner, from, to)
+            .await
+            .unwrap();
+        // Should have 2 separate currencies recorded: CNY and USD
+        assert_eq!(summary.len(), 2, "Must record separate currencies without blending");
+        let currencies: Vec<_> = summary.iter().map(|s| s.currency.as_str()).collect();
+        assert!(currencies.contains(&"CNY"));
+        assert!(currencies.contains(&"USD"));
+
+        // Verify reminder in DB
+        let reminders = crate::modules::reminder::repository::ReminderRepository::list_user_pending(&db.pool, &owner, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(reminders.len(), 1);
+        assert!(reminders[0].message.to_lowercase().contains("receipt"));
+
+        // Verify response never sums different currencies together
+        assert!(!result.message.contains("57"), "Different currencies must never be added together");
     }
 }

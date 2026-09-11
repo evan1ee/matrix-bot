@@ -3,7 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use thiserror::Error;
 use tracing::{debug, error};
 
-use super::models::{ChatCompletionRequest, ChatCompletionResponse, AiUserConfig};
+use super::models::{AiUserConfig, ChatCompletionRequest, ChatCompletionResponse};
 
 #[derive(Debug, Error)]
 pub enum AiClientError {
@@ -102,9 +102,27 @@ pub struct AiClient {
 
 impl AiClient {
     pub fn new() -> Self {
-        let http_client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(120));
+
+        if let Ok(proxy_url) = std::env::var("AI_PROXY")
+            .or_else(|_| std::env::var("HTTPS_PROXY"))
+            .or_else(|_| std::env::var("https_proxy"))
+            .or_else(|_| std::env::var("ALL_PROXY"))
+            .or_else(|_| std::env::var("all_proxy"))
+            .or_else(|_| std::env::var("HTTP_PROXY"))
+            .or_else(|_| std::env::var("http_proxy"))
+        {
+            let trimmed = proxy_url.trim();
+            if !trimmed.is_empty() {
+                if let Ok(proxy) = reqwest::Proxy::all(trimmed) {
+                    builder = builder.proxy(proxy);
+                }
+            }
+        }
+
+        let http_client = builder
             .build()
             .expect("Failed to build HTTP client for AI assistant");
 
@@ -239,12 +257,18 @@ impl Default for AiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::models::ChatCompletionMessage;
 
     #[test]
     fn test_resolved_config_defaults() {
         let resolved = ResolvedAiConfig::from_user_config(None);
-        assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
-        assert_eq!(resolved.model_name, "gpt-4o-mini");
+        if std::env::var("AI_ENDPOINT").is_err()
+            && std::env::var("AI_API_BASE").is_err()
+            && std::env::var("OPENAI_API_BASE").is_err()
+        {
+            assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
+            assert_eq!(resolved.model_name, "gpt-4o-mini");
+        }
         assert_eq!(resolved.temperature, 0.7);
         assert_eq!(resolved.max_tokens, 2048);
     }
@@ -289,5 +313,62 @@ mod tests {
         let resolved = ResolvedAiConfig::from_user_config(Some(&user_config));
         assert_eq!(resolved.temperature, 2.0);
         assert_eq!(resolved.max_tokens, 8192);
+    }
+
+    #[tokio::test]
+    async fn test_live_xai_verify_and_completion() {
+        let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
+        let _ = dotenvy::from_path(&root_env);
+        let _ = dotenvy::dotenv();
+        let config = ResolvedAiConfig::from_user_config(None);
+        println!("\n=== Live Test Config ===");
+        println!("Resolved base URL: {}", config.api_base_url);
+        println!("Resolved model: {}", config.model_name);
+        println!("Resolved has API key: {}", config.api_key.is_some());
+        let api_key = match config.api_key.as_ref() {
+            Some(k) if !k.trim().is_empty() => k.clone(),
+            _ => panic!("AI_API_KEY not found in .env or ../.env"),
+        };
+
+        let client = AiClient::new();
+        let verify = client
+            .verify_api_key(&config.api_base_url, Some(&api_key), Some(&config.model_name))
+            .await;
+        assert!(verify.is_ok(), "Live verify failed: {:?}", verify.err());
+
+        let req = ChatCompletionRequest {
+            model: config.model_name.clone(),
+            messages: vec![
+                ChatCompletionMessage {
+                    role: "system".to_string(),
+                    content: Some("You are a concise AI assistant. Reply in one short sentence.".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                },
+                ChatCompletionMessage {
+                    role: "user".to_string(),
+                    content: Some("State your model name and say hello.".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                },
+            ],
+            temperature: Some(0.7),
+            max_tokens: Some(100),
+            tools: None,
+            tool_choice: None,
+            stream: Some(false),
+        };
+
+        let response = client
+            .chat_completion(&config, &req)
+            .await
+            .expect("Live chat completion should succeed");
+        let choice = response.choices.into_iter().next().expect("Should return choice");
+        let text = choice.message.content.expect("Should have message content");
+        println!("\n=== Live xAI Response ===");
+        println!("{}", text);
+        assert!(!text.trim().is_empty());
     }
 }
