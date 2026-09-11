@@ -10,6 +10,19 @@ use crate::modules::life::repository::LifeRepository;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
+fn normalize_footprint_category(input: &str) -> &'static str {
+    let lower = input.trim().to_lowercase();
+    match lower.as_str() {
+        "sightseeing" | "scenic" | "attraction" | "landmark" | "tourism" | "景区" | "景点" | "名胜" | "古迹" | "观光" => "sightseeing",
+        "food" | "dining" | "restaurant" | "cafe" | "coffee" | "bar" | "美食" | "餐饮" | "餐厅" | "咖啡" => "food",
+        "nature" | "park" | "parks" | "mountain" | "hiking" | "outdoor" | "beach" | "lake" | "自然" | "公园" | "山" | "森林" | "湖" | "海滩" | "徒步" => "nature",
+        "lodging" | "hotel" | "hostel" | "resort" | "inn" | "bnb" | "住宿" | "酒店" | "宾馆" | "民宿" => "lodging",
+        "roadtrip" | "road_trip" | "drive" | "camping" | "自驾" | "露营" => "roadtrip",
+        "work" | "business" | "conference" | "office" | "出差" | "工作" | "会议" => "work",
+        _ => "sightseeing",
+    }
+}
+
 pub async fn execute_life_habits_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
@@ -194,7 +207,8 @@ pub async fn execute_life_habits_tool(
             let lon = args.get("longitude").and_then(|v| v.as_f64()).ok_or("Field 'longitude' is required")?;
             let city = args.get("city").and_then(|v| v.as_str());
             let country = args.get("country").and_then(|v| v.as_str());
-            let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("general");
+            let raw_category = args.get("category").and_then(|v| v.as_str()).unwrap_or("sightseeing");
+            let category = normalize_footprint_category(raw_category);
             let rating = args.get("rating").and_then(|v| v.as_i64()).unwrap_or(0).clamp(0, 5);
             let spend_str = args.get("spend_amount").and_then(|v| v.as_str()).unwrap_or("0");
             let currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");

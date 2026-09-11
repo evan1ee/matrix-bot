@@ -133,7 +133,11 @@ pub fn life_and_habits_tool_definitions() -> Vec<ToolDefinition> {
                         "country": { "type": "string", "description": "Country name" },
                         "arrival_date": { "type": "string", "description": "Arrival date in YYYY-MM-DD format (e.g. '2026-09-10'). Defaults to today" },
                         "departure_date": { "type": "string", "description": "Optional departure date in YYYY-MM-DD format" },
-                        "category": { "type": "string", "description": "Category e.g. 'Cafe', 'Restaurant', 'Park'" },
+                        "category": {
+                            "type": "string",
+                            "enum": ["sightseeing", "food", "nature", "lodging", "roadtrip", "work"],
+                            "description": "Footprint category must be one of: 'sightseeing' (tourist spots, scenic attractions, 景区/景点, cultural landmarks), 'food' (dining, restaurants, cafes), 'nature' (parks, mountains, beaches, lakes, hiking), 'lodging' (hotels, resorts, bnb), 'roadtrip' (scenic drive), 'work' (business, conference). Defaults to 'sightseeing'."
+                        },
                         "rating": { "type": "integer", "description": "Rating from 1 to 5" },
                         "spend_amount": { "type": "string", "description": "Amount spent, e.g. '12.50'" },
                         "currency": { "type": "string", "description": "3-letter currency code, e.g. USD" },

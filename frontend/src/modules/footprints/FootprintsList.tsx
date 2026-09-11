@@ -226,7 +226,7 @@ export const FootprintsList: React.FC<FootprintsListProps> = ({
                 {/* Card Footer: Category & Spend */}
                 <div className="flex items-center justify-between border-t border-neutral-100 dark:border-neutral-850 pt-2.5 mt-3">
                   <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200/50 dark:border-neutral-700/50">
-                    {fp.category}
+                    {CATEGORY_FILTERS.find((c) => c.id === fp.category)?.label || fp.category}
                   </span>
                   {formattedSpend ? (
                     <span className="text-xs font-mono font-medium text-neutral-800 dark:text-neutral-200">

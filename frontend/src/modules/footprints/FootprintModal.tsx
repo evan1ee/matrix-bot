@@ -61,7 +61,10 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
       setArrivalDate(initialData.arrival_date);
       setDepartureDate(initialData.departure_date || '');
       setRating(initialData.rating);
-      setCategory(initialData.category || 'sightseeing');
+      const validCategory = CATEGORIES.some((c) => c.id === initialData.category)
+        ? initialData.category
+        : 'sightseeing';
+      setCategory(validCategory);
       setSpendAmount(
         initialData.spend_amount_minor > 0
           ? (initialData.spend_amount_minor / Math.pow(10, initialData.spend_currency_exponent)).toFixed(2)

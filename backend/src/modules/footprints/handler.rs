@@ -129,7 +129,7 @@ async fn handle_add(
         "USD",
         2,
         rating,
-        "travel",
+        "sightseeing",
         note,
     )
     .await
