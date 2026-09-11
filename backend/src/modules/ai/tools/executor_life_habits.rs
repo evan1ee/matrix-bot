@@ -211,7 +211,7 @@ pub async fn execute_life_habits_tool(
             let category = normalize_footprint_category(raw_category);
             let rating = args.get("rating").and_then(|v| v.as_i64()).unwrap_or(0).clamp(0, 5);
             let spend_str = args.get("spend_amount").and_then(|v| v.as_str()).unwrap_or("0");
-            let currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
+            let currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or(&settings.currency);
             let note = args.get("note").and_then(|v| v.as_str());
             let arrival_date = args.get("arrival_date").and_then(|v| v.as_str()).unwrap_or(&today_str);
             let departure_date = args.get("departure_date").and_then(|v| v.as_str());

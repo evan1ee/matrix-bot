@@ -111,7 +111,7 @@ const FootprintsView: React.FC<{
             })} ${s.currency}`
         )
         .join(' · ')
-    : '$0.00';
+    : '—';
 
   return (
     <div className="space-y-6 pb-8">
@@ -146,13 +146,38 @@ const FootprintsView: React.FC<{
           </span>
         </div>
 
-        <div className="flex flex-col">
+        <div className="flex flex-col min-w-0">
           <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
             Recorded Spend
           </span>
-          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5 truncate">
-            {formattedTotalSpend}
-          </span>
+          {summaryStats?.spend_by_currency?.length ? (
+            <div
+              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mt-0.5"
+              title={formattedTotalSpend}
+            >
+              {summaryStats.spend_by_currency.map((s, idx) => (
+                <span
+                  key={s.currency}
+                  className="text-lg sm:text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums whitespace-nowrap inline-flex items-baseline gap-1"
+                >
+                  {(s.total_spend_minor / Math.pow(10, s.currency_exponent)).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                  <span className="text-[11px] font-mono font-normal text-neutral-500">
+                    {s.currency}
+                  </span>
+                  {idx < summaryStats.spend_by_currency.length - 1 && (
+                    <span className="text-neutral-300 dark:text-neutral-700 font-normal select-none">·</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+              —
+            </span>
+          )}
         </div>
       </div>
 
