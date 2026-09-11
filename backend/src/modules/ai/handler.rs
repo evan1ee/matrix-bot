@@ -49,16 +49,20 @@ pub async fn handle_ai_command(
     _sender_name: &str,
     command: &str,
     raw_args: &str,
-    _full_body: &str,
-    _is_direct: bool,
+    full_body: &str,
+    is_direct: bool,
+    is_mentioned: bool,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
-    if cmd_lower == "ai" || cmd_lower == "ask" {
+    let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
         let trimmed = raw_args.trim();
         if trimmed.is_empty() {
             return Some(format_help());
         }
-        if trimmed.eq_ignore_ascii_case("retro") || trimmed.eq_ignore_ascii_case("retrospective") || trimmed.eq_ignore_ascii_case("weekly") {
+        if trimmed.eq_ignore_ascii_case("retro")
+            || trimmed.eq_ignore_ascii_case("retrospective")
+            || trimmed.eq_ignore_ascii_case("weekly")
+        {
             return Some(super::retrospective::handle_retrospective_command(pool, owner_id).await);
         }
         if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
@@ -77,27 +81,34 @@ pub async fn handle_ai_command(
             }
             return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
         }
-
-        if trimmed.len() > MAX_PROMPT_LENGTH {
-            return Some(format_error(&format!(
-                "Prompt exceeds maximum length of {} characters.",
-                MAX_PROMPT_LENGTH
-            )));
+        trimmed
+    } else if is_direct || is_mentioned {
+        let trimmed = full_body.trim();
+        if trimmed.is_empty() {
+            return None;
         }
-
-        match run_ai_turn(pool, broadcaster, owner_id, room_id, None, trimmed).await {
-            Ok(result) => {
-                clear_ai_error_state();
-                Some(format_response(&result.message, &result.model_used))
-            }
-            Err(err) => {
-                error!("AI execution failed: {}", err);
-                notify_dev_room_ai_error(pool, client_handle, owner_id, &err).await;
-                None
-            }
-        }
+        trimmed
     } else {
-        None
+        return None;
+    };
+
+    if prompt.len() > MAX_PROMPT_LENGTH {
+        return Some(format_error(&format!(
+            "Prompt exceeds maximum length of {} characters.",
+            MAX_PROMPT_LENGTH
+        )));
+    }
+
+    match run_ai_turn(pool, broadcaster, owner_id, room_id, None, prompt).await {
+        Ok(result) => {
+            clear_ai_error_state();
+            Some(format_response(&result.message, &result.model_used))
+        }
+        Err(err) => {
+            error!("AI execution failed: {}", err);
+            notify_dev_room_ai_error(pool, client_handle, owner_id, &err).await;
+            None
+        }
     }
 }
 
@@ -155,6 +166,9 @@ pub async fn run_ai_turn(
 
     let mut chat_messages = Vec::new();
 
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    let now_utc = chrono::Utc::now().to_rfc3339();
+
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
         format!(
             "You are the central Brain and intelligent Personal Operating System for matrix-bot. \
@@ -163,8 +177,12 @@ pub async fn run_ai_turn(
              Provide a consolidated, clear confirmation of every action taken with bullet points. \
              SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. \
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
-             The current user's ID is '{}'. Keep answers concise, clear, and nicely formatted with Markdown.",
-            owner_id
+             TEMPORAL CONTEXT: Current UTC time is '{now_utc}'. The user's configured timezone is '{tz}' and default currency is '{curr}'. When setting reminders or due dates for relative phrases (such as 'tomorrow at 8:00 AM' or 'tonight at 9:00 PM'), compute the target timestamp in the user's timezone '{tz}' and supply trigger_at in ISO 8601 UTC or in_minutes. \
+             The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
+            now_utc = now_utc,
+            tz = settings.timezone,
+            curr = settings.currency,
+            owner_id = owner_id
         )
     });
 
@@ -440,6 +458,7 @@ mod tests {
             "",
             "",
             false,
+            false,
         )
         .await
         .unwrap();
@@ -455,6 +474,7 @@ mod tests {
             "ai",
             "config",
             "",
+            false,
             false,
         )
         .await
@@ -477,6 +497,7 @@ mod tests {
             "model gpt-4o-mini",
             "",
             false,
+            false,
         )
         .await
         .unwrap();
@@ -492,6 +513,7 @@ mod tests {
             "ai",
             "reset",
             "",
+            false,
             false,
         )
         .await
@@ -529,6 +551,7 @@ mod tests {
             "hello world",
             "",
             false,
+            false,
         )
         .await;
 
@@ -547,6 +570,7 @@ mod tests {
             "ai",
             "second prompt",
             "",
+            false,
             false,
         )
         .await;
@@ -860,5 +884,63 @@ mod tests {
 
         // Verify response never sums different currencies together
         assert!(!result.message.contains("57"), "Different currencies must never be added together");
+    }
+
+    #[tokio::test]
+    async fn test_ai_mention_natural_language_routing() {
+        let (db, owner) = setup_test().await;
+
+        clear_ai_error_state();
+        assert!(!is_ai_error_alerted());
+
+        // When neither mentioned nor direct, unrecognized command returns None immediately
+        let unhandled = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "User",
+            "明天早上8点提醒我写邮件",
+            "",
+            "明天早上8点提醒我写邮件",
+            false,
+            false,
+        )
+        .await;
+        assert!(unhandled.is_none());
+        assert!(!is_ai_error_alerted());
+
+        // Configure invalid endpoint so run_ai_turn triggers error alert if called
+        let input = crate::modules::ai::models::UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("invalid-key".to_string()),
+            model_name: Some("test-model".to_string()),
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+            .await
+            .unwrap();
+
+        // When mentioned in a room, prompt is routed to AI
+        let _ = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "User",
+            "明天早上8点提醒我写邮件",
+            "",
+            "明天早上8点提醒我写邮件",
+            false,
+            true, // is_mentioned = true
+        )
+        .await;
+
+        assert!(is_ai_error_alerted(), "Mentioned natural language message should be routed to AI engine");
+        clear_ai_error_state();
     }
 }

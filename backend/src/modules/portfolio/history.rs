@@ -360,10 +360,14 @@ mod tests {
         let pool = pool().await;
         let owner = "bob";
 
+        let today = chrono::Utc::now().date_naive();
+        let d1 = (today - chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
+        let d2 = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+
         HistoryRepository::record_snapshot(
             &pool,
             owner,
-            "2026-09-01",
+            &d1,
             "USD",
             2i64,
             5000_00,
@@ -375,7 +379,7 @@ mod tests {
         HistoryRepository::record_snapshot(
             &pool,
             owner,
-            "2026-09-02",
+            &d2,
             "USD",
             2i64,
             5500_00,

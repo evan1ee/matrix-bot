@@ -85,6 +85,7 @@ impl BotModule for AiModule {
             &ctx.raw_args,
             &ctx.full_body,
             ctx.is_direct,
+            ctx.is_mentioned,
         )
         .await
     }

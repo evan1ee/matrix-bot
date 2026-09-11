@@ -98,6 +98,7 @@ mod tests {
             raw_args: "".to_string(),
             full_body: "!hello".to_string(),
             is_direct: true,
+            is_mentioned: false,
         };
 
         let dummy_db = Database {

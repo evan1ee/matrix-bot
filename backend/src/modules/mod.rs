@@ -45,6 +45,8 @@ pub struct ParsedCommand {
     pub raw_args: String,
     /// The full original message body.
     pub full_body: String,
+    /// Whether the bot was explicitly mentioned (@bot or pill).
+    pub is_mentioned: bool,
 }
 
 impl ParsedCommand {
@@ -64,6 +66,7 @@ impl ParsedCommand {
             raw_args: self.raw_args,
             full_body: self.full_body,
             is_direct,
+            is_mentioned: self.is_mentioned,
         }
     }
 }
@@ -100,6 +103,8 @@ pub struct CommandContext {
     /// `!link` and `!recover` refuse anything else: both put a secret in the
     /// room, and a shared room hands it to everyone present.
     pub is_direct: bool,
+    /// Whether the bot was explicitly mentioned in the room.
+    pub is_mentioned: bool,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -340,6 +345,7 @@ mod tests {
                 raw_args: String::new(),
                 full_body: body.to_string(),
                 is_direct: true,
+                is_mentioned: false,
             };
             assert!(
                 registry.dispatch(&ctx, &db, None).await.is_some(),
@@ -389,6 +395,7 @@ use crate::events::EventBroadcaster;
             raw_args: String::new(),
             full_body: format!("!{}", command),
             is_direct: true,
+            is_mentioned: false,
         }
     }
 

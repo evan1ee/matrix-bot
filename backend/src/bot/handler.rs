@@ -79,6 +79,7 @@ pub fn register_handlers(
                         command: "ai".to_string(),
                         raw_args: trimmed.to_string(),
                         full_body: trimmed.to_string(),
+                        is_mentioned: false,
                     }
                 } else {
                     return;
@@ -136,7 +137,17 @@ pub fn register_handlers(
 
                 let cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
 
-                if let Some(reply_html) = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await {
+                if is_direct || cmd_ctx.is_mentioned {
+                    let _ = room.typing_notice(true).await;
+                }
+
+                let reply_opt = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await;
+
+                if is_direct || cmd_ctx.is_mentioned {
+                    let _ = room.typing_notice(false).await;
+                }
+
+                if let Some(reply_html) = reply_opt {
                     let plain_text = crate::utils::strip_html(&reply_html);
                     let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
                     if let Err(err) = room.send(content).await {

@@ -237,6 +237,7 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
             raw_args: String::new(),
             full_body: format!("!{command}"),
             is_direct,
+            is_mentioned: false,
         }
     }
 

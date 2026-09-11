@@ -78,6 +78,7 @@ impl CommandParser {
             command: raw_command,
             raw_args,
             full_body: clean_body,
+            is_mentioned,
         })
     }
 }

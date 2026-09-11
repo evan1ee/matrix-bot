@@ -1,7 +1,7 @@
 use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, info, warn};
 
 use super::models::{AiUserConfig, ChatCompletionRequest, ChatCompletionResponse};
 
@@ -102,6 +102,7 @@ pub struct AiClient {
 
 impl AiClient {
     pub fn new() -> Self {
+        dotenvy::dotenv().ok();
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
             .timeout(Duration::from_secs(120));
@@ -116,8 +117,14 @@ impl AiClient {
         {
             let trimmed = proxy_url.trim();
             if !trimmed.is_empty() {
-                if let Ok(proxy) = reqwest::Proxy::all(trimmed) {
-                    builder = builder.proxy(proxy);
+                match reqwest::Proxy::all(trimmed) {
+                    Ok(proxy) => {
+                        info!("AI Assistant client configured with proxy: {}", trimmed);
+                        builder = builder.proxy(proxy);
+                    }
+                    Err(err) => {
+                        warn!("Failed to parse AI proxy URL '{}': {}", trimmed, err);
+                    }
                 }
             }
         }
