@@ -447,11 +447,10 @@ async fn query_footprints(
     let rows = sqlx::query_as::<_, FootprintRow>(
         "SELECT title, city, country, arrival_date, created_at \
          FROM footprints \
-         WHERE owner_id = ? AND (arrival_date = ? OR (departure_date IS NOT NULL AND arrival_date <= ? AND departure_date >= ?)) \
+         WHERE owner_id = ? AND (arrival_date = ? OR departure_date = ?) \
          ORDER BY created_at",
     )
     .bind(owner)
-    .bind(date)
     .bind(date)
     .bind(date)
     .fetch_all(pool)
@@ -461,8 +460,15 @@ async fn query_footprints(
     for row in rows {
         let loc_parts: Vec<&str> = [row.city.as_deref(), row.country.as_deref()].into_iter().flatten().collect();
         let detail = if loc_parts.is_empty() { None } else { Some(loc_parts.join(", ")) };
-        let action = if row.arrival_date == date { "arrived" } else { "visited" };
-        push_event(events, extract_time(&row.created_at), "footprint", action, "📍", row.title, detail);
+        let action = if row.arrival_date == date { "arrived" } else { "departed" };
+        let time = row.created_at.and_then(|dt| {
+            if dt.format("%Y-%m-%d").to_string() == date {
+                extract_time(&Some(dt))
+            } else {
+                None
+            }
+        });
+        push_event(events, time, "footprint", action, "📍", row.title, detail);
         stats.footprints += 1;
     }
 }
@@ -586,5 +592,57 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_footprints_only_appear_on_arrival_or_departure_date() {
+        let (state, pool) = create_test_state().await;
+
+        // Trip from 2026-09-04 to 2026-09-14
+        sqlx::query(
+            "INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at) \
+             VALUES ('user1', 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let user = test_user("user1");
+
+        // 1. On arrival date: appears as "arrived"
+        let res_arrival = get_day_activity(
+            user.clone(),
+            axum::extract::State(state.clone()),
+            Path("2026-09-04".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(res_arrival.stats.footprints, 1);
+        assert_eq!(res_arrival.events[0].action, "arrived");
+
+        // 2. On intermediate date (e.g. 2026-09-10 or 2026-09-11): does NOT appear!
+        let res_mid = get_day_activity(
+            user.clone(),
+            axum::extract::State(state.clone()),
+            Path("2026-09-10".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(res_mid.stats.footprints, 0);
+        assert_eq!(res_mid.events.len(), 0);
+
+        // 3. On departure date: appears as "departed"
+        let res_dep = get_day_activity(
+            user,
+            axum::extract::State(state),
+            Path("2026-09-14".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(res_dep.stats.footprints, 1);
+        assert_eq!(res_dep.events[0].action, "departed");
     }
 }
