@@ -27,7 +27,7 @@ pub fn get_ai_client() -> AiClient {
     AiClient::new()
 }
 
-pub const MAX_HISTORY_TURNS: i64 = 15;
+pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
 pub const MAX_PROMPT_LENGTH: usize = 4000;
 
