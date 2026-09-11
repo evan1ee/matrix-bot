@@ -1,4 +1,5 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono_tz::Tz;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -8,6 +9,22 @@ use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
+
+fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(due_str) {
+        Some(dt.with_timezone(&Utc))
+    } else if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(due_str, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(due_str, "%Y-%m-%d %H:%M:%S"))
+    {
+        tz.from_local_datetime(&naive_dt).single().map(|dt| dt.with_timezone(&Utc))
+    } else if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(due_str.trim(), "%Y-%m-%d") {
+        naive_date.and_hms_opt(18, 0, 0)
+            .and_then(|dt| tz.from_local_datetime(&dt).single())
+            .map(|dt| dt.with_timezone(&Utc))
+    } else {
+        None
+    }
+}
 
 pub async fn execute_todo_tool(
     pool: &SqlitePool,
@@ -52,7 +69,8 @@ pub async fn execute_todo_tool(
             let due_at = if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                 Some(Utc::now() + Duration::minutes(mins))
             } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                DateTime::parse_from_rfc3339(due_str).map(|dt| dt.with_timezone(&Utc)).ok()
+                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                parse_due_at(due_str, &settings.tz())
             } else {
                 None
             };
@@ -117,9 +135,20 @@ pub async fn execute_todo_tool(
             let trigger_at = if let Some(mins) = args.get("in_minutes").and_then(|v| v.as_i64()) {
                 Utc::now() + Duration::minutes(mins)
             } else if let Some(trig_str) = args.get("trigger_at").and_then(|v| v.as_str()) {
-                DateTime::parse_from_rfc3339(trig_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .map_err(|e| format!("Invalid trigger_at timestamp: {}", e))?
+                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let tz = settings.tz();
+                if let Ok(dt) = DateTime::parse_from_rfc3339(trig_str) {
+                    dt.with_timezone(&Utc)
+                } else if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%dT%H:%M:%S")
+                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%d %H:%M:%S"))
+                {
+                    tz.from_local_datetime(&naive_dt)
+                        .single()
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .ok_or_else(|| "Ambiguous or invalid local time for trigger_at".to_string())?
+                } else {
+                    return Err(format!("Invalid trigger_at timestamp: {}", trig_str));
+                }
             } else {
                 return Err("Either 'in_minutes' or 'trigger_at' must be provided for a reminder".to_string());
             };
@@ -192,7 +221,8 @@ pub async fn execute_todo_tool(
                 let due_at = if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                     Some(Utc::now() + Duration::minutes(mins))
                 } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                    DateTime::parse_from_rfc3339(due_str).map(|dt| dt.with_timezone(&Utc)).ok()
+                    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                    parse_due_at(due_str, &settings.tz())
                 } else {
                     None
                 };
@@ -253,7 +283,8 @@ pub async fn execute_todo_tool(
             let amount_f: f64 = amount_str.parse().map_err(|_| "Invalid amount format")?;
             let amount_minor = (amount_f * 100.0).round() as i64;
 
-            let today = Utc::now().format("%Y-%m-%d").to_string();
+            let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+            let today = Utc::now().with_timezone(&settings.tz()).format("%Y-%m-%d").to_string();
             let payload = crate::modules::recurring_bills::models::CreateBillPayload {
                 name: name_val.to_string(),
                 category: category.to_string(),

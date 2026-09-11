@@ -167,7 +167,12 @@ pub async fn run_ai_turn(
     let mut chat_messages = Vec::new();
 
     let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
-    let now_utc = chrono::Utc::now().to_rfc3339();
+    let tz = settings.tz();
+    let now_utc = chrono::Utc::now();
+    let now_local = now_utc.with_timezone(&tz);
+    let today_local = now_local.format("%Y-%m-%d").to_string();
+    let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
+    let now_utc_str = now_utc.to_rfc3339();
 
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
         format!(
@@ -177,9 +182,11 @@ pub async fn run_ai_turn(
              Provide a consolidated, clear confirmation of every action taken with bullet points. \
              SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. \
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
-             TEMPORAL CONTEXT: Current UTC time is '{now_utc}'. The user's configured timezone is '{tz}' and default currency is '{curr}'. When setting reminders or due dates for relative phrases (such as 'tomorrow at 8:00 AM' or 'tonight at 9:00 PM'), compute the target timestamp in the user's timezone '{tz}' and supply trigger_at in ISO 8601 UTC or in_minutes. \
+             TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
              The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
-            now_utc = now_utc,
+            now_local_str = now_local_str,
+            today_local = today_local,
+            now_utc = now_utc_str,
             tz = settings.timezone,
             curr = settings.currency,
             owner_id = owner_id

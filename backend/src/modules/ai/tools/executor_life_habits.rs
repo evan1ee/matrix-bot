@@ -8,6 +8,7 @@ use crate::modules::footprints::repository::FootprintRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
+use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_life_habits_tool(
     pool: &SqlitePool,
@@ -17,9 +18,11 @@ pub async fn execute_life_habits_tool(
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
+    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let today_str = Utc::now().with_timezone(&settings.tz()).format("%Y-%m-%d").to_string();
+
     match name {
         "get_my_habits" => Some(async {
-            let today_str = Utc::now().format("%Y-%m-%d").to_string();
             let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -27,7 +30,6 @@ pub async fn execute_life_habits_tool(
         }.await),
 
         "log_habit" => Some(async {
-            let today_str = Utc::now().format("%Y-%m-%d").to_string();
             let (habit_id, habit_name) = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                 let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
                     .await
@@ -103,7 +105,7 @@ pub async fn execute_life_habits_tool(
             });
             let date_str = args.get("date").and_then(|v| v.as_str())
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
+                .unwrap_or_else(|| today_str.clone());
 
             let activities_json = activities.as_ref().and_then(|acts| serde_json::to_string(acts).ok());
 
@@ -138,9 +140,8 @@ pub async fn execute_life_habits_tool(
         }.await),
 
         "get_life_profile" => Some(async {
-            let today = Utc::now().format("%Y-%m-%d").to_string();
             let profile = LifeRepository::get_profile(pool, owner_id).await.map_err(|e| e.to_string())?;
-            let stats = LifeRepository::get_stats(pool, owner_id, &today).await.map_err(|e| e.to_string())?;
+            let stats = LifeRepository::get_stats(pool, owner_id, &today_str).await.map_err(|e| e.to_string())?;
             serde_json::to_string(&json!({
                 "profile": profile,
                 "stats": stats,
@@ -198,7 +199,6 @@ pub async fn execute_life_habits_tool(
             let spend_str = args.get("spend_amount").and_then(|v| v.as_str()).unwrap_or("0");
             let currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
             let note = args.get("note").and_then(|v| v.as_str());
-            let today_str = Utc::now().format("%Y-%m-%d").to_string();
             let arrival_date = args.get("arrival_date").and_then(|v| v.as_str()).unwrap_or(&today_str);
             let departure_date = args.get("departure_date").and_then(|v| v.as_str());
 
@@ -340,7 +340,7 @@ pub async fn execute_life_habits_tool(
         "get_daily_log" => Some(async {
             let date_str = args.get("date").and_then(|v| v.as_str())
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
+                .unwrap_or_else(|| today_str.clone());
 
             let day_log = LifeRepository::get_day_log(pool, owner_id, &date_str)
                 .await

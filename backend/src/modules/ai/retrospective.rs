@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use chrono::{Duration, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use utoipa::ToSchema;
@@ -61,8 +61,12 @@ pub async fn generate_weekly_retrospective(
     pool: &SqlitePool,
     owner_id: &str,
 ) -> anyhow::Result<WeeklyRetrospective> {
+    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let tz = settings.tz();
+    let default_currency = settings.currency.clone();
+
     let now = Utc::now();
-    let today = now.date_naive();
+    let today = now.with_timezone(&tz).date_naive();
     let seven_days_ago = today - Duration::days(7);
     let next_seven_days = today + Duration::days(7);
 
@@ -70,14 +74,12 @@ pub async fn generate_weekly_retrospective(
     let period_end = today.format("%Y-%m-%d").to_string();
     let next_period_end = next_seven_days.format("%Y-%m-%d").to_string();
 
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    let default_currency = settings.currency.clone();
-
     // 1. Finance (last 7 days) — Currencies must NEVER be added together.
     let start_dt = seven_days_ago
         .and_hms_opt(0, 0, 0)
-        .expect("valid midnight")
-        .and_utc();
+        .and_then(|naive_dt| tz.from_local_datetime(&naive_dt).single())
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|| seven_days_ago.and_hms_opt(0, 0, 0).expect("valid midnight").and_utc());
 
     let summaries = FinanceRepository::summary(pool, owner_id, start_dt, now).await?;
 

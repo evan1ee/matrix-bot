@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 use sqlx::SqlitePool;
 
@@ -115,8 +115,9 @@ pub async fn execute_finance_tool(
             let direction = Direction::parse(dir_str).ok_or("Invalid direction (must be expense or income)")?;
             let note = args.get("note").and_then(|v| v.as_str()).ok_or("Field 'note' is required")?;
 
-            let default_cur = SettingsRepository::get_or_default(pool, owner_id).await.currency;
-            let raw_currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or(&default_cur);
+            let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+            let tz = settings.tz();
+            let raw_currency = args.get("currency").and_then(|v| v.as_str()).unwrap_or(&settings.currency);
             let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
             let exp = exponent_for(&currency);
             let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
@@ -137,7 +138,11 @@ pub async fn execute_finance_tool(
                 if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
                     dt.with_timezone(&Utc)
                 } else if let Ok(naive_date) = NaiveDate::parse_from_str(date_str.trim(), "%Y-%m-%d") {
-                    naive_date.and_hms_opt(12, 0, 0).map(|d| d.and_utc()).unwrap_or_else(Utc::now)
+                    naive_date
+                        .and_hms_opt(12, 0, 0)
+                        .and_then(|naive_dt| tz.from_local_datetime(&naive_dt).single())
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_else(Utc::now)
                 } else {
                     Utc::now()
                 }
