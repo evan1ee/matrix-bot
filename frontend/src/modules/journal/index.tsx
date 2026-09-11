@@ -441,29 +441,6 @@ export const JournalView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Activities */}
-                {dayLog?.activities && dayLog.activities.length > 0 && (
-                  <div>
-                    <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
-                      Activities & Milestones
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {dayLog.activities.map((actId) => {
-                        const act = ACTIVITY_OPTIONS.find((a) => a.id === actId);
-                        return (
-                          <span
-                            key={actId}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
-                          >
-                            <span>{act?.emoji || '📌'}</span>
-                            <span>{act?.label || actId}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 {/* Reflection Note */}
                 <div>
                   <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
@@ -588,33 +565,6 @@ export const JournalView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Activities */}
-                <div>
-                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
-                    Activities & milestones
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {ACTIVITY_OPTIONS.map((act) => {
-                      const isChecked = selectedActivities.includes(act.id);
-                      return (
-                        <button
-                          key={act.id}
-                          type="button"
-                          onClick={() => handleToggleActivity(act.id)}
-                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
-                            isChecked
-                              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
-                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                          }`}
-                        >
-                          <span>{act.emoji}</span>
-                          <span className="truncate">{act.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {/* Notes */}
                 <div>
                   <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
@@ -653,8 +603,70 @@ export const JournalView: React.FC = () => {
             )}
           </div>
 
-          {/* Right Column: Auto-Logged Activity Feed & Time Overview */}
+          {/* Right Column: Activities, Auto-Logged Activity Feed & Time Overview */}
           <div className="lg:col-span-6 space-y-6">
+            {/* Activities & Milestones Card */}
+            <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                  Activities & Milestones
+                </span>
+                <span className="text-[10px] font-mono text-neutral-400">
+                  {isLogged
+                    ? dayLog?.activities?.length
+                      ? `${dayLog.activities.length} tagged`
+                      : 'None'
+                    : selectedActivities.length > 0
+                      ? `${selectedActivities.length} selected`
+                      : 'Optional'}
+                </span>
+              </div>
+
+              {isLogged ? (
+                dayLog?.activities && dayLog.activities.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {dayLog.activities.map((actId) => {
+                      const act = ACTIVITY_OPTIONS.find((a) => a.id === actId);
+                      return (
+                        <span
+                          key={actId}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                        >
+                          <span>{act?.emoji || '📌'}</span>
+                          <span>{act?.label || actId}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-neutral-400 dark:text-neutral-500 italic">
+                    No activities or milestones recorded for this day.
+                  </p>
+                )
+              ) : (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {ACTIVITY_OPTIONS.map((act) => {
+                    const isChecked = selectedActivities.includes(act.id);
+                    return (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => handleToggleActivity(act.id)}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
+                          isChecked
+                            ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
+                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                        }`}
+                      >
+                        <span>{act.emoji}</span>
+                        <span className="truncate">{act.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <LifeActivityFeed date={selectedDate} />
 
             {/* Time Grid Quick Jump Card */}
