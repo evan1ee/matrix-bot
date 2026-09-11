@@ -17,27 +17,49 @@ export async function fetchApi<T>(
   options: RequestInit & {
     /**
      * Suppresses {@link AUTH_EXPIRED_EVENT} on a 401.
-     *
-     * Set by the session probe. Without it a signed-out page loops: the probe
-     * 401s, the event invalidates the session query, the query refetches the
-     * probe, and it 401s again — several requests a second, forever.
      */
     suppressAuthEvent?: boolean;
+    /**
+     * Optional client-side timeout in milliseconds (defaults to 90 seconds).
+     */
+    timeoutMs?: number;
   } = {}
 ): Promise<T> {
+  const { timeoutMs = 90_000, suppressAuthEvent, signal: callerSignal, ...fetchOptions } = options;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', () => controller.abort());
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+    ...(fetchOptions.headers as Record<string, string>),
   };
 
   const url = `${API_BASE}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    // Sends the session cookie. Also required for the browser to *store* the
-    // cookie the sign-in endpoints set.
-    credentials: 'include',
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...fetchOptions,
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (response.status === 204) {
     return {} as T;

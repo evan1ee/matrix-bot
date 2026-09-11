@@ -41,15 +41,22 @@ pub async fn chat(
     let owner_id = &user.account_id;
     let room_id = payload.room_id.unwrap_or_else(|| "web_chat".to_string());
 
-    let turn_result = run_ai_turn(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        owner_id,
-        &room_id,
-        payload.conversation_id.as_deref(),
-        prompt,
+    let turn_result = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        run_ai_turn(
+            &state.db.pool,
+            Some(&state.broadcaster),
+            owner_id,
+            &room_id,
+            payload.conversation_id.as_deref(),
+            prompt,
+        ),
     )
     .await
+    .map_err(|_| {
+        error!("AI chat execution timed out after 90s for {}", owner_id);
+        ApiError::gateway_timeout("AI response timed out after 90 seconds. Please try again.")
+    })?
     .map_err(|e| {
         error!("AI chat execution error for {}: {}", owner_id, e);
         ApiError::bad_request(e)

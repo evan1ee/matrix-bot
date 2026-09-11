@@ -3,7 +3,7 @@ use std::sync::Arc;
 #[cfg(not(test))]
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
 use super::client::{AiClient, ResolvedAiConfig};
@@ -180,7 +180,7 @@ pub async fn run_ai_turn(
              You have full bidirectional sensory and action access across all modules: tasks & to-dos, reminders, recurring bills & subscriptions, investment portfolio & cash balances, financial ledger & categories, daily habits & streaks, travel footprints, bookmarks & reading list, inbound webhooks, user settings, and daily logs / lifespan reflections. \
              MULTIPLE ACTIONS & QUICK CAPTURE: When the user requests multiple actions in a single message (e.g. logging an expense, checking off a habit, setting a reminder, adding a task, or logging today's mood), call all relevant tools in sequence or parallel. \
              Provide a consolidated, clear confirmation of every action taken with bullet points. \
-             SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. \
+             SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. When performing a daily or weekly reflection / summary, retrieve all needed data (daily log, habits, tasks, finance, footprints, reminders, life profile) in parallel during the first tool round rather than chaining sequential retrieval rounds. \
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
              TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
              The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
@@ -269,7 +269,10 @@ pub async fn run_ai_turn(
                             let func_name = tool_call.function.name.clone();
                             let tool_call_id = tool_call.id.clone();
                             tool_calls_executed.push(func_name.clone());
-                            debug!("Executing AI tool: {} (id: {})", func_name, tool_call_id);
+                            info!(
+                                "AI turn [{}/{}] executing tool: {} for owner {}",
+                                iteration, max_iterations, func_name, owner_id
+                            );
 
                             let result_str = match ToolRegistry::execute_tool(
                                 pool,
@@ -332,6 +335,14 @@ pub async fn run_ai_turn(
             owner_id: owner_id.to_string(),
         });
     }
+
+    info!(
+        "AI turn completed for owner {} in room {} (tools: {}, reply chars: {})",
+        owner_id,
+        room_id,
+        tool_calls_executed.len(),
+        final_content.len()
+    );
 
     Ok(AiTurnResult {
         conversation_id: conversation.id,

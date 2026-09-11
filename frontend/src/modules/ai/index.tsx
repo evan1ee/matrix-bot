@@ -67,42 +67,33 @@ const AiAssistantView: React.FC<{
     queryFn: () => fetchApi<AiConversation[]>('/ai/conversations'),
   });
 
-  useEffect(() => {
-    if (conversations.length === 0) {
-      if (activeConversationId !== null) {
-        setActiveConversationId(null);
-      }
-    } else if (!activeConversationId || !conversations.some((c) => c.id === activeConversationId)) {
-      setActiveConversationId(conversations[0].id);
-    }
-  }, [conversations, activeConversationId]);
-
-  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
-    queryKey: ['ai-messages', activeConversationId],
-    queryFn: () =>
-      activeConversationId
-        ? fetchApi<AiMessage[]>(`/ai/conversations/${activeConversationId}/messages`)
-        : Promise.resolve([]),
-    enabled: !!activeConversationId,
-  });
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   // Mutations
   const chatMutation = useMutation({
     mutationFn: (text: string) =>
       fetchApi<AiChatResponse>('/ai/chat', {
         method: 'POST',
+        timeoutMs: 90_000,
         body: JSON.stringify({
           prompt: text,
-          conversation_id: activeConversationId || undefined,
+          conversation_id: activeConversationId || (conversations.length > 0 ? conversations[0].id : undefined),
           room_id: 'web_chat',
         }),
       }),
     onSuccess: (data, variables) => {
       setActiveConversationId(data.conversation_id);
+      queryClient.setQueryData<AiConversation[]>(['ai-conversations'], (old = []) => {
+        const existing = old.find((c) => c.id === data.conversation_id);
+        const updated: AiConversation = existing
+          ? { ...existing, updated_at: new Date().toISOString() }
+          : {
+              id: data.conversation_id,
+              owner_id: '',
+              room_id: 'web_chat',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+        return [updated, ...old.filter((c) => c.id !== data.conversation_id)];
+      });
       queryClient.setQueryData<AiMessage[]>(['ai-messages', data.conversation_id], (old = []) => {
         if (old.some((m) => m.role === 'user' && m.content === variables)) return old;
         return [
@@ -131,6 +122,29 @@ const AiAssistantView: React.FC<{
       setPrompt((prev) => (prev ? prev : variables));
     },
   });
+
+  useEffect(() => {
+    if (conversations.length === 0) {
+      if (activeConversationId !== null && !chatMutation.isPending) {
+        setActiveConversationId(null);
+      }
+    } else if (!activeConversationId) {
+      setActiveConversationId(conversations[0].id);
+    }
+  }, [conversations, activeConversationId, chatMutation.isPending]);
+
+  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
+    queryKey: ['ai-messages', activeConversationId],
+    queryFn: () =>
+      activeConversationId
+        ? fetchApi<AiMessage[]>(`/ai/conversations/${activeConversationId}/messages`)
+        : Promise.resolve([]),
+    enabled: !!activeConversationId,
+  });
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
     scrollToBottom();

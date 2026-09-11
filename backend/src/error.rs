@@ -41,6 +41,9 @@ impl ApiError {
     pub fn too_many_requests(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::TOO_MANY_REQUESTS, message: msg.into() }
     }
+    pub fn gateway_timeout(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::GATEWAY_TIMEOUT, message: msg.into() }
+    }
     /// Records the underlying failure and returns an opaque 500.
     ///
     /// Call sites pass raw `sqlx`/IO errors here. Those name tables, columns and
