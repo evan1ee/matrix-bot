@@ -449,6 +449,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/matrix/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticates a user using their active Matrix session from Element X iOS.
+         * @description Verifies the token with the homeserver's `/_matrix/client/v3/account/whoami`,
+         *     resolves or provisions their local account row, and issues a standard session token.
+         */
+        post: operations["login_with_matrix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -1632,6 +1653,23 @@ export interface components {
         LoginFinishRequest: {
             ceremony_id: string;
             credential: Record<string, never>;
+        };
+        /** @description What a native client (e.g. Element X iOS) provides to authenticate using Matrix. */
+        MatrixLoginRequest: {
+            /** @description The active Matrix access token from the user's Element X session. */
+            access_token: string;
+            /**
+             * @description Optional homeserver URL (e.g. "https://matrix.org"). If omitted, defaults
+             *     to the bot's configured homeserver.
+             */
+            homeserver?: string | null;
+        };
+        /** @description The session issued upon successful Matrix authentication. */
+        MatrixLoginResponse: {
+            account_id: string;
+            display_name: string;
+            mxid: string;
+            session_token: string;
         };
         MediaProxyQuery: {
             media_id: string;
@@ -2978,6 +3016,48 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    login_with_matrix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatrixLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated via Matrix */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatrixLoginResponse"];
+                };
+            };
+            /** @description Invalid request payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid or expired Matrix credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
             };
         };
     };

@@ -1,6 +1,17 @@
-use serde::Deserialize;
+use axum::{
+    extract::State,
+    http::{header, HeaderMap},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
+use crate::accounts::{AccountRepository, SessionRepository};
 use crate::api::auth::types::ApiState;
+use crate::api::auth::webauthn::with_session_cookie;
+use crate::error::ApiError;
+#[allow(unused_imports)]
+use crate::error::ApiErrorResponse;
 
 /// The bot's access token, if the bot has one.
 ///
@@ -96,4 +107,248 @@ pub async fn resolved_homeserver(state: &ApiState) -> String {
         state.homeserver
     );
     state.homeserver.trim_end_matches('/').to_string()
+}
+
+/// What a native client (e.g. Element X iOS) provides to authenticate using Matrix.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MatrixLoginRequest {
+    /// The active Matrix access token from the user's Element X session.
+    pub access_token: String,
+    /// Optional homeserver URL (e.g. "https://matrix.org"). If omitted, defaults
+    /// to the bot's configured homeserver.
+    pub homeserver: Option<String>,
+}
+
+/// The session issued upon successful Matrix authentication.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MatrixLoginResponse {
+    pub session_token: String,
+    pub account_id: String,
+    pub display_name: String,
+    pub mxid: String,
+}
+
+#[derive(Deserialize)]
+struct MatrixWhoamiResponse {
+    user_id: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    device_id: Option<String>,
+}
+
+/// Authenticates a user using their active Matrix session from Element X iOS.
+///
+/// Verifies the token with the homeserver's `/_matrix/client/v3/account/whoami`,
+/// resolves or provisions their local account row, and issues a standard session token.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/matrix/login",
+    request_body = MatrixLoginRequest,
+    responses(
+        (status = 200, description = "Authenticated via Matrix", body = MatrixLoginResponse),
+        (status = 400, description = "Invalid request payload", body = ApiErrorResponse),
+        (status = 401, description = "Invalid or expired Matrix credentials", body = ApiErrorResponse)
+    )
+)]
+pub async fn login_with_matrix(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(payload): Json<MatrixLoginRequest>,
+) -> Result<axum::response::Response, ApiError> {
+    let token = payload.access_token.trim();
+    if token.is_empty() {
+        return Err(ApiError::bad_request("access_token cannot be empty"));
+    }
+    if token.len() > 500 {
+        return Err(ApiError::bad_request("access_token exceeds 500 characters"));
+    }
+
+    let target_hs = match payload.homeserver {
+        Some(hs) => {
+            let trimmed = hs.trim().trim_end_matches('/');
+            if trimmed.is_empty() {
+                resolved_homeserver(&state).await
+            } else {
+                if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+                    return Err(ApiError::bad_request(
+                        "homeserver must start with http:// or https://",
+                    ));
+                }
+                trimmed.to_string()
+            }
+        }
+        None => resolved_homeserver(&state).await,
+    };
+
+    let whoami = verify_homeserver_whoami(&state.http_client, &target_hs, token).await?;
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok());
+
+    issue_matrix_session(&state, &whoami.user_id, user_agent).await
+}
+
+async fn verify_homeserver_whoami(
+    client: &reqwest::Client,
+    homeserver: &str,
+    token: &str,
+) -> Result<MatrixWhoamiResponse, ApiError> {
+    let whoami_url = format!("{}/_matrix/client/v3/account/whoami", homeserver);
+    let res = client
+        .get(&whoami_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed connecting to homeserver {}: {:?}", whoami_url, err);
+            ApiError::internal("Could not verify Matrix credentials with homeserver")
+        })?;
+
+    if !res.status().is_success() {
+        return Err(ApiError::unauthorized(
+            "Invalid or expired Matrix credentials",
+        ));
+    }
+
+    res.json().await.map_err(|err| {
+        tracing::error!("Invalid whoami JSON response from homeserver: {:?}", err);
+        ApiError::internal("Invalid response from Matrix homeserver")
+    })
+}
+
+/// Issues a session for a verified Matrix user.
+pub async fn issue_matrix_session(
+    state: &ApiState,
+    mxid: &str,
+    user_agent: Option<&str>,
+) -> Result<axum::response::Response, ApiError> {
+    let account_id = AccountRepository::resolve_or_provision(&state.db.pool, mxid)
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
+            ApiError::internal("Failed to resolve user account")
+        })?;
+
+    let display_name = AccountRepository::find(&state.db.pool, &account_id)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?
+        .map(|a| a.display_name)
+        .unwrap_or_else(|| mxid.to_string());
+
+    let session_token = SessionRepository::create(
+        &state.db.pool,
+        &account_id,
+        user_agent.or(Some("ElementX-iOS")),
+        None,
+        None,
+    )
+    .await
+    .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
+
+    let body = Json(MatrixLoginResponse {
+        session_token: session_token.clone(),
+        account_id,
+        display_name,
+        mxid: mxid.to_string(),
+    });
+
+    Ok(with_session_cookie(body, &session_token, state.cookie_secure))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+    use crate::events::EventBroadcaster;
+    use axum::http::StatusCode;
+    use sqlx::SqlitePool;
+
+    async fn test_state() -> ApiState {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            None,
+            "https://mbm.one".to_string(),
+            reqwest::Client::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_issue_matrix_session_provisions_and_sets_cookie() {
+        let state = test_state().await;
+
+        let res = issue_matrix_session(&state, "@alice:example.org", Some("ElementX/1.0"))
+            .await
+            .unwrap();
+
+        assert!(res.headers().contains_key(header::SET_COOKIE));
+
+        let account_id = AccountRepository::find_by_mxid(&state.db.pool, "@alice:example.org")
+            .await
+            .unwrap();
+        assert!(account_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_matrix_login_empty_token() {
+        let state = test_state().await;
+
+        let res = login_with_matrix(
+            State(state),
+            HeaderMap::new(),
+            Json(MatrixLoginRequest {
+                access_token: "   ".to_string(),
+                homeserver: None,
+            }),
+        )
+        .await;
+
+        let Err(err) = res else {
+            panic!("expected bad request error");
+        };
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_matrix_login_invalid_homeserver_scheme() {
+        let state = test_state().await;
+
+        let res = login_with_matrix(
+            State(state),
+            HeaderMap::new(),
+            Json(MatrixLoginRequest {
+                access_token: "some_token".to_string(),
+                homeserver: Some("ftp://invalid.example".to_string()),
+            }),
+        )
+        .await;
+
+        let Err(err) = res else {
+            panic!("expected bad request error");
+        };
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_matrix_login_token_too_long() {
+        let state = test_state().await;
+
+        let long_token = "a".repeat(501);
+        let res = login_with_matrix(
+            State(state),
+            HeaderMap::new(),
+            Json(MatrixLoginRequest {
+                access_token: long_token,
+                homeserver: None,
+            }),
+        )
+        .await;
+
+        let Err(err) = res else {
+            panic!("expected bad request error");
+        };
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
 }

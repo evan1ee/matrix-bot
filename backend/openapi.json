@@ -954,6 +954,58 @@
         ]
       }
     },
+    "/api/v1/auth/matrix/login": {
+      "post": {
+        "tags": [
+          "auth::matrix"
+        ],
+        "summary": "Authenticates a user using their active Matrix session from Element X iOS.",
+        "description": "Verifies the token with the homeserver's `/_matrix/client/v3/account/whoami`,\nresolves or provisions their local account row, and issues a standard session token.",
+        "operationId": "login_with_matrix",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MatrixLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated via Matrix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatrixLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired Matrix credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/me": {
       "get": {
         "tags": [
@@ -5333,6 +5385,48 @@
           }
         }
       },
+      "MatrixLoginRequest": {
+        "type": "object",
+        "description": "What a native client (e.g. Element X iOS) provides to authenticate using Matrix.",
+        "required": [
+          "access_token"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "The active Matrix access token from the user's Element X session."
+          },
+          "homeserver": {
+            "type": "string",
+            "description": "Optional homeserver URL (e.g. \"https://matrix.org\"). If omitted, defaults\nto the bot's configured homeserver.",
+            "nullable": true
+          }
+        }
+      },
+      "MatrixLoginResponse": {
+        "type": "object",
+        "description": "The session issued upon successful Matrix authentication.",
+        "required": [
+          "session_token",
+          "account_id",
+          "display_name",
+          "mxid"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "mxid": {
+            "type": "string"
+          },
+          "session_token": {
+            "type": "string"
+          }
+        }
+      },
       "MediaProxyQuery": {
         "type": "object",
         "required": [
@@ -7128,6 +7222,10 @@
       }
     },
     "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
       "session_cookie": {
         "type": "apiKey",
         "in": "cookie",

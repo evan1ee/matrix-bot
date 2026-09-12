@@ -76,6 +76,10 @@ pub fn api_routes() -> Router<auth::ApiState> {
             "/auth/passkey/login/finish",
             post(auth::webauthn::login_finish),
         )
+        .route(
+            "/auth/matrix/login",
+            post(auth::matrix::login_with_matrix),
+        )
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::get_current_user))
         .route("/auth/media", get(auth::media_proxy))

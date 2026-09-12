@@ -28,6 +28,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         auth::webauthn::register_finish,
         auth::webauthn::login_start,
         auth::webauthn::login_finish,
+        auth::matrix::login_with_matrix,
         auth::logout,
         account::passkeys::list_passkeys,
         account::passkeys::rename_passkey,
@@ -128,6 +129,8 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             auth::webauthn::RegisterFinishRequest,
             auth::webauthn::LoginFinishRequest,
             auth::webauthn::SessionResponse,
+            auth::matrix::MatrixLoginRequest,
+            auth::matrix::MatrixLoginResponse,
             account::PasskeySummary,
             account::SessionSummary,
             account::LinkCodeResponse,
@@ -245,6 +248,12 @@ impl Modify for SecurityAddon {
                      it is sent by the browser automatically and is not readable by \
                      JavaScript.",
                 ),
+            )),
+        );
+        components.add_security_scheme(
+            "bearer_auth",
+            SecurityScheme::Http(utoipa::openapi::security::Http::new(
+                utoipa::openapi::security::HttpAuthScheme::Bearer,
             )),
         );
     }

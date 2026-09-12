@@ -36,16 +36,43 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let api_state = ApiState::from_ref(state);
 
+        // 1. Check for Bearer token in Authorization header.
+        // Bearer tokens are explicitly attached by non-browser clients (e.g. Element X iOS)
+        // and cannot be forged via ambient browser credential CSRF.
+        let bearer_token = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|auth| {
+                let parts: Vec<&str> = auth.split_whitespace().collect();
+                if parts.len() == 2 && parts[0].eq_ignore_ascii_case("bearer") {
+                    Some(parts[1])
+                } else {
+                    None
+                }
+            });
+
+        let (token, is_bearer) = if let Some(t) = bearer_token {
+            (t, true)
+        } else {
+            let cookie_token = parts
+                .headers
+                .get(header::COOKIE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|cookies| cookie_value(cookies, COOKIE_NAME))
+                .ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
+            (cookie_token, false)
+        };
+
         // A session cookie rides along automatically, so a cross-site request
         // would carry full authority if nothing stopped it. `SameSite=Strict`
         // is the first defence and this is the second: a state-changing request
         // must come from our own origin, and must say so.
         //
-        // A missing `Origin` on a mutating request is refused rather than
-        // waved through. Browsers always send it on `fetch`, and since the API
-        // no longer accepts bearer tokens there is no non-browser client left
-        // whose omission would be legitimate.
-        if is_mutating(&parts.method) {
+        // Non-browser clients (such as Element X iOS) presenting an explicit
+        // Authorization: Bearer token are immune to ambient credential CSRF,
+        // so the Origin requirement is enforced only for cookie-authenticated requests.
+        if !is_bearer && is_mutating(&parts.method) {
             let origin = parts
                 .headers
                 .get(header::ORIGIN)
@@ -65,13 +92,6 @@ where
                 }
             }
         }
-
-        let token = parts
-            .headers
-            .get(header::COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|cookies| cookie_value(cookies, COOKIE_NAME))
-            .ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
 
         let session = SessionRepository::resolve(&api_state.db.pool, token)
             .await

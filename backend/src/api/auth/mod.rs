@@ -56,6 +56,25 @@ mod tests {
         AuthUser::from_request_parts(&mut parts, state).await
     }
 
+    async fn extract_bearer(
+        state: &ApiState,
+        method: Method,
+        bearer: Option<&str>,
+        origin: Option<&str>,
+    ) -> Result<AuthUser, ApiError> {
+        let mut builder = axum::http::Request::builder()
+            .method(method)
+            .uri("/api/v1/todos");
+        if let Some(value) = bearer {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {value}"));
+        }
+        if let Some(value) = origin {
+            builder = builder.header(header::ORIGIN, value);
+        }
+        let (mut parts, _) = builder.body(()).unwrap().into_parts();
+        AuthUser::from_request_parts(&mut parts, state).await
+    }
+
     /// A signed-in account, and the cookie proving it.
     async fn signed_in(state: &ApiState, display_name: &str) -> (String, String) {
         let account = AccountRepository::create(&state.db.pool, display_name, STATUS_ACTIVE)
@@ -78,6 +97,34 @@ mod tests {
         assert_eq!(user.owner_id(), account);
         assert_eq!(user.display_name, "evan");
         assert_eq!(user.session_id_hash, hash_token(&token));
+    }
+
+    #[tokio::test]
+    async fn test_a_bearer_token_resolves_to_its_account() {
+        let state = state().await;
+        let (account, token) = signed_in(&state, "evan").await;
+
+        let user = extract_bearer(&state, Method::GET, Some(&token), None)
+            .await
+            .unwrap();
+        assert_eq!(user.owner_id(), account);
+        assert_eq!(user.display_name, "evan");
+        assert_eq!(user.session_id_hash, hash_token(&token));
+    }
+
+    #[tokio::test]
+    async fn test_bearer_token_mutating_requests_need_no_origin() {
+        let state = state().await;
+        let (_account, token) = signed_in(&state, "evan").await;
+
+        for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            assert!(
+                extract_bearer(&state, method.clone(), Some(&token), None)
+                    .await
+                    .is_ok(),
+                "{method} with Bearer auth should not require an Origin header"
+            );
+        }
     }
 
     #[tokio::test]
