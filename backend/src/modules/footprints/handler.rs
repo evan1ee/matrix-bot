@@ -123,6 +123,9 @@ async fn handle_add(
     if title.is_empty() {
         return "<p>Place name cannot be empty.</p>".to_string();
     }
+    if title.len() > 500 {
+        return "<p>⚠️ Place name exceeds maximum length of 500 characters.</p>".to_string();
+    }
 
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let arrival_date: &str = parts
@@ -136,6 +139,11 @@ async fn handle_add(
         .unwrap_or(5)
         .clamp(1, 5);
     let note = parts.get(3).copied();
+    if let Some(n) = note {
+        if n.len() > 500 {
+            return "<p>⚠️ Note exceeds maximum length of 500 characters.</p>".to_string();
+        }
+    }
 
     // Default to 0,0 if added via text command without coordinates (user can set coordinates later on map)
     match FootprintRepository::create(

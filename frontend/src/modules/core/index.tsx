@@ -29,8 +29,8 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
       {/* System Overview Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
-          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
-            <span>REST API SERVICE</span>
+          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
+            <span>REST API service</span>
             <Server className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
@@ -43,26 +43,26 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
         </div>
 
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
-          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
-            <span>SQLITE DATABASE</span>
+          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
+            <span>SQLite database</span>
             <Database className="w-4 h-4 text-neutral-500" />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100 capitalize">
             {health?.db_status || 'checking...'}
           </div>
-          <div className="text-xs text-neutral-500 font-mono">WAL Journal Mode • SQLite3</div>
+          <div className="text-xs text-neutral-500">WAL journal mode · SQLite3</div>
         </div>
 
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
-          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
-            <span>SSE BROADCASTER</span>
+          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
+            <span>SSE broadcaster</span>
             <Radio className={`w-4 h-4 ${!hasToken ? 'text-neutral-400 dark:text-neutral-500' : isConnected ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'}`} />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
             {!hasToken ? 'Auth Required' : isConnected ? 'Stream Active' : 'Connecting...'}
           </div>
-          <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
-            {!hasToken ? 'Login to listen for real-time events' : 'Real-time System Events'}
+          <div className="text-xs text-neutral-500 dark:text-neutral-400">
+            {!hasToken ? 'Login to listen for real-time events' : 'Real-time system events'}
           </div>
         </div>
       </div>
@@ -90,7 +90,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200">
                       {ev.type}
                     </span>
                     <span className="text-neutral-500 dark:text-neutral-400">{ev.timestamp}</span>

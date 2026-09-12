@@ -114,45 +114,43 @@ const FootprintsView: React.FC<{
     : '—';
 
   return (
-    <div className="space-y-6 pb-8">
-
-
+    <div className="space-y-6">
       {/* Vercel Stat Strip (Design.md vbg-stat-strip) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Places Visited
           </span>
-          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+          <span className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-1">
             {summaryStats?.total_places ?? footprints.length}
           </span>
         </div>
 
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Countries
           </span>
-          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+          <span className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-1">
             {summaryStats?.total_countries ?? 0}
           </span>
         </div>
 
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Days Traveled
           </span>
-          <span className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-0.5">
+          <span className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums mt-1">
             {summaryStats?.total_days_traveled ?? 0}
           </span>
         </div>
 
-        <div className="flex flex-col min-w-0">
-          <span className="text-[10px] uppercase font-mono text-neutral-500 tracking-wider">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between min-w-0">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Recorded Spend
           </span>
           {summaryStats?.spend_by_currency?.length ? (
             <div
-              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mt-0.5"
+              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mt-1"
               title={formattedTotalSpend}
             >
               {summaryStats.spend_by_currency.map((s, idx) => (

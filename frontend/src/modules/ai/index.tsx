@@ -251,7 +251,7 @@ const AiAssistantView: React.FC<{
       {/* Top Toolbar */}
       <div className="flex items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-3">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Model</span>
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Model</span>
           <span className="font-mono text-xs font-medium px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
             {config?.model_name || 'gpt-4o-mini'}
           </span>

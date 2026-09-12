@@ -71,7 +71,7 @@ export const AddBookmarkModal: React.FC<AddBookmarkModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="add-bookmark-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
     >
       <div
         data-testid="add-bookmark-modal"

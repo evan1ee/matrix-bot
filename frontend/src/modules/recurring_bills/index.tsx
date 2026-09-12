@@ -161,12 +161,12 @@ export const RecurringBillsView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Neutral Stat Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
-          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-mono">
+          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Monthly Commitment
           </div>
-          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white truncate">
+          <div className="mt-1 text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 truncate">
             {monthlyCommitments.length === 0
               ? `${displayCurrency} 0.00`
               : `${monthlyCommitments[0].currency} ${monthlyCommitments[0].amount.toFixed(2)}`}
@@ -179,30 +179,30 @@ export const RecurringBillsView: React.FC = () => {
         </div>
 
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
-          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-mono">
+          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Active Subscriptions
           </div>
-          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white">
+          <div className="mt-1 text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100">
             {subscriptionsCount}
           </div>
           <p className="mt-1 text-[11px] text-neutral-500 font-mono">SaaS & recurring services</p>
         </div>
 
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
-          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-mono">
+          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Fixed Bills & Transfers
           </div>
-          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white">
+          <div className="mt-1 text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100">
             {fixedBillsCount + transfersCount}
           </div>
           <p className="mt-1 text-[11px] text-neutral-500 font-mono">Rent, utilities & auto-savings</p>
         </div>
 
         <div className="p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 space-y-1">
-          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-mono">
+          <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Installment Plans
           </div>
-          <div className="mt-1 text-2xl font-bold font-mono tracking-tight text-neutral-900 dark:text-white">
+          <div className="mt-1 text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100">
             {installmentsCount}
           </div>
           <p className="mt-1 text-[11px] text-neutral-500 font-mono">Active loan / BNPL schedules</p>

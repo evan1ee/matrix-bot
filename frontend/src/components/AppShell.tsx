@@ -33,6 +33,8 @@ const MODULE_LABELS: Record<string, string> = {
   footprints: 'Footprints',
   journal: 'Daily Log',
   life: 'Life Grid',
+  habits: 'Habits',
+  webhooks: 'Webhooks',
   ai: 'AI Assistant',
   core: 'System Overview',
 };

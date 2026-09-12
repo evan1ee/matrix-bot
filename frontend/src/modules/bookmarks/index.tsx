@@ -157,27 +157,27 @@ export const BookmarksView: React.FC = () => {
     <div className="space-y-6">
       {/* Sourced Stat Strip (Vercel-style) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200/80 dark:border-neutral-800/80">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Unread</p>
-          <p className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">Unread</p>
+          <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans tabular-nums tracking-tight">
             {stats?.unread_count ?? 0}
           </p>
         </div>
-        <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200/80 dark:border-neutral-800/80">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Favorites</p>
-          <p className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">Favorites</p>
+          <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans tabular-nums tracking-tight">
             {stats?.favorite_count ?? 0}
           </p>
         </div>
-        <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200/80 dark:border-neutral-800/80">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Total Saved</p>
-          <p className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">Total Saved</p>
+          <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans tabular-nums tracking-tight">
             {stats?.total_count ?? 0}
           </p>
         </div>
-        <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200/80 dark:border-neutral-800/80">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Archived</p>
-          <p className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans">
+        <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">Archived</p>
+          <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 mt-1 font-sans tabular-nums tracking-tight">
             {stats?.archived_count ?? 0}
           </p>
         </div>
@@ -280,7 +280,7 @@ export const BookmarksView: React.FC = () => {
         {/* Tag Filters if tags exist */}
         {stats?.tags && stats.tags.length > 0 && (
           <div data-testid="tag-filters" className="flex items-center gap-1.5 flex-wrap pt-1">
-            <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider mr-1">
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans mr-1">
               Tags:
             </span>
             {selectedTag && (

@@ -615,11 +615,11 @@ export const PortfolioMainView: React.FC = () => {
               key={s.currency}
               className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1"
             >
-              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-mono">
-                <span>{s.currency} PORTFOLIO</span>
-                <TrendingUp className="w-3.5 h-3.5" />
+              <div className="flex items-center justify-between text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
+                <span><span className="font-mono">{s.currency}</span> portfolio</span>
+                <TrendingUp className="w-3.5 h-3.5 text-neutral-400" />
               </div>
-              <div className={`text-2xl font-bold font-mono tracking-tight ${plColor(s.unrealized_pl_minor)}`}>
+              <div className={`text-2xl font-semibold font-sans tabular-nums tracking-tight ${plColor(s.unrealized_pl_minor)}`}>
                 {formatSigned(s.unrealized_pl_minor, s.currency_exponent)}
               </div>
               <div className="text-[11px] text-neutral-500 dark:text-neutral-500 font-mono">
@@ -1085,7 +1085,7 @@ export const PortfolioMainView: React.FC = () => {
 
       {/* Edit Symbol Modal */}
       {editingSymbolHolding && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-800 p-5 max-w-sm w-full space-y-4 shadow-xl">
             <div>
               <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -1148,7 +1148,7 @@ export const PortfolioMainView: React.FC = () => {
 
       {/* Remove Holding Confirmation Modal */}
       {removingHolding && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-800 p-5 max-w-sm w-full space-y-4 shadow-xl">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">

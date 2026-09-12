@@ -159,7 +159,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
@@ -191,7 +191,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {/* API Endpoint Dropdown */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
               API Endpoint / Provider
             </span>
             <CustomSelect
@@ -220,7 +220,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
 
           {/* Model Name Dropdown */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
               Model Name ({activeProvider.name})
             </span>
             <CustomSelect
@@ -244,7 +244,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
           {/* API Key */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
                 API Key {config?.has_api_key && <span className="text-emerald-600 dark:text-emerald-400 font-normal ml-1">✓ Saved</span>}
               </label>
               <button
@@ -298,7 +298,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
           {/* Temperature Slider */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
                 Temperature
               </label>
               <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300">
@@ -324,7 +324,7 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
           {/* Max History Turns */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+              <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
                 Max Context History Messages
               </label>
               <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300">
@@ -345,14 +345,14 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
               <span>10 (Default)</span>
               <span>50 (Deep context)</span>
             </div>
-            <p className="text-[11px] font-mono text-neutral-500 mt-1">
+            <p className="text-[11px] font-sans text-neutral-500 mt-1">
               Number of recent conversation messages included in context when you chat or mention the AI.
             </p>
           </div>
 
           {/* System Prompt */}
           <div>
-            <label className="block text-[10px] font-mono uppercase tracking-wider text-neutral-500 mb-1">
+            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans mb-1">
               Custom System Prompt (Optional)
             </label>
             <textarea

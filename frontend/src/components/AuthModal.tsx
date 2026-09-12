@@ -48,6 +48,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, busy, onClose]);
+
   if (!isOpen) return null;
 
   const supported = isPasskeySupported();
@@ -99,8 +108,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
     >
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl border border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="mb-5 flex items-start justify-between gap-4">
           <h2 id="auth-title" className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {user

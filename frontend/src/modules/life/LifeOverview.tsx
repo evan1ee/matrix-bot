@@ -356,7 +356,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         <div
           ref={tooltipRef}
           style={{ display: 'none' }}
-          className="pointer-events-none absolute left-0 top-0 z-20 px-3 py-2 rounded-lg text-xs font-medium shadow-xl bg-neutral-900/95 text-neutral-100 dark:bg-neutral-100/95 dark:text-neutral-900 border border-neutral-700/80 dark:border-neutral-300/80 backdrop-blur-sm whitespace-nowrap will-change-transform"
+          className="pointer-events-none absolute left-0 top-0 z-20 px-3 py-2 rounded-lg text-xs font-medium shadow-xl bg-neutral-900/95 text-neutral-100 dark:bg-neutral-100/95 dark:text-neutral-900 border border-neutral-700/80 dark:border-neutral-300/80 whitespace-nowrap will-change-transform"
         >
           <div className="flex items-center gap-2">
             <span ref={tooltipDateRef} className="font-mono font-bold tracking-tight text-sm"></span>

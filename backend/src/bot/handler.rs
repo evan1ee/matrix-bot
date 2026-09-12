@@ -70,7 +70,13 @@ pub fn register_handlers(
     });
 
     // 2. Incoming message event handler
-    let bot_user_id = client.user_id().unwrap().to_owned();
+    let bot_user_id = match client.user_id() {
+        Some(id) => id.to_owned(),
+        None => {
+            error!("Matrix client has no user_id — cannot register message handler");
+            return;
+        }
+    };
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room| {
         let own_id = bot_user_id.clone();
         let registry = registry.clone();

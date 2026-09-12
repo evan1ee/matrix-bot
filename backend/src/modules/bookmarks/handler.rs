@@ -27,6 +27,10 @@ pub async fn handle_save_command(
         return "❌ <b>Invalid URL:</b> URL must start with <code>http://</code> or <code>https://</code>".to_string();
     }
 
+    if url_candidate.len() > 2048 {
+        return "❌ <b>Invalid URL:</b> URL exceeds maximum length of 2048 characters.".to_string();
+    }
+
     let tags = parts.collect::<Vec<_>>().join(" ");
     let clean_tags = tags
         .split(',')
@@ -34,6 +38,10 @@ pub async fn handle_save_command(
         .filter(|t| !t.is_empty())
         .collect::<Vec<_>>()
         .join(",");
+
+    if clean_tags.len() > 500 {
+        return "❌ <b>Invalid tags:</b> Tags exceed maximum length of 500 characters.".to_string();
+    }
 
     let meta = fetch_and_extract_metadata(http_client, url_candidate, None).await;
 

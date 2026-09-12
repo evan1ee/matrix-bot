@@ -199,7 +199,7 @@ const ReminderRow: React.FC<{
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{item.message}</p>
           {item.recurrence !== 'none' && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
               <Repeat className="w-3 h-3" />
               {item.recurrence}
             </span>
@@ -395,9 +395,9 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-neutral-600 dark:text-neutral-300" />
-            <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Schedule Reminder</h3>
+            <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Schedule reminder</h3>
           </div>
-          <span className="text-xs font-mono text-neutral-500">Scheduled Execution</span>
+          <span className="text-xs font-mono text-neutral-500">Scheduled execution</span>
         </div>
 
         {errorMsg && (
@@ -504,7 +504,7 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
               className="h-9 inline-flex items-center justify-center gap-2 px-4 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-black text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>{createMutation.isPending ? 'Scheduling...' : 'Set Reminder'}</span>
+              <span>{createMutation.isPending ? 'Scheduling...' : 'Set reminder'}</span>
             </button>
           </div>
         </form>
@@ -515,7 +515,7 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
           <div className="flex items-center gap-2">
             <BellRing className="w-4 h-4 text-neutral-600 dark:text-neutral-300" />
-            <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Pending Reminders</h3>
+            <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-200">Pending reminders</h3>
           </div>
           <div className="flex items-center gap-3">
             <button

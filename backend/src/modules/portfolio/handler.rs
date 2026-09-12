@@ -190,6 +190,12 @@ async fn handle_note(
     };
     let text = parts.next().map(str::trim).filter(|t| !t.is_empty());
 
+    if let Some(t) = text {
+        if t.len() > 500 {
+            return "⚠️ Note exceeds maximum length of 500 characters.".to_string();
+        }
+    }
+
     match PortfolioRepository::set_note(pool, owner_id, &symbol, text).await {
         Ok(Some(holding)) => {
             broadcast(broadcaster, SystemEvent::PortfolioHoldingUpdated(holding));

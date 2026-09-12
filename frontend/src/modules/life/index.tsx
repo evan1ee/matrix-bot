@@ -197,7 +197,7 @@ export const LifeView: React.FC = () => {
   }, [profile, horizonDays]);
 
   return (
-    <div className="space-y-5 pb-8">
+    <div className="space-y-6">
       {/* Action Toolbar */}
       <div className="flex items-center justify-end gap-2">
         {profile && (

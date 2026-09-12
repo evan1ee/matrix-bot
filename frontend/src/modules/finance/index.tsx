@@ -178,7 +178,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
     >
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase font-mono text-neutral-500">Direction</span>
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Direction</span>
           <CustomSelect
             value={direction}
             onChange={(v) => setDirection(v as Direction)}
@@ -191,7 +191,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Amount</span>
           <input
             type="text"
             inputMode="decimal"
@@ -202,7 +202,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Currency</span>
           <CustomSelect
             value={currency}
             onChange={setCurrency}
@@ -212,7 +212,7 @@ const LedgerEditRow: React.FC<LedgerEditRowProps> = ({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase font-mono text-neutral-500">Category</span>
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Category</span>
           <CustomSelect
             value={categoryId}
             onChange={setCategoryId}
@@ -398,9 +398,9 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
               key={s.currency}
               className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1"
             >
-              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] uppercase font-mono tracking-wider">
-                <span>{s.currency} THIS MONTH</span>
-                <Wallet className="w-3.5 h-3.5" />
+              <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium font-sans">
+                <span><span className="font-mono">{s.currency}</span> this month</span>
+                <Wallet className="w-3.5 h-3.5 text-neutral-400" />
               </div>
               <div
                 className={`text-2xl font-semibold font-sans tabular-nums tracking-tight ${
@@ -503,7 +503,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">Direction</span>
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Direction</span>
               <CustomSelect
                 value={direction}
                 onChange={(v) => setDirection(v as Direction)}
@@ -516,7 +516,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">Amount</span>
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Amount</span>
               <input
                 ref={amountInputRef}
                 type="text"
@@ -529,7 +529,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">Currency</span>
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Currency</span>
               <CustomSelect
                 value={currency}
                 onChange={setCurrency}
@@ -539,7 +539,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">Category</span>
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Category</span>
               <CustomSelect
                 value={categoryId}
                 onChange={setCategoryId}
@@ -576,7 +576,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 whitespace-nowrap">STATUS FILTER</span>
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 whitespace-nowrap">Filter:</span>
             <div className="flex items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded p-0.5 text-xs font-mono">
               {(['all', 'expense', 'income'] as const).map((tab) => (
                 <button
@@ -660,7 +660,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                         {tx.source_kind === 'recurring_bill' && (
                           <span
                             data-testid="badge-source-bill"
-                            className="px-1.5 py-0.2 rounded text-[10px] font-medium uppercase tracking-wider bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
                           >
                             Bill
                           </span>
@@ -668,7 +668,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
                         {tx.source_kind === 'portfolio_cash' && (
                           <span
                             data-testid="badge-source-portfolio"
-                            className="px-1.5 py-0.2 rounded text-[10px] font-medium uppercase tracking-wider bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium font-mono bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
                           >
                             Portfolio
                           </span>

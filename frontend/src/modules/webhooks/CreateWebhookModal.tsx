@@ -33,6 +33,16 @@ export const CreateWebhookModal: React.FC<CreateWebhookModalProps> = ({
     label: r.name || r.room_id,
   }));
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -52,14 +62,17 @@ export const CreateWebhookModal: React.FC<CreateWebhookModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 w-full max-w-lg rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xl animate-in fade-in-0 zoom-in-95">
         <div className="p-6 border-b border-neutral-200 dark:border-neutral-800">
-          <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">Create Inbound Webhook</h2>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 font-sans">Create inbound webhook</h2>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-sans">
             Generates a secure endpoint for external scripts and alert integrations.
           </p>
         </div>

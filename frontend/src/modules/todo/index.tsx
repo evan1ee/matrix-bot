@@ -176,7 +176,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-mono text-neutral-500">Priority</span>
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Priority</span>
             <CustomSelect
               value={draftPriority}
               onChange={setDraftPriority}
@@ -190,7 +190,7 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-mono text-neutral-500">Due date</span>
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Due date</span>
             <DateTimePicker
               value={draftDue}
               onChange={setDraftDue}
@@ -200,14 +200,14 @@ const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelete, onSa
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-mono text-neutral-500">Remind me</span>
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Remind me</span>
             <CustomSelect value={draftLead} onChange={setDraftLead} mono options={LEAD_OPTIONS} />
           </label>
         </div>
 
         {draftLead !== '' && needsRoom && (
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-mono text-neutral-500">Send to room</span>
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Send to room</span>
             <CustomSelect
               value={draftRoom}
               onChange={setDraftRoom}
@@ -513,7 +513,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <label className="sm:col-span-2 flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">
                 Due date (optional)
               </span>
               <DateTimePicker
@@ -525,7 +525,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase font-mono text-neutral-500">Remind me</span>
+              <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Remind me</span>
               <CustomSelect
                 value={leadMinutes}
                 onChange={setLeadMinutes}
@@ -536,7 +536,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
 
             {wantsReminder && (
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-mono text-neutral-500">Send to room</span>
+                <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Send to room</span>
                 <CustomSelect
                   value={remindRoomId}
                   onChange={setRemindRoomId}
@@ -563,7 +563,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
       <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 whitespace-nowrap">STATUS FILTER</span>
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 whitespace-nowrap">Status:</span>
             <div className="flex items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded p-0.5 text-xs font-mono">
               {(['all', 'active', 'completed'] as const).map((tab) => (
                 <button

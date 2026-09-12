@@ -138,7 +138,7 @@ export const HabitsView: React.FC = () => {
       {/* Vercel Stat Strip (Design.md vbg-stat-strip) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-4">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Active Habits
           </span>
           <div className="text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 mt-1">
@@ -150,7 +150,7 @@ export const HabitsView: React.FC = () => {
         </div>
 
         <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-4">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Today's Cadence
           </span>
           <div className="text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 mt-1">
@@ -164,7 +164,7 @@ export const HabitsView: React.FC = () => {
         </div>
 
         <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-4">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Best Streak
           </span>
           <div className="text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 mt-1">
@@ -176,7 +176,7 @@ export const HabitsView: React.FC = () => {
         </div>
 
         <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-4">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
             Total Check-ins
           </span>
           <div className="text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 mt-1">

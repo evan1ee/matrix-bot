@@ -140,7 +140,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {statusLabel}
           </span>
         </div>
-        <span className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+        <span className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400">
           SSE
         </span>
       </div>
@@ -240,7 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div key={group.title} className={`w-full ${groupIdx > 0 ? (collapsed ? 'mt-3' : 'mt-5') : ''}`}>
             {/* Section header or divider */}
             {!collapsed ? (
-              <h3 className="px-6 mb-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+              <h3 className="px-3 mb-1.5 text-xs font-medium text-[var(--color-text-tertiary)]">
                 {group.title}
               </h3>
             ) : groupIdx > 0 ? (
@@ -427,7 +427,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Overlay Backdrop */}
       {isMobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden sidebar-backdrop-enter"
+          className="fixed inset-0 bg-black/50 z-40 md:hidden sidebar-backdrop-enter"
           onClick={onCloseMobile}
         />
       )}

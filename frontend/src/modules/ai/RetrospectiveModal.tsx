@@ -59,7 +59,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in-0 duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in-0 duration-200"
       onClick={onClose}
     >
       <div
@@ -116,8 +116,8 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {/* Financial Velocity */}
                 <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-850/50 space-y-1">
-                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] font-mono uppercase tracking-wider">
-                    <span>Net Flow</span>
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium font-sans">
+                    <span>Net flow</span>
                     <DollarSign className="w-3.5 h-3.5" />
                   </div>
                   <div className={`text-base font-semibold font-sans truncate ${isNetPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={retro.formatted_net}>
@@ -130,7 +130,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
                 {/* Tasks Completed */}
                 <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-850/50 space-y-1">
-                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] font-mono uppercase tracking-wider">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium font-sans">
                     <span>Tasks</span>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                   </div>
@@ -144,7 +144,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
                 {/* Habit Adherence */}
                 <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-850/50 space-y-1">
-                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] font-mono uppercase tracking-wider">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium font-sans">
                     <span>Habits</span>
                     <TrendingUp className="w-3.5 h-3.5" />
                   </div>
@@ -158,7 +158,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
                 {/* Life & Wellness */}
                 <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-850/50 space-y-1">
-                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-[10px] font-mono uppercase tracking-wider">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium font-sans">
                     <span>Mood</span>
                     <Smile className="w-3.5 h-3.5" />
                   </div>
@@ -183,8 +183,8 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
               {/* Full Formatted Summary */}
               <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 p-4 space-y-2">
-                <h4 className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
-                  Consolidated Brief
+                <h4 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 font-sans">
+                  Consolidated brief
                 </h4>
                 <div className="text-xs leading-relaxed text-neutral-800 dark:text-neutral-200 bg-white dark:bg-neutral-900 p-3.5 rounded border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
                   <MarkdownRenderer content={retro.formatted_markdown} />

@@ -5,7 +5,10 @@ use axum::{
 };
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::ServeDir;
+use tower_http::timeout::TimeoutLayer;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::config::Config;
@@ -426,6 +429,9 @@ pub async fn start_api_server(
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         .fallback_service(ServeDir::new(web_dist))
         .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
+        .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
         .with_state(state);
 
     let host = config.api_host.parse().unwrap_or([0, 0, 0, 0].into());
