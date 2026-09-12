@@ -40,11 +40,9 @@ impl fmt::Display for MoneyError {
                 write!(f, "Currency must be a 3-letter code such as EUR or JPY")
             }
             MoneyError::InvalidAmount => write!(f, "Amount must be a number such as 15.50"),
-            MoneyError::TooPrecise { max_decimals } => write!(
-                f,
-                "That currency has {} decimal place(s)",
-                max_decimals
-            ),
+            MoneyError::TooPrecise { max_decimals } => {
+                write!(f, "That currency has {} decimal place(s)", max_decimals)
+            }
             MoneyError::NotPositive => {
                 write!(f, "Amount must be greater than zero")
             }
@@ -131,7 +129,9 @@ pub fn parse_amount(input: &str, exponent: u32) -> Result<i64, MoneyError> {
         return Err(MoneyError::InvalidAmount);
     }
     if fraction.len() as u32 > exponent {
-        return Err(MoneyError::TooPrecise { max_decimals: exponent });
+        return Err(MoneyError::TooPrecise {
+            max_decimals: exponent,
+        });
     }
 
     let padded = format!("{:0<width$}", fraction, width = exponent as usize);
@@ -190,17 +190,26 @@ mod tests {
         assert_eq!(parse_amount("1234567.89", 2), Ok(123456789));
         // Round-trips exactly, which a float would not guarantee.
         assert_eq!(format_amount(parse_amount("0.29", 2).unwrap(), 2), "0.29");
-        assert_eq!(format_amount(parse_amount("1234567.89", 2).unwrap(), 2), "1234567.89");
+        assert_eq!(
+            format_amount(parse_amount("1234567.89", 2).unwrap(), 2),
+            "1234567.89"
+        );
     }
 
     #[test]
     fn test_respects_currency_exponent() {
         // JPY has no minor unit at all.
         assert_eq!(parse_amount("500", 0), Ok(500));
-        assert_eq!(parse_amount("500.5", 0), Err(MoneyError::TooPrecise { max_decimals: 0 }));
+        assert_eq!(
+            parse_amount("500.5", 0),
+            Err(MoneyError::TooPrecise { max_decimals: 0 })
+        );
         // KWD has three.
         assert_eq!(parse_amount("1.234", 3), Ok(1234));
-        assert_eq!(parse_amount("1.2345", 3), Err(MoneyError::TooPrecise { max_decimals: 3 }));
+        assert_eq!(
+            parse_amount("1.2345", 3),
+            Err(MoneyError::TooPrecise { max_decimals: 3 })
+        );
     }
 
     #[test]
@@ -208,7 +217,10 @@ mod tests {
         assert_eq!(parse_amount("", 2), Err(MoneyError::InvalidAmount));
         assert_eq!(parse_amount("abc", 2), Err(MoneyError::InvalidAmount));
         assert_eq!(parse_amount("1.2.3", 2), Err(MoneyError::InvalidAmount));
-        assert_eq!(parse_amount("15.501", 2), Err(MoneyError::TooPrecise { max_decimals: 2 }));
+        assert_eq!(
+            parse_amount("15.501", 2),
+            Err(MoneyError::TooPrecise { max_decimals: 2 })
+        );
         assert_eq!(parse_amount("0", 2), Err(MoneyError::NotPositive));
         assert_eq!(parse_amount("0.00", 2), Err(MoneyError::NotPositive));
     }

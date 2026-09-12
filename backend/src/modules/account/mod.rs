@@ -19,9 +19,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::accounts::recovery::RECOVERY_DELAY_HOURS;
-use crate::accounts::{
-    AccountRepository, MaturedRecovery, RecoveryRepository, SecurityEventKind,
-};
+use crate::accounts::{AccountRepository, MaturedRecovery, RecoveryRepository, SecurityEventKind};
 use crate::bot::notify::notify_account;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
@@ -213,7 +211,7 @@ pub enum RecoveryRejection {
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
     use sqlx::SqlitePool;
 
@@ -224,12 +222,19 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     }
 
     fn module() -> AccountModule {
-        AccountModule::new(Arc::new(RwLock::new(None)), "https://bot.mbm.one".to_string())
+        AccountModule::new(
+            Arc::new(RwLock::new(None)),
+            "https://bot.mbm.one".to_string(),
+        )
     }
 
     fn ctx(command: &str, owner_id: &str, is_direct: bool) -> CommandContext {
         CommandContext {
-            room_id: if is_direct { "!dm:x".into() } else { "!public:x".into() },
+            room_id: if is_direct {
+                "!dm:x".into()
+            } else {
+                "!public:x".into()
+            },
             owner_id: owner_id.to_string(),
             sender_mxid: "@evan:mbm.one".to_string(),
             sender_name: "evan".to_string(),
@@ -259,7 +264,10 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
                 reply.contains("web app"),
                 "`!{command}` must explain where to go: {reply}"
             );
-            assert!(reply.contains("bot.mbm.one"), "`!{command}` must name the site");
+            assert!(
+                reply.contains("bot.mbm.one"),
+                "`!{command}` must name the site"
+            );
         }
     }
 
@@ -277,7 +285,9 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     #[tokio::test]
     async fn test_recover_is_refused_outside_a_direct_message() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         let reply = module()
             .handle_command(&ctx("recover", &account, false), &db, None)
@@ -286,7 +296,10 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
 
         assert!(reply.contains("direct message"));
         assert!(
-            RecoveryRepository::pending(&db.pool, &account).await.unwrap().is_none(),
+            RecoveryRepository::pending(&db.pool, &account)
+                .await
+                .unwrap()
+                .is_none(),
             "nothing may be started from a public room"
         );
     }
@@ -296,7 +309,9 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     #[tokio::test]
     async fn test_recover_needs_a_claimed_account() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_UNCLAIMED).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
 
         let reply = module()
             .handle_command(&ctx("recover", &account, true), &db, None)
@@ -304,23 +319,34 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
             .unwrap();
 
         assert!(reply.contains("!link"), "it should say how to link instead");
-        assert!(RecoveryRepository::pending(&db.pool, &account).await.unwrap().is_none());
+        assert!(RecoveryRepository::pending(&db.pool, &account)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     /// The happy path: a code now, usable in a day, cancellable until then.
     #[tokio::test]
     async fn test_recover_issues_a_delayed_code_and_says_so() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         let reply = module()
             .handle_command(&ctx("recover", &account, true), &db, None)
             .await
             .unwrap();
 
-        assert!(reply.contains("24 hours"), "the delay must be stated: {reply}");
+        assert!(
+            reply.contains("24 hours"),
+            "the delay must be stated: {reply}"
+        );
         assert!(reply.contains("cancel"), "the way out must be stated");
-        assert!(RecoveryRepository::pending(&db.pool, &account).await.unwrap().is_some());
+        assert!(RecoveryRepository::pending(&db.pool, &account)
+            .await
+            .unwrap()
+            .is_some());
 
         // And it is logged, so the web UI shows it even with no DM delivered.
         let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
@@ -333,8 +359,12 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     #[tokio::test]
     async fn test_a_premature_code_is_refused_in_the_web_ui_too() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let (code, _) = RecoveryRepository::request(&db.pool, &account)
+            .await
+            .unwrap();
 
         assert_eq!(
             redeem_matured_recovery(&db, None, &code).await.unwrap_err(),
@@ -345,8 +375,12 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     #[tokio::test]
     async fn test_a_matured_code_opens_the_account_and_is_logged() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let (code, _) = RecoveryRepository::request(&db.pool, &account)
+            .await
+            .unwrap();
 
         sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
             .bind(chrono::Utc::now() - chrono::Duration::minutes(1))
@@ -355,7 +389,10 @@ use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
             .await
             .unwrap();
 
-        assert_eq!(redeem_matured_recovery(&db, None, &code).await.unwrap(), account);
+        assert_eq!(
+            redeem_matured_recovery(&db, None, &code).await.unwrap(),
+            account
+        );
 
         let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
             .await

@@ -1,14 +1,8 @@
 //! Recovery codes, and stopping a recovery someone else started.
 
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 
-use crate::accounts::{
-    RecoveryRepository,
-    SecurityEventKind, SecurityEventRepository,
-};
+use crate::accounts::{RecoveryRepository, SecurityEventKind, SecurityEventRepository};
 use crate::api::account::types::*;
 use crate::api::auth::extractor::VerifiedUser;
 use crate::api::auth::types::{ApiState, AuthUser};

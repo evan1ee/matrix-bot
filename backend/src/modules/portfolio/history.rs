@@ -100,7 +100,8 @@ impl HistoryRepository {
         }
 
         for cur in currencies {
-            let cur_holdings: Vec<&Holding> = holdings.iter().filter(|h| h.currency == cur).collect();
+            let cur_holdings: Vec<&Holding> =
+                holdings.iter().filter(|h| h.currency == cur).collect();
             let cur_cash = cash_list.iter().find(|c| c.currency == cur);
 
             let mut holdings_value = 0i64;
@@ -109,14 +110,17 @@ impl HistoryRepository {
             for h in cur_holdings {
                 exponent = h.currency_exponent;
                 if let Some(price) = h.current_price_minor {
-                    holdings_value += (h.quantity_minor as i128 * price as i128 / 100_000_000) as i64;
+                    holdings_value +=
+                        (h.quantity_minor as i128 * price as i128 / 100_000_000) as i64;
                 }
             }
 
-            let cash_minor = cur_cash.map(|c| {
-                exponent = c.currency_exponent;
-                c.balance_minor
-            }).unwrap_or(0);
+            let cash_minor = cur_cash
+                .map(|c| {
+                    exponent = c.currency_exponent;
+                    c.balance_minor
+                })
+                .unwrap_or(0);
 
             Self::record_snapshot(
                 pool,
@@ -174,12 +178,16 @@ impl HistoryRepository {
         let mut live_holdings_value = 0i64;
         let mut currency_exponent = 2i64;
 
-        let cur_holdings: Vec<&Holding> = holdings.iter().filter(|h| h.currency == norm_currency).collect();
+        let cur_holdings: Vec<&Holding> = holdings
+            .iter()
+            .filter(|h| h.currency == norm_currency)
+            .collect();
 
         for h in &cur_holdings {
             currency_exponent = h.currency_exponent;
             if let Some(price) = h.current_price_minor {
-                live_holdings_value += (h.quantity_minor as i128 * price as i128 / 100_000_000) as i64;
+                live_holdings_value +=
+                    (h.quantity_minor as i128 * price as i128 / 100_000_000) as i64;
             }
         }
 
@@ -196,11 +204,16 @@ impl HistoryRepository {
         let today_str = now.format("%Y-%m-%d").to_string();
 
         // If user has active holdings, fetch their real historical price curves
-        let mut holding_series: Vec<(&Holding, std::collections::BTreeMap<String, i64>)> = Vec::new();
+        let mut holding_series: Vec<(&Holding, std::collections::BTreeMap<String, i64>)> =
+            Vec::new();
         let mut all_dates: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for h in &cur_holdings {
-            if let Ok(series) = crate::modules::portfolio::history_feed::fetch_historical_prices(&h.symbol, timeframe).await {
+            if let Ok(series) = crate::modules::portfolio::history_feed::fetch_historical_prices(
+                &h.symbol, timeframe,
+            )
+            .await
+            {
                 let mut map = std::collections::BTreeMap::new();
                 for (date, price) in series {
                     if let Some(created) = h.created_at {
@@ -209,8 +222,14 @@ impl HistoryRepository {
                             continue;
                         }
                     }
-                    let price_minor = crate::modules::portfolio::price_feed::price_to_minor(price, h.currency_exponent);
-                    let val_minor = crate::modules::portfolio::models::scale_product(h.quantity_minor, price_minor);
+                    let price_minor = crate::modules::portfolio::price_feed::price_to_minor(
+                        price,
+                        h.currency_exponent,
+                    );
+                    let val_minor = crate::modules::portfolio::models::scale_product(
+                        h.quantity_minor,
+                        price_minor,
+                    );
                     all_dates.insert(date.clone());
                     map.insert(date, val_minor);
                 }
@@ -224,7 +243,8 @@ impl HistoryRepository {
 
         if !holding_series.is_empty() && !all_dates.is_empty() {
             // Forward-fill per holding so weekends or missing quotes don't create false dips
-            let mut last_known_vals: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            let mut last_known_vals: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
 
             for date in all_dates {
                 if date == today_str {
@@ -361,34 +381,24 @@ mod tests {
         let owner = "bob";
 
         let today = chrono::Utc::now().date_naive();
-        let d1 = (today - chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
-        let d2 = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let d1 = (today - chrono::Duration::days(2))
+            .format("%Y-%m-%d")
+            .to_string();
+        let d2 = (today - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
-        HistoryRepository::record_snapshot(
-            &pool,
-            owner,
-            &d1,
-            "USD",
-            2i64,
-            5000_00,
-            1000_00,
-        )
-        .await
-        .unwrap();
+        HistoryRepository::record_snapshot(&pool, owner, &d1, "USD", 2i64, 5000_00, 1000_00)
+            .await
+            .unwrap();
 
-        HistoryRepository::record_snapshot(
-            &pool,
-            owner,
-            &d2,
-            "USD",
-            2i64,
-            5500_00,
-            1000_00,
-        )
-        .await
-        .unwrap();
+        HistoryRepository::record_snapshot(&pool, owner, &d2, "USD", 2i64, 5500_00, 1000_00)
+            .await
+            .unwrap();
 
-        let hist = HistoryRepository::get_history(&pool, owner, "7d", "USD").await.unwrap();
+        let hist = HistoryRepository::get_history(&pool, owner, "7d", "USD")
+            .await
+            .unwrap();
         assert_eq!(hist.currency, "USD");
         assert!(hist.points.len() >= 2);
     }

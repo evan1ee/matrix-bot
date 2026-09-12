@@ -89,7 +89,12 @@ pub async fn list_reminders(
         (items, total)
     };
 
-    Ok(Json(ReminderListResponse { items, page, limit, total }))
+    Ok(Json(ReminderListResponse {
+        items,
+        page,
+        limit,
+        total,
+    }))
 }
 
 #[utoipa::path(
@@ -141,7 +146,9 @@ pub async fn create_reminder(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::ReminderCreated(reminder.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::ReminderCreated(reminder.clone()));
 
     Ok(Json(reminder))
 }
@@ -204,7 +211,9 @@ pub async fn update_reminder(
     .map_err(|e| ApiError::internal(e.to_string()))?
     .ok_or_else(|| ApiError::not_found("Reminder not found, or is no longer pending"))?;
 
-    state.broadcaster.send(SystemEvent::ReminderUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::ReminderUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -226,14 +235,13 @@ pub async fn delete_reminder(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT room_id FROM reminders WHERE id = ? AND owner_id = ?",
-    )
-    .bind(id)
-    .bind(&owner_id)
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT room_id FROM reminders WHERE id = ? AND owner_id = ?")
+            .bind(id)
+            .bind(&owner_id)
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let (room_id,) = match row {
         Some(r) => r,
@@ -246,7 +254,11 @@ pub async fn delete_reminder(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::ReminderCancelled { id, room_id, owner_id });
+    state.broadcaster.send(SystemEvent::ReminderCancelled {
+        id,
+        room_id,
+        owner_id,
+    });
 
     Ok(StatusCode::NO_CONTENT)
 }

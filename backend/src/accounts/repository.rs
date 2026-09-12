@@ -106,12 +106,13 @@ impl AccountRepository {
 
         let candidate = Self::create(pool, &display_name_for_mxid(mxid), STATUS_UNCLAIMED).await?;
 
-        let claimed = sqlx::query("INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)")
-            .bind(mxid)
-            .bind(&candidate)
-            .execute(pool)
-            .await?
-            .rows_affected();
+        let claimed =
+            sqlx::query("INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)")
+                .bind(mxid)
+                .bind(&candidate)
+                .execute(pool)
+                .await?
+                .rows_affected();
 
         if claimed == 1 {
             return Ok(candidate);
@@ -128,7 +129,6 @@ impl AccountRepository {
             .await?
             .ok_or(sqlx::Error::RowNotFound)
     }
-
 }
 
 #[cfg(test)]
@@ -146,8 +146,12 @@ mod tests {
     #[tokio::test]
     async fn test_ids_are_prefixed_and_unique() {
         let pool = db().await;
-        let a = AccountRepository::create(&pool, "a", STATUS_ACTIVE).await.unwrap();
-        let b = AccountRepository::create(&pool, "b", STATUS_ACTIVE).await.unwrap();
+        let a = AccountRepository::create(&pool, "a", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let b = AccountRepository::create(&pool, "b", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         assert!(a.starts_with("acct_"), "got {a}");
         assert_eq!(a.len(), "acct_".len() + 32);
@@ -160,8 +164,12 @@ mod tests {
     async fn test_provisioning_is_stable_for_a_repeated_sender() {
         let pool = db().await;
 
-        let first = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        let second = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let first = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        let second = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
 
         assert_eq!(first, second);
 
@@ -176,7 +184,9 @@ mod tests {
     #[tokio::test]
     async fn test_provisioned_account_is_unclaimed() {
         let pool = db().await;
-        let id = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let id = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
 
         let account = AccountRepository::find(&pool, &id).await.unwrap().unwrap();
         assert!(account.is_unclaimed());
@@ -187,8 +197,12 @@ mod tests {
     #[tokio::test]
     async fn test_two_senders_get_two_accounts() {
         let pool = db().await;
-        let a = AccountRepository::resolve_or_provision(&pool, "@a:x").await.unwrap();
-        let b = AccountRepository::resolve_or_provision(&pool, "@b:x").await.unwrap();
+        let a = AccountRepository::resolve_or_provision(&pool, "@a:x")
+            .await
+            .unwrap();
+        let b = AccountRepository::resolve_or_provision(&pool, "@b:x")
+            .await
+            .unwrap();
         assert_ne!(a, b);
     }
 
@@ -204,7 +218,9 @@ mod tests {
         for _ in 0..8 {
             let pool = pool.clone();
             results.push(tokio::spawn(async move {
-                AccountRepository::resolve_or_provision(&pool, "@racer:x").await.unwrap()
+                AccountRepository::resolve_or_provision(&pool, "@racer:x")
+                    .await
+                    .unwrap()
             }));
         }
 
@@ -213,7 +229,10 @@ mod tests {
             ids.push(handle.await.unwrap());
         }
 
-        assert!(ids.windows(2).all(|w| w[0] == w[1]), "resolved to different accounts: {ids:?}");
+        assert!(
+            ids.windows(2).all(|w| w[0] == w[1]),
+            "resolved to different accounts: {ids:?}"
+        );
 
         let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
             .fetch_one(&pool)
@@ -225,7 +244,9 @@ mod tests {
     #[tokio::test]
     async fn test_linked_mxids_lists_every_route_to_an_account() {
         let pool = db().await;
-        let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
 
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)")
             .bind("@evan:work.org")
@@ -234,7 +255,9 @@ mod tests {
             .await
             .unwrap();
 
-        let mxids = AccountRepository::linked_mxids(&pool, &account).await.unwrap();
+        let mxids = AccountRepository::linked_mxids(&pool, &account)
+            .await
+            .unwrap();
         assert_eq!(mxids.len(), 2);
         assert!(mxids.contains(&"@evan:work.org".to_string()));
     }
@@ -244,8 +267,12 @@ mod tests {
     #[tokio::test]
     async fn test_an_mxid_cannot_be_linked_to_two_accounts() {
         let pool = db().await;
-        let first = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        let other = AccountRepository::create(&pool, "other", STATUS_ACTIVE).await.unwrap();
+        let first = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        let other = AccountRepository::create(&pool, "other", STATUS_ACTIVE)
+            .await
+            .unwrap();
         assert_ne!(first, other);
 
         let duplicate = sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)")
@@ -254,8 +281,9 @@ mod tests {
             .execute(&pool)
             .await;
 
-        assert!(duplicate.is_err(), "the primary key must reject a second link");
+        assert!(
+            duplicate.is_err(),
+            "the primary key must reject a second link"
+        );
     }
-
-
 }

@@ -69,7 +69,11 @@ impl CommandParser {
             .to_string();
 
         let mut parts = clean_body.splitn(2, ' ');
-        let raw_command = parts.next().unwrap_or("").trim_start_matches('!').to_string();
+        let raw_command = parts
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('!')
+            .to_string();
         let raw_args = parts.next().unwrap_or("").trim().to_string();
 
         Some(ParsedCommand {

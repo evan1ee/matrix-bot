@@ -35,9 +35,9 @@ pub mod session;
 pub use credentials::CredentialRepository;
 pub use linking::{LinkOutcome, LinkRepository};
 pub use merge::{MergePreview, MergeRepository};
-pub use recovery::{MaturedRecovery, RecoveryRepository};
-pub use security_events::{SecurityEventKind, SecurityEventRepository};
+pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;
+pub use security_events::{SecurityEventKind, SecurityEventRepository};
 pub use session::{Session, SessionRepository};
 
 use chrono::{DateTime, Utc};
@@ -175,7 +175,10 @@ mod tests {
             "@evan:mbm.one", // a legacy owner string
             "",
         ] {
-            assert!(account_id_to_handle(bad).is_none(), "{bad} must not map to a handle");
+            assert!(
+                account_id_to_handle(bad).is_none(),
+                "{bad} must not map to a handle"
+            );
         }
     }
 
@@ -185,10 +188,20 @@ mod tests {
     fn test_owned_tables_covers_every_ownership_carrying_table() {
         assert_eq!(OWNED_TABLES.len(), 20);
         for table in [
-            "todos", "reminders", "transactions", "user_settings",
-            "bookmarks", "habits", "life_day_logs", "footprints", "ai_conversations"
+            "todos",
+            "reminders",
+            "transactions",
+            "user_settings",
+            "bookmarks",
+            "habits",
+            "life_day_logs",
+            "footprints",
+            "ai_conversations",
         ] {
-            assert!(OWNED_TABLES.contains(&table), "{table} must be re-pointed on merge");
+            assert!(
+                OWNED_TABLES.contains(&table),
+                "{table} must be re-pointed on merge"
+            );
         }
     }
 }

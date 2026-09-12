@@ -17,9 +17,11 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_account_rooms_account_id ON account_rooms(account_id);")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_account_rooms_account_id ON account_rooms(account_id);",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

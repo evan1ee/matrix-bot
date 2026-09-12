@@ -72,7 +72,11 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str, sender_name: &str) -> Op
                     html_escape(sender_name)
                 );
                 for h in hooks {
-                    let status = if h.is_active { "🟢 Active" } else { "⚪ Inactive" };
+                    let status = if h.is_active {
+                        "🟢 Active"
+                    } else {
+                        "⚪ Inactive"
+                    };
                     html.push_str(&format!(
                         "• [<code>{}</code>] <b>{}</b> &mdash; {}<br/>\
                          &nbsp;&nbsp;Room: <code>{}</code> | Delivered: <b>{}</b> | Failures: <b>{}</b><br/>",
@@ -144,9 +148,15 @@ async fn handle_revoke(
                     owner_id: owner_id.to_string(),
                 });
             }
-            Some(format!("🗑️ Webhook <code>{}</code> has been revoked.", html_escape(id)))
+            Some(format!(
+                "🗑️ Webhook <code>{}</code> has been revoked.",
+                html_escape(id)
+            ))
         }
-        Ok(false) => Some(format!("⚠️ Webhook <code>{}</code> not found.", html_escape(id))),
+        Ok(false) => Some(format!(
+            "⚠️ Webhook <code>{}</code> not found.",
+            html_escape(id)
+        )),
         Err(err) => {
             error!("Failed revoking webhook {}: {:?}", id, err);
             Some("❌ Database error revoking webhook.".to_string())
@@ -205,7 +215,10 @@ async fn handle_test(
                 }
             }
         }
-        Ok(None) => Some(format!("⚠️ Webhook <code>{}</code> not found.", html_escape(id))),
+        Ok(None) => Some(format!(
+            "⚠️ Webhook <code>{}</code> not found.",
+            html_escape(id)
+        )),
         Err(err) => {
             error!("Failed finding webhook for test: {:?}", err);
             Some("❌ Database error retrieving webhook.".to_string())

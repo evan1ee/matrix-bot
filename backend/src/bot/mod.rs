@@ -50,7 +50,12 @@ impl MatrixBot {
         client_handle: Option<Arc<RwLock<Option<Client>>>>,
         pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
     ) -> Result<Self> {
-        let client = BotClient::build_and_login_with_token_handles(config, token_handle, client_handle.clone()).await?;
+        let client = BotClient::build_and_login_with_token_handles(
+            config,
+            token_handle,
+            client_handle.clone(),
+        )
+        .await?;
 
         if let Some(ref handle) = client_handle {
             *handle.write().await = Some(client.clone());
@@ -124,7 +129,10 @@ impl MatrixBot {
         // hold this generation's client, and the caller reconnects in a loop, so
         // leaving them detached accumulated one scheduler per reconnect and
         // delivered every reminder once per copy.
-        let _workers = self.registry.spawn_all_background_workers(&module_ctx).await;
+        let _workers = self
+            .registry
+            .spawn_all_background_workers(&module_ctx)
+            .await;
 
         tracing::info!("Matrix Bot is active and listening for events...");
         self.client.sync(SyncSettings::default()).await?;

@@ -1,0 +1,36 @@
+services:
+  matrix-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: matrix-bot:latest
+    container_name: matrix-bot
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - DATABASE_URL=sqlite:///app/data/bot_data.db?mode=rwc
+      - DATABASE_MAX_CONNECTIONS=10
+      - RUST_LOG=info,matrix_bot=info
+      - HOMESERVER_URL=${HOMESERVER_URL:-}
+      - BOT_USERNAME=${BOT_USERNAME:-}
+      - BOT_PASSWORD=${BOT_PASSWORD:-}
+      - BOT_ACCESS_TOKEN=${BOT_ACCESS_TOKEN:-}
+      - MATRIX_REGISTRATION_SECRET=${MATRIX_REGISTRATION_SECRET:-}
+      - MATRIX_VERIFICATION_ALLOWLIST=${MATRIX_VERIFICATION_ALLOWLIST:-}
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - SPA_ORIGIN=${SPA_ORIGIN:-}
+    volumes:
+      - bot-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  bot-data:
+    name: matrix-bot-data

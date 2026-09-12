@@ -1,8 +1,9 @@
 pub mod extractor;
-pub mod webauthn;
 pub mod handlers;
 pub mod matrix;
+pub mod recovery;
 pub mod types;
+pub mod webauthn;
 
 pub use handlers::*;
 pub use types::*;
@@ -71,7 +72,9 @@ mod tests {
         let state = state().await;
         let (account, token) = signed_in(&state, "evan").await;
 
-        let user = extract(&state, Method::GET, Some(&token), None).await.unwrap();
+        let user = extract(&state, Method::GET, Some(&token), None)
+            .await
+            .unwrap();
         assert_eq!(user.owner_id(), account);
         assert_eq!(user.display_name, "evan");
         assert_eq!(user.session_id_hash, hash_token(&token));
@@ -87,7 +90,9 @@ mod tests {
     #[tokio::test]
     async fn test_an_unknown_cookie_is_unauthorized() {
         let state = state().await;
-        let err = extract(&state, Method::GET, Some("nonsense"), None).await.unwrap_err();
+        let err = extract(&state, Method::GET, Some("nonsense"), None)
+            .await
+            .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
     }
 
@@ -98,11 +103,17 @@ mod tests {
         let state = state().await;
         let (_account, token) = signed_in(&state, "evan").await;
 
-        assert!(extract(&state, Method::GET, Some(&token), None).await.is_ok());
+        assert!(extract(&state, Method::GET, Some(&token), None)
+            .await
+            .is_ok());
 
-        SessionRepository::revoke(&state.db.pool, &hash_token(&token)).await.unwrap();
+        SessionRepository::revoke(&state.db.pool, &hash_token(&token))
+            .await
+            .unwrap();
 
-        let err = extract(&state, Method::GET, Some(&token), None).await.unwrap_err();
+        let err = extract(&state, Method::GET, Some(&token), None)
+            .await
+            .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
     }
 
@@ -118,7 +129,9 @@ mod tests {
             .await
             .unwrap();
 
-        let err = extract(&state, Method::GET, Some(&token), None).await.unwrap_err();
+        let err = extract(&state, Method::GET, Some(&token), None)
+            .await
+            .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
     }
 
@@ -131,26 +144,39 @@ mod tests {
         let (_account, token) = signed_in(&state, "evan").await;
 
         // Reads need no origin at all.
-        assert!(extract(&state, Method::GET, Some(&token), None).await.is_ok());
+        assert!(extract(&state, Method::GET, Some(&token), None)
+            .await
+            .is_ok());
 
         // Writes from our own origin are fine.
-        assert!(extract(&state, Method::POST, Some(&token), Some(ORIGIN)).await.is_ok());
+        assert!(extract(&state, Method::POST, Some(&token), Some(ORIGIN))
+            .await
+            .is_ok());
 
         // Writes from somewhere else are refused.
-        let err = extract(&state, Method::POST, Some(&token), Some("https://evil.example"))
-            .await
-            .unwrap_err();
+        let err = extract(
+            &state,
+            Method::POST,
+            Some(&token),
+            Some("https://evil.example"),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
 
         // So is a write with no Origin at all. Browsers always send one on
         // `fetch`, and there is no bearer-token client left whose omission
         // would be legitimate.
-        let err = extract(&state, Method::POST, Some(&token), None).await.unwrap_err();
+        let err = extract(&state, Method::POST, Some(&token), None)
+            .await
+            .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
 
         for method in [Method::PUT, Method::PATCH, Method::DELETE] {
             assert!(
-                extract(&state, method.clone(), Some(&token), None).await.is_err(),
+                extract(&state, method.clone(), Some(&token), None)
+                    .await
+                    .is_err(),
                 "{method} must require an Origin"
             );
         }
@@ -165,11 +191,19 @@ mod tests {
 
         assert_ne!(first, second);
 
-        let a = extract(&state, Method::GET, Some(&first_token), None).await.unwrap();
-        let b = extract(&state, Method::GET, Some(&second_token), None).await.unwrap();
+        let a = extract(&state, Method::GET, Some(&first_token), None)
+            .await
+            .unwrap();
+        let b = extract(&state, Method::GET, Some(&second_token), None)
+            .await
+            .unwrap();
 
         assert_eq!(a.display_name, b.display_name);
-        assert_ne!(a.owner_id(), b.owner_id(), "a shared name must not imply shared data");
+        assert_ne!(
+            a.owner_id(),
+            b.owner_id(),
+            "a shared name must not imply shared data"
+        );
     }
 
     /// Step-up: a sensitive action needs a recent passkey assertion.
@@ -203,7 +237,10 @@ mod tests {
         // qualifies again — the restriction expires on its own, with nothing to
         // run to clear it.
         let later = Utc::now() + Duration::hours(73);
-        let lapsed = AuthUser { last_verified_at: later, ..restricted };
+        let lapsed = AuthUser {
+            last_verified_at: later,
+            ..restricted
+        };
         assert!(lapsed.may_perform_sensitive_action(later));
     }
 }

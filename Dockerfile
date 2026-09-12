@@ -34,7 +34,7 @@ RUN cargo build --release --bin matrix-bot
 FROM debian:bookworm-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -g 10001 app \
  && useradd -u 10001 -g app -s /usr/sbin/nologin app
@@ -56,5 +56,8 @@ ENV API_HOST=0.0.0.0 \
 
 EXPOSE 8080
 VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://127.0.0.1:8080/api/v1/health || exit 1
 
 CMD ["matrix-bot"]

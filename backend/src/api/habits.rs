@@ -40,9 +40,13 @@ pub struct ToggleHabitRequest {
 }
 
 fn get_today_string(override_today: Option<&str>) -> String {
-    override_today
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| chrono::Utc::now().naive_utc().date().format("%Y-%m-%d").to_string())
+    override_today.map(|s| s.to_string()).unwrap_or_else(|| {
+        chrono::Utc::now()
+            .naive_utc()
+            .date()
+            .format("%Y-%m-%d")
+            .to_string()
+    })
 }
 
 pub async fn list_habits(
@@ -68,7 +72,9 @@ pub async fn create_habit(
         return Err(ApiError::bad_request("Habit name is required."));
     }
     if name.len() > 100 {
-        return Err(ApiError::bad_request("Habit name must be 100 characters or fewer."));
+        return Err(ApiError::bad_request(
+            "Habit name must be 100 characters or fewer.",
+        ));
     }
 
     let habit = HabitsRepository::create_habit(
@@ -83,7 +89,9 @@ pub async fn create_habit(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::HabitCreated(habit.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::HabitCreated(habit.clone()));
 
     Ok(Json(habit))
 }
@@ -99,7 +107,9 @@ pub async fn update_habit(
         return Err(ApiError::bad_request("Habit name cannot be empty."));
     }
     if name.len() > 100 {
-        return Err(ApiError::bad_request("Habit name must be 100 characters or fewer."));
+        return Err(ApiError::bad_request(
+            "Habit name must be 100 characters or fewer.",
+        ));
     }
 
     let habit = HabitsRepository::update_habit(
@@ -116,7 +126,9 @@ pub async fn update_habit(
     .map_err(|e| ApiError::internal(e.to_string()))?
     .ok_or_else(|| ApiError::not_found(format!("Habit #{} not found", id)))?;
 
-    state.broadcaster.send(SystemEvent::HabitUpdated(habit.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::HabitUpdated(habit.clone()));
 
     Ok(Json(habit))
 }

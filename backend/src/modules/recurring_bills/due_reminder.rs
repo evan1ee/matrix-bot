@@ -30,9 +30,7 @@ use crate::modules::reminder::models::ReminderSource;
 pub fn parse_due_at(raw: &str) -> Option<DateTime<Utc>> {
     NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S"))
-        .or_else(|_| {
-            NaiveDateTime::parse_from_str(&format!("{raw} 00:00:00"), "%Y-%m-%d %H:%M:%S")
-        })
+        .or_else(|_| NaiveDateTime::parse_from_str(&format!("{raw} 00:00:00"), "%Y-%m-%d %H:%M:%S"))
         .ok()
         .map(|ndt| Utc.from_utc_datetime(&ndt))
 }
@@ -174,8 +172,14 @@ mod tests {
         let pool = setup().await;
         let bill = bill_with(&pool, due_in(4), None).await;
 
-        assert_eq!(sync(&pool, None, &bill).await.unwrap(), SyncOutcome::Nothing);
-        assert_eq!(sync(&pool, None, &bill).await.unwrap(), SyncOutcome::Nothing);
+        assert_eq!(
+            sync(&pool, None, &bill).await.unwrap(),
+            SyncOutcome::Nothing
+        );
+        assert_eq!(
+            sync(&pool, None, &bill).await.unwrap(),
+            SyncOutcome::Nothing
+        );
     }
 
     /// Paying advances the due date, so the reminder must re-arm rather than
@@ -272,6 +276,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(reminder_room(&bill), None);
-        assert_eq!(sync(&pool, None, &bill).await.unwrap(), SyncOutcome::Nothing);
+        assert_eq!(
+            sync(&pool, None, &bill).await.unwrap(),
+            SyncOutcome::Nothing
+        );
     }
 }

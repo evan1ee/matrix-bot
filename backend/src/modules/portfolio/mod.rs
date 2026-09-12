@@ -22,6 +22,8 @@ pub mod models;
 pub mod price_feed;
 pub mod repository;
 pub mod scheduler;
+pub mod trade;
+pub mod trade_cmd;
 pub mod view;
 
 pub struct PortfolioModule;
@@ -74,13 +76,14 @@ impl BotModule for PortfolioModule {
             CommandHelp {
                 name: "portfolio refresh".to_string(),
                 usage: "!portfolio refresh".to_string(),
-                description: "Automatically fetch and update current market prices for all holdings".to_string(),
+                description:
+                    "Automatically fetch and update current market prices for all holdings"
+                        .to_string(),
             },
             CommandHelp {
                 name: "portfolio note".to_string(),
                 usage: "!portfolio note <symbol> [text]".to_string(),
-                description: "Set a note on a holding, or clear it if no text is given"
-                    .to_string(),
+                description: "Set a note on a holding, or clear it if no text is given".to_string(),
             },
             CommandHelp {
                 name: "portfolio cash".to_string(),
@@ -100,8 +103,7 @@ impl BotModule for PortfolioModule {
             CommandHelp {
                 name: "portfolio list".to_string(),
                 usage: "!portfolio [list]".to_string(),
-                description: "Show your holdings with current value and unrealized P&L"
-                    .to_string(),
+                description: "Show your holdings with current value and unrealized P&L".to_string(),
             },
             CommandHelp {
                 name: "portfolio summary".to_string(),
@@ -123,7 +125,8 @@ impl BotModule for PortfolioModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
+        handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
+            .await
     }
 
     async fn spawn_background_workers(
@@ -145,7 +148,12 @@ mod tests {
             sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
-            command: body.split_whitespace().next().unwrap_or("").trim_start_matches('!').to_string(),
+            command: body
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('!')
+                .to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
@@ -162,7 +170,11 @@ mod tests {
     /// directly), so it also exercises `!portfolio cash deposit`.
     async fn fund(module: &PortfolioModule, db: &Database, currency: &str) {
         module
-            .handle_command(&ctx(&format!("!portfolio cash deposit 100000 {currency}")), db, None)
+            .handle_command(
+                &ctx(&format!("!portfolio cash deposit 100000 {currency}")),
+                db,
+                None,
+            )
             .await
             .unwrap();
     }
@@ -175,7 +187,9 @@ mod tests {
         let commands = module.commands();
         assert!(commands.iter().any(|c| c.name == "portfolio buy"));
         assert!(commands.iter().any(|c| c.name == "portfolio sell"));
-        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+        assert!(commands
+            .iter()
+            .all(|c| !c.usage.is_empty() && !c.description.is_empty()));
     }
 
     /// The module must claim its own commands and nothing else, or it will
@@ -186,17 +200,35 @@ mod tests {
         let db = db().await;
         fund(&module, &db, "USD").await;
 
-        assert!(module.handle_command(&ctx("!portfolio"), &db, None).await.is_some());
+        assert!(module
+            .handle_command(&ctx("!portfolio"), &db, None)
+            .await
+            .is_some());
         assert!(module
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &db, None)
             .await
             .is_some());
-        assert!(module.handle_command(&ctx("!portfolio cash"), &db, None).await.is_some());
+        assert!(module
+            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .await
+            .is_some());
 
-        assert!(module.handle_command(&ctx("!todo add milk"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!expense add 1 EUR x"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!settings"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("hello there"), &db, None).await.is_none());
+        assert!(module
+            .handle_command(&ctx("!todo add milk"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!expense add 1 EUR x"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!settings"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("hello there"), &db, None)
+            .await
+            .is_none());
     }
 
     /// An end-to-end pass: deposit cash, buy a position, then read it back.
@@ -211,10 +243,19 @@ mod tests {
             .await
             .expect("the module must answer");
         assert!(reply.contains("AAPL"));
-        assert!(reply.contains("Cash remaining: 98500.00 USD"), "should state the cash left: {reply}");
+        assert!(
+            reply.contains("Cash remaining: 98500.00 USD"),
+            "should state the cash left: {reply}"
+        );
 
-        let listed = module.handle_command(&ctx("!portfolio list"), &db, None).await.unwrap();
-        assert!(listed.contains("AAPL"), "the position should be listed: {listed}");
+        let listed = module
+            .handle_command(&ctx("!portfolio list"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            listed.contains("AAPL"),
+            "the position should be listed: {listed}"
+        );
     }
 
     /// Buying without enough cash must be rejected, not silently succeed —
@@ -228,11 +269,17 @@ mod tests {
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &db, None)
             .await
             .unwrap();
-        assert!(reply.contains("Need"), "should explain the shortfall: {reply}");
+        assert!(
+            reply.contains("Need"),
+            "should explain the shortfall: {reply}"
+        );
 
         // The empty-state message's own usage example mentions "AAPL", so
         // assert the positive (still empty), not a naive "does not contain".
-        let listed = module.handle_command(&ctx("!portfolio list"), &db, None).await.unwrap();
+        let listed = module
+            .handle_command(&ctx("!portfolio list"), &db, None)
+            .await
+            .unwrap();
         assert!(
             listed.contains("No holdings yet"),
             "a rejected buy must not create a position: {listed}"
@@ -251,7 +298,12 @@ mod tests {
         SettingsRepository::upsert(
             &db.pool,
             "@alice:a",
-            &UserSettings { timezone: "UTC".to_string(), currency: "CNY".to_string(), dev_room_id: None, max_history_turns: 10 },
+            &UserSettings {
+                timezone: "UTC".to_string(),
+                currency: "CNY".to_string(),
+                dev_room_id: None,
+                max_history_turns: 10,
+            },
         )
         .await
         .unwrap();
@@ -261,7 +313,10 @@ mod tests {
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &db, None)
             .await
             .unwrap();
-        assert!(reply.contains("CNY"), "should use the saved currency: {reply}");
+        assert!(
+            reply.contains("CNY"),
+            "should use the saved currency: {reply}"
+        );
     }
 
     /// Mutations must reach the SSE stream, exactly like the settings module —
@@ -276,7 +331,11 @@ mod tests {
         let mut rx = broadcaster.subscribe();
 
         module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .unwrap();
 
@@ -306,8 +365,14 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
-        module.handle_command(&ctx("!portfolio list"), &db, Some(&broadcaster)).await.unwrap();
-        module.handle_command(&ctx("!portfolio cash"), &db, Some(&broadcaster)).await.unwrap();
+        module
+            .handle_command(&ctx("!portfolio list"), &db, Some(&broadcaster))
+            .await
+            .unwrap();
+        module
+            .handle_command(&ctx("!portfolio cash"), &db, Some(&broadcaster))
+            .await
+            .unwrap();
 
         assert!(rx.try_recv().is_err(), "a read must not broadcast");
     }
@@ -327,14 +392,27 @@ mod tests {
             .unwrap();
 
         let note_reply = module
-            .handle_command(&ctx("!portfolio note AAPL <script>alert(1)</script>"), &db, None)
+            .handle_command(
+                &ctx("!portfolio note AAPL <script>alert(1)</script>"),
+                &db,
+                None,
+            )
             .await
             .unwrap();
-        assert!(!note_reply.contains("<script>"), "raw markup must not survive: {note_reply}");
+        assert!(
+            !note_reply.contains("<script>"),
+            "raw markup must not survive: {note_reply}"
+        );
         assert!(note_reply.contains("&lt;script&gt;"));
 
-        let listed = module.handle_command(&ctx("!portfolio list"), &db, None).await.unwrap();
-        assert!(!listed.contains("<script>"), "raw markup must not survive: {listed}");
+        let listed = module
+            .handle_command(&ctx("!portfolio list"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            !listed.contains("<script>"),
+            "raw markup must not survive: {listed}"
+        );
         assert!(listed.contains("&lt;script&gt;"));
     }
 
@@ -345,7 +423,10 @@ mod tests {
         let module = PortfolioModule::new();
         let db = db().await;
 
-        let deposited = module.handle_command(&ctx("!portfolio cash deposit 1000 USD"), &db, None).await.unwrap();
+        let deposited = module
+            .handle_command(&ctx("!portfolio cash deposit 1000 USD"), &db, None)
+            .await
+            .unwrap();
         assert!(deposited.contains("1000.00"), "{deposited}");
 
         module
@@ -353,7 +434,10 @@ mod tests {
             .await
             .unwrap();
         // 1000.00 - 750.00 (5 @ 150.00) = 250.00 remaining.
-        let after_buy = module.handle_command(&ctx("!portfolio cash"), &db, None).await.unwrap();
+        let after_buy = module
+            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .await
+            .unwrap();
         assert!(after_buy.contains("250.00"), "{after_buy}");
 
         module
@@ -361,19 +445,21 @@ mod tests {
             .await
             .unwrap();
         // 250.00 + 900.00 (5 @ 180.00 proceeds) = 1150.00.
-        let after_sell = module.handle_command(&ctx("!portfolio cash"), &db, None).await.unwrap();
+        let after_sell = module
+            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .await
+            .unwrap();
         assert!(after_sell.contains("1150.00"), "{after_sell}");
 
-        let withdrawn = module.handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &db, None).await.unwrap();
+        let withdrawn = module
+            .handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &db, None)
+            .await
+            .unwrap();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
 
         // Verify deposit and withdraw transactions were posted to the finance ledger
         let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &db.pool,
-            "@alice:a",
-            None,
-            10,
-            0,
+            &db.pool, "@alice:a", None, 10, 0,
         )
         .await
         .unwrap();
@@ -391,9 +477,18 @@ mod tests {
     async fn test_cash_withdraw_insufficient_funds() {
         let module = PortfolioModule::new();
         let db = db().await;
-        module.handle_command(&ctx("!portfolio cash deposit 100 USD"), &db, None).await.unwrap();
+        module
+            .handle_command(&ctx("!portfolio cash deposit 100 USD"), &db, None)
+            .await
+            .unwrap();
 
-        let reply = module.handle_command(&ctx("!portfolio cash withdraw 101 USD"), &db, None).await.unwrap();
-        assert!(reply.contains("100.00"), "should state what is actually available: {reply}");
+        let reply = module
+            .handle_command(&ctx("!portfolio cash withdraw 101 USD"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            reply.contains("100.00"),
+            "should state what is actually available: {reply}"
+        );
     }
 }

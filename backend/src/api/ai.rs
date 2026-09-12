@@ -11,8 +11,8 @@ use crate::events::SystemEvent;
 use crate::modules::ai::client::ResolvedAiConfig;
 use crate::modules::ai::handler::{get_ai_client, run_ai_turn};
 use crate::modules::ai::models::{
-    AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig,
-    UpdateAiConfigInput, VerifyAiKeyInput, VerifyAiKeyResponse,
+    AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
+    VerifyAiKeyInput, VerifyAiKeyResponse,
 };
 use crate::modules::ai::repository::AiRepository;
 use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
@@ -35,7 +35,9 @@ pub async fn chat(
         return Err(ApiError::bad_request("Prompt cannot be empty"));
     }
     if prompt.len() > 4000 {
-        return Err(ApiError::bad_request("Prompt exceeds maximum length of 4000 characters"));
+        return Err(ApiError::bad_request(
+            "Prompt exceeds maximum length of 4000 characters",
+        ));
     }
 
     let owner_id = &user.account_id;
@@ -152,16 +154,30 @@ pub async fn get_ai_config(
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
     let resolved = ResolvedAiConfig::from_user_config(None);
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
+        &state.db.pool,
+        &user.account_id,
+    )
+    .await;
     let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .map(|c| {
             let mut redacted = c.redacted();
-            if redacted.api_base_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+            if redacted
+                .api_base_url
+                .as_ref()
+                .map(|s| s.trim().is_empty())
+                .unwrap_or(true)
+            {
                 redacted.api_base_url = Some(resolved.api_base_url.clone());
             }
-            if redacted.model_name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+            if redacted
+                .model_name
+                .as_ref()
+                .map(|s| s.trim().is_empty())
+                .unwrap_or(true)
+            {
                 redacted.model_name = Some(resolved.model_name.clone());
             }
             if !redacted.has_api_key && resolved.api_key.is_some() {
@@ -170,19 +186,17 @@ pub async fn get_ai_config(
             redacted.max_history_turns = Some(settings.max_history_turns);
             redacted
         })
-        .unwrap_or_else(|| {
-            AiUserConfig {
-                owner_id: user.account_id.clone(),
-                api_base_url: Some(resolved.api_base_url),
-                api_key: None,
-                model_name: Some(resolved.model_name),
-                system_prompt: None,
-                temperature: Some(resolved.temperature),
-                max_tokens: Some(resolved.max_tokens),
-                max_history_turns: Some(settings.max_history_turns),
-                updated_at: String::new(),
-                has_api_key: resolved.api_key.is_some(),
-            }
+        .unwrap_or_else(|| AiUserConfig {
+            owner_id: user.account_id.clone(),
+            api_base_url: Some(resolved.api_base_url),
+            api_key: None,
+            model_name: Some(resolved.model_name),
+            system_prompt: None,
+            temperature: Some(resolved.temperature),
+            max_tokens: Some(resolved.max_tokens),
+            max_history_turns: Some(settings.max_history_turns),
+            updated_at: String::new(),
+            has_api_key: resolved.api_key.is_some(),
         });
 
     Ok(Json(config))
@@ -204,9 +218,19 @@ pub async fn update_ai_config(
     input.validate().map_err(ApiError::bad_request)?;
 
     if let Some(turns) = input.max_history_turns {
-        let mut settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
+        let mut settings =
+            crate::modules::settings::repository::SettingsRepository::get_or_default(
+                &state.db.pool,
+                &user.account_id,
+            )
+            .await;
         settings.max_history_turns = turns.clamp(1, 100);
-        let _ = crate::modules::settings::repository::SettingsRepository::upsert(&state.db.pool, &user.account_id, &settings).await;
+        let _ = crate::modules::settings::repository::SettingsRepository::upsert(
+            &state.db.pool,
+            &user.account_id,
+            &settings,
+        )
+        .await;
         state.broadcaster.send(SystemEvent::SettingsUpdated {
             owner_id: user.account_id.clone(),
             settings,
@@ -221,7 +245,11 @@ pub async fn update_ai_config(
         owner_id: user.account_id.clone(),
     });
 
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await;
+    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
+        &state.db.pool,
+        &user.account_id,
+    )
+    .await;
     let mut redacted = updated.redacted();
     redacted.max_history_turns = Some(settings.max_history_turns);
 
@@ -307,9 +335,10 @@ mod tests {
     async fn setup_state() -> (ApiState, String) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         crate::db::schema::run_migrations(&pool).await.unwrap();
-        let owner = crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
-            .await
-            .unwrap();
+        let owner =
+            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
+                .await
+                .unwrap();
         let state = ApiState::new(
             Database { pool },
             EventBroadcaster::default(),
@@ -394,7 +423,8 @@ mod tests {
         let retro_res = get_retrospective(State(state), user).await.unwrap();
         assert_eq!(retro_res.currency, "USD");
         assert_eq!(retro_res.total_spent_minor, 0);
-        assert!(retro_res.formatted_markdown.contains("Weekly Executive Retrospective"));
+        assert!(retro_res
+            .formatted_markdown
+            .contains("Weekly Executive Retrospective"));
     }
 }
-

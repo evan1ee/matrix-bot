@@ -17,7 +17,10 @@ pub async fn execute(
     name: &str,
     args_json: &str,
 ) -> Result<String, String> {
-    debug!("Executing AI tool '{}' for owner '{}' with args: {}", name, owner_id, args_json);
+    debug!(
+        "Executing AI tool '{}' for owner '{}' with args: {}",
+        name, owner_id, args_json
+    );
     let parsed_args: serde_json::Value = if args_json.trim().is_empty() {
         json!({})
     } else {
@@ -25,27 +28,59 @@ pub async fn execute(
     };
 
     // 1. Try portfolio tools
-    if let Some(res) = executor_portfolio::execute_portfolio_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+    if let Some(res) =
+        executor_portfolio::execute_portfolio_tool(pool, broadcaster, owner_id, name, &parsed_args)
+            .await
+    {
         return res;
     }
 
     // 2. Try finance tools
-    if let Some(res) = executor_finance::execute_finance_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await {
+    if let Some(res) = executor_finance::execute_finance_tool(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
+    {
         return res;
     }
 
     // 3. Try todo / reminder / bills / settings tools
-    if let Some(res) = executor_todo::execute_todo_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await {
+    if let Some(res) =
+        executor_todo::execute_todo_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args)
+            .await
+    {
         return res;
     }
 
     // 4. Try life, habits, bills, footprints, and retrospective tools
-    if let Some(res) = executor_life_habits::execute_life_habits_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await {
+    if let Some(res) = executor_life_habits::execute_life_habits_tool(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
+    {
         return res;
     }
 
     // 5. Try bookmarks and webhooks tools
-    if let Some(res) = executor_bookmarks_webhooks::execute_bookmarks_webhooks_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+    if let Some(res) = executor_bookmarks_webhooks::execute_bookmarks_webhooks_tool(
+        pool,
+        broadcaster,
+        owner_id,
+        name,
+        &parsed_args,
+    )
+    .await
+    {
         return res;
     }
 

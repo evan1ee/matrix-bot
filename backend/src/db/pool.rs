@@ -101,6 +101,9 @@ mod tests {
         // Postgres is not wired up: the driver is not even compiled in, so this
         // must fail loudly rather than appear to work.
         let result = Database::connect("postgres://localhost/whatever", 1).await;
-        assert!(result.is_err(), "a non-sqlite URL must not silently succeed");
+        assert!(
+            result.is_err(),
+            "a non-sqlite URL must not silently succeed"
+        );
     }
 }

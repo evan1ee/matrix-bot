@@ -27,18 +27,14 @@ pub async fn refresh_all_prices(
     user: AuthUser,
 ) -> Result<Json<RefreshSummary>, ApiError> {
     let owner_id = user.owner_id();
-    let summary = refresh_all_for_owner(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &owner_id,
-    )
-    .await;
+    let summary = refresh_all_for_owner(&state.db.pool, Some(&state.broadcaster), &owner_id).await;
 
-    let _ = crate::modules::portfolio::history::HistoryRepository::capture_current_snapshot_for_owner(
-        &state.db.pool,
-        &owner_id,
-    )
-    .await;
+    let _ =
+        crate::modules::portfolio::history::HistoryRepository::capture_current_snapshot_for_owner(
+            &state.db.pool,
+            &owner_id,
+        )
+        .await;
 
     Ok(Json(summary))
 }
@@ -98,16 +94,16 @@ pub async fn record_holding_position(
     use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
 
     let owner_id = user.owner_id();
-    let symbol = normalise_symbol(&payload.symbol)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let currency = normalise_currency(&payload.currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let symbol =
+        normalise_symbol(&payload.symbol).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency =
+        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exponent = exponent_for(&currency);
 
     let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let price_minor = parse_amount(&payload.price, exponent)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let price_minor =
+        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let note = match payload.note {
         Some(ref n) if n.trim().is_empty() => None,
@@ -130,7 +126,9 @@ pub async fn record_holding_position(
     .map_err(|e| ApiError::internal(e.to_string()))?
     {
         Ok(holding) => {
-            state.broadcaster.send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
+            state
+                .broadcaster
+                .send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
             Ok(Json(holding))
         }
         Err(err) => Err(ApiError::bad_request(err)),
@@ -262,7 +260,9 @@ pub async fn update_holding_symbol(
         .map_err(|e| ApiError::not_found(e.to_string()))?
     {
         Ok(holding) => {
-            state.broadcaster.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
+            state
+                .broadcaster
+                .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
             Ok(Json(holding))
         }
         Err(err) => Err(ApiError::bad_request(err)),

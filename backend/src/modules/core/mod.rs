@@ -112,7 +112,10 @@ mod tests {
             command: "ping".to_string(),
             ..ctx
         };
-        let res_ping = core.handle_command(&ctx_ping, &dummy_db, None).await.unwrap();
+        let res_ping = core
+            .handle_command(&ctx_ping, &dummy_db, None)
+            .await
+            .unwrap();
         assert!(res_ping.contains("Pong!"));
     }
 }

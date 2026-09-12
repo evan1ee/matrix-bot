@@ -61,12 +61,12 @@ pub async fn create_alert(
     user: AuthUser,
     Json(payload): Json<CreateAlertRequest>,
 ) -> Result<(StatusCode, Json<PriceAlert>), ApiError> {
-    let symbol = normalise_symbol(&payload.symbol)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let symbol =
+        normalise_symbol(&payload.symbol).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let raw_currency = payload.currency.as_deref().unwrap_or("USD");
-    let currency = normalise_currency(raw_currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency =
+        normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exponent = exponent_for(&currency);
 
     let target_price_minor = parse_amount(&payload.target_price, exponent)
@@ -89,7 +89,9 @@ pub async fn create_alert(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::PortfolioAlertCreated(alert.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::PortfolioAlertCreated(alert.clone()));
 
     Ok((StatusCode::CREATED, Json(alert)))
 }
@@ -120,7 +122,9 @@ pub async fn delete_alert(
         return Err(ApiError::not_found("Alert not found or access denied"));
     }
 
-    state.broadcaster.send(SystemEvent::PortfolioAlertDeleted { id, owner_id });
+    state
+        .broadcaster
+        .send(SystemEvent::PortfolioAlertDeleted { id, owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -170,7 +174,9 @@ mod tests {
         assert_eq!(created.symbol, "AAPL");
         assert_eq!(created.target_price_minor, 25050);
 
-        let Json(list) = list_alerts(State(state.clone()), user.clone()).await.unwrap();
+        let Json(list) = list_alerts(State(state.clone()), user.clone())
+            .await
+            .unwrap();
         assert_eq!(list.len(), 1);
 
         let del_status = delete_alert(State(state.clone()), user.clone(), Path(created.id))
@@ -178,7 +184,9 @@ mod tests {
             .unwrap();
         assert_eq!(del_status, StatusCode::NO_CONTENT);
 
-        let Json(list_after) = list_alerts(State(state.clone()), user.clone()).await.unwrap();
+        let Json(list_after) = list_alerts(State(state.clone()), user.clone())
+            .await
+            .unwrap();
         assert!(list_after.is_empty());
     }
 }

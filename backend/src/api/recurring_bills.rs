@@ -35,7 +35,11 @@ fn validate_lead(minutes: i64) -> Result<(), ApiError> {
 /// A bill created from the web has no room of its own, so a reminder needs one
 /// named. Rejecting up front beats writing a lead time that silently never
 /// fires.
-fn validate_reminder_room(lead: Option<i64>, room_id: &str, explicit: Option<&str>) -> Result<(), ApiError> {
+fn validate_reminder_room(
+    lead: Option<i64>,
+    room_id: &str,
+    explicit: Option<&str>,
+) -> Result<(), ApiError> {
     if lead.is_none() {
         return Ok(());
     }
@@ -107,21 +111,18 @@ pub async fn create_bill(
     let owner_id = user.owner_id();
     let display_name = user.display_name;
 
-    let bill = RecurringBillRepository::create(
-        &state.db.pool,
-        "web",
-        &owner_id,
-        &display_name,
-        payload,
-    )
-    .await
-    .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let bill =
+        RecurringBillRepository::create(&state.db.pool, "web", &owner_id, &display_name, payload)
+            .await
+            .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &bill)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::RecurringBillCreated(bill.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::RecurringBillCreated(bill.clone()));
 
     Ok(Json(bill))
 }
@@ -198,7 +199,9 @@ pub async fn update_bill(
     let updated = RecurringBillRepository::update(&state.db.pool, id, &owner_id, payload)
         .await
         .map_err(|e| match e {
-            sqlx::Error::RowNotFound => ApiError::not_found("Recurring bill not found or access denied"),
+            sqlx::Error::RowNotFound => {
+                ApiError::not_found("Recurring bill not found or access denied")
+            }
             err => ApiError::internal(err.to_string()),
         })?;
 
@@ -208,7 +211,9 @@ pub async fn update_bill(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::RecurringBillUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::RecurringBillUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -235,7 +240,9 @@ pub async fn delete_bill(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     if !success {
-        return Err(ApiError::not_found("Recurring bill not found or access denied"));
+        return Err(ApiError::not_found(
+            "Recurring bill not found or access denied",
+        ));
     }
 
     // The bill is gone; its reminder must not outlive it pointing at nothing.
@@ -243,10 +250,9 @@ pub async fn delete_bill(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::RecurringBillDeleted {
-        id,
-        owner_id,
-    });
+    state
+        .broadcaster
+        .send(SystemEvent::RecurringBillDeleted { id, owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -271,7 +277,9 @@ pub async fn pay_bill(
     let (bill, tx) = RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| match e {
-            sqlx::Error::RowNotFound => ApiError::not_found("Recurring bill not found or access denied"),
+            sqlx::Error::RowNotFound => {
+                ApiError::not_found("Recurring bill not found or access denied")
+            }
             err => ApiError::internal(err.to_string()),
         })?;
 
@@ -286,7 +294,9 @@ pub async fn pay_bill(
         owner_id: owner_id.clone(),
         next_due_at: bill.next_due_at.clone(),
     });
-    state.broadcaster.send(SystemEvent::RecurringBillUpdated(bill.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::RecurringBillUpdated(bill.clone()));
     state.broadcaster.send(SystemEvent::TransactionCreated(tx));
 
     Ok(Json(bill))
@@ -446,7 +456,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "lead {bad} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "lead {bad} must be rejected"
+            );
         }
 
         // A web bill has no room of its own, so a reminder needs one named.
@@ -460,7 +474,11 @@ mod tests {
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
 
         assert!(
-            list_bills(State(state.clone()), alice).await.unwrap().0.is_empty(),
+            list_bills(State(state.clone()), alice)
+                .await
+                .unwrap()
+                .0
+                .is_empty(),
             "a rejected lead time must not leave a bill behind"
         );
     }

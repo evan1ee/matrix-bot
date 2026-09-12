@@ -3,8 +3,9 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, finance, health, portfolio, portfolio_alerts, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
+    account, ai, auth, bookmarks, finance, health, portfolio, portfolio_alerts, portfolio_cash,
+    portfolio_history, portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos,
+    webhooks,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -15,8 +16,8 @@ use crate::modules::recurring_bills::models::{
     CreateBillPayload, RecurringBill, UpdateBillPayload,
 };
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
-use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::settings::UserSettings;
+use crate::modules::todo::models::{TodoItem, TodoPriority};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -72,9 +73,9 @@ use crate::modules::settings::UserSettings;
         portfolio::set_note,
         portfolio::delete_holding,
         portfolio::summary,
-        portfolio::list_cash,
-        portfolio::deposit_cash,
-        portfolio::withdraw_cash,
+        portfolio_cash::list_cash,
+        portfolio_cash::deposit_cash,
+        portfolio_cash::withdraw_cash,
         portfolio_prices::refresh_all_prices,
         portfolio_prices::refresh_single_holding_price,
         portfolio_prices::record_holding_position,
@@ -174,7 +175,7 @@ use crate::modules::settings::UserSettings;
             portfolio::SetPriceRequest,
             portfolio::SetNoteRequest,
             portfolio::SellResponse,
-            portfolio::CashAmountRequest,
+            portfolio_cash::CashAmountRequest,
             crate::modules::portfolio::price_feed::RefreshSummary,
             crate::modules::portfolio::price_feed::TickerSearchResult,
             portfolio_prices::UpdateSymbolRequest,

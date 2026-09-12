@@ -67,15 +67,25 @@ pub async fn create_footprint(
 ) -> Result<Json<Footprint>, ApiError> {
     let title = payload.title.trim();
     if title.is_empty() {
-        return Err(ApiError::bad_request("Title / Place Name is required".to_string()));
+        return Err(ApiError::bad_request(
+            "Title / Place Name is required".to_string(),
+        ));
     }
     if title.len() > 500 {
-        return Err(ApiError::bad_request("Title exceeds 500 characters".to_string()));
+        return Err(ApiError::bad_request(
+            "Title exceeds 500 characters".to_string(),
+        ));
     }
 
-    let default_currency = SettingsRepository::get_or_default(&state.db.pool, &user.account_id).await.currency;
-    let raw_currency = payload.spend_currency.as_deref().unwrap_or(&default_currency);
-    let currency = normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let default_currency = SettingsRepository::get_or_default(&state.db.pool, &user.account_id)
+        .await
+        .currency;
+    let raw_currency = payload
+        .spend_currency
+        .as_deref()
+        .unwrap_or(&default_currency);
+    let currency =
+        normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exp = exponent_for(&currency);
 
     let spend_minor = if let Some(ref s) = payload.spend_amount {
@@ -112,7 +122,9 @@ pub async fn create_footprint(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::FootprintCreated(created.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::FootprintCreated(created.clone()));
 
     Ok(Json(created))
 }
@@ -130,7 +142,9 @@ pub async fn update_footprint(
 
     let title = payload.title.as_deref().unwrap_or(&existing.title).trim();
     if title.is_empty() {
-        return Err(ApiError::bad_request("Title / Place Name cannot be empty".to_string()));
+        return Err(ApiError::bad_request(
+            "Title / Place Name cannot be empty".to_string(),
+        ));
     }
 
     let lat = payload.latitude.unwrap_or(existing.latitude);
@@ -138,11 +152,21 @@ pub async fn update_footprint(
     let country = payload.country.as_deref().or(existing.country.as_deref());
     let city = payload.city.as_deref().or(existing.city.as_deref());
     let address = payload.address.as_deref().or(existing.address.as_deref());
-    let arrival_date = payload.arrival_date.as_deref().unwrap_or(&existing.arrival_date);
-    let departure_date = payload.departure_date.as_deref().or(existing.departure_date.as_deref());
+    let arrival_date = payload
+        .arrival_date
+        .as_deref()
+        .unwrap_or(&existing.arrival_date);
+    let departure_date = payload
+        .departure_date
+        .as_deref()
+        .or(existing.departure_date.as_deref());
 
-    let raw_currency = payload.spend_currency.as_deref().unwrap_or(&existing.spend_currency);
-    let currency = normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let raw_currency = payload
+        .spend_currency
+        .as_deref()
+        .unwrap_or(&existing.spend_currency);
+    let currency =
+        normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exp = exponent_for(&currency);
 
     let spend_minor = if let Some(ref s) = payload.spend_amount {
@@ -182,7 +206,9 @@ pub async fn update_footprint(
     .map_err(|e| ApiError::internal(e.to_string()))?
     .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
 
-    state.broadcaster.send(SystemEvent::FootprintUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::FootprintUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -221,19 +247,29 @@ pub async fn get_summary_stats(
 
 /// Reverse or forward geocoding proxy using OpenStreetMap Nominatim.
 pub async fn geocode_proxy(
-    _user: AuthUser,
+    user: AuthUser,
+    State(state): State<ApiState>,
     Query(params): Query<GeocodeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .user_agent("matrix-bot/1.0 (contact: info@mbm.one)")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if !crate::api::rate_limit::check_geocode_limit(&user.account_id) {
+        return Err(ApiError::too_many_requests(
+            "Geocoding rate limit exceeded. Please wait a moment.",
+        ));
+    }
 
     if let (Some(lat), Some(lon)) = (params.lat, params.lon) {
-        let resp = client
+        if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+            return Err(ApiError::bad_request(
+                "Invalid latitude or longitude coordinates",
+            ));
+        }
+        let resp = state
+            .http_client
             .get("https://nominatim.openstreetmap.org/reverse")
+            .header(
+                reqwest::header::USER_AGENT,
+                "matrix-bot/1.0 (contact: info@mbm.one)",
+            )
             .query(&[
                 ("lat", lat.to_string()),
                 ("lon", lon.to_string()),
@@ -254,8 +290,18 @@ pub async fn geocode_proxy(
         if q.is_empty() {
             return Ok(Json(serde_json::json!([])));
         }
-        let resp = client
+        if q.len() > 200 {
+            return Err(ApiError::bad_request(
+                "Geocoding query exceeds 200 characters",
+            ));
+        }
+        let resp = state
+            .http_client
             .get("https://nominatim.openstreetmap.org/search")
+            .header(
+                reqwest::header::USER_AGENT,
+                "matrix-bot/1.0 (contact: info@mbm.one)",
+            )
             .query(&[
                 ("q", q.to_string()),
                 ("format", "json".to_string()),
@@ -272,6 +318,8 @@ pub async fn geocode_proxy(
         let data: serde_json::Value = resp.json().await.unwrap_or(serde_json::json!([]));
         Ok(Json(data))
     } else {
-        Err(ApiError::bad_request("Must provide 'query' or 'lat' and 'lon'".to_string()))
+        Err(ApiError::bad_request(
+            "Must provide 'query' or 'lat' and 'lon'".to_string(),
+        ))
     }
 }

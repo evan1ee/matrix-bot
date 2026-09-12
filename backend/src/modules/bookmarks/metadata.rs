@@ -1,6 +1,77 @@
-use std::time::Duration;
 use reqwest::Client;
+use std::net::{IpAddr, Ipv4Addr};
+use std::time::Duration;
 use url::Url;
+
+/// Evaluates whether an IP belongs to private, loopback, link-local, or non-routable ranges.
+pub fn is_disallowed_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() // 127.0.0.0/8
+            || v4.is_unspecified() // 0.0.0.0
+            || v4.is_private() // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            || v4.is_link_local() // 169.254.0.0/16
+            || v4.is_broadcast() // 255.255.255.255
+            || v4.is_documentation()
+            || (v4.octets()[0] == 100 && (v4.octets()[1] & 0b1100_0000 == 0b0100_0000))
+            // 100.64.0.0/10 CGNAT
+        }
+        IpAddr::V6(v6) => {
+            let octets = v6.octets();
+            v6.is_loopback() // ::1
+            || v6.is_unspecified() // ::
+            || (v6.segments()[0] & 0xfe00 == 0xfc00) // Unique local fc00::/7
+            || (v6.segments()[0] & 0xffc0 == 0xfe80) // Link local fe80::/10
+            // Check for IPv4-mapped IPv6 (::ffff:x.x.x.x)
+            || if octets[..10] == [0; 10] && octets[10] == 0xff && octets[11] == 0xff {
+                let v4 = Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
+                is_disallowed_ip(IpAddr::V4(v4))
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// Validates that a target URL is an acceptable public HTTP/HTTPS URL and does not resolve to private IPs.
+pub async fn is_safe_target_url(raw_url: &str) -> bool {
+    let Ok(parsed) = Url::parse(raw_url) else {
+        return false;
+    };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return false;
+    }
+    let Some(host_str) = parsed.host_str() else {
+        return false;
+    };
+    let host_lower = host_str.to_lowercase();
+    if host_lower == "localhost"
+        || host_lower.ends_with(".localhost")
+        || host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+    {
+        return false;
+    }
+
+    if let Ok(ip) = host_lower.parse::<IpAddr>() {
+        return !is_disallowed_ip(ip);
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    match tokio::net::lookup_host(format!("{host_lower}:{port}")).await {
+        Ok(addrs) => {
+            let mut count = 0;
+            for addr in addrs {
+                count += 1;
+                if is_disallowed_ip(addr.ip()) {
+                    return false;
+                }
+            }
+            count > 0
+        }
+        Err(_) => false,
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ExtractedMetadata {
@@ -99,7 +170,9 @@ pub async fn fetch_and_extract_metadata(
         title: default_title,
         description: None,
         author: None,
-        image_url: yt_id.as_ref().map(|id| format!("https://img.youtube.com/vi/{id}/hqdefault.jpg")),
+        image_url: yt_id
+            .as_ref()
+            .map(|id| format!("https://img.youtube.com/vi/{id}/hqdefault.jpg")),
         domain: domain.clone(),
         reader_content: None,
         reading_time_minutes: 1,
@@ -111,7 +184,8 @@ pub async fn fetch_and_extract_metadata(
 
     // For YouTube links, prefer the official oEmbed API for fast, unblocked metadata
     if yt_id.is_some() || domain == "youtube.com" || domain == "youtu.be" {
-        if let Some((yt_title, yt_author, yt_thumb)) = fetch_youtube_oembed(http, target_url).await {
+        if let Some((yt_title, yt_author, yt_thumb)) = fetch_youtube_oembed(http, target_url).await
+        {
             if user_title.is_none() || user_title.unwrap().trim().is_empty() {
                 meta.title = yt_title;
             }
@@ -126,18 +200,30 @@ pub async fn fetch_and_extract_metadata(
         }
     }
 
-    // Attempt HTTP GET with a 5s timeout
-    let resp_res = http
+    // SSRF protection: reject loopback, link-local, private IP ranges, and internal domains
+    if !is_safe_target_url(target_url).await {
+        tracing::warn!("Blocked SSRF request to unsafe target URL: {}", target_url);
+        return meta;
+    }
+
+    // Attempt HTTP GET with a 5s timeout and strict redirect refusal to avoid SSRF bypasses
+    let fetch_client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| http.clone());
+
+    let resp_res = fetch_client
         .get(target_url)
         .header(
             reqwest::header::USER_AGENT,
             "Mozilla/5.0 (compatible; MatrixBot/1.0; +https://matrix.org)",
         )
-        .timeout(Duration::from_secs(5))
         .send()
         .await;
 
-    let Ok(resp) = resp_res else {
+    let Ok(mut resp) = resp_res else {
         return meta;
     };
 
@@ -145,10 +231,16 @@ pub async fn fetch_and_extract_metadata(
         return meta;
     }
 
-    let Ok(html) = resp.text().await else {
-        return meta;
-    };
+    // Limit body read to 2 MB to prevent memory exhaustion / OOM
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > 2 * 1024 * 1024 {
+            break;
+        }
+    }
 
+    let html = String::from_utf8_lossy(&bytes);
     parse_html_metadata(&html, &mut meta);
 
     if let Some(title) = user_title {
@@ -248,7 +340,9 @@ fn extract_attribute_value(tag_slice: &str, attr: &str) -> Option<String> {
         let end_pos = rest.find(quote_char)?;
         Some(rest[..end_pos].to_string())
     } else {
-        let end_pos = after_eq.find(|c: char| c.is_whitespace() || c == '/' || c == '>').unwrap_or(after_eq.len());
+        let end_pos = after_eq
+            .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+            .unwrap_or(after_eq.len());
         Some(after_eq[..end_pos].to_string())
     }
 }
@@ -271,10 +365,14 @@ fn extract_paragraphs(html: &str) -> Vec<String> {
 
     while let Some(start_p) = lower[cursor..].find("<p") {
         let abs_start = cursor + start_p;
-        let Some(tag_close) = html[abs_start..].find('>') else { break; };
+        let Some(tag_close) = html[abs_start..].find('>') else {
+            break;
+        };
         let content_start = abs_start + tag_close + 1;
 
-        let Some(end_p) = lower[content_start..].find("</p>") else { break; };
+        let Some(end_p) = lower[content_start..].find("</p>") else {
+            break;
+        };
         let abs_end = content_start + end_p;
 
         let p_text = clean_text(&html[content_start..abs_end]);
@@ -322,8 +420,14 @@ mod tests {
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(extract_domain("https://www.github.com/rust-lang"), "github.com");
-        assert_eq!(extract_domain("http://news.ycombinator.com/item?id=123"), "news.ycombinator.com");
+        assert_eq!(
+            extract_domain("https://www.github.com/rust-lang"),
+            "github.com"
+        );
+        assert_eq!(
+            extract_domain("http://news.ycombinator.com/item?id=123"),
+            "news.ycombinator.com"
+        );
         assert_eq!(extract_domain("not-a-valid-url"), "unknown");
     }
 
@@ -350,9 +454,15 @@ mod tests {
         parse_html_metadata(html, &mut meta);
 
         assert_eq!(meta.title, "Rust in 2026: Fast & Reliable");
-        assert_eq!(meta.description.as_deref(), Some("A deep dive into asynchronous systems."));
+        assert_eq!(
+            meta.description.as_deref(),
+            Some("A deep dive into asynchronous systems.")
+        );
         assert_eq!(meta.author.as_deref(), Some("Ferris the Crab"));
-        assert_eq!(meta.image_url.as_deref(), Some("https://example.com/cover.png"));
+        assert_eq!(
+            meta.image_url.as_deref(),
+            Some("https://example.com/cover.png")
+        );
         assert_eq!(meta.reading_time_minutes, 1);
         assert!(meta.reader_content.unwrap().contains("memory safety"));
     }
@@ -371,6 +481,36 @@ mod tests {
             extract_youtube_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s"),
             Some("dQw4w9WgXcQ".to_string())
         );
-        assert_eq!(extract_youtube_video_id("https://github.com/rust-lang"), None);
+        assert_eq!(
+            extract_youtube_video_id("https://github.com/rust-lang"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_is_disallowed_ip() {
+        use std::net::Ipv4Addr;
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(
+            169, 254, 169, 254
+        ))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
+        assert!(is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(
+            255, 255, 255, 255
+        ))));
+        assert!(!is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
+        assert!(!is_disallowed_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+    }
+
+    #[tokio::test]
+    async fn test_is_safe_target_url() {
+        assert!(!is_safe_target_url("http://127.0.0.1:8080/secret").await);
+        assert!(!is_safe_target_url("http://localhost:8080").await);
+        assert!(!is_safe_target_url("http://service.internal/status").await);
+        assert!(!is_safe_target_url("http://169.254.169.254/latest/meta-data").await);
+        assert!(!is_safe_target_url("ftp://example.com").await);
     }
 }

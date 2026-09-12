@@ -14,9 +14,7 @@ use axum::response::IntoResponse;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use webauthn_rs::prelude::{
-    DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential,
-};
+use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
 use crate::accounts::{
     handle_to_account_id, session::COOKIE_NAME, AccountRepository, CredentialRepository,
@@ -100,18 +98,19 @@ pub async fn register_start(
 
     let display_name = payload.display_name.trim();
     if display_name.is_empty() || display_name.len() > 64 {
-        return Err(ApiError::bad_request("Display name must be 1-64 characters"));
+        return Err(ApiError::bad_request(
+            "Display name must be 1-64 characters",
+        ));
     }
 
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id = sqlx::query_scalar::<_, String>(
-        "SELECT 'acct_' || lower(hex(randomblob(16)))",
-    )
-    .fetch_one(&state.db.pool)
-    .await
-    .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
+    let account_id =
+        sqlx::query_scalar::<_, String>("SELECT 'acct_' || lower(hex(randomblob(16)))")
+            .fetch_one(&state.db.pool)
+            .await
+            .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
 
     let handle = crate::accounts::account_id_to_handle(&account_id)
         .ok_or_else(|| ApiError::internal("minted an account id with no handle"))?;
@@ -153,8 +152,11 @@ pub async fn register_finish(
     headers: axum::http::HeaderMap,
     Json(payload): Json<RegisterFinishRequest>,
 ) -> Result<axum::response::Response, ApiError> {
-    let Some(Ceremony::Registration { account_id, display_name, state: reg_state }) =
-        state.take_ceremony(&payload.ceremony_id).await
+    let Some(Ceremony::Registration {
+        account_id,
+        display_name,
+        state: reg_state,
+    }) = state.take_ceremony(&payload.ceremony_id).await
     else {
         return Err(ApiError::bad_request(
             "That registration expired. Start again.",
@@ -200,16 +202,15 @@ pub async fn register_finish(
         (status = 200, description = "Challenge to pass to navigator.credentials.get", body = CeremonyStart)
     )
 )]
-pub async fn login_start(
-    State(state): State<ApiState>,
-) -> Result<Json<CeremonyStart>, ApiError> {
-    let (options, auth_state) = state
-        .webauthn
-        .start_discoverable_authentication()
-        .map_err(|err| {
-            tracing::error!("Could not start discoverable authentication: {:?}", err);
-            ApiError::internal("Could not start sign-in")
-        })?;
+pub async fn login_start(State(state): State<ApiState>) -> Result<Json<CeremonyStart>, ApiError> {
+    let (options, auth_state) =
+        state
+            .webauthn
+            .start_discoverable_authentication()
+            .map_err(|err| {
+                tracing::error!("Could not start discoverable authentication: {:?}", err);
+                ApiError::internal("Could not start sign-in")
+            })?;
 
     let ceremony_id = state
         .stash_ceremony(Ceremony::Authentication { state: auth_state })
@@ -367,7 +368,9 @@ pub fn with_session_cookie(
 
     let mut response = body.into_response();
     if let Ok(value) = axum::http::HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(axum::http::header::SET_COOKIE, value);
+        response
+            .headers_mut()
+            .append(axum::http::header::SET_COOKIE, value);
     }
     response
 }
@@ -381,7 +384,9 @@ pub fn clearing_session_cookie(secure: bool) -> axum::response::Response {
 
     let mut response = axum::http::StatusCode::NO_CONTENT.into_response();
     if let Ok(value) = axum::http::HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(axum::http::header::SET_COOKIE, value);
+        response
+            .headers_mut()
+            .append(axum::http::header::SET_COOKIE, value);
     }
     response
 }
@@ -464,7 +469,10 @@ mod tests {
 
         let _ = register_start(
             State(state.clone()),
-            Json(RegisterStartRequest { display_name: "evan".to_string(), invite: None }),
+            Json(RegisterStartRequest {
+                display_name: "evan".to_string(),
+                invite: None,
+            }),
         )
         .await
         .unwrap();
@@ -473,7 +481,10 @@ mod tests {
             .fetch_one(&state.db.pool)
             .await
             .unwrap();
-        assert_eq!(accounts, 0, "the account is written only when the ceremony finishes");
+        assert_eq!(
+            accounts, 0,
+            "the account is written only when the ceremony finishes"
+        );
     }
 
     #[tokio::test]
@@ -483,7 +494,10 @@ mod tests {
         for bad in ["", "   ", &"x".repeat(65)] {
             let err = register_start(
                 State(state.clone()),
-                Json(RegisterStartRequest { display_name: bad.to_string(), invite: None }),
+                Json(RegisterStartRequest {
+                    display_name: bad.to_string(),
+                    invite: None,
+                }),
             )
             .await
             .unwrap_err();
@@ -498,7 +512,10 @@ mod tests {
         let state = state_with_secret(None).await;
         let started = register_start(
             State(state.clone()),
-            Json(RegisterStartRequest { display_name: "evan".to_string(), invite: None }),
+            Json(RegisterStartRequest {
+                display_name: "evan".to_string(),
+                invite: None,
+            }),
         )
         .await
         .unwrap();
@@ -558,8 +575,14 @@ mod tests {
             .to_string();
 
         assert!(cookie.contains("mb_session=tok123"));
-        assert!(cookie.contains("HttpOnly"), "must be unreadable by JavaScript");
-        assert!(cookie.contains("SameSite=Strict"), "must not ride cross-site requests");
+        assert!(
+            cookie.contains("HttpOnly"),
+            "must be unreadable by JavaScript"
+        );
+        assert!(
+            cookie.contains("SameSite=Strict"),
+            "must not ride cross-site requests"
+        );
         assert!(cookie.contains("Secure"), "production must be HTTPS-only");
         assert!(cookie.contains("Path=/"));
 
@@ -588,7 +611,10 @@ mod tests {
             .unwrap()
             .to_string();
 
-        assert!(cookie.contains("Max-Age=0"), "sign-out must expire the cookie");
+        assert!(
+            cookie.contains("Max-Age=0"),
+            "sign-out must expire the cookie"
+        );
         assert!(cookie.contains("mb_session="));
     }
 }

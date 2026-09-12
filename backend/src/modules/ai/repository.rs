@@ -22,7 +22,11 @@ impl AiRepository {
         .await?;
 
         if let Some(ref mut cfg) = config {
-            cfg.has_api_key = cfg.api_key.as_ref().map(|k| !k.trim().is_empty()).unwrap_or(false);
+            cfg.has_api_key = cfg
+                .api_key
+                .as_ref()
+                .map(|k| !k.trim().is_empty())
+                .unwrap_or(false);
         }
 
         Ok(config)
@@ -171,10 +175,7 @@ impl AiRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn touch_conversation(
-        pool: &SqlitePool,
-        id: &str,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn touch_conversation(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             UPDATE ai_conversations
@@ -259,9 +260,10 @@ mod tests {
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id = crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@tester:mbm.one")
-            .await
-            .unwrap();
+        let account_id =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@tester:mbm.one")
+                .await
+                .unwrap();
         (db, account_id)
     }
 
@@ -269,7 +271,9 @@ mod tests {
     async fn test_ai_user_config_crud() {
         let (db, owner) = setup_db().await;
 
-        let initial = AiRepository::get_user_config(&db.pool, &owner).await.unwrap();
+        let initial = AiRepository::get_user_config(&db.pool, &owner)
+            .await
+            .unwrap();
         assert!(initial.is_none());
 
         let input = UpdateAiConfigInput {
@@ -326,7 +330,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(updated.model_name.as_deref(), Some("deepseek-chat"));
-        assert_eq!(updated.api_base_url.as_deref(), Some("https://api.openai.com/v1"));
+        assert_eq!(
+            updated.api_base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
         assert_eq!(updated.api_key.as_deref(), Some("sk-initial-secret"));
         assert_eq!(updated.system_prompt.as_deref(), Some("Original prompt"));
         assert_eq!(updated.temperature, Some(0.3));
@@ -350,16 +357,10 @@ mod tests {
         assert_eq!(msg1.content, "Hello!");
         assert_eq!(msg1.role, "user");
 
-        let msg2 = AiRepository::add_message(
-            &db.pool,
-            &conv.id,
-            "assistant",
-            "Hi there!",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let msg2 =
+            AiRepository::add_message(&db.pool, &conv.id, "assistant", "Hi there!", None, None)
+                .await
+                .unwrap();
         assert_eq!(msg2.content, "Hi there!");
 
         let list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
@@ -370,9 +371,10 @@ mod tests {
         assert_eq!(list[1].role, "assistant");
 
         // An empty assistant message (e.g. intermediate tool call) should be filtered out
-        let _empty_msg = AiRepository::add_message(&db.pool, &conv.id, "assistant", "   ", None, None)
-            .await
-            .unwrap();
+        let _empty_msg =
+            AiRepository::add_message(&db.pool, &conv.id, "assistant", "   ", None, None)
+                .await
+                .unwrap();
         let filtered_list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
             .await
             .unwrap();
@@ -389,4 +391,3 @@ mod tests {
         assert!(after_delete.is_none());
     }
 }
-

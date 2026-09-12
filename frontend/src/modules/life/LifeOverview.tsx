@@ -231,11 +231,11 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         el.style.backgroundColor = conf?.color || '#10b981';
         el.textContent = `${conf?.emoji ?? '✨'} ${d.mood}`;
       } else if (d.status === 'past_empty') {
-        el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-zinc-700 dark:bg-zinc-300 text-zinc-200 dark:text-zinc-800';
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-neutral-700 dark:bg-neutral-300 text-neutral-200 dark:text-neutral-800';
         el.style.backgroundColor = '';
         el.textContent = 'Unrecorded';
       } else {
-        el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 dark:bg-zinc-200 text-zinc-300 dark:text-zinc-700';
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-neutral-800 dark:bg-neutral-200 text-neutral-300 dark:text-neutral-700';
         el.style.backgroundColor = '';
         el.textContent = 'Future';
       }
@@ -309,22 +309,22 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
   if (days.length === 0) return null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 space-y-3">
+    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 space-y-3">
       {/* Header & Controls */}
-      <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+      <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-2 pb-2 border-b border-neutral-100 dark:border-neutral-800">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             Lifespan overview
           </h2>
         </div>
 
         {/* Compact Legend */}
-        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
           {[
-            { label: 'Past', cls: 'bg-zinc-200 dark:bg-zinc-800' },
+            { label: 'Past', cls: 'bg-neutral-200 dark:bg-neutral-800' },
             { label: 'Today', cls: 'bg-blue-500 ring-1 ring-blue-400' },
             { label: 'Logged', cls: 'bg-amber-400 dark:bg-amber-500' },
-            { label: 'Future', cls: 'bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800' },
+            { label: 'Future', cls: 'bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800' },
           ].map((item) => (
             <div key={item.label} className="flex items-center gap-1.5">
               <span className={`w-2.5 h-2.5 rounded-xs ${item.cls}`} />
@@ -334,14 +334,14 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         </div>
       </div>
 
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
         Full {days.length.toLocaleString()} days visual map. Inspect your complete life journey at a glance.
       </p>
 
       {/* Overview Canvas */}
       <div
         ref={containerRef}
-        className="w-full relative cursor-default rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 select-none overflow-hidden"
+        className="w-full relative cursor-default rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-950/40 select-none overflow-hidden"
       >
         <canvas
           ref={canvasRef}
@@ -356,7 +356,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         <div
           ref={tooltipRef}
           style={{ display: 'none' }}
-          className="pointer-events-none absolute left-0 top-0 z-20 px-3 py-2 rounded-lg text-xs font-medium shadow-xl bg-zinc-900/95 text-zinc-100 dark:bg-zinc-100/95 dark:text-zinc-900 border border-zinc-700/80 dark:border-zinc-300/80 backdrop-blur-sm whitespace-nowrap will-change-transform"
+          className="pointer-events-none absolute left-0 top-0 z-20 px-3 py-2 rounded-lg text-xs font-medium shadow-xl bg-neutral-900/95 text-neutral-100 dark:bg-neutral-100/95 dark:text-neutral-900 border border-neutral-700/80 dark:border-neutral-300/80 backdrop-blur-sm whitespace-nowrap will-change-transform"
         >
           <div className="flex items-center gap-2">
             <span ref={tooltipDateRef} className="font-mono font-bold tracking-tight text-sm"></span>

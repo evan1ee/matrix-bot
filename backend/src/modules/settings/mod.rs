@@ -69,8 +69,7 @@ impl BotModule for SettingsModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_settings_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
-            .await
+        handler::handle_settings_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
     }
 }
 
@@ -109,7 +108,9 @@ mod tests {
 
         let commands = module.commands();
         assert!(commands.iter().any(|c| c.name == "settings timezone"));
-        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+        assert!(commands
+            .iter()
+            .all(|c| !c.usage.is_empty() && !c.description.is_empty()));
     }
 
     /// Dispatch returns the first match, so a module that over-claims silently
@@ -119,15 +120,27 @@ mod tests {
         let module = SettingsModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!settings"), &db, None).await.is_some());
+        assert!(module
+            .handle_command(&ctx("!settings"), &db, None)
+            .await
+            .is_some());
         assert!(module
             .handle_command(&ctx("!settings tz Asia/Tokyo"), &db, None)
             .await
             .is_some());
 
-        assert!(module.handle_command(&ctx("!todo list"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!expense list"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("hello there"), &db, None).await.is_none());
+        assert!(module
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!expense list"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("hello there"), &db, None)
+            .await
+            .is_none());
     }
 
     /// The setting is only worth having if the other modules observe it.
@@ -139,15 +152,25 @@ mod tests {
         let settings = SettingsModule::new();
         let todo = TodoModule::new();
 
-        todo.handle_command(&ctx("!todo add ship it"), &db, None).await.unwrap();
-        todo.handle_command(&ctx("!todo due 1 2d"), &db, None).await.unwrap();
+        todo.handle_command(&ctx("!todo add ship it"), &db, None)
+            .await
+            .unwrap();
+        todo.handle_command(&ctx("!todo due 1 2d"), &db, None)
+            .await
+            .unwrap();
 
         settings
             .handle_command(&ctx("!settings timezone Asia/Tokyo"), &db, None)
             .await
             .unwrap();
 
-        let listed = todo.handle_command(&ctx("!todo list"), &db, None).await.unwrap();
-        assert!(listed.contains("JST"), "the todo list must follow the setting: {listed}");
+        let listed = todo
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            listed.contains("JST"),
+            "the todo list must follow the setting: {listed}"
+        );
     }
 }

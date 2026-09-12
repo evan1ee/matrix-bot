@@ -145,22 +145,23 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
 
         for table in crate::accounts::OWNED_TABLES {
-            let _ = sqlx::query(&format!("UPDATE {table} SET owner_id = ? WHERE owner_id = ?"))
-                .bind(&account_id)
-                .bind(owner)
-                .execute(pool)
-                .await;
+            let _ = sqlx::query(&format!(
+                "UPDATE {table} SET owner_id = ? WHERE owner_id = ?"
+            ))
+            .bind(&account_id)
+            .bind(owner)
+            .execute(pool)
+            .await;
         }
     }
 
     // A registered user who never created a row still needs an account, or
     // their first login would mint one and look like a brand-new person.
-    let orphan_users = sqlx::query_scalar::<_, String>(
-        "SELECT username FROM web_users WHERE account_id IS NULL",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let orphan_users =
+        sqlx::query_scalar::<_, String>("SELECT username FROM web_users WHERE account_id IS NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
 
     for username in orphan_users {
         let account_id = sqlx::query_scalar::<_, String>(
@@ -180,7 +181,6 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     Ok(())
 }
-
 
 /// Demotes accounts whose only credential was a password.
 ///
@@ -324,11 +324,12 @@ mod tests {
         assert_eq!(moved, 2);
 
         // Settings followed the same owner, so the user keeps Asia/Tokyo.
-        let tz: String = sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
-            .bind(&matrix_account)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let tz: String =
+            sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
+                .bind(&matrix_account)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(tz, "Asia/Tokyo");
 
         // The web owner became an active account wired to its `web_users` row,
@@ -338,7 +339,10 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_ne!(web_account, matrix_account, "unlinked identities stay separate");
+        assert_ne!(
+            web_account, matrix_account,
+            "unlinked identities stay separate"
+        );
 
         let web_todos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos WHERE owner_id = ?")
             .bind(&web_account)
@@ -367,7 +371,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(after_first, after_third, "re-running must not create accounts");
+        assert_eq!(
+            after_first, after_third,
+            "re-running must not create accounts"
+        );
 
         let orphans: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM todos WHERE owner_id NOT IN (SELECT id FROM accounts)",
@@ -395,7 +402,10 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert!(account.is_some(), "a user with no rows still needs an account");
+        assert!(
+            account.is_some(),
+            "a user with no rows still needs an account"
+        );
     }
 
     /// Migrates a real database file and checks nothing was stranded.
@@ -418,7 +428,9 @@ mod tests {
             panic!("set MIGRATE_TEST_DB to a *copy* of a real database");
         };
 
-        let pool = SqlitePool::connect(&format!("sqlite://{path}")).await.unwrap();
+        let pool = SqlitePool::connect(&format!("sqlite://{path}"))
+            .await
+            .unwrap();
 
         let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos")
             .fetch_one(&pool)
@@ -431,7 +443,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(before, after, "the migration must not lose or duplicate rows");
+        assert_eq!(
+            before, after,
+            "the migration must not lose or duplicate rows"
+        );
 
         // Nothing may still point at an owner that no account claims.
         for table in crate::accounts::OWNED_TABLES {

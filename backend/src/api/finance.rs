@@ -75,8 +75,8 @@ pub struct CategoryDeletedResponse {
 
 /// Validates a request and converts the amount into minor units.
 fn prepare(payload: &TransactionRequest) -> Result<(i64, String, i64), ApiError> {
-    let currency = normalise_currency(&payload.currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency =
+        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exponent = exponent_for(&currency);
     let amount_minor = parse_amount(&payload.amount, exponent)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -99,7 +99,9 @@ async fn owned_category(
     owner_id: &str,
     category_id: Option<i64>,
 ) -> Result<Option<i64>, ApiError> {
-    let Some(id) = category_id else { return Ok(None) };
+    let Some(id) = category_id else {
+        return Ok(None);
+    };
 
     let categories = FinanceRepository::list_categories(&state.db.pool, owner_id)
         .await
@@ -148,7 +150,12 @@ pub async fn list_transactions(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    Ok(Json(LedgerResponse { items, page, limit, total }))
+    Ok(Json(LedgerResponse {
+        items,
+        page,
+        limit,
+        total,
+    }))
 }
 
 #[utoipa::path(
@@ -189,7 +196,9 @@ pub async fn create_transaction(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::TransactionCreated(tx.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::TransactionCreated(tx.clone()));
     Ok(Json(tx))
 }
 
@@ -237,7 +246,9 @@ pub async fn update_transaction(
     .map_err(|e| ApiError::internal(e.to_string()))?
     .ok_or_else(|| ApiError::not_found("Entry not found or access denied"))?;
 
-    state.broadcaster.send(SystemEvent::TransactionUpdated(tx.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::TransactionUpdated(tx.clone()));
     Ok(Json(tx))
 }
 
@@ -352,7 +363,9 @@ pub async fn create_category(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::conflict("You already have a category with that name"))?;
 
-    state.broadcaster.send(SystemEvent::CategoryCreated(category.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::CategoryCreated(category.clone()));
     Ok(Json(category))
 }
 
@@ -379,9 +392,14 @@ pub async fn delete_category(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Category not found or access denied"))?;
 
-    state.broadcaster.send(SystemEvent::CategoryDeleted { id, owner_id });
+    state
+        .broadcaster
+        .send(SystemEvent::CategoryDeleted { id, owner_id });
 
-    Ok(Json(CategoryDeletedResponse { id, uncategorised: uncategorised as i64 }))
+    Ok(Json(CategoryDeletedResponse {
+        id,
+        uncategorised: uncategorised as i64,
+    }))
 }
 
 #[cfg(test)]
@@ -422,9 +440,13 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
 
-        let created = create_transaction(State(state.clone()), alice, Json(entry("15.50", "EUR", None)))
-            .await
-            .unwrap();
+        let created = create_transaction(
+            State(state.clone()),
+            alice,
+            Json(entry("15.50", "EUR", None)),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(created.amount_minor, 1550);
         assert_eq!(created.currency, "EUR");
@@ -451,8 +473,12 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
 
-        for (amount, currency) in [("15.501", "EUR"), ("-5", "EUR"), ("abc", "EUR"), ("5", "EURO")]
-        {
+        for (amount, currency) in [
+            ("15.501", "EUR"),
+            ("-5", "EUR"),
+            ("abc", "EUR"),
+            ("5", "EURO"),
+        ] {
             let err = create_transaction(
                 State(state.clone()),
                 alice.clone(),
@@ -460,7 +486,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{amount} {currency} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "{amount} {currency} must be rejected"
+            );
         }
     }
 
@@ -470,15 +500,22 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         let bob = AuthUser::named("bob", "acct_bob");
 
-        let created =
-            create_transaction(State(state.clone()), alice, Json(entry("10.00", "EUR", None)))
-                .await
-                .unwrap();
+        let created = create_transaction(
+            State(state.clone()),
+            alice,
+            Json(entry("10.00", "EUR", None)),
+        )
+        .await
+        .unwrap();
 
         let bobs_view = list_transactions(
             State(state.clone()),
             bob.clone(),
-            Query(LedgerQuery { direction: None, page: None, limit: None }),
+            Query(LedgerQuery {
+                direction: None,
+                page: None,
+                limit: None,
+            }),
         )
         .await
         .unwrap();
@@ -507,7 +544,9 @@ mod tests {
         let bobs_category = create_category(
             State(state.clone()),
             AuthUser::named("bob", "acct_bob"),
-            Json(CategoryRequest { name: "food".to_string() }),
+            Json(CategoryRequest {
+                name: "food".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -531,7 +570,9 @@ mod tests {
         let _ = create_category(
             State(state.clone()),
             alice.clone(),
-            Json(CategoryRequest { name: "food".to_string() }),
+            Json(CategoryRequest {
+                name: "food".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -539,7 +580,9 @@ mod tests {
         let err = create_category(
             State(state.clone()),
             alice.clone(),
-            Json(CategoryRequest { name: "food".to_string() }),
+            Json(CategoryRequest {
+                name: "food".to_string(),
+            }),
         )
         .await
         .unwrap_err();
@@ -558,7 +601,9 @@ mod tests {
         let category = create_category(
             State(state.clone()),
             alice.clone(),
-            Json(CategoryRequest { name: "food".to_string() }),
+            Json(CategoryRequest {
+                name: "food".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -579,7 +624,11 @@ mod tests {
         let ledger = list_transactions(
             State(state),
             alice,
-            Query(LedgerQuery { direction: None, page: None, limit: None }),
+            Query(LedgerQuery {
+                direction: None,
+                page: None,
+                limit: None,
+            }),
         )
         .await
         .unwrap();
@@ -595,7 +644,10 @@ mod tests {
         let err = summary(
             State(state),
             AuthUser::named("alice", "acct_alice"),
-            Query(SummaryQuery { from: now, to: now - chrono::Duration::days(1) }),
+            Query(SummaryQuery {
+                from: now,
+                to: now - chrono::Duration::days(1),
+            }),
         )
         .await
         .unwrap_err();

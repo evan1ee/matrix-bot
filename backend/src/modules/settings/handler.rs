@@ -298,8 +298,14 @@ mod tests {
         let pool = pool().await;
         let reply = run(&pool, "!settings").await;
 
-        assert!(reply.contains("UTC"), "should show the default zone: {reply}");
-        assert!(reply.contains("USD"), "should show the default currency: {reply}");
+        assert!(
+            reply.contains("UTC"),
+            "should show the default zone: {reply}"
+        );
+        assert!(
+            reply.contains("USD"),
+            "should show the default currency: {reply}"
+        );
     }
 
     #[tokio::test]
@@ -311,10 +317,16 @@ mod tests {
 
         // Setting one must not reset the other.
         let cur_reply = run(&pool, "!settings currency cny").await;
-        assert!(cur_reply.contains("CNY"), "should normalise to upper case: {cur_reply}");
+        assert!(
+            cur_reply.contains("CNY"),
+            "should normalise to upper case: {cur_reply}"
+        );
 
         let shown = run(&pool, "!settings").await;
-        assert!(shown.contains("Asia/Shanghai"), "the zone must survive: {shown}");
+        assert!(
+            shown.contains("Asia/Shanghai"),
+            "the zone must survive: {shown}"
+        );
         assert!(shown.contains("CNY"), "the currency must survive: {shown}");
     }
 
@@ -331,7 +343,10 @@ mod tests {
         let pool = pool().await;
         run(&pool, "!settings timezone Asia/Shanghai").await;
 
-        for bad in ["!settings timezone GMT+8", "!settings timezone Mars/Olympus"] {
+        for bad in [
+            "!settings timezone GMT+8",
+            "!settings timezone Mars/Olympus",
+        ] {
             let reply = run(&pool, bad).await;
             assert!(reply.contains("not an IANA"), "{bad} -> {reply}");
         }
@@ -339,17 +354,29 @@ mod tests {
         assert!(reply.contains("3-letter"), "{reply}");
 
         let shown = run(&pool, "!settings").await;
-        assert!(shown.contains("Asia/Shanghai"), "a rejected value must not clobber: {shown}");
-        assert!(shown.contains("USD"), "a rejected currency must not clobber: {shown}");
+        assert!(
+            shown.contains("Asia/Shanghai"),
+            "a rejected value must not clobber: {shown}"
+        );
+        assert!(
+            shown.contains("USD"),
+            "a rejected currency must not clobber: {shown}"
+        );
     }
 
     #[tokio::test]
     async fn test_names_a_missing_value_rather_than_saving_an_empty_one() {
         let pool = pool().await;
 
-        assert!(run(&pool, "!settings timezone").await.contains("Which timezone"));
-        assert!(run(&pool, "!settings currency").await.contains("Which currency"));
-        assert!(run(&pool, "!settings colour blue").await.contains("Unknown setting"));
+        assert!(run(&pool, "!settings timezone")
+            .await
+            .contains("Which timezone"));
+        assert!(run(&pool, "!settings currency")
+            .await
+            .contains("Which currency"));
+        assert!(run(&pool, "!settings colour blue")
+            .await
+            .contains("Unknown setting"));
     }
 
     /// User text reaches an HTML message, so it has to be escaped.
@@ -358,7 +385,10 @@ mod tests {
         let pool = pool().await;
         let reply = run(&pool, "!settings timezone <script>alert(1)</script>").await;
 
-        assert!(!reply.contains("<script>"), "raw markup must not survive: {reply}");
+        assert!(
+            !reply.contains("<script>"),
+            "raw markup must not survive: {reply}"
+        );
         assert!(reply.contains("&lt;script&gt;"));
     }
 
@@ -370,9 +400,14 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
-        handle_settings_command(&pool, "@alice:a", "!settings tz Asia/Tokyo", Some(&broadcaster))
-            .await
-            .unwrap();
+        handle_settings_command(
+            &pool,
+            "@alice:a",
+            "!settings tz Asia/Tokyo",
+            Some(&broadcaster),
+        )
+        .await
+        .unwrap();
 
         let event = rx.try_recv().expect("a settings change must be broadcast");
         assert_eq!(event.owner_id(), "@alice:a");
@@ -386,14 +421,22 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
-        handle_settings_command(&pool, "@alice:a", "!settings tz Mars/Olympus", Some(&broadcaster))
-            .await
-            .unwrap();
+        handle_settings_command(
+            &pool,
+            "@alice:a",
+            "!settings tz Mars/Olympus",
+            Some(&broadcaster),
+        )
+        .await
+        .unwrap();
         handle_settings_command(&pool, "@alice:a", "!settings", Some(&broadcaster))
             .await
             .unwrap();
 
-        assert!(rx.try_recv().is_err(), "a read or a rejection must not broadcast");
+        assert!(
+            rx.try_recv().is_err(),
+            "a read or a rejection must not broadcast"
+        );
     }
 
     #[tokio::test]

@@ -22,17 +22,13 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_webhooks_owner ON webhooks(owner_id);",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhooks_owner ON webhooks(owner_id);")
+        .execute(pool)
+        .await?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_webhooks_token_hash ON webhooks(token_hash);",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhooks_token_hash ON webhooks(token_hash);")
+        .execute(pool)
+        .await?;
 
     sqlx::query(
         r#"

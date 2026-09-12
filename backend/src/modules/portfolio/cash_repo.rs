@@ -74,7 +74,15 @@ pub async fn deposit_cash(
     currency_exponent: i64,
     amount_minor: i64,
 ) -> Result<CashBalance> {
-    deposit_cash_at(pool, owner_id, currency, currency_exponent, amount_minor, None).await
+    deposit_cash_at(
+        pool,
+        owner_id,
+        currency,
+        currency_exponent,
+        amount_minor,
+        None,
+    )
+    .await
 }
 
 pub async fn deposit_cash_at(
@@ -87,7 +95,18 @@ pub async fn deposit_cash_at(
 ) -> Result<CashBalance> {
     let cash = credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await?;
     let _ = crate::modules::portfolio::audit::record_audit_entry(
-        pool, owner_id, "deposit", None, None, None, amount_minor, currency, currency_exponent, None, None, executed_at,
+        pool,
+        owner_id,
+        "deposit",
+        None,
+        None,
+        None,
+        amount_minor,
+        currency,
+        currency_exponent,
+        None,
+        None,
+        executed_at,
     )
     .await;
     Ok(cash)
@@ -113,7 +132,9 @@ pub async fn debit_cash(
     };
 
     if amount_minor > balance {
-        return Ok(WithdrawOutcome::InsufficientFunds { available_minor: balance });
+        return Ok(WithdrawOutcome::InsufficientFunds {
+            available_minor: balance,
+        });
     }
 
     sqlx::query(
@@ -153,7 +174,18 @@ pub async fn withdraw_cash_at(
     let outcome = debit_cash(pool, owner_id, currency, amount_minor).await?;
     if let WithdrawOutcome::Ok(ref cash) = outcome {
         let _ = crate::modules::portfolio::audit::record_audit_entry(
-            pool, owner_id, "withdraw", None, None, None, amount_minor, currency, cash.currency_exponent, None, None, executed_at,
+            pool,
+            owner_id,
+            "withdraw",
+            None,
+            None,
+            None,
+            amount_minor,
+            currency,
+            cash.currency_exponent,
+            None,
+            None,
+            executed_at,
         )
         .await;
     }

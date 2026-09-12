@@ -63,8 +63,8 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 
-        let homeserver = env::var("MATRIX_HOMESERVER")
-            .unwrap_or_else(|_| "https://matrix.org".to_string());
+        let homeserver =
+            env::var("MATRIX_HOMESERVER").unwrap_or_else(|_| "https://matrix.org".to_string());
 
         let username = env::var("MATRIX_USERNAME")
             .context("MATRIX_USERNAME environment variable is required")?;
@@ -107,8 +107,8 @@ impl Config {
 
         let webauthn_rp_id = env::var("WEBAUTHN_RP_ID").unwrap_or_else(|_| "localhost".to_string());
 
-        let webauthn_origin = env::var("WEBAUTHN_ORIGIN")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let webauthn_origin =
+            env::var("WEBAUTHN_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
         let cookie_secure = is_production();
 
@@ -150,7 +150,8 @@ impl Config {
         // mint passkeys bound to `localhost`, which no real browser would ever
         // send back to it — every registration would appear to succeed and
         // every subsequent login would fail. Refuse to boot instead.
-        if is_prod && (self.webauthn_rp_id == "localhost" || self.webauthn_origin.contains("localhost"))
+        if is_prod
+            && (self.webauthn_rp_id == "localhost" || self.webauthn_origin.contains("localhost"))
         {
             anyhow::bail!(
                 "WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN are still the localhost defaults in production. \
@@ -172,7 +173,6 @@ impl Config {
                 self.webauthn_origin
             );
         }
-
 
         Ok(())
     }
@@ -234,17 +234,32 @@ mod tests {
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {
-            let cfg = Config { webauthn_rp_id: bad.to_string(), ..base.clone() };
-            assert!(cfg.validate().is_err(), "'{bad}' must be rejected as an RP ID");
+            let cfg = Config {
+                webauthn_rp_id: bad.to_string(),
+                ..base.clone()
+            };
+            assert!(
+                cfg.validate().is_err(),
+                "'{bad}' must be rejected as an RP ID"
+            );
         }
 
         for good in ["localhost", "mbm.one", "bot.mbm.one"] {
-            let cfg = Config { webauthn_rp_id: good.to_string(), ..base.clone() };
+            let cfg = Config {
+                webauthn_rp_id: good.to_string(),
+                ..base.clone()
+            };
             assert!(cfg.validate().is_ok(), "'{good}' is a valid RP ID");
         }
 
         // The origin is the other half of the pair and does carry a scheme.
-        let cfg = Config { webauthn_origin: "mbm.one".to_string(), ..base.clone() };
-        assert!(cfg.validate().is_err(), "an origin without a scheme must be rejected");
+        let cfg = Config {
+            webauthn_origin: "mbm.one".to_string(),
+            ..base.clone()
+        };
+        assert!(
+            cfg.validate().is_err(),
+            "an origin without a scheme must be rejected"
+        );
     }
 }

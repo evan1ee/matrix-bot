@@ -31,14 +31,16 @@ impl BotModule for JournalModule {
             CommandHelp {
                 name: "journal".to_string(),
                 usage: "!journal [date] (or !daily)".to_string(),
-                description: "View daily log, mood, weather, reflection, and cross-module activity summary"
-                    .to_string(),
+                description:
+                    "View daily log, mood, weather, reflection, and cross-module activity summary"
+                        .to_string(),
             },
             CommandHelp {
                 name: "journal log".to_string(),
                 usage: "!journal log <mood> [| weather] [| note]".to_string(),
-                description: "Log today's mood (amazing, good, neutral, low, rough), weather, and reflection"
-                    .to_string(),
+                description:
+                    "Log today's mood (amazing, good, neutral, low, rough), weather, and reflection"
+                        .to_string(),
             },
             CommandHelp {
                 name: "journal activities".to_string(),
@@ -49,8 +51,7 @@ impl BotModule for JournalModule {
             CommandHelp {
                 name: "journal clear".to_string(),
                 usage: "!journal clear [date]".to_string(),
-                description: "Clear the daily log entry for today or specified date"
-                    .to_string(),
+                description: "Clear the daily log entry for today or specified date".to_string(),
             },
         ]
     }

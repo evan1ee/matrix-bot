@@ -70,12 +70,17 @@ pub async fn ensure_self_verified(client: &Client) {
         let own_device = match client.encryption().get_own_device().await {
             Ok(device) => device,
             Err(err) => {
-                warn!("Could not read this device from the crypto store: {:?}", err);
+                warn!(
+                    "Could not read this device from the crypto store: {:?}",
+                    err
+                );
                 None
             }
         };
 
-        let cross_signed = own_device.as_ref().is_some_and(|d| d.is_cross_signed_by_owner());
+        let cross_signed = own_device
+            .as_ref()
+            .is_some_and(|d| d.is_cross_signed_by_owner());
 
         debug!(
             "Self-verification attempt {}/{}: device_known={} cross_signed={} has_self_signing={}",
@@ -104,7 +109,11 @@ pub async fn ensure_self_verified(client: &Client) {
                 // `/keys/query` shows it. So `Done` is the rare path and this
                 // one runs most boots — which is harmless, as the signature is
                 // deterministic and re-uploading it is a no-op for the server.
-                match own_device.expect("Sign implies a known device").verify().await {
+                match own_device
+                    .expect("Sign implies a known device")
+                    .verify()
+                    .await
+                {
                     Ok(()) => {
                         info!("Signed this device with our own self-signing key — the session is now verified 🎉");
                         return;
@@ -165,8 +174,8 @@ pub fn device_is_cross_signed(
         return false;
     };
 
-    let Some(signatures) = keys_query["device_keys"][user_id][device_id]["signatures"][user_id]
-        .as_object()
+    let Some(signatures) =
+        keys_query["device_keys"][user_id][device_id]["signatures"][user_id].as_object()
     else {
         return false;
     };
@@ -283,7 +292,8 @@ mod tests {
             .trim_start_matches("http://")
             .trim_end_matches('/');
 
-        if let Ok(response) = reqwest::get(format!("https://{}/.well-known/matrix/client", domain)).await
+        if let Ok(response) =
+            reqwest::get(format!("https://{}/.well-known/matrix/client", domain)).await
         {
             if let Ok(body) = response.json::<serde_json::Value>().await {
                 if let Some(base_url) = body["m.homeserver"]["base_url"].as_str() {
@@ -334,7 +344,9 @@ mod tests {
         let user_id = whoami["user_id"]
             .as_str()
             .unwrap_or_else(|| panic!("the saved token is not valid: {}", whoami));
-        let device_id = whoami["device_id"].as_str().expect("whoami returned no device_id");
+        let device_id = whoami["device_id"]
+            .as_str()
+            .expect("whoami returned no device_id");
 
         let keys: serde_json::Value = http
             .post(format!("{}/_matrix/client/v3/keys/query", homeserver))

@@ -122,7 +122,20 @@ async fn main() -> Result<()> {
         shutdown_tx.subscribe(),
     ));
 
-    tokio::signal::ctrl_c().await?;
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut term = signal(SignalKind::terminate())?;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => info!("Received SIGINT..."),
+            _ = term.recv() => info!("Received SIGTERM..."),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+    }
+
     info!("Shutting down Matrix Bot & Web API server...");
     let _ = shutdown_tx.send(());
 

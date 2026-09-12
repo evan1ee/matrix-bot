@@ -81,7 +81,14 @@ mod tests {
         lead: Option<i64>,
     ) -> TodoItem {
         TodoRepository::add(
-            pool, "web", "@alice:a", "alice", "Ship it", TodoPriority::Medium, due_at, lead,
+            pool,
+            "web",
+            "@alice:a",
+            "alice",
+            "Ship it",
+            TodoPriority::Medium,
+            due_at,
+            lead,
         )
         .await
         .unwrap()
@@ -113,10 +120,16 @@ mod tests {
         let pool = setup().await;
 
         let no_due = todo_with(&pool, None, Some(60)).await;
-        assert_eq!(sync(&pool, None, &no_due, "!room:a").await.unwrap(), SyncOutcome::Nothing);
+        assert_eq!(
+            sync(&pool, None, &no_due, "!room:a").await.unwrap(),
+            SyncOutcome::Nothing
+        );
 
         let no_lead = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), None).await;
-        assert_eq!(sync(&pool, None, &no_lead, "!room:a").await.unwrap(), SyncOutcome::Nothing);
+        assert_eq!(
+            sync(&pool, None, &no_lead, "!room:a").await.unwrap(),
+            SyncOutcome::Nothing
+        );
     }
 
     #[tokio::test]
@@ -129,10 +142,12 @@ mod tests {
         let outcome = sync(&pool, None, &todo, "!room:a").await.unwrap();
 
         assert!(matches!(outcome, SyncOutcome::LeadTimeInPast(_)));
-        assert!(ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -141,14 +156,19 @@ mod tests {
         let todo = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), Some(60)).await;
         sync(&pool, None, &todo, "!room:a").await.unwrap();
 
-        let done = TodoRepository::mark_done(&pool, todo.id).await.unwrap().unwrap();
+        let done = TodoRepository::mark_done(&pool, todo.id)
+            .await
+            .unwrap()
+            .unwrap();
         let outcome = sync(&pool, None, &done, "!room:a").await.unwrap();
 
         assert_eq!(outcome, SyncOutcome::Cancelled);
-        assert!(ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -164,17 +184,19 @@ mod tests {
             .unwrap();
         let outcome = sync(&pool, None, &moved, "!room:a").await.unwrap();
 
-        assert_eq!(outcome, SyncOutcome::Scheduled(moved_due - Duration::minutes(60)));
+        assert_eq!(
+            outcome,
+            SyncOutcome::Scheduled(moved_due - Duration::minutes(60))
+        );
 
-        let pending: i64 =
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ? \
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ? \
                  AND status = 'pending'",
-            )
-            .bind(todo.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        )
+        .bind(todo.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(pending, 1, "rescheduling must replace, not stack");
     }
 
@@ -188,7 +210,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(sync(&pool, None, &cleared, "!room:a").await.unwrap(), SyncOutcome::Cancelled);
+        assert_eq!(
+            sync(&pool, None, &cleared, "!room:a").await.unwrap(),
+            SyncOutcome::Cancelled
+        );
     }
 
     /// Re-syncing an unchanged todo must be a no-op, not a churn of
@@ -206,9 +231,9 @@ mod tests {
             "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ?",
         )
         .bind(todo.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(total, 1);
     }
 }

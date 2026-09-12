@@ -3,10 +3,10 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
 
-use super::models::{CreateBillPayload, UpdateBillPayload};
-use crate::modules::due_reminder::SyncOutcome;
 use super::due_reminder;
+use super::models::{CreateBillPayload, UpdateBillPayload};
 use super::repository::RecurringBillRepository;
+use crate::modules::due_reminder::SyncOutcome;
 
 pub async fn handle_bill_command(
     ctx: &CommandContext,
@@ -113,7 +113,15 @@ async fn handle_add(
         remind_room_id: None,
     };
 
-    match RecurringBillRepository::create(&db.pool, &ctx.room_id, &ctx.owner_id, &ctx.sender_name, payload).await {
+    match RecurringBillRepository::create(
+        &db.pool,
+        &ctx.room_id,
+        &ctx.owner_id,
+        &ctx.sender_name,
+        payload,
+    )
+    .await
+    {
         Ok(bill) => {
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::RecurringBillCreated(bill.clone()));
@@ -211,9 +219,7 @@ async fn handle_remind(
     args: &[&str],
 ) -> Option<String> {
     if args.len() < 2 {
-        return Some(
-            "Usage: <code>!bill remind &lt;id&gt; &lt;minutes|off&gt;</code>".to_string(),
-        );
+        return Some("Usage: <code>!bill remind &lt;id&gt; &lt;minutes|off&gt;</code>".to_string());
     }
 
     let id: i64 = match args[0].parse() {

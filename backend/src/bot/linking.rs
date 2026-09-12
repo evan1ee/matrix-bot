@@ -53,7 +53,10 @@ pub async fn handle_link_command(
              account — anything you add here shows up there, and the other way round."
                 .to_string()
         }
-        Ok(LinkOutcome::NeedsMergeConfirmation { account_id, from_account }) => {
+        Ok(LinkOutcome::NeedsMergeConfirmation {
+            account_id,
+            from_account,
+        }) => {
             let preview = MergeRepository::preview(&db.pool, &from_account)
                 .await
                 .unwrap_or_default();
@@ -119,7 +122,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_first_time_link_does_not_provision_or_prompt() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
@@ -129,10 +134,15 @@ mod tests {
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        assert_eq!(accounts, 1, "no throwaway account may be created for the MXID");
+        assert_eq!(
+            accounts, 1,
+            "no throwaway account may be created for the MXID"
+        );
 
         assert_eq!(
-            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(account)
         );
     }
@@ -140,7 +150,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_public_room_cancels_the_code_and_says_so() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", false, None).await;
@@ -157,7 +169,9 @@ mod tests {
     #[tokio::test]
     async fn test_existing_history_asks_before_moving_anything() {
         let db = db().await;
-        let old = AccountRepository::resolve_or_provision(&db.pool, "@evan:mbm.one").await.unwrap();
+        let old = AccountRepository::resolve_or_provision(&db.pool, "@evan:mbm.one")
+            .await
+            .unwrap();
         for text in ["one", "two", "three"] {
             sqlx::query(
                 "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
@@ -170,7 +184,9 @@ mod tests {
             .unwrap();
         }
 
-        let new = AccountRepository::create(&db.pool, "web", STATUS_ACTIVE).await.unwrap();
+        let new = AccountRepository::create(&db.pool, "web", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&db.pool, &new).await.unwrap();
 
         let pending: PendingMerges = Default::default();
@@ -184,7 +200,9 @@ mod tests {
         // The MXID still points at the old account: the link is deliberately
         // left undone until the merge is confirmed.
         assert_eq!(
-            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(old)
         );
     }
@@ -192,14 +210,18 @@ mod tests {
     #[tokio::test]
     async fn test_an_mxid_belonging_to_someone_else_is_refused() {
         let db = db().await;
-        let theirs = AccountRepository::create(&db.pool, "theirs", STATUS_ACTIVE).await.unwrap();
+        let theirs = AccountRepository::create(&db.pool, "theirs", STATUS_ACTIVE)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
             .bind(&theirs)
             .execute(&db.pool)
             .await
             .unwrap();
 
-        let mine = AccountRepository::create(&db.pool, "mine", STATUS_ACTIVE).await.unwrap();
+        let mine = AccountRepository::create(&db.pool, "mine", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&db.pool, &mine).await.unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
@@ -209,7 +231,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_successful_link_is_written_to_the_audit_log() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
 
         handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;

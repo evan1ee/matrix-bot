@@ -89,7 +89,10 @@ async fn deliver_to_matrix(
                 true
             }
             Err(err) => {
-                warn!("Reminder #{} send failed after join: {:?}", reminder.id, err);
+                warn!(
+                    "Reminder #{} send failed after join: {:?}",
+                    reminder.id, err
+                );
                 false
             }
         },
@@ -113,7 +116,10 @@ async fn advance_after_delivery(ctx: &ModuleContext, reminder: &Reminder) {
         }
         None => {
             if let Err(err) = ReminderRepository::mark_triggered(&ctx.db.pool, reminder.id).await {
-                error!("Failed marking reminder #{} triggered: {:?}", reminder.id, err);
+                error!(
+                    "Failed marking reminder #{} triggered: {:?}",
+                    reminder.id, err
+                );
             }
         }
     }
@@ -145,7 +151,10 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
     if let Err(err) =
         ReminderRepository::increment_retry(&ctx.db.pool, reminder.id, next_attempt).await
     {
-        error!("Failed recording retry for reminder #{}: {:?}", reminder.id, err);
+        error!(
+            "Failed recording retry for reminder #{}: {:?}",
+            reminder.id, err
+        );
     }
 }
 
@@ -185,8 +194,9 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
 
                 if delivered {
                     if let Some(ref broadcaster) = ctx.broadcaster {
-                        broadcaster
-                            .send(crate::events::SystemEvent::ReminderTriggered(reminder.clone()));
+                        broadcaster.send(crate::events::SystemEvent::ReminderTriggered(
+                            reminder.clone(),
+                        ));
                     }
                     advance_after_delivery(&ctx, &reminder).await;
                 } else {
@@ -217,7 +227,10 @@ mod tests {
     fn test_daily_and_weekly_step() {
         let t = utc(2026, 1, 10, 9);
         assert_eq!(next_occurrence(t, "daily", t).unwrap(), utc(2026, 1, 11, 9));
-        assert_eq!(next_occurrence(t, "weekly", t).unwrap(), utc(2026, 1, 17, 9));
+        assert_eq!(
+            next_occurrence(t, "weekly", t).unwrap(),
+            utc(2026, 1, 17, 9)
+        );
     }
 
     #[test]
@@ -225,7 +238,10 @@ mod tests {
         // A 30-day step would land on 2026-01-31, walking the reminder backwards
         // through the month; calendar months keep it on the 1st.
         let t = utc(2026, 1, 1, 9);
-        assert_eq!(next_occurrence(t, "monthly", t).unwrap(), utc(2026, 2, 1, 9));
+        assert_eq!(
+            next_occurrence(t, "monthly", t).unwrap(),
+            utc(2026, 2, 1, 9)
+        );
 
         // February clamps a 31st to the last valid day rather than overflowing.
         let end_of_jan = utc(2026, 1, 31, 9);

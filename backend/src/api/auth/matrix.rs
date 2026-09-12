@@ -1,6 +1,5 @@
 use serde::Deserialize;
 
-
 use crate::api::auth::types::ApiState;
 
 /// The bot's access token, if the bot has one.
@@ -55,7 +54,13 @@ async fn discover_homeserver(state: &ApiState) -> Option<String> {
     }
 
     let well_known: WellKnown = res.json().await.ok()?;
-    Some(well_known.homeserver.base_url.trim_end_matches('/').to_string())
+    Some(
+        well_known
+            .homeserver
+            .base_url
+            .trim_end_matches('/')
+            .to_string(),
+    )
 }
 
 /// The homeserver base URL for client-API calls, resolved once and reused.
@@ -72,7 +77,11 @@ pub async fn resolved_homeserver(state: &ApiState) -> String {
     }
 
     if let Some(client) = state.bot_client.read().await.clone() {
-        let url = client.homeserver().to_string().trim_end_matches('/').to_string();
+        let url = client
+            .homeserver()
+            .to_string()
+            .trim_end_matches('/')
+            .to_string();
         *state.resolved_homeserver.write().await = Some(url.clone());
         return url;
     }

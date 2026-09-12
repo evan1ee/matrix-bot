@@ -34,7 +34,8 @@ impl BotModule for RecurringBillsModule {
             CommandHelp {
                 name: "bill list".to_string(),
                 usage: "!bill list".to_string(),
-                description: "List all recurring bills, subscriptions, installments, and transfers".to_string(),
+                description: "List all recurring bills, subscriptions, installments, and transfers"
+                    .to_string(),
             },
             CommandHelp {
                 name: "bill add".to_string(),

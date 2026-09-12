@@ -114,20 +114,16 @@ pub struct MergeRepository;
 
 impl MergeRepository {
     /// Counts what a merge from `from` into `into` would move.
-    pub async fn preview(
-        pool: &SqlitePool,
-        from: &str,
-    ) -> Result<MergePreview, sqlx::Error> {
+    pub async fn preview(pool: &SqlitePool, from: &str) -> Result<MergePreview, sqlx::Error> {
         let mut preview = MergePreview::default();
 
         for table in OWNED_TABLES {
-            let count: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE owner_id = ?"
-            ))
-            .bind(from)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
+            let count: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(from)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
 
             preview.set(table, count);
         }
@@ -145,7 +141,10 @@ impl MergeRepository {
         into: &str,
     ) -> Result<MergeOutcome, sqlx::Error> {
         if from == into {
-            return Ok(MergeOutcome { moved: MergePreview::default(), discarded: 0 });
+            return Ok(MergeOutcome {
+                moved: MergePreview::default(),
+                discarded: 0,
+            });
         }
 
         let mut moved = MergePreview::default();
@@ -169,13 +168,12 @@ impl MergeRepository {
 
             moved.set(table, updated);
 
-            let leftover: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE owner_id = ?"
-            ))
-            .bind(from)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
+            let leftover: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(from)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
 
             if leftover > 0 {
                 // Rows the destination already had an equivalent of. Removed so
@@ -195,11 +193,13 @@ impl MergeRepository {
             ("webauthn_credentials", "account_id"),
             ("security_events", "account_id"),
         ] {
-            sqlx::query(&format!("UPDATE {table} SET {column} = ? WHERE {column} = ?"))
-                .bind(into)
-                .bind(from)
-                .execute(pool)
-                .await?;
+            sqlx::query(&format!(
+                "UPDATE {table} SET {column} = ? WHERE {column} = ?"
+            ))
+            .bind(into)
+            .bind(from)
+            .execute(pool)
+            .await?;
         }
 
         // Sessions and recovery material do *not* follow. A session belongs to
@@ -263,15 +263,19 @@ mod tests {
     #[tokio::test]
     async fn test_preview_counts_what_would_move() {
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED).await.unwrap();
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
 
         add_todo(&pool, &from, "one").await;
         add_todo(&pool, &from, "two").await;
-        sqlx::query("INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')")
-            .bind(&from)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
         assert_eq!(preview.todos, 2);
@@ -285,8 +289,12 @@ mod tests {
     #[tokio::test]
     async fn test_merge_moves_the_rows_and_removes_the_source() {
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "matrix", STATUS_UNCLAIMED).await.unwrap();
-        let into = AccountRepository::create(&pool, "web", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::create(&pool, "matrix", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "web", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         add_todo(&pool, &from, "from matrix").await;
         add_todo(&pool, &into, "from the web").await;
@@ -299,8 +307,14 @@ mod tests {
         assert_eq!(owner_of(&pool, "from matrix").await, into);
         assert_eq!(owner_of(&pool, "from the web").await, into);
 
-        assert!(AccountRepository::find(&pool, &from).await.unwrap().is_none());
-        assert!(AccountRepository::find(&pool, &into).await.unwrap().is_some());
+        assert!(AccountRepository::find(&pool, &from)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(AccountRepository::find(&pool, &into)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     /// The linked MXID has to follow, or the user merges their history in and
@@ -308,13 +322,19 @@ mod tests {
     #[tokio::test]
     async fn test_merge_carries_the_matrix_link_over() {
         let pool = db().await;
-        let from = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        let into = AccountRepository::create(&pool, "web", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "web", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
         assert_eq!(
-            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(into.clone())
         );
         assert_eq!(
@@ -329,8 +349,12 @@ mod tests {
     #[tokio::test]
     async fn test_conflicting_singleton_rows_keep_the_destinations() {
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED).await.unwrap();
-        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         for (owner, tz) in [(&from, "Asia/Tokyo"), (&into, "Europe/Berlin")] {
             sqlx::query(
@@ -346,11 +370,12 @@ mod tests {
         let outcome = MergeRepository::merge(&pool, &from, &into).await.unwrap();
         assert_eq!(outcome.discarded, 1, "the source's settings row is dropped");
 
-        let tz: String = sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
-            .bind(&into)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let tz: String =
+            sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
+                .bind(&into)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(tz, "Europe/Berlin", "the surviving account's choice wins");
 
         let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_settings")
@@ -367,8 +392,12 @@ mod tests {
         use crate::accounts::SessionRepository;
 
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "old", STATUS_ACTIVE).await.unwrap();
-        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::create(&pool, "old", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         let old_session = SessionRepository::create(&pool, &from, None, None, None)
             .await
@@ -380,10 +409,16 @@ mod tests {
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
         assert!(
-            SessionRepository::resolve(&pool, &old_session).await.unwrap().is_none(),
+            SessionRepository::resolve(&pool, &old_session)
+                .await
+                .unwrap()
+                .is_none(),
             "the absorbed account's session must not become a session on the survivor"
         );
-        assert!(SessionRepository::resolve(&pool, &kept_session).await.unwrap().is_some());
+        assert!(SessionRepository::resolve(&pool, &kept_session)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     /// Merging an account into itself would delete it after moving its rows to
@@ -391,13 +426,20 @@ mod tests {
     #[tokio::test]
     async fn test_self_merge_is_refused() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "solo", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "solo", STATUS_ACTIVE)
+            .await
+            .unwrap();
         add_todo(&pool, &account, "keep me").await;
 
-        let outcome = MergeRepository::merge(&pool, &account, &account).await.unwrap();
+        let outcome = MergeRepository::merge(&pool, &account, &account)
+            .await
+            .unwrap();
         assert_eq!(outcome.moved.total(), 0);
 
-        assert!(AccountRepository::find(&pool, &account).await.unwrap().is_some());
+        assert!(AccountRepository::find(&pool, &account)
+            .await
+            .unwrap()
+            .is_some());
         assert_eq!(owner_of(&pool, "keep me").await, account);
     }
 
@@ -406,8 +448,12 @@ mod tests {
     #[tokio::test]
     async fn test_merging_twice_is_harmless() {
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED).await.unwrap();
-        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
         add_todo(&pool, &from, "only me").await;
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
@@ -423,8 +469,12 @@ mod tests {
     #[tokio::test]
     async fn test_no_owned_table_is_left_behind() {
         let pool = db().await;
-        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED).await.unwrap();
-        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE).await.unwrap();
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         // Put one row in every owned table.
         add_todo(&pool, &from, "todo").await;
@@ -443,25 +493,47 @@ mod tests {
         sqlx::query("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES (?, 'AAPL', 20000, 'USD', 'ABOVE')")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES (?, 'food')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')")
-            .bind(&from).execute(&pool).await.unwrap();
+            .bind(&from)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO bookmarks (owner_id, url, title, domain) VALUES (?, 'https://example.com', 'Example', 'example.com')")
             .bind(&from).execute(&pool).await.unwrap();
         let habit_id: i64 = sqlx::query_scalar("INSERT INTO habits (owner_id, name, frequency) VALUES (?, 'Exercise', 'daily') RETURNING id")
             .bind(&from).fetch_one(&pool).await.unwrap();
-        sqlx::query("INSERT INTO habit_logs (habit_id, owner_id, log_date) VALUES (?, ?, '2026-09-06')")
-            .bind(habit_id).bind(&from).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO habit_logs (habit_id, owner_id, log_date) VALUES (?, ?, '2026-09-06')",
+        )
+        .bind(habit_id)
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES (?, '2026-09-06', 'happy')")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES (?, '1990-01-01', 90)")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')")
             .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', ?, '!r:x')")
-            .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', ?, '!r:x')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO ai_user_configs (owner_id, model_name) VALUES (?, 'gemini')")
-            .bind(&from).execute(&pool).await.unwrap();
+            .bind(&from)
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', ?, 'hook', 'thash', 'pref', '!r:x')")
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)")
@@ -473,22 +545,23 @@ mod tests {
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
         for table in OWNED_TABLES {
-            let stranded: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE owner_id = ?"
-            ))
-            .bind(&from)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            assert_eq!(stranded, 0, "{table} still has rows owned by the absorbed account");
+            let stranded: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(&from)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                stranded, 0,
+                "{table} still has rows owned by the absorbed account"
+            );
 
-            let arrived: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE owner_id = ?"
-            ))
-            .bind(&into)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+            let arrived: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(&into)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(arrived, 1, "{table} did not receive its row");
         }
     }

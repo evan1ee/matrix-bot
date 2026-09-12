@@ -8,6 +8,7 @@ pub mod due_reminder;
 pub mod handler;
 pub mod models;
 pub mod repository;
+pub mod view;
 
 pub struct TodoModule;
 
@@ -104,7 +105,12 @@ mod tests {
             sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
-            command: body.split_whitespace().next().unwrap_or("").trim_start_matches('!').to_string(),
+            command: body
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('!')
+                .to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
@@ -125,8 +131,14 @@ mod tests {
         assert!(commands.iter().any(|c| c.name == "todo due"));
         // The due command advertises the reminder suffix, or nobody discovers it.
         let due = commands.iter().find(|c| c.name == "todo due").unwrap();
-        assert!(due.usage.contains("remind"), "usage should mention the reminder: {}", due.usage);
-        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+        assert!(
+            due.usage.contains("remind"),
+            "usage should mention the reminder: {}",
+            due.usage
+        );
+        assert!(commands
+            .iter()
+            .all(|c| !c.usage.is_empty() && !c.description.is_empty()));
     }
 
     #[tokio::test]
@@ -134,9 +146,18 @@ mod tests {
         let module = TodoModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!todo list"), &db, None).await.is_some());
-        assert!(module.handle_command(&ctx("!expense add 1 EUR x"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!remind me later"), &db, None).await.is_none());
+        assert!(module
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .is_some());
+        assert!(module
+            .handle_command(&ctx("!expense add 1 EUR x"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!remind me later"), &db, None)
+            .await
+            .is_none());
     }
 
     #[tokio::test]
@@ -144,10 +165,19 @@ mod tests {
         let module = TodoModule::new();
         let db = db().await;
 
-        module.handle_command(&ctx("!todo add <img src=x onerror=1>"), &db, None).await.unwrap();
-        let listed = module.handle_command(&ctx("!todo list"), &db, None).await.unwrap();
+        module
+            .handle_command(&ctx("!todo add <img src=x onerror=1>"), &db, None)
+            .await
+            .unwrap();
+        let listed = module
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .unwrap();
 
-        assert!(!listed.contains("<img"), "raw markup must not survive: {listed}");
+        assert!(
+            !listed.contains("<img"),
+            "raw markup must not survive: {listed}"
+        );
         assert!(listed.contains("&lt;img"));
     }
 
@@ -161,11 +191,20 @@ mod tests {
         let module = TodoModule::new();
         let db = db().await;
 
-        module.handle_command(&ctx("!todo add ship it"), &db, None).await.unwrap();
+        module
+            .handle_command(&ctx("!todo add ship it"), &db, None)
+            .await
+            .unwrap();
 
         // With no preference saved, the reply stays in UTC.
-        let utc_reply = module.handle_command(&ctx("!todo due 1 2d"), &db, None).await.unwrap();
-        assert!(utc_reply.contains("UTC"), "default must render as UTC: {utc_reply}");
+        let utc_reply = module
+            .handle_command(&ctx("!todo due 1 2d"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            utc_reply.contains("UTC"),
+            "default must render as UTC: {utc_reply}"
+        );
 
         SettingsRepository::upsert(
             &db.pool,
@@ -180,8 +219,17 @@ mod tests {
         .await
         .unwrap();
 
-        let listed = module.handle_command(&ctx("!todo list"), &db, None).await.unwrap();
-        assert!(listed.contains("CST"), "should render in Asia/Shanghai: {listed}");
-        assert!(!listed.contains("UTC"), "should no longer claim UTC: {listed}");
+        let listed = module
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            listed.contains("CST"),
+            "should render in Asia/Shanghai: {listed}"
+        );
+        assert!(
+            !listed.contains("UTC"),
+            "should no longer claim UTC: {listed}"
+        );
     }
 }

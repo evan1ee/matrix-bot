@@ -51,8 +51,7 @@ impl Session {
     /// Whether a passkey assertion happened recently enough for a sensitive
     /// action.
     pub fn is_recently_verified(&self, now: DateTime<Utc>) -> bool {
-        now.signed_duration_since(self.last_verified_at)
-            < Duration::minutes(STEP_UP_WINDOW_MINUTES)
+        now.signed_duration_since(self.last_verified_at) < Duration::minutes(STEP_UP_WINDOW_MINUTES)
     }
 
     /// Whether this session came out of account recovery and is still inside
@@ -79,11 +78,13 @@ impl Session {
 /// Hashes a session cookie into its storage key.
 pub fn hash_token(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
-    digest.iter().fold(String::with_capacity(64), |mut acc, byte| {
-        use std::fmt::Write;
-        let _ = write!(acc, "{byte:02x}");
-        acc
-    })
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, byte| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{byte:02x}");
+            acc
+        })
 }
 
 pub struct SessionRepository;
@@ -104,11 +105,9 @@ impl SessionRepository {
         // Minted by SQLite for the same reason account ids are: no RNG crate is
         // a direct dependency, and 32 random bytes from its CSPRNG is more
         // entropy than a session token needs.
-        let token = sqlx::query_scalar::<_, String>(
-            "SELECT lower(hex(randomblob(32)))",
-        )
-        .fetch_one(pool)
-        .await?;
+        let token = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(32)))")
+            .fetch_one(pool)
+            .await?;
 
         let now = Utc::now();
         sqlx::query(
@@ -136,10 +135,7 @@ impl SessionRepository {
     /// Returns `None` for anything not currently usable — unknown, revoked, or
     /// past either timeout — so a caller cannot accidentally treat an expired
     /// session as merely stale.
-    pub async fn resolve(
-        pool: &SqlitePool,
-        token: &str,
-    ) -> Result<Option<Session>, sqlx::Error> {
+    pub async fn resolve(pool: &SqlitePool, token: &str) -> Result<Option<Session>, sqlx::Error> {
         let id_hash = hash_token(token);
 
         let Some(session) = sqlx::query_as::<_, Session>(
@@ -165,7 +161,10 @@ impl SessionRepository {
             .execute(pool)
             .await?;
 
-        Ok(Some(Session { last_seen_at: now, ..session }))
+        Ok(Some(Session {
+            last_seen_at: now,
+            ..session
+        }))
     }
 
     /// Records that the holder just proved possession of a passkey.
@@ -258,7 +257,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(stored.len(), 1);
-        assert_ne!(stored[0], token, "the cookie value itself must not be in the table");
+        assert_ne!(
+            stored[0], token,
+            "the cookie value itself must not be in the table"
+        );
         assert_eq!(stored[0], hash_token(&token));
         assert_eq!(stored[0].len(), 64);
     }
@@ -266,8 +268,12 @@ mod tests {
     #[tokio::test]
     async fn test_tokens_are_unique_per_session() {
         let pool = db().await;
-        let a = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
-        let b = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
+        let a = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
+        let b = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
         assert_ne!(a, b);
         assert_eq!(a.len(), 64);
     }
@@ -279,7 +285,10 @@ mod tests {
             .await
             .unwrap();
 
-        let session = SessionRepository::resolve(&pool, &token).await.unwrap().unwrap();
+        let session = SessionRepository::resolve(&pool, &token)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(session.account_id, "acct_evan");
         assert!(session.is_recently_verified(Utc::now()));
         assert!(!session.is_restricted(Utc::now()));
@@ -288,7 +297,10 @@ mod tests {
     #[tokio::test]
     async fn test_an_unknown_token_resolves_to_nothing() {
         let pool = db().await;
-        assert!(SessionRepository::resolve(&pool, "nonsense").await.unwrap().is_none());
+        assert!(SessionRepository::resolve(&pool, "nonsense")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     /// Revocation must take effect on the very next request, which is the one
@@ -300,12 +312,20 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(SessionRepository::resolve(&pool, &token).await.unwrap().is_some());
+        assert!(SessionRepository::resolve(&pool, &token)
+            .await
+            .unwrap()
+            .is_some());
 
-        SessionRepository::revoke(&pool, &hash_token(&token)).await.unwrap();
+        SessionRepository::revoke(&pool, &hash_token(&token))
+            .await
+            .unwrap();
 
         assert!(
-            SessionRepository::resolve(&pool, &token).await.unwrap().is_none(),
+            SessionRepository::resolve(&pool, &token)
+                .await
+                .unwrap()
+                .is_none(),
             "a revoked session must not resolve"
         );
     }
@@ -314,9 +334,15 @@ mod tests {
     #[tokio::test]
     async fn test_revoking_others_spares_the_current_session() {
         let pool = db().await;
-        let mine = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
-        let other = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
-        let stranger = SessionRepository::create(&pool, "acct_b", None, None, None).await.unwrap();
+        let mine = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
+        let other = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
+        let stranger = SessionRepository::create(&pool, "acct_b", None, None, None)
+            .await
+            .unwrap();
 
         let revoked =
             SessionRepository::revoke_all_for_account(&pool, "acct_a", Some(&hash_token(&mine)))
@@ -324,10 +350,19 @@ mod tests {
                 .unwrap();
         assert_eq!(revoked, 1);
 
-        assert!(SessionRepository::resolve(&pool, &mine).await.unwrap().is_some());
-        assert!(SessionRepository::resolve(&pool, &other).await.unwrap().is_none());
+        assert!(SessionRepository::resolve(&pool, &mine)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(SessionRepository::resolve(&pool, &other)
+            .await
+            .unwrap()
+            .is_none());
         assert!(
-            SessionRepository::resolve(&pool, &stranger).await.unwrap().is_some(),
+            SessionRepository::resolve(&pool, &stranger)
+                .await
+                .unwrap()
+                .is_some(),
             "another account's sessions must be untouched"
         );
     }
@@ -335,13 +370,23 @@ mod tests {
     #[tokio::test]
     async fn test_listing_shows_only_this_accounts_live_sessions() {
         let pool = db().await;
-        let _mine = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
-        let gone = SessionRepository::create(&pool, "acct_a", None, None, None).await.unwrap();
-        let _theirs = SessionRepository::create(&pool, "acct_b", None, None, None).await.unwrap();
+        let _mine = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
+        let gone = SessionRepository::create(&pool, "acct_a", None, None, None)
+            .await
+            .unwrap();
+        let _theirs = SessionRepository::create(&pool, "acct_b", None, None, None)
+            .await
+            .unwrap();
 
-        SessionRepository::revoke(&pool, &hash_token(&gone)).await.unwrap();
+        SessionRepository::revoke(&pool, &hash_token(&gone))
+            .await
+            .unwrap();
 
-        let listed = SessionRepository::list_for_account(&pool, "acct_a").await.unwrap();
+        let listed = SessionRepository::list_for_account(&pool, "acct_a")
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].account_id, "acct_a");
     }
@@ -373,7 +418,10 @@ mod tests {
             created_at: now - Duration::days(ABSOLUTE_TIMEOUT_DAYS + 1),
             ..fresh.clone()
         };
-        assert!(!ancient.is_live(now), "a session must not outlive the absolute cap");
+        assert!(
+            !ancient.is_live(now),
+            "a session must not outlive the absolute cap"
+        );
     }
 
     /// The step-up window is what makes "recent passkey verification" mean
@@ -386,7 +434,8 @@ mod tests {
             account_id: "acct_a".into(),
             created_at: now,
             last_seen_at: now,
-            last_verified_at: now - Duration::minutes(STEP_UP_WINDOW_MINUTES) + Duration::seconds(1),
+            last_verified_at: now - Duration::minutes(STEP_UP_WINDOW_MINUTES)
+                + Duration::seconds(1),
             restricted_until: None,
             user_agent: None,
             ip: None,
@@ -395,7 +444,9 @@ mod tests {
         assert!(session.is_recently_verified(now), "just inside the window");
 
         let stale = Session {
-            last_verified_at: now - Duration::minutes(STEP_UP_WINDOW_MINUTES) - Duration::seconds(1),
+            last_verified_at: now
+                - Duration::minutes(STEP_UP_WINDOW_MINUTES)
+                - Duration::seconds(1),
             ..session
         };
         assert!(!stale.is_recently_verified(now), "just outside the window");

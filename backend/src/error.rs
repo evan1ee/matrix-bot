@@ -18,31 +18,52 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn bad_request(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::BAD_REQUEST, message: msg.into() }
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: msg.into(),
+        }
     }
     pub fn unauthorized(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::UNAUTHORIZED, message: msg.into() }
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: msg.into(),
+        }
     }
     pub fn not_found(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::NOT_FOUND, message: msg.into() }
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: msg.into(),
+        }
     }
     /// The caller is authenticated but this particular action is not open to
     /// them right now. Distinct from a 401 so the client knows to prompt for a
     /// passkey rather than sending the user back to sign in.
     pub fn forbidden(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::FORBIDDEN, message: msg.into() }
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: msg.into(),
+        }
     }
     /// The request is valid but conflicts with existing state — a duplicate
     /// name, say. Distinct from a 400 so clients can tell "you typed something
     /// wrong" from "that already exists".
     pub fn conflict(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::CONFLICT, message: msg.into() }
+        Self {
+            status: StatusCode::CONFLICT,
+            message: msg.into(),
+        }
     }
     pub fn too_many_requests(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::TOO_MANY_REQUESTS, message: msg.into() }
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: msg.into(),
+        }
     }
     pub fn gateway_timeout(msg: impl Into<String>) -> Self {
-        Self { status: StatusCode::GATEWAY_TIMEOUT, message: msg.into() }
+        Self {
+            status: StatusCode::GATEWAY_TIMEOUT,
+            message: msg.into(),
+        }
     }
     /// Records the underlying failure and returns an opaque 500.
     ///
@@ -103,9 +124,8 @@ mod tests {
     /// Internal failures must not describe themselves to the caller.
     #[test]
     fn test_internal_errors_do_not_leak_detail() {
-        let err = ApiError::internal(
-            "error returned from database: no such column: todos.secret_column",
-        );
+        let err =
+            ApiError::internal("error returned from database: no such column: todos.secret_column");
         assert_eq!(err.message, "Internal server error");
         assert!(!err.message.contains("todos"));
 

@@ -82,14 +82,22 @@ impl BookmarksRepository {
             "SELECT id, owner_id, url, title, description, author, image_url, \
                     domain, reader_content, reading_time_minutes, is_favorite, \
                     is_archived, tags, created_at, updated_at \
-             FROM bookmarks WHERE owner_id = ?"
+             FROM bookmarks WHERE owner_id = ?",
         );
 
         if let Some(archived) = query.archived {
-            sql.push_str(if archived { " AND is_archived = 1" } else { " AND is_archived = 0" });
+            sql.push_str(if archived {
+                " AND is_archived = 1"
+            } else {
+                " AND is_archived = 0"
+            });
         }
         if let Some(favorite) = query.favorite {
-            sql.push_str(if favorite { " AND is_favorite = 1" } else { " AND is_favorite = 0" });
+            sql.push_str(if favorite {
+                " AND is_favorite = 1"
+            } else {
+                " AND is_favorite = 0"
+            });
         }
         if let Some(ref domain) = query.domain {
             if !domain.trim().is_empty() {
@@ -135,18 +143,22 @@ impl BookmarksRepository {
         Ok(items)
     }
 
-    pub async fn count(
-        pool: &SqlitePool,
-        owner_id: &str,
-        query: &BookmarkQuery,
-    ) -> Result<i64> {
+    pub async fn count(pool: &SqlitePool, owner_id: &str, query: &BookmarkQuery) -> Result<i64> {
         let mut sql = String::from("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ?");
 
         if let Some(archived) = query.archived {
-            sql.push_str(if archived { " AND is_archived = 1" } else { " AND is_archived = 0" });
+            sql.push_str(if archived {
+                " AND is_archived = 1"
+            } else {
+                " AND is_archived = 0"
+            });
         }
         if let Some(favorite) = query.favorite {
-            sql.push_str(if favorite { " AND is_favorite = 1" } else { " AND is_favorite = 0" });
+            sql.push_str(if favorite {
+                " AND is_favorite = 1"
+            } else {
+                " AND is_favorite = 0"
+            });
         }
         if let Some(ref domain) = query.domain {
             if !domain.trim().is_empty() {
@@ -201,7 +213,10 @@ impl BookmarksRepository {
             .ok_or_else(|| anyhow::anyhow!("Bookmark not found"))?;
 
         let title = input.title.as_deref().unwrap_or(&existing.title);
-        let description = input.description.as_deref().or(existing.description.as_deref());
+        let description = input
+            .description
+            .as_deref()
+            .or(existing.description.as_deref());
         let is_favorite = input.is_favorite.unwrap_or(existing.is_favorite);
         let is_archived = input.is_archived.unwrap_or(existing.is_archived);
         let tags_str = input
@@ -233,11 +248,7 @@ impl BookmarksRepository {
         Ok(updated)
     }
 
-    pub async fn toggle_favorite(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Bookmark> {
+    pub async fn toggle_favorite(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Bookmark> {
         let updated = sqlx::query_as::<_, Bookmark>(
             r#"
             UPDATE bookmarks
@@ -256,11 +267,7 @@ impl BookmarksRepository {
         Ok(updated)
     }
 
-    pub async fn toggle_archived(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Bookmark> {
+    pub async fn toggle_archived(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Bookmark> {
         let updated = sqlx::query_as::<_, Bookmark>(
             r#"
             UPDATE bookmarks
@@ -295,20 +302,23 @@ impl BookmarksRepository {
             .fetch_one(pool)
             .await?;
 
-        let unread: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 0")
-            .bind(owner_id)
-            .fetch_one(pool)
-            .await?;
+        let unread: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 0")
+                .bind(owner_id)
+                .fetch_one(pool)
+                .await?;
 
-        let archived: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 1")
-            .bind(owner_id)
-            .fetch_one(pool)
-            .await?;
+        let archived: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 1")
+                .bind(owner_id)
+                .fetch_one(pool)
+                .await?;
 
-        let favorite: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_favorite = 1")
-            .bind(owner_id)
-            .fetch_one(pool)
-            .await?;
+        let favorite: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_favorite = 1")
+                .bind(owner_id)
+                .fetch_one(pool)
+                .await?;
 
         let domain_rows = sqlx::query_as::<_, (String, i64)>(
             r#"
@@ -364,9 +374,10 @@ mod tests {
     async fn setup_db() -> (SqlitePool, String) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         crate::db::schema::run_migrations(&pool).await.unwrap();
-        let owner = crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-            .await
-            .unwrap();
+        let owner =
+            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
+                .await
+                .unwrap();
         (pool, owner)
     }
 
@@ -428,8 +439,13 @@ mod tests {
         assert!(stats.tags.contains(&"tech".to_string()));
 
         // Delete
-        let deleted = BookmarksRepository::delete(&pool, b1.id, &owner).await.unwrap();
+        let deleted = BookmarksRepository::delete(&pool, b1.id, &owner)
+            .await
+            .unwrap();
         assert!(deleted);
-        assert!(BookmarksRepository::find_by_id(&pool, b1.id, &owner).await.unwrap().is_none());
+        assert!(BookmarksRepository::find_by_id(&pool, b1.id, &owner)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

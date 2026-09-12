@@ -105,9 +105,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await;
 
-    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN max_history_turns INTEGER NOT NULL DEFAULT 10;")
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE user_settings ADD COLUMN max_history_turns INTEGER NOT NULL DEFAULT 10;",
+    )
+    .execute(pool)
+    .await;
 
     // Investment holdings. One row per (owner, symbol) — `quantity_minor` and
     // `avg_cost_minor` are integers so weighted-average cost math never touches
@@ -327,16 +329,14 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // Composite indexes for performance optimization
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger ON reminders(status, trigger_at);"
+        "CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger ON reminders(status, trigger_at);",
     )
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_todos_sender_room ON todos(owner_id, room_id);"
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_todos_sender_room ON todos(owner_id, room_id);")
+        .execute(pool)
+        .await?;
 
     // Migration helper for existing sqlite DBs missing retry_count column
     let _ = sqlx::query("ALTER TABLE reminders ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;")
@@ -387,25 +387,58 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Link transactions to external originating sources (e.g. recurring_bill, portfolio_cash).
-    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_kind TEXT;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_id INTEGER;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_kind TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE transactions ADD COLUMN source_id INTEGER;")
+        .execute(pool)
+        .await;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions(source_kind, source_id);").execute(pool).await?;
 
     // Migration helpers for recurring_bills columns on existing SQLite DBs
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN due_day INTEGER;").execute(pool).await;
+    let _ = sqlx::query(
+        "ALTER TABLE recurring_bills ADD COLUMN currency_exponent INTEGER NOT NULL DEFAULT 2;",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE recurring_bills ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN due_day INTEGER;")
+        .execute(pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN total_installments INTEGER;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN total_installments INTEGER;")
+        .execute(pool)
+        .await;
     // Lead-time reminder, mirroring the todo columns above: minutes before
     // `next_due_at`, and where to deliver it when the bill has no room of its
     // own (the `web` sentinel).
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_before_minutes INTEGER;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_room_id TEXT;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN paid_installments INTEGER NOT NULL DEFAULT 0;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT 0;").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN status TEXT NOT NULL DEFAULT 'active';").execute(pool).await;
-    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN notes TEXT;").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_before_minutes INTEGER;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN remind_room_id TEXT;")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE recurring_bills ADD COLUMN paid_installments INTEGER NOT NULL DEFAULT 0;",
+    )
+    .execute(pool)
+    .await;
+    let _ =
+        sqlx::query("ALTER TABLE recurring_bills ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT 0;")
+            .execute(pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE recurring_bills ADD COLUMN status TEXT NOT NULL DEFAULT 'active';",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("ALTER TABLE recurring_bills ADD COLUMN notes TEXT;")
+        .execute(pool)
+        .await;
 
     // `due_at` used to hold the rendered display string (`2026-12-31 23:59 UTC`),
     // which cannot be compared or subtracted from. Rewrite legacy rows into the
@@ -440,9 +473,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000';")
         .execute(pool)
         .await;
-    let _ = sqlx::query("ALTER TABLE portfolio_audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT '';")
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE portfolio_audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT '';",
+    )
+    .execute(pool)
+    .await;
 
     // One-shot data conversions, kept out of the DDL above because they are a
     // different job: this function describes the shape of the database, and
@@ -452,7 +487,6 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Database migrations applied successfully.");
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -486,7 +520,10 @@ mod tests {
             "user_settings",
             "web_users",
         ] {
-            assert!(tables.contains(&expected.to_string()), "missing table {expected}");
+            assert!(
+                tables.contains(&expected.to_string()),
+                "missing table {expected}"
+            );
         }
     }
 
@@ -503,7 +540,10 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         let third = table_names(&pool).await;
 
-        assert_eq!(first, third, "re-running migrations must not change the schema");
+        assert_eq!(
+            first, third,
+            "re-running migrations must not change the schema"
+        );
     }
 
     /// Re-running migrations must not disturb rows that already exist.
@@ -545,7 +585,10 @@ mod tests {
             sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
                 .execute(&pool)
                 .await;
-        assert!(duplicate.is_err(), "a duplicate name must be rejected by the index");
+        assert!(
+            duplicate.is_err(),
+            "a duplicate name must be rejected by the index"
+        );
 
         // A different owner may reuse the name.
         sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')")

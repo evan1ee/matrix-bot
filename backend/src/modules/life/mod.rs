@@ -33,7 +33,8 @@ impl BotModule for LifeModule {
             CommandHelp {
                 name: "life stats".to_string(),
                 usage: "!life stats".to_string(),
-                description: "View life summary: age in days, % elapsed, and log summary".to_string(),
+                description: "View life summary: age in days, % elapsed, and log summary"
+                    .to_string(),
             },
             CommandHelp {
                 name: "life today".to_string(),

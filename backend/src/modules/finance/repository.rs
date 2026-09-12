@@ -211,7 +211,11 @@ impl FinanceRepository {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Transaction>> {
-        let filter = if direction.is_some() { "AND t.direction = ?" } else { "" };
+        let filter = if direction.is_some() {
+            "AND t.direction = ?"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT {TX_COLUMNS} FROM transactions t \
              LEFT JOIN finance_categories c ON c.id = t.category_id \
@@ -229,9 +233,12 @@ impl FinanceRepository {
     }
 
     pub async fn count(pool: &SqlitePool, owner_id: &str, direction: Option<&str>) -> Result<i64> {
-        let filter = if direction.is_some() { "AND direction = ?" } else { "" };
-        let sql =
-            format!("SELECT COUNT(*) FROM transactions WHERE owner_id = ? {filter}");
+        let filter = if direction.is_some() {
+            "AND direction = ?"
+        } else {
+            ""
+        };
+        let sql = format!("SELECT COUNT(*) FROM transactions WHERE owner_id = ? {filter}");
 
         let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(owner_id);
         if let Some(dir) = direction {
@@ -395,8 +402,19 @@ mod tests {
         when: DateTime<Utc>,
     ) -> Transaction {
         FinanceRepository::create_transaction(
-            pool, "web", owner, "tester", direction, minor, currency, exponent, category_id,
-            Some("note"), None, None, when,
+            pool,
+            "web",
+            owner,
+            "tester",
+            direction,
+            minor,
+            currency,
+            exponent,
+            category_id,
+            Some("note"),
+            None,
+            None,
+            when,
         )
         .await
         .unwrap()
@@ -406,35 +424,77 @@ mod tests {
     async fn test_category_names_are_unique_per_owner_not_globally() {
         let pool = setup().await;
 
-        assert!(FinanceRepository::create_category(&pool, "@a:x", "food").await.unwrap().is_some());
+        assert!(FinanceRepository::create_category(&pool, "@a:x", "food")
+            .await
+            .unwrap()
+            .is_some());
         // Same name, same owner: rejected.
-        assert!(FinanceRepository::create_category(&pool, "@a:x", "food").await.unwrap().is_none());
+        assert!(FinanceRepository::create_category(&pool, "@a:x", "food")
+            .await
+            .unwrap()
+            .is_none());
         // Same name, different owner: fine — categories are personal.
-        assert!(FinanceRepository::create_category(&pool, "@b:x", "food").await.unwrap().is_some());
+        assert!(FinanceRepository::create_category(&pool, "@b:x", "food")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     /// Deleting a category must never destroy financial records.
     #[tokio::test]
     async fn test_deleting_a_category_uncategorises_rather_than_deletes() {
         let pool = setup().await;
-        let cat = FinanceRepository::create_category(&pool, "@a:x", "food").await.unwrap().unwrap();
-        let tx = log(&pool, "@a:x", "expense", 1550, "EUR", 2, Some(cat.id), Utc::now()).await;
+        let cat = FinanceRepository::create_category(&pool, "@a:x", "food")
+            .await
+            .unwrap()
+            .unwrap();
+        let tx = log(
+            &pool,
+            "@a:x",
+            "expense",
+            1550,
+            "EUR",
+            2,
+            Some(cat.id),
+            Utc::now(),
+        )
+        .await;
 
-        let orphaned = FinanceRepository::delete_category(&pool, "@a:x", cat.id).await.unwrap();
+        let orphaned = FinanceRepository::delete_category(&pool, "@a:x", cat.id)
+            .await
+            .unwrap();
         assert_eq!(orphaned, Some(1));
 
-        let still_there = FinanceRepository::find(&pool, tx.id).await.unwrap().unwrap();
+        let still_there = FinanceRepository::find(&pool, tx.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(still_there.amount_minor, 1550, "the entry must survive");
-        assert!(still_there.category_id.is_none(), "and be left uncategorised");
+        assert!(
+            still_there.category_id.is_none(),
+            "and be left uncategorised"
+        );
     }
 
     #[tokio::test]
     async fn test_cannot_delete_another_owners_category() {
         let pool = setup().await;
-        let cat = FinanceRepository::create_category(&pool, "@a:x", "food").await.unwrap().unwrap();
+        let cat = FinanceRepository::create_category(&pool, "@a:x", "food")
+            .await
+            .unwrap()
+            .unwrap();
 
-        assert!(FinanceRepository::delete_category(&pool, "@b:x", cat.id).await.unwrap().is_none());
-        assert_eq!(FinanceRepository::list_categories(&pool, "@a:x").await.unwrap().len(), 1);
+        assert!(FinanceRepository::delete_category(&pool, "@b:x", cat.id)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            FinanceRepository::list_categories(&pool, "@a:x")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -443,11 +503,16 @@ mod tests {
         log(&pool, "@a:x", "expense", 100, "EUR", 2, None, Utc::now()).await;
         let theirs = log(&pool, "@b:x", "expense", 200, "EUR", 2, None, Utc::now()).await;
 
-        let mine = FinanceRepository::list(&pool, "@a:x", None, 25, 0).await.unwrap();
+        let mine = FinanceRepository::list(&pool, "@a:x", None, 25, 0)
+            .await
+            .unwrap();
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].amount_minor, 100);
 
-        assert!(FinanceRepository::find_owned(&pool, theirs.id, "@a:x").await.unwrap().is_none());
+        assert!(FinanceRepository::find_owned(&pool, theirs.id, "@a:x")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -456,11 +521,21 @@ mod tests {
         log(&pool, "@a:x", "expense", 100, "EUR", 2, None, Utc::now()).await;
         log(&pool, "@a:x", "income", 900, "EUR", 2, None, Utc::now()).await;
 
-        let expenses = FinanceRepository::list(&pool, "@a:x", Some("expense"), 25, 0).await.unwrap();
+        let expenses = FinanceRepository::list(&pool, "@a:x", Some("expense"), 25, 0)
+            .await
+            .unwrap();
         assert_eq!(expenses.len(), 1);
         assert_eq!(expenses[0].direction, "expense");
-        assert_eq!(FinanceRepository::count(&pool, "@a:x", Some("income")).await.unwrap(), 1);
-        assert_eq!(FinanceRepository::count(&pool, "@a:x", None).await.unwrap(), 2);
+        assert_eq!(
+            FinanceRepository::count(&pool, "@a:x", Some("income"))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            FinanceRepository::count(&pool, "@a:x", None).await.unwrap(),
+            2
+        );
     }
 
     /// Currencies must never be added together — without a rate source the sum
@@ -474,7 +549,10 @@ mod tests {
         log(&pool, "@a:x", "income", 300000, "JPY", 0, None, now).await;
 
         let summaries = FinanceRepository::summary(
-            &pool, "@a:x", now - Duration::days(1), now + Duration::days(1),
+            &pool,
+            "@a:x",
+            now - Duration::days(1),
+            now + Duration::days(1),
         )
         .await
         .unwrap();
@@ -496,14 +574,20 @@ mod tests {
     async fn test_summary_groups_by_category_including_uncategorised() {
         let pool = setup().await;
         let now = Utc::now();
-        let food = FinanceRepository::create_category(&pool, "@a:x", "food").await.unwrap().unwrap();
+        let food = FinanceRepository::create_category(&pool, "@a:x", "food")
+            .await
+            .unwrap()
+            .unwrap();
 
         log(&pool, "@a:x", "expense", 1000, "EUR", 2, Some(food.id), now).await;
         log(&pool, "@a:x", "expense", 250, "EUR", 2, Some(food.id), now).await;
         log(&pool, "@a:x", "expense", 700, "EUR", 2, None, now).await;
 
         let summaries = FinanceRepository::summary(
-            &pool, "@a:x", now - Duration::days(1), now + Duration::days(1),
+            &pool,
+            "@a:x",
+            now - Duration::days(1),
+            now + Duration::days(1),
         )
         .await
         .unwrap();
@@ -511,10 +595,18 @@ mod tests {
         let eur = &summaries[0];
         assert_eq!(eur.expense_minor, 1950);
 
-        let food_bucket = eur.categories.iter().find(|c| c.category.as_deref() == Some("food")).unwrap();
+        let food_bucket = eur
+            .categories
+            .iter()
+            .find(|c| c.category.as_deref() == Some("food"))
+            .unwrap();
         assert_eq!(food_bucket.expense_minor, 1250);
 
-        let uncategorised = eur.categories.iter().find(|c| c.category.is_none()).unwrap();
+        let uncategorised = eur
+            .categories
+            .iter()
+            .find(|c| c.category.is_none())
+            .unwrap();
         assert_eq!(uncategorised.expense_minor, 700);
     }
 
@@ -529,7 +621,9 @@ mod tests {
         log(&pool, "@a:x", "expense", 100, "EUR", 2, None, start).await;
         log(&pool, "@a:x", "expense", 500, "EUR", 2, None, end).await;
 
-        let summaries = FinanceRepository::summary(&pool, "@a:x", start, end).await.unwrap();
+        let summaries = FinanceRepository::summary(&pool, "@a:x", start, end)
+            .await
+            .unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].expense_minor, 100);
     }

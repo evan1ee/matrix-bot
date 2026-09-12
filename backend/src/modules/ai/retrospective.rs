@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use chrono::{Duration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 use crate::modules::finance::money::format_amount;
@@ -79,7 +79,12 @@ pub async fn generate_weekly_retrospective(
         .and_hms_opt(0, 0, 0)
         .and_then(|naive_dt| tz.from_local_datetime(&naive_dt).single())
         .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|| seven_days_ago.and_hms_opt(0, 0, 0).expect("valid midnight").and_utc());
+        .unwrap_or_else(|| {
+            seven_days_ago
+                .and_hms_opt(0, 0, 0)
+                .expect("valid midnight")
+                .and_utc()
+        });
 
     let summaries = FinanceRepository::summary(pool, owner_id, start_dt, now).await?;
 
@@ -96,7 +101,10 @@ pub async fn generate_weekly_retrospective(
     spends_by_currency.sort_by(|a, b| a.currency.cmp(&b.currency));
 
     let (currency, total_spent_minor, total_income_minor, net_cashflow_minor) =
-        if let Some(primary) = spends_by_currency.iter().find(|s| s.currency == default_currency) {
+        if let Some(primary) = spends_by_currency
+            .iter()
+            .find(|s| s.currency == default_currency)
+        {
             (
                 default_currency.clone(),
                 primary.spent_minor,
@@ -183,7 +191,12 @@ pub async fn generate_weekly_retrospective(
             }
         });
         all_cats.first().map(|(name, amount, curr, exp)| {
-            format!("{} ({} {})", name, curr, format_amount(*amount, *exp as u32))
+            format!(
+                "{} ({} {})",
+                name,
+                curr,
+                format_amount(*amount, *exp as u32)
+            )
         })
     };
 
@@ -193,7 +206,8 @@ pub async fn generate_weekly_retrospective(
     let active_tasks_count = all_tasks.iter().filter(|t| !t.completed).count();
 
     // 3. Habits
-    let habits_with_status = HabitsRepository::find_all_with_status(pool, owner_id, &period_end).await?;
+    let habits_with_status =
+        HabitsRepository::find_all_with_status(pool, owner_id, &period_end).await?;
     let active_habits_count = habits_with_status.len();
     let mut total_possible_habit_days = 0;
     let mut total_completed_habit_days = 0;
@@ -205,7 +219,8 @@ pub async fn generate_weekly_retrospective(
     }
 
     let habits_adherence_percent = if total_possible_habit_days > 0 {
-        ((total_completed_habit_days as f64) / (total_possible_habit_days as f64) * 1000.0).round() / 10.0
+        ((total_completed_habit_days as f64) / (total_possible_habit_days as f64) * 1000.0).round()
+            / 10.0
     } else {
         0.0
     };
@@ -216,9 +231,7 @@ pub async fn generate_weekly_retrospective(
     let mut bills_by_currency: HashMap<String, (i64, i64)> = HashMap::new();
 
     for b in &bills {
-        if b.status == "active"
-            && b.next_due_at.as_str() <= next_period_end.as_str()
-        {
+        if b.status == "active" && b.next_due_at.as_str() <= next_period_end.as_str() {
             upcoming_bills_count += 1;
             let entry = bills_by_currency
                 .entry(b.currency.to_uppercase())
@@ -237,8 +250,9 @@ pub async fn generate_weekly_retrospective(
         .collect();
     upcoming_bills_by_currency.sort_by(|a, b| a.currency.cmp(&b.currency));
 
-    let upcoming_bills_total_minor = if let Some(primary_bill) =
-        upcoming_bills_by_currency.iter().find(|b| b.currency == default_currency)
+    let upcoming_bills_total_minor = if let Some(primary_bill) = upcoming_bills_by_currency
+        .iter()
+        .find(|b| b.currency == default_currency)
     {
         primary_bill.total_minor
     } else if let Some(first_bill) = upcoming_bills_by_currency.first() {
@@ -272,7 +286,9 @@ pub async fn generate_weekly_retrospective(
     let mut mood_counts: HashMap<String, usize> = HashMap::new();
 
     for i in 0..7 {
-        let d = (seven_days_ago + Duration::days(i)).format("%Y-%m-%d").to_string();
+        let d = (seven_days_ago + Duration::days(i))
+            .format("%Y-%m-%d")
+            .to_string();
         if let Ok(Some(log)) = LifeRepository::get_day_log(pool, owner_id, &d).await {
             days_logged_count += 1;
             *mood_counts.entry(log.mood.to_lowercase()).or_insert(0) += 1;
@@ -477,7 +493,9 @@ mod tests {
         .unwrap();
 
         // Add upcoming bills in USD and CNY
-        let tomorrow = (Utc::now() + Duration::days(1)).format("%Y-%m-%d").to_string();
+        let tomorrow = (Utc::now() + Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         RecurringBillRepository::create(
             &pool,
             "room1",
@@ -535,9 +553,17 @@ mod tests {
 
         // spends_by_currency must separate both currencies
         assert_eq!(retro.spends_by_currency.len(), 2);
-        let cny = retro.spends_by_currency.iter().find(|s| s.currency == "CNY").unwrap();
+        let cny = retro
+            .spends_by_currency
+            .iter()
+            .find(|s| s.currency == "CNY")
+            .unwrap();
         assert_eq!(cny.spent_minor, 4500);
-        let usd = retro.spends_by_currency.iter().find(|s| s.currency == "USD").unwrap();
+        let usd = retro
+            .spends_by_currency
+            .iter()
+            .find(|s| s.currency == "USD")
+            .unwrap();
         assert_eq!(usd.spent_minor, 1650);
 
         // Formatted spent must state both currencies explicitly without summing
@@ -546,11 +572,19 @@ mod tests {
         assert!(!retro.formatted_spent.contains("61.50"));
 
         // Markdown must show formatted spent and upcoming bills without summing
-        assert!(retro.formatted_markdown.contains("**Total Spent**: `CNY 45.00, USD 16.50`"));
-        assert!(retro.formatted_markdown.contains("Due Bills**: 2 bills (`CNY 30.00, USD 10.00`)"));
+        assert!(retro
+            .formatted_markdown
+            .contains("**Total Spent**: `CNY 45.00, USD 16.50`"));
+        assert!(retro
+            .formatted_markdown
+            .contains("Due Bills**: 2 bills (`CNY 30.00, USD 10.00`)"));
 
         // Top category must show category and currency without cross-currency addition
-        assert!(retro.top_expense_category.as_ref().unwrap().contains("Groceries (CNY 45.00)"));
+        assert!(retro
+            .top_expense_category
+            .as_ref()
+            .unwrap()
+            .contains("Groceries (CNY 45.00)"));
 
         // Upcoming bills count is 2, and upcoming_bills_by_currency keeps them apart
         assert_eq!(retro.upcoming_bills_count, 2);

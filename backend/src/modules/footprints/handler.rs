@@ -24,7 +24,10 @@ pub async fn handle_footprint_command(
     let trimmed = raw_args.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("list") {
         Some(handle_list(pool, owner_id).await)
-    } else if let Some(rest) = trimmed.strip_prefix("delete").or_else(|| trimmed.strip_prefix("rm")) {
+    } else if let Some(rest) = trimmed
+        .strip_prefix("delete")
+        .or_else(|| trimmed.strip_prefix("rm"))
+    {
         Some(handle_delete(pool, broadcaster, owner_id, rest.trim()).await)
     } else if let Some(rest) = trimmed.strip_prefix("add") {
         Some(handle_add(pool, broadcaster, owner_id, rest.trim()).await)
@@ -34,13 +37,14 @@ pub async fn handle_footprint_command(
 }
 
 async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
-    let footprints = match FootprintRepository::list_by_owner(pool, owner_id, None, None, None).await {
-        Ok(list) => list,
-        Err(e) => {
-            error!("Failed to list footprints: {}", e);
-            return "<p>⚠️ Failed to load your footprints.</p>".to_string();
-        }
-    };
+    let footprints =
+        match FootprintRepository::list_by_owner(pool, owner_id, None, None, None).await {
+            Ok(list) => list,
+            Err(e) => {
+                error!("Failed to list footprints: {}", e);
+                return "<p>⚠️ Failed to load your footprints.</p>".to_string();
+            }
+        };
 
     let summary = FootprintRepository::summary_stats(pool, owner_id)
         .await
@@ -54,7 +58,8 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
     if footprints.is_empty() {
         return "<p>🌍 <strong>No footprints recorded yet.</strong><br/>\
                 Use <code>!footprint add &lt;Place Name&gt; [| YYYY-MM-DD]</code> \
-                or drop a star on the interactive web map!</p>".to_string();
+                or drop a star on the interactive web map!</p>"
+            .to_string();
     }
 
     let mut out = format!(
@@ -71,7 +76,11 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
             (None, Some(co)) => format!(" ({})", html_escape(co)),
             (None, None) => String::new(),
         };
-        let dep = fp.departure_date.as_deref().map(|d| format!(" → {}", d)).unwrap_or_default();
+        let dep = fp
+            .departure_date
+            .as_deref()
+            .map(|d| format!(" → {}", d))
+            .unwrap_or_default();
         out.push_str(&format!(
             "<li><strong>#{}</strong>: <strong>{}</strong>{} — <em>{}</em> ({} {}{})</li>",
             fp.id,
@@ -80,13 +89,20 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
             stars,
             fp.arrival_date,
             dep,
-            if fp.stay_duration_days > 1 { format!(", {} days", fp.stay_duration_days) } else { "".to_string() }
+            if fp.stay_duration_days > 1 {
+                format!(", {} days", fp.stay_duration_days)
+            } else {
+                "".to_string()
+            }
         ));
     }
 
     out.push_str("</ul>");
     if footprints.len() > 10 {
-        out.push_str(&format!("<p><em>...and {} more places on your interactive map.</em></p>", footprints.len() - 10));
+        out.push_str(&format!(
+            "<p><em>...and {} more places on your interactive map.</em></p>",
+            footprints.len() - 10
+        ));
     }
 
     out
@@ -109,8 +125,16 @@ async fn handle_add(
     }
 
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let arrival_date: &str = parts.get(1).filter(|s| !s.is_empty()).copied().unwrap_or(&today);
-    let rating = parts.get(2).and_then(|s| s.parse::<i64>().ok()).unwrap_or(5).clamp(1, 5);
+    let arrival_date: &str = parts
+        .get(1)
+        .filter(|s| !s.is_empty())
+        .copied()
+        .unwrap_or(&today);
+    let rating = parts
+        .get(2)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(5)
+        .clamp(1, 5);
     let note = parts.get(3).copied();
 
     // Default to 0,0 if added via text command without coordinates (user can set coordinates later on map)
@@ -168,7 +192,10 @@ async fn handle_delete(
     match FootprintRepository::delete(pool, id, owner_id).await {
         Ok(true) => {
             if let Some(b) = broadcaster {
-                b.send(SystemEvent::FootprintDeleted { id, owner_id: owner_id.to_string() });
+                b.send(SystemEvent::FootprintDeleted {
+                    id,
+                    owner_id: owner_id.to_string(),
+                });
             }
             format!("<p>🗑️ Footprint #{} deleted.</p>", id)
         }

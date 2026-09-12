@@ -57,24 +57,24 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in">
       <div
-        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg w-full max-w-md overflow-hidden shadow-lg transition-all"
+        className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg w-full max-w-md overflow-hidden shadow-lg transition-all"
         role="dialog"
         aria-modal="true"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
           <div>
-            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
               {profile ? 'Edit life profile' : 'Set up life grid'}
             </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
               Visualize every single day of your lifespan.
             </p>
           </div>
           {profile && (
             <button
               onClick={onClose}
-              className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="p-1 rounded text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -91,7 +91,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
 
           {/* Birth Date */}
           <div>
-            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+            <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
               Date of birth
             </label>
             <DatePicker
@@ -101,7 +101,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
               max={new Date().toISOString().split('T')[0]}
               placeholder="Select date of birth"
             />
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">
               Anchors your timeline from Day 1.
             </p>
           </div>
@@ -109,10 +109,10 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
           {/* Expected Lifespan */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 Assumed lifespan
               </label>
-              <span className="text-xs font-mono font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">
+              <span className="text-xs font-mono font-medium text-neutral-900 dark:text-neutral-100 tabular-nums">
                 {lifespan} years
               </span>
             </div>
@@ -123,9 +123,9 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
               step={1}
               value={lifespan}
               onChange={(e) => setLifespan(Number(e.target.value))}
-              className="w-full accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+              className="w-full accent-neutral-900 dark:accent-neutral-100 cursor-pointer"
             />
-            <div className="flex justify-between text-xs text-zinc-400 dark:text-zinc-500 mt-1 tabular-nums">
+            <div className="flex justify-between text-xs text-neutral-400 dark:text-neutral-500 mt-1 tabular-nums">
               <span>40 yrs</span>
               <span className="font-mono">
                 ~{totalDays.toLocaleString()} days
@@ -135,12 +135,12 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
           </div>
 
           {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
             {profile && (
               <button
                 type="button"
                 onClick={onClose}
-                className="h-9 px-3.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md transition-colors cursor-pointer"
+                className="h-9 px-3.5 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -148,7 +148,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
             <button
               type="submit"
               disabled={isSaving}
-              className="h-9 px-4 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
+              className="h-9 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
             >
               {isSaving ? 'Saving...' : 'Save profile'}
             </button>

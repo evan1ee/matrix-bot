@@ -51,12 +51,21 @@ mod tests {
 
     #[test]
     fn test_todo_priority_conversion() {
-        assert_eq!(TodoPriority::from_str_or_default("high"), TodoPriority::High);
+        assert_eq!(
+            TodoPriority::from_str_or_default("high"),
+            TodoPriority::High
+        );
         assert_eq!(TodoPriority::from_str_or_default("h"), TodoPriority::High);
         assert_eq!(TodoPriority::from_str_or_default("low"), TodoPriority::Low);
         assert_eq!(TodoPriority::from_str_or_default("l"), TodoPriority::Low);
-        assert_eq!(TodoPriority::from_str_or_default("medium"), TodoPriority::Medium);
-        assert_eq!(TodoPriority::from_str_or_default("anything_else"), TodoPriority::Medium);
+        assert_eq!(
+            TodoPriority::from_str_or_default("medium"),
+            TodoPriority::Medium
+        );
+        assert_eq!(
+            TodoPriority::from_str_or_default("anything_else"),
+            TodoPriority::Medium
+        );
 
         assert_eq!(TodoPriority::High.as_str(), "high");
         assert_eq!(TodoPriority::Medium.as_str(), "medium");

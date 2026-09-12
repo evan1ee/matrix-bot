@@ -48,7 +48,10 @@ pub async fn notify_account(
     let mxids = match AccountRepository::linked_mxids(&db.pool, account_id).await {
         Ok(mxids) => mxids,
         Err(err) => {
-            error!("Could not read linked identities for {}: {:?}", account_id, err);
+            error!(
+                "Could not read linked identities for {}: {:?}",
+                account_id, err
+            );
             return;
         }
     };
@@ -90,10 +93,16 @@ pub async fn send_dm(client: &Client, mxid: &str, body: &str) {
     match client.create_dm(&user_id).await {
         Ok(room) => {
             if let Err(err) = room.send(content).await {
-                error!("Could not send a notification to the new DM with {}: {:?}", mxid, err);
+                error!(
+                    "Could not send a notification to the new DM with {}: {:?}",
+                    mxid, err
+                );
             }
         }
-        Err(err) => error!("Could not open a DM with {} to notify them: {:?}", mxid, err),
+        Err(err) => error!(
+            "Could not open a DM with {} to notify them: {:?}",
+            mxid, err
+        ),
     }
 }
 
@@ -122,10 +131,16 @@ pub async fn send_dm_html(client: &Client, mxid: &str, plain: &str, html: &str) 
     match client.create_dm(&user_id).await {
         Ok(room) => {
             if let Err(err) = room.send(content).await {
-                error!("Could not send an HTML notification to the new DM with {}: {:?}", mxid, err);
+                error!(
+                    "Could not send an HTML notification to the new DM with {}: {:?}",
+                    mxid, err
+                );
             }
         }
-        Err(err) => error!("Could not open a DM with {} to notify them: {:?}", mxid, err),
+        Err(err) => error!(
+            "Could not open a DM with {} to notify them: {:?}",
+            mxid, err
+        ),
     }
 }
 
@@ -147,7 +162,9 @@ mod tests {
     #[tokio::test]
     async fn test_the_event_is_logged_even_with_nowhere_to_send_it() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         notify_account(
             None,
@@ -158,7 +175,9 @@ mod tests {
         )
         .await;
 
-        let events = SecurityEventRepository::list(&db.pool, &account, 10).await.unwrap();
+        let events = SecurityEventRepository::list(&db.pool, &account, 10)
+            .await
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "recovery_requested");
         assert_eq!(events[0].detail.as_deref(), Some("from @evan:mbm.one"));
@@ -169,6 +188,13 @@ mod tests {
     #[tokio::test]
     async fn test_notifying_a_missing_account_is_harmless() {
         let db = db().await;
-        notify_account(None, &db, "acct_gone", SecurityEventKind::PasskeyRemoved, None).await;
+        notify_account(
+            None,
+            &db,
+            "acct_gone",
+            SecurityEventKind::PasskeyRemoved,
+            None,
+        )
+        .await;
     }
 }

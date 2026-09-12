@@ -34,8 +34,7 @@ impl BotModule for FinanceModule {
             CommandHelp {
                 name: "expense add".to_string(),
                 usage: "!expense add <amount> [CUR] <note> [-c <category>]".to_string(),
-                description: "Log spending (e.g. !expense add 15.50 EUR lunch -c food)"
-                    .to_string(),
+                description: "Log spending (e.g. !expense add 15.50 EUR lunch -c food)".to_string(),
             },
             CommandHelp {
                 name: "income add".to_string(),
@@ -99,7 +98,12 @@ mod tests {
             sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
-            command: body.split_whitespace().next().unwrap_or("").trim_start_matches('!').to_string(),
+            command: body
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('!')
+                .to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
@@ -122,7 +126,9 @@ mod tests {
         assert!(commands.iter().any(|c| c.name == "income add"));
         assert!(commands.iter().any(|c| c.name == "category"));
         // Every advertised command needs usage text, or help is useless.
-        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+        assert!(commands
+            .iter()
+            .all(|c| !c.usage.is_empty() && !c.description.is_empty()));
     }
 
     /// The module must claim its own commands and nothing else, or it will
@@ -132,13 +138,31 @@ mod tests {
         let module = FinanceModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!expense list"), &db, None).await.is_some());
-        assert!(module.handle_command(&ctx("!income list"), &db, None).await.is_some());
-        assert!(module.handle_command(&ctx("!category list"), &db, None).await.is_some());
+        assert!(module
+            .handle_command(&ctx("!expense list"), &db, None)
+            .await
+            .is_some());
+        assert!(module
+            .handle_command(&ctx("!income list"), &db, None)
+            .await
+            .is_some());
+        assert!(module
+            .handle_command(&ctx("!category list"), &db, None)
+            .await
+            .is_some());
 
-        assert!(module.handle_command(&ctx("!todo add milk"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!remind me later"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("hello there"), &db, None).await.is_none());
+        assert!(module
+            .handle_command(&ctx("!todo add milk"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!remind me later"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("hello there"), &db, None)
+            .await
+            .is_none());
     }
 
     /// An end-to-end pass through the module: log an entry, then read it back.
@@ -151,11 +175,20 @@ mod tests {
             .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db, None)
             .await
             .expect("the module must answer");
-        assert!(reply.contains("15.50"), "reply should confirm the amount: {reply}");
+        assert!(
+            reply.contains("15.50"),
+            "reply should confirm the amount: {reply}"
+        );
         assert!(reply.contains("EUR"));
 
-        let listed = module.handle_command(&ctx("!expense list"), &db, None).await.unwrap();
-        assert!(listed.contains("lunch"), "the entry should be listed: {listed}");
+        let listed = module
+            .handle_command(&ctx("!expense list"), &db, None)
+            .await
+            .unwrap();
+        assert!(
+            listed.contains("lunch"),
+            "the entry should be listed: {listed}"
+        );
     }
 
     /// The README's documented shape, with no currency given: it must be
@@ -170,8 +203,14 @@ mod tests {
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
-        assert!(reply.contains("15.50"), "reply should confirm the amount: {reply}");
-        assert!(reply.contains("USD"), "should fall back to the default currency: {reply}");
+        assert!(
+            reply.contains("15.50"),
+            "reply should confirm the amount: {reply}"
+        );
+        assert!(
+            reply.contains("USD"),
+            "should fall back to the default currency: {reply}"
+        );
         assert!(reply.contains("lunch"), "should keep the note: {reply}");
     }
 
@@ -187,7 +226,12 @@ mod tests {
         SettingsRepository::upsert(
             &db.pool,
             "@alice:a",
-            &UserSettings { timezone: "UTC".to_string(), currency: "CNY".to_string(), dev_room_id: None, max_history_turns: 10 },
+            &UserSettings {
+                timezone: "UTC".to_string(),
+                currency: "CNY".to_string(),
+                dev_room_id: None,
+                max_history_turns: 10,
+            },
         )
         .await
         .unwrap();
@@ -197,15 +241,24 @@ mod tests {
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
-        assert!(reply.contains("CNY"), "should use the saved currency: {reply}");
-        assert!(!reply.contains("USD"), "should not fall back to USD: {reply}");
+        assert!(
+            reply.contains("CNY"),
+            "should use the saved currency: {reply}"
+        );
+        assert!(
+            !reply.contains("USD"),
+            "should not fall back to USD: {reply}"
+        );
 
         // An explicit code still wins over the preference.
         let explicit = module
             .handle_command(&ctx("!expense add 9.99 EUR coffee"), &db, None)
             .await
             .unwrap();
-        assert!(explicit.contains("EUR"), "an explicit currency must win: {explicit}");
+        assert!(
+            explicit.contains("EUR"),
+            "an explicit currency must win: {explicit}"
+        );
     }
 
     /// User text reaches an HTML message, so it has to be escaped.
@@ -215,11 +268,18 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 1.00 EUR <script>alert(1)</script>"), &db, None)
+            .handle_command(
+                &ctx("!expense add 1.00 EUR <script>alert(1)</script>"),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
-        assert!(!reply.contains("<script>"), "raw markup must not survive: {reply}");
+        assert!(
+            !reply.contains("<script>"),
+            "raw markup must not survive: {reply}"
+        );
         assert!(reply.contains("&lt;script&gt;"));
     }
 }

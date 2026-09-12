@@ -117,10 +117,7 @@ impl RecoveryRepository {
     /// Every unused hash is compared. There is no index to narrow this by, and
     /// deliberately so: a lookup keyed on anything derivable from the code
     /// would leak which codes exist.
-    pub async fn redeem(
-        pool: &SqlitePool,
-        code: &str,
-    ) -> Result<Option<String>, sqlx::Error> {
+    pub async fn redeem(pool: &SqlitePool, code: &str) -> Result<Option<String>, sqlx::Error> {
         let normalised = normalise(code);
 
         let candidates = sqlx::query_as::<_, (i64, String, String)>(
@@ -323,7 +320,9 @@ mod tests {
     }
 
     async fn account(pool: &SqlitePool, name: &str) -> String {
-        AccountRepository::create(pool, name, STATUS_ACTIVE).await.unwrap()
+        AccountRepository::create(pool, name, STATUS_ACTIVE)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -343,7 +342,10 @@ mod tests {
             .await
             .unwrap();
         for code in &codes {
-            assert!(!stored.iter().any(|h| h.contains(code)), "a code is stored in the clear");
+            assert!(
+                !stored.iter().any(|h| h.contains(code)),
+                "a code is stored in the clear"
+            );
         }
     }
 
@@ -362,7 +364,10 @@ mod tests {
             None,
             "a used code must not work twice"
         );
-        assert_eq!(RecoveryRepository::remaining(&pool, &acct).await.unwrap(), 9);
+        assert_eq!(
+            RecoveryRepository::remaining(&pool, &acct).await.unwrap(),
+            9
+        );
     }
 
     #[tokio::test]
@@ -371,8 +376,16 @@ mod tests {
         let acct = account(&pool, "evan").await;
         RecoveryRepository::issue_codes(&pool, &acct).await.unwrap();
 
-        assert_eq!(RecoveryRepository::redeem(&pool, "ZZZZZ-ZZZZZ").await.unwrap(), None);
-        assert_eq!(RecoveryRepository::remaining(&pool, &acct).await.unwrap(), 10);
+        assert_eq!(
+            RecoveryRepository::redeem(&pool, "ZZZZZ-ZZZZZ")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            RecoveryRepository::remaining(&pool, &acct).await.unwrap(),
+            10
+        );
     }
 
     /// Reissuing must invalidate the previous set, or a printout someone threw
@@ -384,7 +397,10 @@ mod tests {
         let first = RecoveryRepository::issue_codes(&pool, &acct).await.unwrap();
         let second = RecoveryRepository::issue_codes(&pool, &acct).await.unwrap();
 
-        assert_eq!(RecoveryRepository::redeem(&pool, &first[0]).await.unwrap(), None);
+        assert_eq!(
+            RecoveryRepository::redeem(&pool, &first[0]).await.unwrap(),
+            None
+        );
         assert_eq!(
             RecoveryRepository::redeem(&pool, &second[0]).await.unwrap(),
             Some(acct)
@@ -399,10 +415,14 @@ mod tests {
         let theirs = account(&pool, "theirs").await;
 
         let my_codes = RecoveryRepository::issue_codes(&pool, &mine).await.unwrap();
-        RecoveryRepository::issue_codes(&pool, &theirs).await.unwrap();
+        RecoveryRepository::issue_codes(&pool, &theirs)
+            .await
+            .unwrap();
 
         assert_eq!(
-            RecoveryRepository::redeem(&pool, &my_codes[0]).await.unwrap(),
+            RecoveryRepository::redeem(&pool, &my_codes[0])
+                .await
+                .unwrap(),
             Some(mine)
         );
     }
@@ -419,12 +439,17 @@ mod tests {
         assert!(valid_after > Utc::now() + Duration::hours(RECOVERY_DELAY_HOURS - 1));
 
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &code).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &code)
+                .await
+                .unwrap(),
             MaturedRecovery::TooEarly
         );
 
         // The countdown is visible, so the UI can say what is happening.
-        assert!(RecoveryRepository::pending(&pool, &acct).await.unwrap().is_some());
+        assert!(RecoveryRepository::pending(&pool, &acct)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
@@ -442,13 +467,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &code).await.unwrap(),
-            MaturedRecovery::Ready { account_id: acct.clone() }
+            RecoveryRepository::redeem_request(&pool, &code)
+                .await
+                .unwrap(),
+            MaturedRecovery::Ready {
+                account_id: acct.clone()
+            }
         );
 
         // And is single-use.
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &code).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &code)
+                .await
+                .unwrap(),
             MaturedRecovery::Unavailable
         );
     }
@@ -461,8 +492,14 @@ mod tests {
         let acct = account(&pool, "evan").await;
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        assert_eq!(RecoveryRepository::cancel_all(&pool, &acct).await.unwrap(), 1);
-        assert!(RecoveryRepository::pending(&pool, &acct).await.unwrap().is_none());
+        assert_eq!(
+            RecoveryRepository::cancel_all(&pool, &acct).await.unwrap(),
+            1
+        );
+        assert!(RecoveryRepository::pending(&pool, &acct)
+            .await
+            .unwrap()
+            .is_none());
 
         // Even once it would have matured, it is dead.
         sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
@@ -473,7 +510,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &code).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &code)
+                .await
+                .unwrap(),
             MaturedRecovery::Unavailable
         );
     }
@@ -496,12 +535,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &first).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &first)
+                .await
+                .unwrap(),
             MaturedRecovery::Unavailable,
             "the superseded request must be dead"
         );
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &second).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &second)
+                .await
+                .unwrap(),
             MaturedRecovery::Ready { account_id: acct }
         );
     }
@@ -513,16 +556,20 @@ mod tests {
         let acct = account(&pool, "evan").await;
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        sqlx::query("UPDATE recovery_requests SET valid_after = ?, expires_at = ? WHERE account_id = ?")
-            .bind(Utc::now() - Duration::hours(2))
-            .bind(Utc::now() - Duration::hours(1))
-            .bind(&acct)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE recovery_requests SET valid_after = ?, expires_at = ? WHERE account_id = ?",
+        )
+        .bind(Utc::now() - Duration::hours(2))
+        .bind(Utc::now() - Duration::hours(1))
+        .bind(&acct)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(
-            RecoveryRepository::redeem_request(&pool, &code).await.unwrap(),
+            RecoveryRepository::redeem_request(&pool, &code)
+                .await
+                .unwrap(),
             MaturedRecovery::Unavailable
         );
     }

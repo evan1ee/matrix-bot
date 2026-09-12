@@ -1,5 +1,5 @@
-use serde_json::json;
 use crate::modules::ai::models::{FunctionDefinition, ToolDefinition};
+use serde_json::json;
 
 pub fn extended_tool_definitions() -> Vec<ToolDefinition> {
     vec![

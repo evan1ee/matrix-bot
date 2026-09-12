@@ -144,23 +144,34 @@ pub async fn list_todos(
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = TodoRepository::count_room_user(&state.db.pool, room, &owner_id, query.completed)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total =
+            TodoRepository::count_room_user(&state.db.pool, room, &owner_id, query.completed)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?;
 
         (items, total)
     } else {
-        let items =
-            TodoRepository::list_all_user(&state.db.pool, &owner_id, query.completed, limit, offset)
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+        let items = TodoRepository::list_all_user(
+            &state.db.pool,
+            &owner_id,
+            query.completed,
+            limit,
+            offset,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
         let total = TodoRepository::count_all_user(&state.db.pool, &owner_id, query.completed)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
         (items, total)
     };
 
-    Ok(Json(TodoListResponse { items, page, limit, total }))
+    Ok(Json(TodoListResponse {
+        items,
+        page,
+        limit,
+        total,
+    }))
 }
 
 #[utoipa::path(
@@ -184,7 +195,9 @@ pub async fn create_todo(
     }
 
     if payload.text.len() > 500 {
-        return Err(ApiError::bad_request("Task text exceeds 500 character limit"));
+        return Err(ApiError::bad_request(
+            "Task text exceeds 500 character limit",
+        ));
     }
 
     let priority = payload
@@ -223,11 +236,18 @@ pub async fn create_todo(
     let remind_room = reminder_room(payload.remind_room_id.as_deref(), &item.room_id)
         .unwrap_or(&item.room_id)
         .to_string();
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &item, &remind_room)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    due_reminder::sync(
+        &state.db.pool,
+        Some(&state.broadcaster),
+        &item,
+        &remind_room,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::TodoCreated(item.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::TodoCreated(item.clone()));
 
     Ok(Json(item))
 }
@@ -301,14 +321,11 @@ pub async fn update_todo(
         // caller names a new room. Without this fallback, editing just the text
         // of a web task that has a reminder would fail for want of a room the
         // caller never intended to change.
-        let current_room = ReminderRepository::find_pending_for_source(
-            &state.db.pool,
-            ReminderSource::Todo,
-            id,
-        )
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map(|r| r.room_id);
+        let current_room =
+            ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, id)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .map(|r| r.room_id);
 
         let remind_room = match payload.remind_room_id.as_deref() {
             Some(room) if !room.trim().is_empty() => room.to_string(),
@@ -318,9 +335,14 @@ pub async fn update_todo(
             },
         };
 
-        due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &item, &remind_room)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        due_reminder::sync(
+            &state.db.pool,
+            Some(&state.broadcaster),
+            &item,
+            &remind_room,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
     } else if due_reminder::wanted_trigger(&existing).is_some() {
         // The task no longer wants a reminder but used to — tear the old one down.
         due_reminder::tear_down(&state.db.pool, Some(&state.broadcaster), id)
@@ -328,7 +350,9 @@ pub async fn update_todo(
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
-    state.broadcaster.send(SystemEvent::TodoUpdated(item.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::TodoUpdated(item.clone()));
 
     Ok(Json(item))
 }
@@ -442,7 +466,12 @@ mod tests {
                 list_todos(
                     State(state),
                     alice,
-                    Query(TodoQuery { room_id: None, page: None, limit: None, completed }),
+                    Query(TodoQuery {
+                        room_id: None,
+                        page: None,
+                        limit: None,
+                        completed,
+                    }),
                 )
                 .await
                 .unwrap()
@@ -599,7 +628,12 @@ mod tests {
         let listed = list_todos(
             State(state),
             alice,
-            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
+            Query(TodoQuery {
+                room_id: None,
+                page: None,
+                limit: None,
+                completed: None,
+            }),
         )
         .await
         .unwrap();
@@ -651,11 +685,20 @@ mod tests {
         let listed = list_todos(
             State(state.clone()),
             impostor.clone(),
-            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
+            Query(TodoQuery {
+                room_id: None,
+                page: None,
+                limit: None,
+                completed: None,
+            }),
         )
         .await
         .unwrap();
-        assert_eq!(listed.items.len(), 0, "local account must not see Matrix user's tasks");
+        assert_eq!(
+            listed.items.len(),
+            0,
+            "local account must not see Matrix user's tasks"
+        );
 
         // Room-scoped listing takes a different code path — check it too.
         let listed_in_room = list_todos(
@@ -699,7 +742,12 @@ mod tests {
         let owner_view = list_todos(
             State(state),
             matrix_evan,
-            Query(TodoQuery { room_id: None, page: None, limit: None, completed: None }),
+            Query(TodoQuery {
+                room_id: None,
+                page: None,
+                limit: None,
+                completed: None,
+            }),
         )
         .await
         .unwrap();
@@ -751,14 +799,15 @@ mod tests {
         assert_eq!(created.due_at.unwrap().timestamp(), due.timestamp());
         assert_eq!(created.remind_before_minutes, Some(60));
 
-        let rem = crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
-            &state.db.pool,
-            ReminderSource::Todo,
-            created.id,
-        )
-        .await
-        .unwrap()
-        .expect("a linked reminder must exist");
+        let rem =
+            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
+                &state.db.pool,
+                ReminderSource::Todo,
+                created.id,
+            )
+            .await
+            .unwrap()
+            .expect("a linked reminder must exist");
         assert_eq!(rem.trigger_at, due - chrono::Duration::minutes(60));
         assert_eq!(rem.room_id, "!room:1");
     }
@@ -787,7 +836,11 @@ mod tests {
         let err = create_todo(
             State(state),
             AuthUser::named("alice", "acct_alice"),
-            Json(create_with_due(Some(Utc::now() + chrono::Duration::hours(6)), Some(60), None)),
+            Json(create_with_due(
+                Some(Utc::now() + chrono::Duration::hours(6)),
+                Some(60),
+                None,
+            )),
         )
         .await
         .unwrap_err();
@@ -808,7 +861,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "lead {bad} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "lead {bad} must be rejected"
+            );
         }
     }
 
@@ -844,7 +901,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(untouched.due_at.is_some(), "absent due_at must not clear it");
+        assert!(
+            untouched.due_at.is_some(),
+            "absent due_at must not clear it"
+        );
 
         let cleared = update_todo(
             State(state.clone()),
@@ -911,11 +971,18 @@ mod tests {
         assert_eq!(edited.text, "Ship the release on Friday");
         assert_eq!(edited.priority, "high");
 
-        let rem = ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, created.id)
-            .await
-            .unwrap()
-            .expect("the reminder must survive an unrelated edit");
-        assert_eq!(rem.room_id, "!room:1", "the delivery room must be preserved");
+        let rem = ReminderRepository::find_pending_for_source(
+            &state.db.pool,
+            ReminderSource::Todo,
+            created.id,
+        )
+        .await
+        .unwrap()
+        .expect("the reminder must survive an unrelated edit");
+        assert_eq!(
+            rem.room_id, "!room:1",
+            "the delivery room must be preserved"
+        );
         assert_eq!(rem.trigger_at, due - chrono::Duration::minutes(60));
     }
 
@@ -951,10 +1018,14 @@ mod tests {
         .await
         .unwrap();
 
-        let rem = ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, created.id)
-            .await
-            .unwrap()
-            .unwrap();
+        let rem = ReminderRepository::find_pending_for_source(
+            &state.db.pool,
+            ReminderSource::Todo,
+            created.id,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(rem.trigger_at, due - chrono::Duration::minutes(1440));
         assert_eq!(rem.room_id, "!room:1");
     }
@@ -976,7 +1047,9 @@ mod tests {
         .await
         .unwrap();
 
-        delete_todo(State(state.clone()), alice, Path(created.id)).await.unwrap();
+        delete_todo(State(state.clone()), alice, Path(created.id))
+            .await
+            .unwrap();
 
         assert!(
             crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(

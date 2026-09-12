@@ -5,7 +5,9 @@ use tracing::{debug, info, warn};
 use crate::accounts::AccountRepository;
 use crate::bot::notify::send_dm_html;
 use crate::events::SystemEvent;
-use crate::modules::portfolio::alerts::{format_alert_notification, AlertCondition, AlertsRepository};
+use crate::modules::portfolio::alerts::{
+    format_alert_notification, AlertCondition, AlertsRepository,
+};
 use crate::modules::portfolio::history::HistoryRepository;
 use crate::modules::portfolio::price_feed;
 use crate::modules::ModuleContext;
@@ -23,7 +25,10 @@ pub async fn check_price_alerts(ctx: &ModuleContext) {
         _ => return, // No active alerts in the system
     };
 
-    debug!("Evaluating active price alerts for {} symbols", active_symbols.len());
+    debug!(
+        "Evaluating active price alerts for {} symbols",
+        active_symbols.len()
+    );
 
     for sym in active_symbols {
         let quote = match price_feed::fetch_latest_price(&sym).await {
@@ -40,7 +45,8 @@ pub async fn check_price_alerts(ctx: &ModuleContext) {
         };
 
         for alert in alerts {
-            let price_minor = price_feed::price_to_minor(quote.price, alert.currency_exponent as i64);
+            let price_minor =
+                price_feed::price_to_minor(quote.price, alert.currency_exponent as i64);
             let condition_met = match alert.parsed_condition() {
                 AlertCondition::Above => price_minor >= alert.target_price_minor,
                 AlertCondition::Below => price_minor <= alert.target_price_minor,
@@ -89,7 +95,7 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                 debug!("Running scheduled portfolio price refresh sweep");
 
                 let owners = match sqlx::query_scalar::<_, String>(
-                    "SELECT DISTINCT owner_id FROM portfolio_holdings;"
+                    "SELECT DISTINCT owner_id FROM portfolio_holdings;",
                 )
                 .fetch_all(&ctx.db.pool)
                 .await
@@ -118,7 +124,9 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                     }
 
                     // Record daily snapshot for performance charts
-                    let _ = HistoryRepository::capture_current_snapshot_for_owner(&ctx.db.pool, owner).await;
+                    let _ =
+                        HistoryRepository::capture_current_snapshot_for_owner(&ctx.db.pool, owner)
+                            .await;
                 }
             }
 

@@ -1,7 +1,9 @@
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::finance::money::{exponent_for, looks_like_currency, normalise_currency, parse_amount};
+use crate::modules::finance::money::{
+    exponent_for, looks_like_currency, normalise_currency, parse_amount,
+};
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::models::normalise_symbol;
 use crate::modules::settings::SettingsRepository;
@@ -21,7 +23,11 @@ pub async fn handle_alert_command(
     }
 
     if lower.starts_with("cancel") || lower.starts_with("delete") || lower.starts_with("rm") {
-        let rest = trimmed.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+        let rest = trimmed
+            .split_whitespace()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join(" ");
         return handle_cancel_alert(pool, owner_id, &rest, broadcaster).await;
     }
 
@@ -31,7 +37,12 @@ pub async fn handle_alert_command(
 async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
     let alerts = match AlertsRepository::list_for_owner(pool, owner_id).await {
         Ok(list) => list,
-        Err(err) => return format!("Could not load price alerts: {}", html_escape(&err.to_string())),
+        Err(err) => {
+            return format!(
+                "Could not load price alerts: {}",
+                html_escape(&err.to_string())
+            )
+        }
     };
 
     if alerts.is_empty() {
@@ -73,12 +84,19 @@ async fn handle_cancel_alert(
     match AlertsRepository::delete(pool, id, owner_id).await {
         Ok(true) => {
             if let Some(b) = broadcaster {
-                b.send(SystemEvent::PortfolioAlertDeleted { id, owner_id: owner_id.to_string() });
+                b.send(SystemEvent::PortfolioAlertDeleted {
+                    id,
+                    owner_id: owner_id.to_string(),
+                });
             }
             format!("<p>Price alert #{} cancelled.</p>", id)
         }
         Ok(false) => format!("<p>Alert #{} not found or does not belong to you.</p>", id),
-        Err(err) => format!("<p>Failed to cancel alert #{}: {}</p>", id, html_escape(&err.to_string())),
+        Err(err) => format!(
+            "<p>Failed to cancel alert #{}: {}</p>",
+            id,
+            html_escape(&err.to_string())
+        ),
     }
 }
 
@@ -150,6 +168,9 @@ async fn handle_create_alert(
                 html_escape(&currency)
             )
         }
-        Err(err) => format!("<p>Failed to create alert: {}</p>", html_escape(&err.to_string())),
+        Err(err) => format!(
+            "<p>Failed to create alert: {}</p>",
+            html_escape(&err.to_string())
+        ),
     }
 }

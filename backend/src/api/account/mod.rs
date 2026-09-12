@@ -20,16 +20,18 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::accounts::linking::LINK_CODE_TTL_MINUTES;
-    use crate::accounts::{AccountRepository, LinkRepository, RecoveryRepository,
-        SecurityEventKind, SecurityEventRepository, SessionRepository};
+    use crate::accounts::{session::hash_token, LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::accounts::{
+        AccountRepository, LinkRepository, RecoveryRepository, SecurityEventKind,
+        SecurityEventRepository, SessionRepository,
+    };
     use crate::api::account::{audit::*, links::*, passkeys::*, recovery::*, sessions::*};
     use crate::api::auth::extractor::VerifiedUser;
     use crate::api::auth::types::{ApiState, AuthUser};
-    use axum::extract::{Path, State};
-    use axum::Json;
-    use crate::accounts::{session::hash_token, LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use axum::extract::{Path, State};
+    use axum::Json;
     use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
@@ -50,9 +52,10 @@ mod tests {
         let account = AccountRepository::create(&state.db.pool, name, STATUS_ACTIVE)
             .await
             .unwrap();
-        let token = SessionRepository::create(&state.db.pool, &account, Some("Test/1.0"), None, None)
-            .await
-            .unwrap();
+        let token =
+            SessionRepository::create(&state.db.pool, &account, Some("Test/1.0"), None, None)
+                .await
+                .unwrap();
 
         AuthUser {
             account_id: account,
@@ -76,7 +79,12 @@ mod tests {
         let outcome = LinkRepository::claim(&state.db.pool, &res.code, "@evan:mbm.one", true)
             .await
             .unwrap();
-        assert_eq!(outcome, LinkOutcome::Linked { account_id: user.account_id.clone() });
+        assert_eq!(
+            outcome,
+            LinkOutcome::Linked {
+                account_id: user.account_id.clone()
+            }
+        );
 
         let links = list_links(State(state), user).await.unwrap();
         assert_eq!(links.0, vec!["@evan:mbm.one".to_string()]);
@@ -97,7 +105,9 @@ mod tests {
         let err = unlink(
             State(state.clone()),
             VerifiedUser(mine),
-            Json(UnlinkRequest { mxid: "@evan:mbm.one".to_string() }),
+            Json(UnlinkRequest {
+                mxid: "@evan:mbm.one".to_string(),
+            }),
         )
         .await
         .unwrap_err();
@@ -105,7 +115,9 @@ mod tests {
 
         // Still linked to its real owner.
         assert_eq!(
-            AccountRepository::find_by_mxid(&state.db.pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&state.db.pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(theirs.account_id)
         );
     }
@@ -132,7 +144,9 @@ mod tests {
         let err = confirm_merge(
             State(state.clone()),
             VerifiedUser(attacker.clone()),
-            Json(ConfirmMergeRequest { from_account: victim.clone() }),
+            Json(ConfirmMergeRequest {
+                from_account: victim.clone(),
+            }),
         )
         .await
         .unwrap_err();
@@ -167,7 +181,9 @@ mod tests {
 
         note_pending_merge(&state, &user.account_id, &old).await;
 
-        let pending = pending_merge(State(state.clone()), user.clone()).await.unwrap();
+        let pending = pending_merge(State(state.clone()), user.clone())
+            .await
+            .unwrap();
         let pending = pending.0.expect("a merge should be waiting");
         assert_eq!(pending.preview.todos, 2);
 
@@ -212,9 +228,15 @@ mod tests {
     async fn test_sessions_list_marks_the_current_one() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        SessionRepository::create(&state.db.pool, &user.account_id, Some("Other/1.0"), None, None)
-            .await
-            .unwrap();
+        SessionRepository::create(
+            &state.db.pool,
+            &user.account_id,
+            Some("Other/1.0"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let sessions = list_sessions(State(state), user.clone()).await.unwrap();
         assert_eq!(sessions.0.len(), 2);
@@ -237,7 +259,10 @@ mod tests {
             .unwrap();
         assert_eq!(revoked.0, 1);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other).await.unwrap().is_none());
+        assert!(SessionRepository::resolve(&state.db.pool, &other)
+            .await
+            .unwrap()
+            .is_none());
 
         let left = list_sessions(State(state), user).await.unwrap();
         assert_eq!(left.0.len(), 1);
@@ -262,7 +287,10 @@ mod tests {
         .unwrap();
         assert!(res.0);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other).await.unwrap().is_none());
+        assert!(SessionRepository::resolve(&state.db.pool, &other)
+            .await
+            .unwrap()
+            .is_none());
 
         let left = list_sessions(State(state), user).await.unwrap();
         assert_eq!(left.0.len(), 1);
@@ -291,11 +319,15 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
 
-        RecoveryRepository::request(&state.db.pool, &user.account_id).await.unwrap();
-        assert!(RecoveryRepository::pending(&state.db.pool, &user.account_id)
+        RecoveryRepository::request(&state.db.pool, &user.account_id)
             .await
-            .unwrap()
-            .is_some());
+            .unwrap();
+        assert!(
+            RecoveryRepository::pending(&state.db.pool, &user.account_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // Deliberately a stale session: it could not pass `VerifiedUser`.
         let stale = AuthUser {
@@ -306,10 +338,12 @@ mod tests {
 
         let cancelled = cancel_recovery(State(state.clone()), stale).await.unwrap();
         assert_eq!(cancelled.0, 1);
-        assert!(RecoveryRepository::pending(&state.db.pool, &user.account_id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            RecoveryRepository::pending(&state.db.pool, &user.account_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -353,7 +387,11 @@ mod tests {
         )
         .await;
 
-        assert!(list_passkeys(State(state.clone()), mine.clone()).await.unwrap().0.is_empty());
+        assert!(list_passkeys(State(state.clone()), mine.clone())
+            .await
+            .unwrap()
+            .0
+            .is_empty());
         assert!(list_security_events(State(state.clone()), mine.clone())
             .await
             .unwrap()

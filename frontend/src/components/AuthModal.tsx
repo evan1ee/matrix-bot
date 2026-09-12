@@ -16,7 +16,7 @@ interface AuthModalProps {
   user: SessionUser | null;
 }
 
-type Mode = 'signin' | 'register';
+type Mode = 'signin' | 'register' | 'recovery';
 
 /**
  * Sign-in, registration, and sign-out.
@@ -30,6 +30,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [mode, setMode] = useState<Mode>('signin');
   const [displayName, setDisplayName] = useState('');
   const [invite, setInvite] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +44,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       setError(null);
       setDisplayName('');
       setInvite('');
+      setRecoveryCode('');
     }
   }, [isOpen]);
 
@@ -73,6 +75,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     }
     return run(() => registerPasskey(displayName.trim(), invite.trim() || undefined));
   };
+  const handleRecover = () => {
+    if (!recoveryCode.trim()) {
+      setError('Please enter your recovery code.');
+      return;
+    }
+    return run(async () => {
+      const resp = await fetch('/api/v1/auth/recovery/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: recoveryCode.trim() }),
+      });
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to redeem recovery code');
+      }
+    });
+  };
 
   return (
     <div
@@ -84,7 +103,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
         <div className="mb-5 flex items-start justify-between gap-4">
           <h2 id="auth-title" className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-            {user ? 'Your account' : mode === 'signin' ? 'Sign in' : 'Create an account'}
+            {user
+              ? 'Your account'
+              : mode === 'signin'
+                ? 'Sign in'
+                : mode === 'register'
+                  ? 'Create an account'
+                  : 'Recover account'}
           </h2>
           <button
             type="button"
@@ -163,6 +188,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
             >
               Create an account instead
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('recovery');
+                setError(null);
+              }}
+              className="text-xs text-neutral-500 underline underline-offset-4 hover:text-neutral-800 dark:hover:text-neutral-200"
+            >
+              Lost your device? Enter a recovery code
+            </button>
+          </div>
+        ) : mode === 'recovery' ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Enter one of your 10 backup recovery codes or a matured code from the Matrix <code className="font-mono text-xs">!recover</code> flow.
+            </p>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Recovery code
+              </span>
+              <input
+                type="text"
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                placeholder="e.g. 1a2b-3c4d-5e6f"
+                autoFocus
+                className="font-mono rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={handleRecover}
+              disabled={busy}
+              className="flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2.5 font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+              Redeem and regain access
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('signin');
+                setError(null);
+              }}
+              className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              Back to sign in
             </button>
           </div>
         ) : (

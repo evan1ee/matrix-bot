@@ -132,16 +132,17 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let user = AuthUser::from_request_parts(parts, state).await?;
 
-        if user.restricted_until.is_some_and(|until| chrono::Utc::now() < until) {
+        if user
+            .restricted_until
+            .is_some_and(|until| chrono::Utc::now() < until)
+        {
             return Err(ApiError::forbidden(
                 "This session was created by account recovery and cannot do that yet",
             ));
         }
 
         if !user.may_perform_sensitive_action(chrono::Utc::now()) {
-            return Err(ApiError::forbidden(
-                "Confirm with your passkey to continue",
-            ));
+            return Err(ApiError::forbidden("Confirm with your passkey to continue"));
         }
 
         Ok(VerifiedUser(user))

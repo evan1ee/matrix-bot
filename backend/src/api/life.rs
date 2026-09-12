@@ -21,7 +21,11 @@ pub struct DeleteDayResponse {
 }
 
 fn get_today_string() -> String {
-    chrono::Utc::now().naive_utc().date().format("%Y-%m-%d").to_string()
+    chrono::Utc::now()
+        .naive_utc()
+        .date()
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 pub async fn get_profile_and_stats(
@@ -43,7 +47,9 @@ pub async fn upsert_profile(
 ) -> Result<Json<LifeProfile>, ApiError> {
     let birth = payload.birth_date.trim();
     if NaiveDate::parse_from_str(birth, "%Y-%m-%d").is_err() {
-        return Err(ApiError::bad_request("Invalid birth date format. Use YYYY-MM-DD."));
+        return Err(ApiError::bad_request(
+            "Invalid birth date format. Use YYYY-MM-DD.",
+        ));
     }
 
     let lifespan = payload.expected_lifespan_years.unwrap_or(80).clamp(40, 130);
@@ -94,11 +100,14 @@ pub async fn upsert_day(
 ) -> Result<Json<LifeDayLog>, ApiError> {
     let date_str = payload.log_date.trim();
     if NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
-        return Err(ApiError::bad_request("Invalid log date format. Use YYYY-MM-DD."));
+        return Err(ApiError::bad_request(
+            "Invalid log date format. Use YYYY-MM-DD.",
+        ));
     }
 
-    let mood = normalize_mood(&payload.mood)
-        .ok_or_else(|| ApiError::bad_request("Invalid mood. Choose from amazing, good, neutral, low, rough."))?;
+    let mood = normalize_mood(&payload.mood).ok_or_else(|| {
+        ApiError::bad_request("Invalid mood. Choose from amazing, good, neutral, low, rough.")
+    })?;
 
     let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, date_str)
         .await
@@ -118,14 +127,28 @@ pub async fn upsert_day(
     }
 
     let activities_json = match payload.activities {
-        Some(ref acts) => serde_json::to_string(acts).ok(),
+        Some(ref acts) => {
+            if acts.len() > 50 {
+                return Err(ApiError::bad_request("Activities cannot exceed 50 items."));
+            }
+            for act in acts {
+                if act.len() > 100 {
+                    return Err(ApiError::bad_request(
+                        "Activity item exceeds 100 characters.",
+                    ));
+                }
+            }
+            serde_json::to_string(acts).ok()
+        }
         None => None,
     };
 
     let time_allocation_json = match payload.time_allocation {
         Some(ref blocks) => {
             if blocks.len() > 96 {
-                return Err(ApiError::bad_request("Time allocation cannot exceed 96 blocks."));
+                return Err(ApiError::bad_request(
+                    "Time allocation cannot exceed 96 blocks.",
+                ));
             }
             serde_json::to_string(blocks).ok()
         }
@@ -145,7 +168,9 @@ pub async fn upsert_day(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::LifeDayLogged(log.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::LifeDayLogged(log.clone()));
 
     Ok(Json(log))
 }
@@ -157,11 +182,15 @@ pub async fn update_time_allocation(
     Json(payload): Json<UpdateTimeAllocationInput>,
 ) -> Result<Json<LifeDayLog>, ApiError> {
     if NaiveDate::parse_from_str(&date, "%Y-%m-%d").is_err() {
-        return Err(ApiError::bad_request("Invalid date format. Use YYYY-MM-DD."));
+        return Err(ApiError::bad_request(
+            "Invalid date format. Use YYYY-MM-DD.",
+        ));
     }
 
     if payload.time_allocation.len() > 96 {
-        return Err(ApiError::bad_request("Time allocation cannot exceed 96 blocks."));
+        return Err(ApiError::bad_request(
+            "Time allocation cannot exceed 96 blocks.",
+        ));
     }
 
     let today = get_today_string();
@@ -189,7 +218,9 @@ pub async fn update_time_allocation(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::LifeDayLogged(log.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::LifeDayLogged(log.clone()));
 
     Ok(Json(log))
 }
@@ -200,7 +231,9 @@ pub async fn get_day(
     Path(date): Path<String>,
 ) -> Result<Json<Option<LifeDayLog>>, ApiError> {
     if NaiveDate::parse_from_str(&date, "%Y-%m-%d").is_err() {
-        return Err(ApiError::bad_request("Invalid date format. Use YYYY-MM-DD."));
+        return Err(ApiError::bad_request(
+            "Invalid date format. Use YYYY-MM-DD.",
+        ));
     }
 
     let log = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
@@ -216,7 +249,9 @@ pub async fn delete_day(
     Path(date): Path<String>,
 ) -> Result<Json<DeleteDayResponse>, ApiError> {
     if NaiveDate::parse_from_str(&date, "%Y-%m-%d").is_err() {
-        return Err(ApiError::bad_request("Invalid date format. Use YYYY-MM-DD."));
+        return Err(ApiError::bad_request(
+            "Invalid date format. Use YYYY-MM-DD.",
+        ));
     }
 
     let deleted = LifeRepository::delete_day_log(&state.db.pool, &user.account_id, &date)
@@ -357,9 +392,13 @@ mod tests {
         assert_eq!(stats.average_sleep_hours, 0.5);
 
         // 5. Delete Day
-        let del = delete_day(user.clone(), State(state.clone()), Path("2026-09-04".to_string()))
-            .await
-            .unwrap();
+        let del = delete_day(
+            user.clone(),
+            State(state.clone()),
+            Path("2026-09-04".to_string()),
+        )
+        .await
+        .unwrap();
         assert!(del.success);
     }
 }

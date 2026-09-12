@@ -8,11 +8,13 @@ use crate::modules::webhook::models::{Webhook, WebhookOutboxItem};
 /// Hashes an inbound webhook token to SHA-256 for secure database lookup.
 pub fn hash_token(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
-    digest.iter().fold(String::with_capacity(64), |mut acc, byte| {
-        use std::fmt::Write;
-        let _ = write!(acc, "{byte:02x}");
-        acc
-    })
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, byte| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{byte:02x}");
+            acc
+        })
 }
 
 pub struct WebhookRepository;
@@ -72,13 +74,11 @@ impl WebhookRepository {
         id: &str,
         owner_id: &str,
     ) -> Result<Option<Webhook>, sqlx::Error> {
-        sqlx::query_as::<_, Webhook>(
-            "SELECT * FROM webhooks WHERE id = ? AND owner_id = ?;",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as::<_, Webhook>("SELECT * FROM webhooks WHERE id = ? AND owner_id = ?;")
+            .bind(id)
+            .bind(owner_id)
+            .fetch_optional(pool)
+            .await
     }
 
     pub async fn list_by_owner(
@@ -159,11 +159,7 @@ impl WebhookRepository {
         Ok(updated.map(|w| (w, raw_token)))
     }
 
-    pub async fn delete(
-        pool: &SqlitePool,
-        id: &str,
-        owner_id: &str,
-    ) -> Result<bool, sqlx::Error> {
+    pub async fn delete(pool: &SqlitePool, id: &str, owner_id: &str) -> Result<bool, sqlx::Error> {
         let res = sqlx::query("DELETE FROM webhooks WHERE id = ? AND owner_id = ?;")
             .bind(id)
             .bind(owner_id)
@@ -210,12 +206,10 @@ impl WebhookRepository {
         .fetch_one(pool)
         .await?;
 
-        sqlx::query(
-            "UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP WHERE id = ?;",
-        )
-        .bind(webhook_id)
-        .execute(pool)
-        .await?;
+        sqlx::query("UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP WHERE id = ?;")
+            .bind(webhook_id)
+            .execute(pool)
+            .await?;
 
         Ok(item)
     }
@@ -379,7 +373,9 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_crud_and_outbox() {
         let pool = setup_db().await;
-        let acct = AccountRepository::create(&pool, "test", STATUS_ACTIVE).await.unwrap();
+        let acct = AccountRepository::create(&pool, "test", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let owner_id = &acct;
 
         let (hook, raw_token) =
@@ -411,14 +407,18 @@ mod tests {
 
         assert_eq!(outbox.status, "pending");
 
-        let pending = WebhookRepository::fetch_pending_outbox(&pool, 10).await.unwrap();
+        let pending = WebhookRepository::fetch_pending_outbox(&pool, 10)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 1);
 
         WebhookRepository::mark_outbox_delivered(&pool, &outbox.id, &hook.id)
             .await
             .unwrap();
 
-        let remaining = WebhookRepository::fetch_pending_outbox(&pool, 10).await.unwrap();
+        let remaining = WebhookRepository::fetch_pending_outbox(&pool, 10)
+            .await
+            .unwrap();
         assert_eq!(remaining.len(), 0);
     }
 }

@@ -10,10 +10,10 @@ use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::finance::models::{Transaction, TransactionSource};
 use crate::modules::finance::money::{
     exponent_for, format_amount, normalise_currency, parse_amount,
 };
-use crate::modules::finance::models::{Transaction, TransactionSource};
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::portfolio::handler::broadcast;
 use crate::modules::portfolio::models::CashBalance;
@@ -78,7 +78,10 @@ pub async fn record_portfolio_cash_transaction(
 fn parse_cash_amount(args: &str, default_currency: &str) -> Result<(i64, String, u32), String> {
     let mut parts = args.split_whitespace();
     let amount_raw = parts.next().ok_or("Amount is required")?;
-    let currency_raw = parts.next().map(str::to_uppercase).unwrap_or_else(|| default_currency.to_string());
+    let currency_raw = parts
+        .next()
+        .map(str::to_uppercase)
+        .unwrap_or_else(|| default_currency.to_string());
 
     let currency = normalise_currency(&currency_raw).map_err(|e| e.to_string())?;
     let exponent = exponent_for(&currency);
@@ -111,7 +114,8 @@ pub async fn handle_cash(
 async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
     match PortfolioRepository::list_cash(pool, owner_id).await {
         Ok(balances) if balances.is_empty() => {
-            "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>.".to_string()
+            "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>."
+                .to_string()
         }
         Ok(balances) => {
             let mut html = "💵 <b>Your cash:</b><br/>".to_string();
@@ -137,7 +141,9 @@ async fn handle_cash_deposit(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
+        .await
+        .currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -148,13 +154,29 @@ async fn handle_cash_deposit(
         }
     };
 
-    match PortfolioRepository::deposit_cash(pool, owner_id, &currency, exponent as i64, amount_minor).await
+    match PortfolioRepository::deposit_cash(
+        pool,
+        owner_id,
+        &currency,
+        exponent as i64,
+        amount_minor,
+    )
+    .await
     {
         Ok(cash) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
             if let Some(tx) = record_portfolio_cash_transaction(
-                pool, owner_id, "deposit", amount_minor, &currency, exponent as i64, cash.id, None,
-            ).await {
+                pool,
+                owner_id,
+                "deposit",
+                amount_minor,
+                &currency,
+                exponent as i64,
+                cash.id,
+                None,
+            )
+            .await
+            {
                 broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
             }
             format!(
@@ -178,7 +200,9 @@ async fn handle_cash_withdraw(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id).await.currency;
+    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
+        .await
+        .currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -193,8 +217,17 @@ async fn handle_cash_withdraw(
         Ok(WithdrawOutcome::Ok(cash)) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
             if let Some(tx) = record_portfolio_cash_transaction(
-                pool, owner_id, "withdraw", amount_minor, &currency, exponent as i64, cash.id, None,
-            ).await {
+                pool,
+                owner_id,
+                "withdraw",
+                amount_minor,
+                &currency,
+                exponent as i64,
+                cash.id,
+                None,
+            )
+            .await
+            {
                 broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
             }
             format!(

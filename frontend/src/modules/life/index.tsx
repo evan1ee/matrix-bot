@@ -207,10 +207,10 @@ export const LifeView: React.FC = () => {
                 'Give me a high-level perspective on my life progress across habits, projects, time allocation, and milestones. Offer thoughtful reflection on intentional living.'
               )
             }
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer shadow-2xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-md transition-colors cursor-pointer shadow-2xs"
             title="Ask AI for life perspective"
           >
-            <Sparkles className="w-3.5 h-3.5 text-zinc-500" />
+            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
             <span>AI Perspective</span>
           </button>
         )}
@@ -218,7 +218,7 @@ export const LifeView: React.FC = () => {
         {profile && (
           <button
             onClick={handleLogToday}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
           >
             <NotebookPen className="w-3.5 h-3.5" />
             <span>Daily Log →</span>
@@ -227,28 +227,28 @@ export const LifeView: React.FC = () => {
 
         <button
           onClick={() => setIsProfileModalOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 rounded-md transition-colors cursor-pointer"
         >
-          <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+          <Calendar className="w-3.5 h-3.5 text-neutral-500" />
           <span>{profile ? 'Edit profile' : 'Set birth date'}</span>
         </button>
       </div>
 
       {/* Onboarding Banner if no profile exists */}
       {!isLoadingProfile && !profile && (
-        <div className="p-5 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="p-5 rounded-lg bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-0.5">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
               Start visualizing your lifespan
             </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xl leading-relaxed">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-xl leading-relaxed">
               Set your birth date to unlock your personal 80-year Life Horizon and lifespan grid of all days.
               Every block is a canvas for your mood, reflections, and life milestones.
             </p>
           </div>
           <button
             onClick={() => setIsProfileModalOpen(true)}
-            className="px-3.5 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white font-medium text-xs shadow-xs transition-colors shrink-0"
+            className="px-3.5 py-1.5 rounded-md bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white font-medium text-xs shadow-xs transition-colors shrink-0"
           >
             Set birth date now
           </button>

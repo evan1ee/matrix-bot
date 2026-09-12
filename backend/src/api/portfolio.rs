@@ -13,7 +13,7 @@ use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amo
 use crate::modules::portfolio::models::{
     normalise_symbol, CashBalance, Holding, PortfolioCurrencySummary, QUANTITY_EXPONENT,
 };
-use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome, WithdrawOutcome};
+use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 
 const MAX_NOTE_LEN: usize = 500;
 
@@ -51,14 +51,7 @@ pub struct SetNoteRequest {
     pub note: Option<String>,
 }
 
-#[derive(Deserialize, ToSchema)]
-pub struct CashAmountRequest {
-    /// Decimal string, e.g. `"1000.00"`.
-    pub amount: String,
-    /// ISO 4217 code, e.g. `"USD"`.
-    pub currency: String,
-    pub executed_at: Option<chrono::DateTime<chrono::Utc>>,
-}
+pub use crate::api::portfolio_cash::{prepare_cash_amount, CashAmountRequest};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SellResponse {
@@ -78,17 +71,6 @@ fn note_or_reject(note: &Option<String>) -> Result<Option<&str>, ApiError> {
         Some(text) => Ok(Some(text.as_str())),
         None => Ok(None),
     }
-}
-
-/// Validates a `{amount, currency}` cash request, returning minor units.
-fn prepare_cash_amount(payload: &CashAmountRequest) -> Result<(i64, String, i64), ApiError> {
-    let currency = normalise_currency(&payload.currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let exponent = exponent_for(&currency);
-    let amount_minor = parse_amount(&payload.amount, exponent)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-    Ok((amount_minor, currency, exponent as i64))
 }
 
 #[utoipa::path(
@@ -130,11 +112,11 @@ pub async fn buy_holding(
     let owner_id = user.owner_id();
 
     let symbol = normalise_symbol(&payload.symbol).map_err(ApiError::bad_request)?;
-    let currency = normalise_currency(&payload.currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency =
+        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exponent = exponent_for(&currency);
-    let price_minor = parse_amount(&payload.price, exponent)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let price_minor =
+        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let note = note_or_reject(&payload.note)?;
@@ -155,7 +137,9 @@ pub async fn buy_holding(
 
     match outcome {
         BuyOutcome::Ok { holding, cash } => {
-            state.broadcaster.send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
+            state
+                .broadcaster
+                .send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
             state.broadcaster.send(cash_event(&owner_id, &cash));
             Ok(Json(holding))
         }
@@ -163,26 +147,27 @@ pub async fn buy_holding(
             "{} is already held in {}",
             symbol, existing_currency
         ))),
-        BuyOutcome::InsufficientCash { available_minor, needed_minor } => {
-            Err(ApiError::bad_request(format!(
-                "Need {} {} but only {} {} in cash",
-                format_for_error(needed_minor, exponent),
-                currency,
-                format_for_error(available_minor, exponent),
-                currency
-            )))
-        }
+        BuyOutcome::InsufficientCash {
+            available_minor,
+            needed_minor,
+        } => Err(ApiError::bad_request(format!(
+            "Need {} {} but only {} {} in cash",
+            format_for_error(needed_minor, exponent),
+            currency,
+            format_for_error(available_minor, exponent),
+            currency
+        ))),
     }
 }
 
 /// Renders minor units for an error message. Reuses the same decimal shape the
 /// rest of the API uses, without pulling `format_amount` into a public error
 /// path's happy-path imports.
-fn format_for_error(minor: i64, exponent: u32) -> String {
+pub(crate) fn format_for_error(minor: i64, exponent: u32) -> String {
     crate::modules::finance::money::format_amount(minor, exponent)
 }
 
-fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
+pub(crate) fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
     SystemEvent::PortfolioCashUpdated {
         owner_id: owner_id.to_string(),
         currency: cash.currency.clone(),
@@ -217,8 +202,8 @@ pub async fn sell_holding(
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
     let exponent = existing.currency_exponent as u32;
-    let price_minor = parse_amount(&payload.price, exponent)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let price_minor =
+        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
@@ -239,15 +224,35 @@ pub async fn sell_holding(
             "Only {} held (minor units)",
             held_minor
         ))),
-        SellOutcome::Closed { realized_pl_minor, cash } => {
-            state.broadcaster.send(SystemEvent::PortfolioHoldingDeleted { id, owner_id: owner_id.clone() });
+        SellOutcome::Closed {
+            realized_pl_minor,
+            cash,
+        } => {
+            state
+                .broadcaster
+                .send(SystemEvent::PortfolioHoldingDeleted {
+                    id,
+                    owner_id: owner_id.clone(),
+                });
             state.broadcaster.send(cash_event(&owner_id, &cash));
-            Ok(Json(SellResponse { holding: None, realized_pl_minor }))
+            Ok(Json(SellResponse {
+                holding: None,
+                realized_pl_minor,
+            }))
         }
-        SellOutcome::Reduced { holding, realized_pl_minor, cash } => {
-            state.broadcaster.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
+        SellOutcome::Reduced {
+            holding,
+            realized_pl_minor,
+            cash,
+        } => {
+            state
+                .broadcaster
+                .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
             state.broadcaster.send(cash_event(&owner_id, &cash));
-            Ok(Json(SellResponse { holding: Some(holding), realized_pl_minor }))
+            Ok(Json(SellResponse {
+                holding: Some(holding),
+                realized_pl_minor,
+            }))
         }
     }
 }
@@ -279,15 +284,18 @@ pub async fn set_price(
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
     let exponent = existing.currency_exponent as u32;
-    let price_minor = parse_amount(&payload.price, exponent)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let price_minor =
+        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let holding = PortfolioRepository::set_price(&state.db.pool, &owner_id, &existing.symbol, price_minor)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
+    let holding =
+        PortfolioRepository::set_price(&state.db.pool, &owner_id, &existing.symbol, price_minor)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
-    state.broadcaster.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
     Ok(Json(holding))
 }
 
@@ -323,7 +331,9 @@ pub async fn set_note(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
-    state.broadcaster.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
     Ok(Json(holding))
 }
 
@@ -354,7 +364,9 @@ pub async fn delete_holding(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::PortfolioHoldingDeleted { id, owner_id });
+    state
+        .broadcaster
+        .send(SystemEvent::PortfolioHoldingDeleted { id, owner_id });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -382,101 +394,10 @@ pub async fn summary(
     Ok(Json(summaries))
 }
 
-#[utoipa::path(
-    get,
-    path = "/api/v1/portfolio/cash",
-    responses(
-        (status = 200, description = "Your cash balances", body = Vec<CashBalance>),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("session_cookie" = []))
-)]
-pub async fn list_cash(
-    State(state): State<ApiState>,
-    user: AuthUser,
-) -> Result<Json<Vec<CashBalance>>, ApiError> {
-    let balances = PortfolioRepository::list_cash(&state.db.pool, &user.owner_id())
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(balances))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/portfolio/cash/deposit",
-    request_body = CashAmountRequest,
-    responses(
-        (status = 200, description = "Cash deposited", body = CashBalance),
-        (status = 400, description = "Bad request", body = ApiErrorResponse),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("session_cookie" = []))
-)]
-pub async fn deposit_cash(
-    State(state): State<ApiState>,
-    user: AuthUser,
-    Json(payload): Json<CashAmountRequest>,
-) -> Result<Json<CashBalance>, ApiError> {
-    let owner_id = user.owner_id();
-    let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
-
-    let cash = PortfolioRepository::deposit_cash_at(&state.db.pool, &owner_id, &currency, exponent, amount_minor, payload.executed_at)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(cash_event(&owner_id, &cash));
-    if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-        &state.db.pool, &owner_id, "deposit", amount_minor, &currency, exponent, cash.id, payload.executed_at,
-    ).await {
-        state.broadcaster.send(SystemEvent::TransactionCreated(tx));
-    }
-    Ok(Json(cash))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/portfolio/cash/withdraw",
-    request_body = CashAmountRequest,
-    responses(
-        (status = 200, description = "Cash withdrawn", body = CashBalance),
-        (status = 400, description = "Bad request, or insufficient funds", body = ApiErrorResponse),
-        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
-    ),
-    security(("session_cookie" = []))
-)]
-pub async fn withdraw_cash(
-    State(state): State<ApiState>,
-    user: AuthUser,
-    Json(payload): Json<CashAmountRequest>,
-) -> Result<Json<CashBalance>, ApiError> {
-    let owner_id = user.owner_id();
-    let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
-
-    match PortfolioRepository::withdraw_cash_at(&state.db.pool, &owner_id, &currency, amount_minor, payload.executed_at)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-    {
-        WithdrawOutcome::Ok(cash) => {
-            state.broadcaster.send(cash_event(&owner_id, &cash));
-            if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-                &state.db.pool, &owner_id, "withdraw", amount_minor, &currency, exponent, cash.id, payload.executed_at,
-            ).await {
-                state.broadcaster.send(SystemEvent::TransactionCreated(tx));
-            }
-            Ok(Json(cash))
-        }
-        WithdrawOutcome::InsufficientFunds { available_minor } => Err(ApiError::bad_request(format!(
-            "Only {} {} available",
-            format_for_error(available_minor, exponent as u32),
-            currency
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::portfolio_cash::{deposit_cash, list_cash, withdraw_cash};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use sqlx::SqlitePool;
@@ -496,9 +417,15 @@ mod tests {
     /// Buying now requires cash on hand; this deposits comfortably more than
     /// any single test spends.
     async fn fund(state: &ApiState, user: &AuthUser, currency: &str, exponent: i64) {
-        PortfolioRepository::deposit_cash(&state.db.pool, &user.owner_id(), currency, exponent, 100_000_000)
-            .await
-            .unwrap();
+        PortfolioRepository::deposit_cash(
+            &state.db.pool,
+            &user.owner_id(),
+            currency,
+            exponent,
+            100_000_000,
+        )
+        .await
+        .unwrap();
     }
 
     fn buy(symbol: &str, qty: &str, price: &str, currency: &str) -> BuyHoldingRequest {
@@ -536,10 +463,13 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let holding =
-            buy_holding(State(state.clone()), alice, Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let holding = buy_holding(
+            State(state.clone()),
+            alice,
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(holding.quantity_minor, 10 * 10i64.pow(QUANTITY_EXPONENT));
         assert_eq!(holding.avg_cost_minor, 15000);
@@ -552,13 +482,20 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-            .await
-            .unwrap();
-        let holding =
-            buy_holding(State(state.clone()), alice, Json(buy("AAPL", "5", "180.00", "USD")))
-                .await
-                .unwrap();
+        let _ = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
+        let holding = buy_holding(
+            State(state.clone()),
+            alice,
+            Json(buy("AAPL", "5", "180.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(holding.avg_cost_minor, 16000);
     }
@@ -570,9 +507,13 @@ mod tests {
         fund(&state, &alice, "USD", 2).await;
         fund(&state, &alice, "EUR", 2).await;
 
-        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-            .await
-            .unwrap();
+        let _ = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         let err = buy_holding(State(state), alice, Json(buy("AAPL", "5", "180.00", "EUR")))
             .await
@@ -587,11 +528,19 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
 
-        let err = buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-            .await
-            .unwrap_err();
+        let err = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
-        assert!(err.message.contains("1500.00"), "should state the shortfall: {}", err.message);
+        assert!(
+            err.message.contains("1500.00"),
+            "should state the shortfall: {}",
+            err.message
+        );
 
         assert_eq!(list_holdings(State(state), alice).await.unwrap().len(), 0);
     }
@@ -602,8 +551,11 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        for (qty, price, currency) in [("-5", "150.00", "USD"), ("10", "abc", "USD"), ("10", "150.00", "EURO")]
-        {
+        for (qty, price, currency) in [
+            ("-5", "150.00", "USD"),
+            ("10", "abc", "USD"),
+            ("10", "150.00", "EURO"),
+        ] {
             let err = buy_holding(
                 State(state.clone()),
                 alice.clone(),
@@ -611,7 +563,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{qty} {price} {currency} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "{qty} {price} {currency} must be rejected"
+            );
         }
     }
 
@@ -622,12 +578,17 @@ mod tests {
         let bob = AuthUser::named("bob", "acct_bob");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice, Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice,
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
-        let bobs_view = list_holdings(State(state.clone()), bob.clone()).await.unwrap();
+        let bobs_view = list_holdings(State(state.clone()), bob.clone())
+            .await
+            .unwrap();
         assert_eq!(bobs_view.len(), 0);
 
         let err = delete_holding(State(state.clone()), bob.clone(), Path(created.id))
@@ -652,10 +613,13 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         let err = sell_holding(
             State(state),
@@ -674,10 +638,13 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         let result = sell_holding(
             State(state),
@@ -689,7 +656,10 @@ mod tests {
         .unwrap();
 
         assert!(result.holding.is_some());
-        assert_eq!(result.holding.as_ref().unwrap().quantity_minor, 6 * 10i64.pow(QUANTITY_EXPONENT));
+        assert_eq!(
+            result.holding.as_ref().unwrap().quantity_minor,
+            6 * 10i64.pow(QUANTITY_EXPONENT)
+        );
         assert_eq!(result.realized_pl_minor, 12000);
     }
 
@@ -699,10 +669,13 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         let result = sell_holding(
             State(state.clone()),
@@ -713,7 +686,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(result.holding.is_none(), "a full sell must report the position as closed");
+        assert!(
+            result.holding.is_none(),
+            "a full sell must report the position as closed"
+        );
         assert_eq!(result.realized_pl_minor, 30000);
 
         let listed = list_holdings(State(state), alice).await.unwrap();
@@ -728,10 +704,13 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
         // 100_000_000 - 150000 (cost) spent so far.
         let _ = sell_holding(
             State(state.clone()),
@@ -753,16 +732,21 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         fund(&state, &alice, "USD", 2).await;
 
-        let created =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
+        let created = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
 
         let priced = set_price(
             State(state.clone()),
             alice.clone(),
             Path(created.id),
-            Json(SetPriceRequest { price: "180.00".to_string() }),
+            Json(SetPriceRequest {
+                price: "180.00".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -772,7 +756,9 @@ mod tests {
             State(state.clone()),
             alice.clone(),
             Path(created.id),
-            Json(SetNoteRequest { note: Some("core position".to_string()) }),
+            Json(SetNoteRequest {
+                note: Some("core position".to_string()),
+            }),
         )
         .await
         .unwrap();
@@ -796,18 +782,27 @@ mod tests {
         fund(&state, &alice, "USD", 2).await;
         fund(&state, &alice, "JPY", 0).await;
 
-        let aapl =
-            buy_holding(State(state.clone()), alice.clone(), Json(buy("AAPL", "10", "150.00", "USD")))
-                .await
-                .unwrap();
-        let _ = buy_holding(State(state.clone()), alice.clone(), Json(buy("SONY", "100", "2000", "JPY")))
-            .await
-            .unwrap();
+        let aapl = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("AAPL", "10", "150.00", "USD")),
+        )
+        .await
+        .unwrap();
+        let _ = buy_holding(
+            State(state.clone()),
+            alice.clone(),
+            Json(buy("SONY", "100", "2000", "JPY")),
+        )
+        .await
+        .unwrap();
         let _ = set_price(
             State(state.clone()),
             alice.clone(),
             Path(aapl.id),
-            Json(SetPriceRequest { price: "180.00".to_string() }),
+            Json(SetPriceRequest {
+                price: "180.00".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -853,7 +848,9 @@ mod tests {
         let mut request = buy("AAPL", "10", "150.00", "USD");
         request.note = Some("x".repeat(MAX_NOTE_LEN + 1));
 
-        let err = buy_holding(State(state), alice, Json(request)).await.unwrap_err();
+        let err = buy_holding(State(state), alice, Json(request))
+            .await
+            .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 
@@ -872,9 +869,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(cash.balance_minor, 100000);
-        assert_eq!(cash.currency, "USD", "should normalise like every other currency field");
+        assert_eq!(
+            cash.currency, "USD",
+            "should normalise like every other currency field"
+        );
 
-        let listed = list_cash(State(state.clone()), alice.clone()).await.unwrap();
+        let listed = list_cash(State(state.clone()), alice.clone())
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].balance_minor, 100000);
 
@@ -945,13 +947,9 @@ mod tests {
         .await
         .unwrap();
 
-        let err = withdraw_cash(
-            State(state),
-            alice,
-            Json(cash("100.01", "USD")),
-        )
-        .await
-        .unwrap_err();
+        let err = withdraw_cash(State(state), alice, Json(cash("100.01", "USD")))
+            .await
+            .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert!(err.message.contains("100.00"));
     }
@@ -961,13 +959,9 @@ mod tests {
         let state = test_state().await;
         let alice = AuthUser::named("alice", "acct_alice");
         let bob = AuthUser::named("bob", "acct_bob");
-        let _ = deposit_cash(
-            State(state.clone()),
-            alice,
-            Json(cash("1000.00", "USD")),
-        )
-        .await
-        .unwrap();
+        let _ = deposit_cash(State(state.clone()), alice, Json(cash("1000.00", "USD")))
+            .await
+            .unwrap();
 
         assert_eq!(list_cash(State(state), bob).await.unwrap().len(), 0);
     }
@@ -978,13 +972,9 @@ mod tests {
         let alice = AuthUser::named("alice", "acct_alice");
         let mut rx = state.broadcaster.subscribe();
 
-        let _ = deposit_cash(
-            State(state),
-            alice,
-            Json(cash("1000.00", "USD")),
-        )
-        .await
-        .unwrap();
+        let _ = deposit_cash(State(state), alice, Json(cash("1000.00", "USD")))
+            .await
+            .unwrap();
 
         let event = rx.try_recv().expect("a deposit must be broadcast");
         assert_eq!(event.owner_id(), "acct_alice");

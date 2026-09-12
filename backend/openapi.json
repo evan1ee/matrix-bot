@@ -2020,7 +2020,17 @@
         "operationId": "health_check",
         "responses": {
           "200": {
-            "description": "System health status",
+            "description": "System healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System degraded or database unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -2272,7 +2282,7 @@
     "/api/v1/portfolio/cash": {
       "get": {
         "tags": [
-          "portfolio"
+          "portfolio_cash"
         ],
         "operationId": "list_cash",
         "responses": {
@@ -2310,7 +2320,7 @@
     "/api/v1/portfolio/cash/deposit": {
       "post": {
         "tags": [
-          "portfolio"
+          "portfolio_cash"
         ],
         "operationId": "deposit_cash",
         "requestBody": {
@@ -2365,7 +2375,7 @@
     "/api/v1/portfolio/cash/withdraw": {
       "post": {
         "tags": [
-          "portfolio"
+          "portfolio_cash"
         ],
         "operationId": "withdraw_cash",
         "requestBody": {

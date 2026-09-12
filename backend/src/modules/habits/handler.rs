@@ -1,9 +1,9 @@
 use sqlx::SqlitePool;
 use tracing::error;
 
+use super::repository::HabitsRepository;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html::html_escape;
-use super::repository::HabitsRepository;
 
 pub async fn handle_habit_command(
     pool: &SqlitePool,
@@ -21,12 +21,19 @@ pub async fn handle_habit_command(
     let mut parts = args.split_whitespace();
     let sub = parts.next().unwrap_or("").to_lowercase();
 
-    let today_str = chrono::Utc::now().naive_utc().date().format("%Y-%m-%d").to_string();
+    let today_str = chrono::Utc::now()
+        .naive_utc()
+        .date()
+        .format("%Y-%m-%d")
+        .to_string();
 
     match sub.as_str() {
         "list" | "" => Some(handle_list(pool, owner_id, &today_str).await),
         "done" | "check" => {
-            let target = args.trim_start_matches("done").trim_start_matches("check").trim();
+            let target = args
+                .trim_start_matches("done")
+                .trim_start_matches("check")
+                .trim();
             Some(handle_toggle(pool, broadcaster, owner_id, target, &today_str, true).await)
         }
         "undo" => {
@@ -42,9 +49,7 @@ pub async fn handle_habit_command(
             let id_str = parts.next().unwrap_or("");
             Some(handle_delete(pool, broadcaster, owner_id, id_str).await)
         }
-        _ => {
-            Some(handle_toggle(pool, broadcaster, owner_id, args, &today_str, true).await)
-        }
+        _ => Some(handle_toggle(pool, broadcaster, owner_id, args, &today_str, true).await),
     }
 }
 
@@ -112,7 +117,12 @@ async fn handle_toggle(
     let habit = match habit {
         Ok(Some(h)) => h,
         Ok(None) => return format!("<p>⚠️ Habit \"{}\" not found.</p>", html_escape(target)),
-        Err(e) => return format!("<p>⚠️ Error finding habit: {}</p>", html_escape(&e.to_string())),
+        Err(e) => {
+            return format!(
+                "<p>⚠️ Error finding habit: {}</p>",
+                html_escape(&e.to_string())
+            )
+        }
     };
 
     let current_state = HabitsRepository::find_all_with_status(pool, owner_id, today_str)
@@ -121,11 +131,19 @@ async fn handle_toggle(
         .into_iter()
         .find(|h| h.habit.id == habit.id);
 
-    let is_already = current_state.as_ref().map(|h| h.completed_today).unwrap_or(false);
+    let is_already = current_state
+        .as_ref()
+        .map(|h| h.completed_today)
+        .unwrap_or(false);
 
     if is_already != mark_completed {
-        if let Err(e) = HabitsRepository::toggle_log(pool, habit.id, owner_id, today_str, None).await {
-            return format!("<p>⚠️ Error updating habit log: {}</p>", html_escape(&e.to_string()));
+        if let Err(e) =
+            HabitsRepository::toggle_log(pool, habit.id, owner_id, today_str, None).await
+        {
+            return format!(
+                "<p>⚠️ Error updating habit log: {}</p>",
+                html_escape(&e.to_string())
+            );
         }
 
         if let Some(bc) = broadcaster {
@@ -180,17 +198,7 @@ async fn handle_add(
         return "<p>⚠️ Habit name must be 100 characters or fewer.</p>".to_string();
     }
 
-    match HabitsRepository::create_habit(
-        pool,
-        owner_id,
-        name,
-        None,
-        "daily",
-        "wellness",
-        7,
-    )
-    .await
-    {
+    match HabitsRepository::create_habit(pool, owner_id, name, None, "daily", "wellness", 7).await {
         Ok(habit) => {
             if let Some(bc) = broadcaster {
                 bc.send(SystemEvent::HabitCreated(habit.clone()));
@@ -202,7 +210,10 @@ async fn handle_add(
                 habit.id
             )
         }
-        Err(e) => format!("<p>⚠️ Failed to create habit: {}</p>", html_escape(&e.to_string())),
+        Err(e) => format!(
+            "<p>⚠️ Failed to create habit: {}</p>",
+            html_escape(&e.to_string())
+        ),
     }
 }
 
@@ -252,7 +263,10 @@ async fn handle_delete(
             format!("<p>🗑️ Deleted habit #{}.</p>", id)
         }
         Ok(false) => format!("<p>⚠️ Habit #{} not found.</p>", id),
-        Err(e) => format!("<p>⚠️ Error deleting habit: {}</p>", html_escape(&e.to_string())),
+        Err(e) => format!(
+            "<p>⚠️ Error deleting habit: {}</p>",
+            html_escape(&e.to_string())
+        ),
     }
 }
 
@@ -262,7 +276,9 @@ mod tests {
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_habits::create_tables(&pool).await.unwrap();
+        crate::db::schema_habits::create_tables(&pool)
+            .await
+            .unwrap();
         pool
     }
 
@@ -272,20 +288,41 @@ mod tests {
         let broadcaster = EventBroadcaster::new(10);
 
         // Add
-        let res = handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "add Read 30 mins").await.unwrap();
+        let res = handle_habit_command(
+            &pool,
+            Some(&broadcaster),
+            "user_1",
+            "habit",
+            "add Read 30 mins",
+        )
+        .await
+        .unwrap();
         assert!(res.contains("Read 30 mins"));
 
         // List
-        let list_res = handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "list").await.unwrap();
+        let list_res = handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "list")
+            .await
+            .unwrap();
         assert!(list_res.contains("Read 30 mins"));
         assert!(list_res.contains("⬜"));
 
         // Done
-        let done_res = handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "done Read 30 mins").await.unwrap();
+        let done_res = handle_habit_command(
+            &pool,
+            Some(&broadcaster),
+            "user_1",
+            "habit",
+            "done Read 30 mins",
+        )
+        .await
+        .unwrap();
         assert!(done_res.contains("completed for today"));
 
         // Streak
-        let streak_res = handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "streak").await.unwrap();
+        let streak_res =
+            handle_habit_command(&pool, Some(&broadcaster), "user_1", "habit", "streak")
+                .await
+                .unwrap();
         assert!(streak_res.contains("Leaderboard"));
     }
 }

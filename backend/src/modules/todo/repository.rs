@@ -30,12 +30,11 @@ impl TodoRepository {
     /// Re-reads a row after a write, so callers always see what was stored
     /// rather than what they hoped was stored.
     async fn fetch(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
-        let item = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE id = ?"
-        ))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+        let item =
+            sqlx::query_as::<_, TodoItem>(&format!("SELECT {COLUMNS} FROM todos WHERE id = ?"))
+                .bind(id)
+                .fetch_optional(pool)
+                .await?;
 
         Ok(item)
     }
@@ -50,7 +49,11 @@ impl TodoRepository {
 
     /// Looks up a task that `owner_id` owns, for handlers acting on a caller's
     /// behalf. `owner_id` is the sole ownership key.
-    pub async fn find_owned(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Option<TodoItem>> {
+    pub async fn find_owned(
+        pool: &SqlitePool,
+        id: i64,
+        owner_id: &str,
+    ) -> Result<Option<TodoItem>> {
         let item = sqlx::query_as::<_, TodoItem>(&format!(
             "SELECT {COLUMNS} FROM todos WHERE id = ? AND owner_id = ?"
         ))
@@ -111,7 +114,12 @@ impl TodoRepository {
         Ok(count)
     }
 
-    pub async fn list_room(pool: &SqlitePool, room_id: &str, limit: i64, offset: i64) -> Result<Vec<TodoItem>> {
+    pub async fn list_room(
+        pool: &SqlitePool,
+        room_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<TodoItem>> {
         let items = sqlx::query_as::<_, TodoItem>(&format!(
             "SELECT {COLUMNS} FROM todos WHERE room_id = ? ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
         ))
@@ -215,7 +223,11 @@ impl TodoRepository {
 
     /// Sets completion in either direction. The API exposes `completed` as a
     /// boolean, so un-completing has to be as reachable as completing.
-    pub async fn set_completed(pool: &SqlitePool, id: i64, completed: bool) -> Result<Option<TodoItem>> {
+    pub async fn set_completed(
+        pool: &SqlitePool,
+        id: i64,
+        completed: bool,
+    ) -> Result<Option<TodoItem>> {
         let result = sqlx::query("UPDATE todos SET completed = ? WHERE id = ?")
             .bind(completed)
             .bind(id)
@@ -241,7 +253,11 @@ impl TodoRepository {
         Self::fetch(pool, id).await
     }
 
-    pub async fn set_priority(pool: &SqlitePool, id: i64, priority: TodoPriority) -> Result<Option<TodoItem>> {
+    pub async fn set_priority(
+        pool: &SqlitePool,
+        id: i64,
+        priority: TodoPriority,
+    ) -> Result<Option<TodoItem>> {
         let result = sqlx::query("UPDATE todos SET priority = ? WHERE id = ?")
             .bind(priority.as_str())
             .bind(id)
@@ -301,23 +317,19 @@ impl TodoRepository {
     }
 
     pub async fn clear_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
-        let result = sqlx::query(
-            "DELETE FROM todos WHERE owner_id = ? AND completed = 1",
-        )
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM todos WHERE owner_id = ? AND completed = 1")
+            .bind(owner_id)
+            .execute(pool)
+            .await?;
 
         Ok(result.rows_affected())
     }
 
     pub async fn clear_completed_room(pool: &SqlitePool, room_id: &str) -> Result<u64> {
-        let result = sqlx::query(
-            "DELETE FROM todos WHERE room_id = ? AND completed = 1",
-        )
-        .bind(room_id)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM todos WHERE room_id = ? AND completed = 1")
+            .bind(room_id)
+            .execute(pool)
+            .await?;
 
         Ok(result.rows_affected())
     }
@@ -340,7 +352,14 @@ mod tests {
         let pool = setup_test_db().await;
 
         let item = TodoRepository::add(
-            &pool, "!room:a", "@alice:a", "alice", "Buy milk", TodoPriority::High, None, None,
+            &pool,
+            "!room:a",
+            "@alice:a",
+            "alice",
+            "Buy milk",
+            TodoPriority::High,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -349,26 +368,44 @@ mod tests {
         assert!(!item.completed);
         assert!(item.due_at.is_none());
 
-        let list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0).await.unwrap();
+        let list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0)
+            .await
+            .unwrap();
         assert_eq!(list.len(), 1);
 
-        let updated = TodoRepository::edit_text(&pool, item.id, "Buy oat milk").await.unwrap().unwrap();
+        let updated = TodoRepository::edit_text(&pool, item.id, "Buy oat milk")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(updated.text, "Buy oat milk");
 
         let due = Utc::now() + Duration::days(3);
-        let due_item = TodoRepository::set_due_date(&pool, item.id, Some(due)).await.unwrap().unwrap();
+        let due_item = TodoRepository::set_due_date(&pool, item.id, Some(due))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(due_item.due_at.unwrap().timestamp(), due.timestamp());
 
-        let cleared = TodoRepository::set_due_date(&pool, item.id, None).await.unwrap().unwrap();
+        let cleared = TodoRepository::set_due_date(&pool, item.id, None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(cleared.due_at.is_none());
 
-        let done = TodoRepository::mark_done(&pool, item.id).await.unwrap().unwrap();
+        let done = TodoRepository::mark_done(&pool, item.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(done.completed);
 
-        let cleared = TodoRepository::clear_completed_user(&pool, "@alice:a").await.unwrap();
+        let cleared = TodoRepository::clear_completed_user(&pool, "@alice:a")
+            .await
+            .unwrap();
         assert_eq!(cleared, 1);
 
-        let empty_list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0).await.unwrap();
+        let empty_list = TodoRepository::list_all_user(&pool, "@alice:a", None, 25, 0)
+            .await
+            .unwrap();
         assert!(empty_list.is_empty());
     }
 
@@ -381,7 +418,14 @@ mod tests {
         let due = Utc::now() + Duration::hours(30);
 
         let item = TodoRepository::add(
-            &pool, "web", "@web-alice:api", "alice", "Ship it", TodoPriority::Medium, Some(due), Some(60),
+            &pool,
+            "web",
+            "@web-alice:api",
+            "alice",
+            "Ship it",
+            TodoPriority::Medium,
+            Some(due),
+            Some(60),
         )
         .await
         .unwrap();
@@ -400,7 +444,14 @@ mod tests {
         let pool = setup_test_db().await;
 
         let item = TodoRepository::add(
-            &pool, "!room:a", "@alice:a", "alice", "Old task", TodoPriority::Low, None, None,
+            &pool,
+            "!room:a",
+            "@alice:a",
+            "alice",
+            "Old task",
+            TodoPriority::Low,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -415,7 +466,9 @@ mod tests {
         run_migrations(&pool).await.unwrap();
 
         let migrated = TodoRepository::find(&pool, item.id).await.unwrap().unwrap();
-        let due = migrated.due_at.expect("legacy due date must survive migration");
+        let due = migrated
+            .due_at
+            .expect("legacy due date must survive migration");
         assert_eq!(due.format("%Y-%m-%d %H:%M").to_string(), "2026-12-31 23:59");
     }
 
@@ -424,12 +477,25 @@ mod tests {
         let pool = setup_test_db().await;
 
         let item = TodoRepository::add(
-            &pool, "!room:a", "@alice:a", "alice", "Alice task", TodoPriority::Medium, None, None,
+            &pool,
+            "!room:a",
+            "@alice:a",
+            "alice",
+            "Alice task",
+            TodoPriority::Medium,
+            None,
+            None,
         )
         .await
         .unwrap();
 
-        assert!(TodoRepository::find_owned(&pool, item.id, "@alice:a").await.unwrap().is_some());
-        assert!(TodoRepository::find_owned(&pool, item.id, "@bob:b").await.unwrap().is_none());
+        assert!(TodoRepository::find_owned(&pool, item.id, "@alice:a")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(TodoRepository::find_owned(&pool, item.id, "@bob:b")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

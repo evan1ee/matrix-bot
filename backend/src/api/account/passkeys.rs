@@ -6,9 +6,7 @@ use axum::{
 };
 
 use crate::accounts::{
-    credentials::DeleteOutcome,
-    CredentialRepository,
-    SecurityEventKind, SecurityEventRepository,
+    credentials::DeleteOutcome, CredentialRepository, SecurityEventKind, SecurityEventRepository,
 };
 use crate::api::account::types::*;
 use crate::api::auth::extractor::VerifiedUser;
@@ -61,7 +59,9 @@ pub async fn rename_passkey(
 ) -> Result<axum::http::StatusCode, ApiError> {
     let label = payload.label.trim();
     if label.is_empty() || label.len() > 64 {
-        return Err(ApiError::bad_request("A passkey name must be 1-64 characters"));
+        return Err(ApiError::bad_request(
+            "A passkey name must be 1-64 characters",
+        ));
     }
 
     let renamed = CredentialRepository::rename(&state.db.pool, &user.account_id, &id, label)

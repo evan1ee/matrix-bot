@@ -16,7 +16,8 @@ pub async fn handle_save_command(
 ) -> String {
     let args = ctx.raw_args.trim();
     if args.is_empty() {
-        return "❌ <b>Usage:</b> <code>!save &lt;url&gt; [tags,comma,separated]</code>".to_string();
+        return "❌ <b>Usage:</b> <code>!save &lt;url&gt; [tags,comma,separated]</code>"
+            .to_string();
     }
 
     let mut parts = args.split_whitespace();
@@ -72,14 +73,14 @@ pub async fn handle_save_command(
                 b.id, url_esc, title_esc, domain_esc, b.reading_time_minutes, tags_display
             )
         }
-        Err(e) => format!("❌ <b>Failed to save bookmark:</b> {}", html_escape(&e.to_string())),
+        Err(e) => format!(
+            "❌ <b>Failed to save bookmark:</b> {}",
+            html_escape(&e.to_string())
+        ),
     }
 }
 
-pub async fn handle_list_command(
-    ctx: &CommandContext,
-    pool: &SqlitePool,
-) -> String {
+pub async fn handle_list_command(ctx: &CommandContext, pool: &SqlitePool) -> String {
     let tag = if ctx.raw_args.trim().is_empty() {
         None
     } else {
@@ -96,7 +97,12 @@ pub async fn handle_list_command(
 
     let items = match BookmarksRepository::list(pool, &ctx.owner_id, &query).await {
         Ok(res) => res,
-        Err(e) => return format!("❌ <b>Error listing bookmarks:</b> {}", html_escape(&e.to_string())),
+        Err(e) => {
+            return format!(
+                "❌ <b>Error listing bookmarks:</b> {}",
+                html_escape(&e.to_string())
+            )
+        }
     };
 
     if items.is_empty() {
@@ -143,8 +149,17 @@ pub async fn handle_bookmark_subcommands(
                     if let Some(bc) = broadcaster {
                         bc.send(SystemEvent::BookmarkUpdated(b.clone()));
                     }
-                    let state = if b.is_favorite { "Starred ⭐" } else { "Unstarred" };
-                    format!("{} bookmark <b>#{}</b>: {}", state, b.id, html_escape(&b.title))
+                    let state = if b.is_favorite {
+                        "Starred ⭐"
+                    } else {
+                        "Unstarred"
+                    };
+                    format!(
+                        "{} bookmark <b>#{}</b>: {}",
+                        state,
+                        b.id,
+                        html_escape(&b.title)
+                    )
                 }
                 Err(_) => format!("❌ Bookmark #{} not found.", id),
             }
@@ -160,8 +175,17 @@ pub async fn handle_bookmark_subcommands(
                     if let Some(bc) = broadcaster {
                         bc.send(SystemEvent::BookmarkUpdated(b.clone()));
                     }
-                    let state = if b.is_archived { "Archived 📦" } else { "Restored to unread 📥" };
-                    format!("{} bookmark <b>#{}</b>: {}", state, b.id, html_escape(&b.title))
+                    let state = if b.is_archived {
+                        "Archived 📦"
+                    } else {
+                        "Restored to unread 📥"
+                    };
+                    format!(
+                        "{} bookmark <b>#{}</b>: {}",
+                        state,
+                        b.id,
+                        html_escape(&b.title)
+                    )
                 }
                 Err(_) => format!("❌ Bookmark #{} not found.", id),
             }
@@ -198,7 +222,8 @@ pub fn format_help() -> String {
      • <code>!bookmarks</code> / <code>!reading</code> — List unread bookmarks<br/>\
      • <code>!bookmark fav &lt;id&gt;</code> — Toggle favorite star<br/>\
      • <code>!bookmark archive &lt;id&gt;</code> — Mark as read / archive<br/>\
-     • <code>!bookmark rm &lt;id&gt;</code> — Delete bookmark".to_string()
+     • <code>!bookmark rm &lt;id&gt;</code> — Delete bookmark"
+        .to_string()
 }
 
 #[cfg(test)]
@@ -208,9 +233,10 @@ mod tests {
     async fn setup_db() -> (SqlitePool, String) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         crate::db::schema::run_migrations(&pool).await.unwrap();
-        let owner = crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-            .await
-            .unwrap();
+        let owner =
+            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
+                .await
+                .unwrap();
         (pool, owner)
     }
 

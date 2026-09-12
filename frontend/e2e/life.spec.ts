@@ -102,7 +102,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByRole('heading', { name: /lifespan day grid — 2020s/i })).toBeVisible();
     const decadePill = app.getByRole('button', { name: '2020s' }).first();
     await expect(decadePill).toBeVisible();
-    await expect(decadePill).toHaveClass(/bg-zinc-900|bg-zinc-100/);
+    await expect(decadePill).toHaveClass(/bg-neutral-900|bg-neutral-100/);
     await decadePill.click();
 
     // Test Open Today button

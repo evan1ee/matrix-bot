@@ -14,7 +14,9 @@ static OUTBOX_NOTIFY: OnceLock<Arc<Notify>> = OnceLock::new();
 
 /// Returns the global notification signal for waking the outbox worker immediately.
 pub fn get_outbox_notify() -> Arc<Notify> {
-    OUTBOX_NOTIFY.get_or_init(|| Arc::new(Notify::new())).clone()
+    OUTBOX_NOTIFY
+        .get_or_init(|| Arc::new(Notify::new()))
+        .clone()
 }
 
 /// Triggers an immediate wakeup of the background outbox worker.
@@ -30,10 +32,7 @@ pub fn retry_delay(attempts_so_far: i64) -> Duration {
 }
 
 /// Attempts delivery of an outbox item to Matrix.
-async fn deliver_outbox_item(
-    ctx: &ModuleContext,
-    item: &WebhookOutboxItem,
-) -> Result<(), String> {
+async fn deliver_outbox_item(ctx: &ModuleContext, item: &WebhookOutboxItem) -> Result<(), String> {
     let room_id = <&RoomId>::try_from(item.room_id.as_str())
         .map_err(|_| format!("Invalid Matrix room ID: {}", item.room_id))?;
 
@@ -41,6 +40,21 @@ async fn deliver_outbox_item(
         .client
         .get_room(room_id)
         .ok_or_else(|| format!("Bot is not joined to room: {}", item.room_id))?;
+
+    // Verify that the webhook owner is authorized for this room before delivery
+    let is_auth = crate::api::rooms::is_room_authorized_for_account(
+        &ctx.db.pool,
+        Some(&ctx.client),
+        &item.owner_id,
+        &item.room_id,
+    )
+    .await;
+    if !is_auth {
+        return Err(format!(
+            "Delivery rejected: owner {} is not joined to room {}",
+            item.owner_id, item.room_id
+        ));
+    }
 
     let content = RoomMessageEventContent::text_html(&item.plain_body, &item.html_body);
 
@@ -62,7 +76,8 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
         loop {
             // Drain all available pending items in batches
             loop {
-                let pending = match WebhookRepository::fetch_pending_outbox(&ctx.db.pool, 20).await {
+                let pending = match WebhookRepository::fetch_pending_outbox(&ctx.db.pool, 20).await
+                {
                     Ok(batch) => batch,
                     Err(err) => {
                         error!("Failed reading webhook outbox batch: {:?}", err);
@@ -78,8 +93,12 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                     match deliver_outbox_item(&ctx, &item).await {
                         Ok(_) => {
                             info!("Delivered webhook alert {} to {}", item.id, item.room_id);
-                            if let Err(err) =
-                                WebhookRepository::mark_outbox_delivered(&ctx.db.pool, &item.id, &item.webhook_id).await
+                            if let Err(err) = WebhookRepository::mark_outbox_delivered(
+                                &ctx.db.pool,
+                                &item.id,
+                                &item.webhook_id,
+                            )
+                            .await
                             {
                                 error!("Failed to mark outbox item as delivered: {:?}", err);
                             }

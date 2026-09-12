@@ -72,7 +72,10 @@ pub async fn notify_dev_room_ai_error(
     };
 
     let Some(room_id_str) = target_room_id else {
-        info!("No DEV room configured or found for owner {}; skipping error alert.", owner_id);
+        info!(
+            "No DEV room configured or found for owner {}; skipping error alert.",
+            owner_id
+        );
         return;
     };
 
@@ -93,7 +96,10 @@ pub async fn notify_dev_room_ai_error(
 
     if let Some(room) = client.get_room(room_id) {
         if let Err(e) = room.send(content).await {
-            error!("Failed to send AI error alert to DEV room {}: {:?}", room_id_str, e);
+            error!(
+                "Failed to send AI error alert to DEV room {}: {:?}",
+                room_id_str, e
+            );
         } else {
             info!("Dispatched AI outage alert to DEV room {}", room_id_str);
         }
@@ -101,13 +107,22 @@ pub async fn notify_dev_room_ai_error(
         match client.join_room_by_id(room_id).await {
             Ok(room) => {
                 if let Err(e) = room.send(content).await {
-                    error!("Failed to send AI error alert to joined DEV room {}: {:?}", room_id_str, e);
+                    error!(
+                        "Failed to send AI error alert to joined DEV room {}: {:?}",
+                        room_id_str, e
+                    );
                 } else {
-                    info!("Dispatched AI outage alert to DEV room {} after joining", room_id_str);
+                    info!(
+                        "Dispatched AI outage alert to DEV room {} after joining",
+                        room_id_str
+                    );
                 }
             }
             Err(e) => {
-                error!("Could not join DEV room {} to send AI error alert: {:?}", room_id_str, e);
+                error!(
+                    "Could not join DEV room {} to send AI error alert: {:?}",
+                    room_id_str, e
+                );
             }
         }
     }

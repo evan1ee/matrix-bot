@@ -1,14 +1,15 @@
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
 
-use super::models::{
-    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
-};
+use super::models::{LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView};
 
 pub struct LifeRepository;
 
 impl LifeRepository {
-    pub async fn get_profile(pool: &SqlitePool, owner_id: &str) -> Result<Option<LifeProfile>, sqlx::Error> {
+    pub async fn get_profile(
+        pool: &SqlitePool,
+        owner_id: &str,
+    ) -> Result<Option<LifeProfile>, sqlx::Error> {
         sqlx::query_as::<_, LifeProfile>(
             r#"
             SELECT owner_id, birth_date, expected_lifespan_years, created_at, updated_at
@@ -308,7 +309,10 @@ mod tests {
         let pool = setup_test_db().await;
         let owner = "user_test_1";
 
-        assert!(LifeRepository::get_profile(&pool, owner).await.unwrap().is_none());
+        assert!(LifeRepository::get_profile(&pool, owner)
+            .await
+            .unwrap()
+            .is_none());
 
         let prof = LifeRepository::upsert_profile(&pool, owner, "1995-06-15", 85)
             .await
@@ -349,7 +353,9 @@ mod tests {
         assert_eq!(log.weather.as_deref(), Some("sunny"));
         assert!(log.time_allocation.is_some());
 
-        let stats = LifeRepository::get_stats(&pool, owner, "2026-09-04").await.unwrap();
+        let stats = LifeRepository::get_stats(&pool, owner, "2026-09-04")
+            .await
+            .unwrap();
         assert_eq!(stats.total_logged_days, 1);
         assert_eq!(stats.dominant_mood.as_deref(), Some("amazing"));
         assert_eq!(stats.total_deep_work_hours, 0.5);
@@ -371,14 +377,23 @@ mod tests {
             Some("[\"deep_work\",\"deep_work\",\"deep_work\",\"deep_work\"]")
         );
 
-        let year_view = LifeRepository::get_year_view(&pool, owner, 2026).await.unwrap();
+        let year_view = LifeRepository::get_year_view(&pool, owner, 2026)
+            .await
+            .unwrap();
         assert_eq!(year_view.logs.len(), 1);
 
-        let horizon = LifeRepository::get_horizon_days(&pool, owner).await.unwrap();
+        let horizon = LifeRepository::get_horizon_days(&pool, owner)
+            .await
+            .unwrap();
         assert_eq!(horizon.len(), 1);
 
-        let deleted = LifeRepository::delete_day_log(&pool, owner, "2026-09-04").await.unwrap();
+        let deleted = LifeRepository::delete_day_log(&pool, owner, "2026-09-04")
+            .await
+            .unwrap();
         assert!(deleted);
-        assert!(LifeRepository::get_day_log(&pool, owner, "2026-09-04").await.unwrap().is_none());
+        assert!(LifeRepository::get_day_log(&pool, owner, "2026-09-04")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

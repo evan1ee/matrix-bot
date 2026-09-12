@@ -8,9 +8,9 @@ pub mod executor_life_habits;
 pub mod executor_portfolio;
 pub mod executor_todo;
 
-use sqlx::SqlitePool;
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
+use sqlx::SqlitePool;
 
 pub struct ToolRegistry;
 
@@ -39,9 +39,10 @@ mod tests {
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id = crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
-            .await
-            .unwrap();
+        let account_id =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
+                .await
+                .unwrap();
         (db, account_id)
     }
 
@@ -489,7 +490,10 @@ mod tests {
             &owner,
             "!room:a",
             "update_todo",
-            &format!(r#"{{"id":{},"text":"Task updated","priority":"high"}}"#, todo_id),
+            &format!(
+                r#"{{"id":{},"text":"Task updated","priority":"high"}}"#,
+                todo_id
+            ),
         )
         .await
         .unwrap();
@@ -588,16 +592,10 @@ mod tests {
         assert!(del_habit_res.contains(r#""deleted":true"#));
 
         // 5. Daily log query
-        let daily_log_res = ToolRegistry::execute_tool(
-            &db.pool,
-            None,
-            &owner,
-            "!room:a",
-            "get_daily_log",
-            r#"{}"#,
-        )
-        .await
-        .unwrap();
+        let daily_log_res =
+            ToolRegistry::execute_tool(&db.pool, None, &owner, "!room:a", "get_daily_log", r#"{}"#)
+                .await
+                .unwrap();
         assert!(daily_log_res.contains("date"));
 
         // 6. Settings update

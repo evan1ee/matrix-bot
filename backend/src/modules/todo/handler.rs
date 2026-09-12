@@ -3,18 +3,17 @@ use chrono_tz::Tz;
 use sqlx::SqlitePool;
 use tracing::error;
 
-use crate::modules::todo::due_reminder;
-use crate::modules::todo::models::{TodoItem, TodoPriority};
-use crate::modules::todo::repository::TodoRepository;
 use crate::modules::settings::SettingsRepository;
+use crate::modules::todo::due_reminder;
+use crate::modules::todo::models::TodoPriority;
+use crate::modules::todo::repository::TodoRepository;
+use crate::modules::todo::view::{format_todo_list, handle_list_room, handle_list_user, PAGE_SIZE};
 use crate::utils::{format_datetime, html_escape, parse_reminder_args, priority_badge};
 
 /// Maximum allowed length for task description text.
 const MAX_TASK_TEXT_LEN: usize = 500;
 /// Maximum active tasks per room.
 const MAX_ROOM_TASKS: i64 = 500;
-/// Number of items per page.
-const PAGE_SIZE: i64 = 25;
 
 pub async fn handle_todo_command(
     pool: &SqlitePool,
@@ -33,13 +32,20 @@ pub async fn handle_todo_command(
 
     // Read after the command is claimed, so an unrelated message never costs a
     // settings query.
-    let tz = SettingsRepository::get_or_default(pool, owner_id).await.tz();
+    let tz = SettingsRepository::get_or_default(pool, owner_id)
+        .await
+        .tz();
 
     if bare {
         let items = TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, 0)
-            .await.ok().unwrap_or_default();
+            .await
+            .ok()
+            .unwrap_or_default();
         return Some(format_todo_list(
-            &format!("Your Tasks ({})", html_escape(sender_name)), &items, 1, &tz,
+            &format!("Your Tasks ({})", html_escape(sender_name)),
+            &items,
+            1,
+            &tz,
         ));
     }
 
@@ -66,7 +72,12 @@ pub async fn handle_todo_command(
         handle_delete(pool, owner_id, args_body).await
     } else if args_lower.starts_with("room") {
         handle_list_room(pool, room_id, args_body, &tz).await
-    } else if args_lower.starts_with("list") || args_lower.starts_with("my") || args_lower.starts_with("all") || args_lower.starts_with("global") || args_lower.is_empty() {
+    } else if args_lower.starts_with("list")
+        || args_lower.starts_with("my")
+        || args_lower.starts_with("all")
+        || args_lower.starts_with("global")
+        || args_lower.is_empty()
+    {
         handle_list_user(pool, owner_id, sender_name, args_body, &tz).await
     } else {
         Some("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
@@ -86,8 +97,11 @@ async fn handle_add(
 ) -> Option<String> {
     let mut raw_text = args_body[3..].trim();
     if raw_text.is_empty() {
-        return Some("⚠️ Usage: <code>!todo add &lt;task description&gt;</code> \
-                      (e.g. <code>!todo add [high] Buy milk</code>)".to_string());
+        return Some(
+            "⚠️ Usage: <code>!todo add &lt;task description&gt;</code> \
+                      (e.g. <code>!todo add [high] Buy milk</code>)"
+                .to_string(),
+        );
     }
 
     let mut priority = TodoPriority::Medium;
@@ -112,7 +126,8 @@ async fn handle_add(
 
     if raw_text.len() > MAX_TASK_TEXT_LEN {
         return Some(format!(
-            "⚠️ Task description too long! Maximum limit is {} characters.", MAX_TASK_TEXT_LEN
+            "⚠️ Task description too long! Maximum limit is {} characters.",
+            MAX_TASK_TEXT_LEN
         ));
     }
 
@@ -120,7 +135,8 @@ async fn handle_add(
         Ok(count) if count >= MAX_ROOM_TASKS => {
             return Some(format!(
                 "⚠️ Room task limit reached ({} active tasks). Clear completed tasks using \
-                 <code>!todo clear room</code>.", MAX_ROOM_TASKS
+                 <code>!todo clear room</code>.",
+                MAX_ROOM_TASKS
             ));
         }
         Err(err) => {
@@ -129,7 +145,18 @@ async fn handle_add(
         _ => {}
     }
 
-    match TodoRepository::add(pool, room_id, owner_id, sender_name, raw_text, priority, None, None).await {
+    match TodoRepository::add(
+        pool,
+        room_id,
+        owner_id,
+        sender_name,
+        raw_text,
+        priority,
+        None,
+        None,
+    )
+    .await
+    {
         Ok(item) => Some(format!(
             "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}",
             item.id,
@@ -147,8 +174,11 @@ async fn handle_add(
 async fn handle_done(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
     let id_str = args_body[4..].trim();
     if id_str.is_empty() {
-        return Some("⚠️ Usage: <code>!todo done &lt;id&gt;</code> \
-                      (e.g. <code>!todo done 1</code>)".to_string());
+        return Some(
+            "⚠️ Usage: <code>!todo done &lt;id&gt;</code> \
+                      (e.g. <code>!todo done 1</code>)"
+                .to_string(),
+        );
     }
 
     if let Ok(id) = id_str.parse::<i64>() {
@@ -163,7 +193,11 @@ async fn handle_done(pool: &SqlitePool, room_id: &str, args_body: &str) -> Optio
                     "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}",
                     item.id,
                     html_escape(&item.text),
-                    if cancelled { " <i>(due reminder cancelled)</i>" } else { "" }
+                    if cancelled {
+                        " <i>(due reminder cancelled)</i>"
+                    } else {
+                        ""
+                    }
                 ))
             }
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
@@ -189,7 +223,8 @@ async fn handle_edit(pool: &SqlitePool, args_body: &str) -> Option<String> {
 
     if new_text.len() > MAX_TASK_TEXT_LEN {
         return Some(format!(
-            "⚠️ Task text too long! Maximum limit is {} characters.", MAX_TASK_TEXT_LEN
+            "⚠️ Task text too long! Maximum limit is {} characters.",
+            MAX_TASK_TEXT_LEN
         ));
     }
 
@@ -197,7 +232,8 @@ async fn handle_edit(pool: &SqlitePool, args_body: &str) -> Option<String> {
         match TodoRepository::edit_text(pool, id, new_text).await {
             Ok(Some(item)) => Some(format!(
                 "✏️ Updated Task <b>#{}</b> text to: <i>\"{}\"</i>",
-                item.id, html_escape(&item.text)
+                item.id,
+                html_escape(&item.text)
             )),
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
             Err(err) => {
@@ -206,7 +242,10 @@ async fn handle_edit(pool: &SqlitePool, args_body: &str) -> Option<String> {
             }
         }
     } else {
-        Some("⚠️ Invalid task ID. Usage: <code>!todo edit &lt;id&gt; &lt;new text&gt;</code>".to_string())
+        Some(
+            "⚠️ Invalid task ID. Usage: <code>!todo edit &lt;id&gt; &lt;new text&gt;</code>"
+                .to_string(),
+        )
     }
 }
 
@@ -217,7 +256,9 @@ async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
     let prio_str = parts.next().unwrap_or("").trim();
 
     if id_str.is_empty() || prio_str.is_empty() {
-        return Some("⚠️ Usage: <code>!todo priority &lt;id&gt; &lt;low|medium|high&gt;</code>".to_string());
+        return Some(
+            "⚠️ Usage: <code>!todo priority &lt;id&gt; &lt;low|medium|high&gt;</code>".to_string(),
+        );
     }
 
     if let Ok(id) = id_str.parse::<i64>() {
@@ -225,7 +266,8 @@ async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
         match TodoRepository::set_priority(pool, id, prio.clone()).await {
             Ok(Some(item)) => Some(format!(
                 "🏷️ Set Task <b>#{}</b> priority to {}",
-                item.id, priority_badge(&item.priority)
+                item.id,
+                priority_badge(&item.priority)
             )),
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
             Err(err) => {
@@ -238,7 +280,8 @@ async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
     }
 }
 
-const DUE_USAGE: &str = "⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt; [remind &lt;lead&gt;]</code> \
+const DUE_USAGE: &str =
+    "⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt; [remind &lt;lead&gt;]</code> \
                          (e.g. <code>!todo due 1 2d remind 1h</code>, or \
                          <code>!todo due 1 none</code> to clear)";
 
@@ -266,7 +309,10 @@ async fn handle_due(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) 
         return match TodoRepository::set_due_date(pool, id, None).await {
             Ok(Some(item)) => {
                 due_reminder::tear_down(pool, None, item.id).await.ok();
-                Some(format!("📅 Cleared the due date on Task <b>#{}</b>.", item.id))
+                Some(format!(
+                    "📅 Cleared the due date on Task <b>#{}</b>.",
+                    item.id
+                ))
             }
             Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
             Err(err) => {
@@ -358,7 +404,10 @@ async fn handle_clear(
     let target = args_body[5..].trim();
     if target == "room" {
         match TodoRepository::clear_completed_room(pool, room_id).await {
-            Ok(count) => Some(format!("🗑️ Cleared <b>{}</b> completed task(s) from this room!", count)),
+            Ok(count) => Some(format!(
+                "🗑️ Cleared <b>{}</b> completed task(s) from this room!",
+                count
+            )),
             Err(err) => {
                 error!("Failed to clear room todos: {:?}", err);
                 Some("❌ Database error clearing room tasks.".to_string())
@@ -366,7 +415,11 @@ async fn handle_clear(
         }
     } else {
         match TodoRepository::clear_completed_user(pool, owner_id).await {
-            Ok(count) => Some(format!("🗑️ Cleared <b>{}</b> of {}'s completed task(s) globally!", count, html_escape(sender_name))),
+            Ok(count) => Some(format!(
+                "🗑️ Cleared <b>{}</b> of {}'s completed task(s) globally!",
+                count,
+                html_escape(sender_name)
+            )),
             Err(err) => {
                 error!("Failed to clear user todos: {:?}", err);
                 Some("❌ Database error clearing tasks.".to_string())
@@ -375,17 +428,16 @@ async fn handle_clear(
     }
 }
 
-async fn handle_delete(
-    pool: &SqlitePool,
-    owner_id: &str,
-    args_body: &str,
-) -> Option<String> {
+async fn handle_delete(pool: &SqlitePool, owner_id: &str, args_body: &str) -> Option<String> {
     let id_str = args_body
         .trim_start_matches("delete")
         .trim_start_matches("rm")
         .trim();
     if id_str.is_empty() {
-        return Some("⚠️ Usage: <code>!todo delete &lt;id&gt;</code> (or <code>!todo rm &lt;id&gt;</code>)".to_string());
+        return Some(
+            "⚠️ Usage: <code>!todo delete &lt;id&gt;</code> (or <code>!todo rm &lt;id&gt;</code>)"
+                .to_string(),
+        );
     }
 
     let Ok(id) = id_str.parse::<i64>() else {
@@ -412,85 +464,6 @@ async fn handle_delete(
     }
 }
 
-async fn handle_list_room(pool: &SqlitePool, room_id: &str, args_body: &str, tz: &Tz) -> Option<String> {
-    let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
-    let page: i64 = rest.parse().unwrap_or(1).max(1);
-    let offset = (page - 1) * PAGE_SIZE;
-
-    match TodoRepository::list_room(pool, room_id, PAGE_SIZE, offset).await {
-        Ok(items) => Some(format_todo_list("Room Tasks", &items, page, tz)),
-        Err(err) => {
-            error!("Failed to fetch room todos: {:?}", err);
-            Some("❌ Database error loading room tasks.".to_string())
-        }
-    }
-}
-
-async fn handle_list_user(
-    pool: &SqlitePool,
-    owner_id: &str,
-    sender_name: &str,
-    args_body: &str,
-    tz: &Tz,
-) -> Option<String> {
-    let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
-    let page: i64 = rest.parse().unwrap_or(1).max(1);
-    let offset = (page - 1) * PAGE_SIZE;
-
-    match TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, offset).await {
-        Ok(items) => Some(format_todo_list(
-            &format!("Your Tasks ({})", html_escape(sender_name)), &items, page, tz,
-        )),
-        Err(err) => {
-            error!("Failed to fetch user todos: {:?}", err);
-            Some("❌ Database error loading tasks.".to_string())
-        }
-    }
-}
-
-// --- Formatting ---
-
-fn format_todo_list(title: &str, items: &[TodoItem], page: i64, tz: &Tz) -> String {
-    if items.is_empty() {
-        if page > 1 {
-            return format!("📋 <b>{} (Page {}):</b><br/>No more tasks on this page.", title, page);
-        }
-        return format!(
-            "📋 <b>{}:</b><br/>No active tasks! Add one using <code>!todo add &lt;task&gt;</code>.",
-            title
-        );
-    }
-
-    let mut html = format!("📋 <b>{} (Page {}):</b><br/>", title, page);
-    for item in items {
-        let badge = priority_badge(&item.priority);
-        let due_note = if let Some(due) = &item.due_at {
-            format!(" 📅 <i>(Due: {})</i>", html_escape(&format_datetime(due, tz)))
-        } else {
-            String::new()
-        };
-
-        if item.completed {
-            html.push_str(&format!(
-                "• [<b>#{}</b>] <del>{}</del> ✅ {}{} <i>(by {})</i><br/>",
-                item.id, html_escape(&item.text), badge, due_note, html_escape(&item.sender_name)
-            ));
-        } else {
-            html.push_str(&format!(
-                "• [<b>#{}</b>] {} {}{} <i>(by {})</i><br/>",
-                item.id, html_escape(&item.text), badge, due_note, html_escape(&item.sender_name)
-            ));
-        }
-    }
-
-    if items.len() as i64 == PAGE_SIZE {
-        html.push_str(&format!(
-            "<i>(Page {} full. Use <code>!todo list {}</code> for next page)</i>", page, page + 1
-        ));
-    }
-    html
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,9 +479,15 @@ mod tests {
     async fn test_handle_todo_add_and_done() {
         let pool = setup_test_db().await;
 
-        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add [high] Buy apples")
-            .await
-            .unwrap();
+        let res = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add [high] Buy apples",
+        )
+        .await
+        .unwrap();
         assert!(res.contains("Added Task"));
         assert!(res.contains("Buy apples"));
         assert!(res.contains("HIGH"));
@@ -531,14 +510,26 @@ mod tests {
 
         handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Test task").await;
 
-        let res_edit = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo edit 1 Updated task")
-            .await
-            .unwrap();
+        let res_edit = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo edit 1 Updated task",
+        )
+        .await
+        .unwrap();
         assert!(res_edit.contains("Updated Task"));
 
-        let res_prio = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo priority 1 high")
-            .await
-            .unwrap();
+        let res_prio = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo priority 1 high",
+        )
+        .await
+        .unwrap();
         assert!(res_prio.contains("Set Task"));
         assert!(res_prio.contains("HIGH"));
     }
@@ -587,7 +578,14 @@ mod tests {
     async fn test_handle_todo_delete() {
         let pool = setup_test_db().await;
 
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Task to remove").await;
+        handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add Task to remove",
+        )
+        .await;
         let res_del = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo delete 1")
             .await
             .unwrap();

@@ -34,7 +34,8 @@ impl BotModule for ReminderModule {
             CommandHelp {
                 name: "remind".to_string(),
                 usage: "!remind [daily|weekly] <time> <message>".to_string(),
-                description: "Set a one-time or recurring timer (e.g., !remind 10s check oven)".to_string(),
+                description: "Set a one-time or recurring timer (e.g., !remind 10s check oven)"
+                    .to_string(),
             },
             CommandHelp {
                 name: "remind list".to_string(),
@@ -65,7 +66,10 @@ impl BotModule for ReminderModule {
         .await
     }
 
-    async fn spawn_background_workers(&self, ctx: &ModuleContext) -> Vec<tokio::task::JoinHandle<()>> {
+    async fn spawn_background_workers(
+        &self,
+        ctx: &ModuleContext,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
         vec![scheduler::start_reminder_scheduler(ctx.clone())]
     }
 }
@@ -81,7 +85,12 @@ mod tests {
             sender_mxid: "@tester:x".to_string(),
             owner_id: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
-            command: body.split_whitespace().next().unwrap_or("").trim_start_matches('!').to_string(),
+            command: body
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('!')
+                .to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
@@ -99,7 +108,9 @@ mod tests {
         assert_eq!(module.name(), "Reminder");
         let commands = module.commands();
         assert!(!commands.is_empty());
-        assert!(commands.iter().all(|c| !c.usage.is_empty() && !c.description.is_empty()));
+        assert!(commands
+            .iter()
+            .all(|c| !c.usage.is_empty() && !c.description.is_empty()));
     }
 
     #[tokio::test]
@@ -107,8 +118,17 @@ mod tests {
         let module = ReminderModule::new();
         let db = db().await;
 
-        assert!(module.handle_command(&ctx("!remind list"), &db, None).await.is_some());
-        assert!(module.handle_command(&ctx("!todo list"), &db, None).await.is_none());
-        assert!(module.handle_command(&ctx("!expense list"), &db, None).await.is_none());
+        assert!(module
+            .handle_command(&ctx("!remind list"), &db, None)
+            .await
+            .is_some());
+        assert!(module
+            .handle_command(&ctx("!todo list"), &db, None)
+            .await
+            .is_none());
+        assert!(module
+            .handle_command(&ctx("!expense list"), &db, None)
+            .await
+            .is_none());
     }
 }

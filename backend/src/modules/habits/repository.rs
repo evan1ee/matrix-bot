@@ -2,7 +2,9 @@ use chrono::{Duration, NaiveDate};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 
-use super::models::{calculate_streaks, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay};
+use super::models::{
+    calculate_streaks, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
+};
 
 pub struct HabitsRepository;
 
@@ -295,7 +297,9 @@ mod tests {
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_habits::create_tables(&pool).await.unwrap();
+        crate::db::schema_habits::create_tables(&pool)
+            .await
+            .unwrap();
         pool
     }
 
@@ -337,7 +341,9 @@ mod tests {
         assert_eq!(items[0].longest_streak, 2);
 
         // Heatmap
-        let heatmap = HabitsRepository::get_heatmap(&pool, "user_1").await.unwrap();
+        let heatmap = HabitsRepository::get_heatmap(&pool, "user_1")
+            .await
+            .unwrap();
         assert_eq!(heatmap.len(), 2);
 
         // Stats

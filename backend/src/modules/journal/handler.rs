@@ -20,7 +20,9 @@ pub async fn handle_journal_command(
         return None;
     }
 
-    let tz = SettingsRepository::get_or_default(pool, &ctx.owner_id).await.tz();
+    let tz = SettingsRepository::get_or_default(pool, &ctx.owner_id)
+        .await
+        .tz();
     let today_str = chrono::Utc::now()
         .with_timezone(&tz)
         .date_naive()
@@ -342,7 +344,9 @@ mod tests {
         // View today
         let mut view_ctx = ctx.clone();
         view_ctx.raw_args = "".to_string();
-        let view_res = handle_journal_command(&pool, None, &view_ctx).await.unwrap();
+        let view_res = handle_journal_command(&pool, None, &view_ctx)
+            .await
+            .unwrap();
         assert!(view_res.contains("amazing"));
         assert!(view_res.contains("High productivity day"));
 
@@ -356,7 +360,9 @@ mod tests {
         let mut clear_ctx = ctx.clone();
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
         clear_ctx.raw_args = format!("clear {}", today);
-        let clear_res = handle_journal_command(&pool, None, &clear_ctx).await.unwrap();
+        let clear_res = handle_journal_command(&pool, None, &clear_ctx)
+            .await
+            .unwrap();
         assert!(clear_res.contains("Cleared daily log"));
     }
 }

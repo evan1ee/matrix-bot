@@ -1,7 +1,7 @@
-use serde_json::json;
-use crate::modules::ai::models::{FunctionDefinition, ToolDefinition};
 use super::definitions_extended::extended_tool_definitions;
 use super::definitions_life::life_and_habits_tool_definitions;
+use crate::modules::ai::models::{FunctionDefinition, ToolDefinition};
+use serde_json::json;
 
 pub fn all_tool_definitions() -> Vec<ToolDefinition> {
     let mut tools = vec![

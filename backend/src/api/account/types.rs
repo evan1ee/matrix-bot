@@ -56,4 +56,3 @@ pub struct RecoveryCodesResponse {
 pub struct RenamePasskeyRequest {
     pub label: String,
 }
-

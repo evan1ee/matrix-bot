@@ -4,10 +4,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use chrono::Utc;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
 use crate::api::auth::extractor::VerifiedUser;
 use crate::api::auth::types::{ApiState, AuthUser};
@@ -20,42 +16,16 @@ use crate::modules::webhook::{
     scheduler::notify_outbox,
 };
 
-type RateLimiterMap = HashMap<String, (Instant, u32)>;
-static RATE_LIMITER: OnceLock<Arc<Mutex<RateLimiterMap>>> = OnceLock::new();
-
-fn check_rate_limit(token_hash: &str) -> bool {
-    let limiter = RATE_LIMITER.get_or_init(|| Arc::new(Mutex::new(HashMap::new())));
-    let mut map = limiter.lock().unwrap();
-    let now = Instant::now();
-
-    // Prune stale entries when map exceeds threshold to prevent unbounded memory growth
-    if map.len() > 500 {
-        map.retain(|_, (last_seen, _)| now.duration_since(*last_seen).as_secs() < 120);
-    }
-
-    let entry = map.entry(token_hash.to_string()).or_insert((now, 0));
-    if now.duration_since(entry.0).as_secs() >= 60 {
-        *entry = (now, 1);
-        true
-    } else if entry.1 < 60 {
-        entry.1 += 1;
-        true
-    } else {
-        false
-    }
-}
-
 fn build_example_curls(raw_token: &str) -> (String, String) {
     let json = format!(
         r#"curl -X POST https://<host>/api/v1/webhooks/{raw_token} -H "Content-Type: application/json" -d '{{"title":"Alert","message":"Server is down","level":"critical"}}'"#
     );
-    let tg = format!(
-        r#"curl -X POST https://<host>/bot{raw_token}/sendMessage -d "text=Server alert""#
-    );
+    let tg =
+        format!(r#"curl -X POST https://<host>/bot{raw_token}/sendMessage -d "text=Server alert""#);
     (json, tg)
 }
 
-async fn queue_and_broadcast(
+pub(crate) async fn queue_and_broadcast(
     state: &ApiState,
     webhook: &Webhook,
     title: Option<&str>,
@@ -64,7 +34,25 @@ async fn queue_and_broadcast(
     room_override: Option<String>,
     format: Option<&str>,
 ) -> Result<String, ApiError> {
-    let target_room = room_override.unwrap_or_else(|| webhook.default_room_id.clone());
+    let target_room = if let Some(ref override_room) = room_override {
+        let client_guard = state.bot_client.read().await;
+        let is_auth = crate::api::rooms::is_room_authorized_for_account(
+            &state.db.pool,
+            client_guard.as_ref(),
+            &webhook.owner_id,
+            override_room,
+        )
+        .await;
+        if !is_auth {
+            return Err(ApiError::bad_request(
+                "Target room override is not authorized for this webhook owner",
+            ));
+        }
+        override_room.clone()
+    } else {
+        webhook.default_room_id.clone()
+    };
+
     let (html, plain) = render_alert_message(&webhook.name, title, raw_message, severity, format);
 
     let outbox_item = WebhookRepository::enqueue_outbox(
@@ -117,8 +105,10 @@ pub async fn inbound_webhook(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
 
-    if !check_rate_limit(&token_hash) {
-        return Err(ApiError::too_many_requests("Rate limit exceeded: max 60 requests per minute"));
+    if !crate::api::rate_limit::check_webhook_limit(&token_hash) {
+        return Err(ApiError::too_many_requests(
+            "Rate limit exceeded: max 60 requests per minute",
+        ));
     }
 
     let is_json = headers
@@ -134,12 +124,30 @@ pub async fn inbound_webhook(
                 .as_deref()
                 .map(WebhookSeverity::from_str_or_default)
                 .unwrap_or(WebhookSeverity::Info);
-            (payload.title, msg, sev, payload.room_id.or(payload.chat_id), payload.format)
+            (
+                payload.title,
+                msg,
+                sev,
+                payload.room_id.or(payload.chat_id),
+                payload.format,
+            )
         } else {
-            (None, String::from_utf8_lossy(&body_bytes).to_string(), WebhookSeverity::Info, None, None)
+            (
+                None,
+                String::from_utf8_lossy(&body_bytes).to_string(),
+                WebhookSeverity::Info,
+                None,
+                None,
+            )
         }
     } else {
-        (None, String::from_utf8_lossy(&body_bytes).to_string(), WebhookSeverity::Info, None, None)
+        (
+            None,
+            String::from_utf8_lossy(&body_bytes).to_string(),
+            WebhookSeverity::Info,
+            None,
+            None,
+        )
     };
 
     if raw_message.trim().is_empty() {
@@ -157,109 +165,16 @@ pub async fn inbound_webhook(
     )
     .await?;
 
-    Ok((StatusCode::ACCEPTED, Json(InboundAcceptedResponse { status: "queued", outbox_id })))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(InboundAcceptedResponse {
+            status: "queued",
+            outbox_id,
+        }),
+    ))
 }
 
-pub async fn telegram_send_message_post(
-    State(state): State<ApiState>,
-    Path(token): Path<String>,
-    headers: HeaderMap,
-    body_bytes: Bytes,
-) -> Result<Json<TelegramResponse>, ApiError> {
-    let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
-
-    if !check_rate_limit(&token_hash) {
-        return Err(ApiError::too_many_requests("Rate limit exceeded: max 60 requests per minute"));
-    }
-
-    let content_type = headers
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    let (text, chat_id, parse_mode) = if content_type.contains("application/json") {
-        let q: TelegramQuery = serde_json::from_slice(&body_bytes)
-            .map_err(|_| ApiError::bad_request("Malformed JSON body"))?;
-        (q.text, q.chat_id, q.parse_mode)
-    } else if content_type.contains("application/x-www-form-urlencoded") {
-        let mut t = None;
-        let mut c = None;
-        let mut p = None;
-        for (k, v) in url::form_urlencoded::parse(&body_bytes) {
-            match k.as_ref() {
-                "text" => t = Some(v.into_owned()),
-                "chat_id" => c = Some(v.into_owned()),
-                "parse_mode" => p = Some(v.into_owned()),
-                _ => {}
-            }
-        }
-        (t, c, p)
-    } else {
-        (Some(String::from_utf8_lossy(&body_bytes).to_string()), None, None)
-    };
-
-    let message_text = text.ok_or_else(|| ApiError::bad_request("Missing text parameter"))?;
-    queue_and_broadcast(
-        &state,
-        &webhook,
-        None,
-        &message_text,
-        WebhookSeverity::Info,
-        chat_id,
-        parse_mode.as_deref(),
-    )
-    .await?;
-
-    Ok(Json(TelegramResponse {
-        ok: true,
-        result: TelegramMessageResult {
-            message_id: 1001,
-            date: Utc::now().timestamp(),
-            text: message_text,
-        },
-    }))
-}
-
-pub async fn telegram_send_message_get(
-    State(state): State<ApiState>,
-    Path(token): Path<String>,
-    Query(q): Query<TelegramQuery>,
-) -> Result<Json<TelegramResponse>, ApiError> {
-    let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
-
-    if !check_rate_limit(&token_hash) {
-        return Err(ApiError::too_many_requests("Rate limit exceeded"));
-    }
-
-    let message_text = q.text.ok_or_else(|| ApiError::bad_request("Missing text parameter"))?;
-    queue_and_broadcast(
-        &state,
-        &webhook,
-        None,
-        &message_text,
-        WebhookSeverity::Info,
-        q.chat_id,
-        q.parse_mode.as_deref(),
-    )
-    .await?;
-
-    Ok(Json(TelegramResponse {
-        ok: true,
-        result: TelegramMessageResult {
-            message_id: 1001,
-            date: Utc::now().timestamp(),
-            text: message_text,
-        },
-    }))
-}
+pub use crate::api::webhooks_telegram::{telegram_send_message_get, telegram_send_message_post};
 
 // ----------------------------------------------------- Account Management --
 
@@ -293,10 +208,26 @@ pub async fn create_webhook(
     Json(input): Json<CreateWebhookInput>,
 ) -> Result<(StatusCode, Json<CreatedWebhookResponse>), ApiError> {
     if input.name.trim().is_empty() || input.name.len() > 100 {
-        return Err(ApiError::bad_request("Webhook name must be between 1 and 100 characters"));
+        return Err(ApiError::bad_request(
+            "Webhook name must be between 1 and 100 characters",
+        ));
     }
     if input.default_room_id.trim().is_empty() {
         return Err(ApiError::bad_request("Target room ID cannot be empty"));
+    }
+
+    let client_guard = state.bot_client.read().await;
+    let is_auth = crate::api::rooms::is_room_authorized_for_account(
+        &state.db.pool,
+        client_guard.as_ref(),
+        &user.account_id,
+        input.default_room_id.trim(),
+    )
+    .await;
+    if !is_auth {
+        return Err(ApiError::bad_request(
+            "You are not joined to the specified target room or the room is inaccessible",
+        ));
     }
 
     let (webhook, raw_token) = WebhookRepository::create(
@@ -308,7 +239,9 @@ pub async fn create_webhook(
     .await
     .map_err(ApiError::from)?;
 
-    state.broadcaster.send(SystemEvent::WebhookCreated(webhook.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::WebhookCreated(webhook.clone()));
     let (json_curl, tg_curl) = build_example_curls(&raw_token);
 
     Ok((
@@ -335,6 +268,21 @@ pub async fn update_webhook(
     Path(id): Path<String>,
     Json(input): Json<UpdateWebhookInput>,
 ) -> Result<Json<Webhook>, ApiError> {
+    if let Some(ref new_room) = input.default_room_id {
+        let client_guard = state.bot_client.read().await;
+        let is_auth = crate::api::rooms::is_room_authorized_for_account(
+            &state.db.pool,
+            client_guard.as_ref(),
+            &user.account_id,
+            new_room.trim(),
+        )
+        .await;
+        if !is_auth {
+            return Err(ApiError::bad_request(
+                "You are not joined to the specified target room or the room is inaccessible",
+            ));
+        }
+    }
     let updated = WebhookRepository::update(
         &state.db.pool,
         &id,
@@ -347,7 +295,9 @@ pub async fn update_webhook(
     .map_err(ApiError::from)?
     .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
 
-    state.broadcaster.send(SystemEvent::WebhookUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::WebhookUpdated(updated.clone()));
     Ok(Json(updated))
 }
 
@@ -363,12 +313,15 @@ pub async fn rotate_webhook_token(
     user: VerifiedUser,
     Path(id): Path<String>,
 ) -> Result<Json<CreatedWebhookResponse>, ApiError> {
-    let (webhook, raw_token) = WebhookRepository::rotate_token(&state.db.pool, &id, &user.account_id)
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
+    let (webhook, raw_token) =
+        WebhookRepository::rotate_token(&state.db.pool, &id, &user.account_id)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
 
-    state.broadcaster.send(SystemEvent::WebhookUpdated(webhook.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::WebhookUpdated(webhook.clone()));
     let (json_curl, tg_curl) = build_example_curls(&raw_token);
 
     Ok(Json(CreatedWebhookResponse {
@@ -407,7 +360,13 @@ pub async fn test_webhook(
     )
     .await?;
 
-    Ok((StatusCode::ACCEPTED, Json(InboundAcceptedResponse { status: "queued", outbox_id })))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(InboundAcceptedResponse {
+            status: "queued",
+            outbox_id,
+        }),
+    ))
 }
 
 #[utoipa::path(
@@ -488,9 +447,9 @@ pub async fn get_webhook_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
@@ -514,7 +473,30 @@ mod tests {
         let user = AuthUser::for_account(&acct);
         let verified = VerifiedUser(AuthUser::for_account(&acct));
 
-        // 1. Create Webhook
+        // 0. Ensure unauthorized room creation is rejected
+        let unauth = create_webhook(
+            State(state.clone()),
+            user.clone(),
+            Json(CreateWebhookInput {
+                name: "Intruder Alert".to_string(),
+                default_room_id: "!unauthorized:matrix.org".to_string(),
+            }),
+        )
+        .await;
+        assert!(unauth.is_err());
+
+        // Pre-populate account_rooms for authorized room
+        sqlx::query(
+            "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
+        )
+        .bind(&acct)
+        .bind("!ops:matrix.org")
+        .bind("Ops Room")
+        .execute(&state.db.pool)
+        .await
+        .unwrap();
+
+        // 1. Create Webhook (authorized)
         let (status, Json(created)) = create_webhook(
             State(state.clone()),
             user.clone(),
@@ -576,17 +558,23 @@ mod tests {
         assert!(tg_res.ok);
 
         // 4. Test Webhook trigger
-        let (test_status, _) =
-            test_webhook(State(state.clone()), user.clone(), Path(created.webhook.id.clone()))
-                .await
-                .unwrap();
+        let (test_status, _) = test_webhook(
+            State(state.clone()),
+            user.clone(),
+            Path(created.webhook.id.clone()),
+        )
+        .await
+        .unwrap();
         assert_eq!(test_status, StatusCode::ACCEPTED);
 
         // 5. Delete Webhook
-        let del_status =
-            delete_webhook(State(state.clone()), verified, Path(created.webhook.id.clone()))
-                .await
-                .unwrap();
+        let del_status = delete_webhook(
+            State(state.clone()),
+            verified,
+            Path(created.webhook.id.clone()),
+        )
+        .await
+        .unwrap();
         assert_eq!(del_status, StatusCode::NO_CONTENT);
     }
 }

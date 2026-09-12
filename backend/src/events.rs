@@ -21,56 +21,128 @@ use crate::modules::webhook::models::Webhook;
 pub enum SystemEvent {
     TodoCreated(TodoItem),
     TodoUpdated(TodoItem),
-    TodoDeleted { id: i64, room_id: String, owner_id: String },
+    TodoDeleted {
+        id: i64,
+        room_id: String,
+        owner_id: String,
+    },
     ReminderCreated(Reminder),
     ReminderUpdated(Reminder),
     ReminderTriggered(Reminder),
-    ReminderCancelled { id: i64, room_id: String, owner_id: String },
+    ReminderCancelled {
+        id: i64,
+        room_id: String,
+        owner_id: String,
+    },
     TransactionCreated(Transaction),
     TransactionUpdated(Transaction),
-    TransactionDeleted { id: i64, room_id: String, owner_id: String },
+    TransactionDeleted {
+        id: i64,
+        room_id: String,
+        owner_id: String,
+    },
     CategoryCreated(Category),
-    CategoryDeleted { id: i64, owner_id: String },
+    CategoryDeleted {
+        id: i64,
+        owner_id: String,
+    },
     /// Carries `owner_id` alongside the settings because `UserSettings` holds
     /// only the two preferences — the row is keyed by owner, not identified by
     /// its contents.
-    SettingsUpdated { owner_id: String, settings: UserSettings },
+    SettingsUpdated {
+        owner_id: String,
+        settings: UserSettings,
+    },
     PortfolioHoldingCreated(Holding),
     PortfolioHoldingUpdated(Holding),
-    PortfolioHoldingDeleted { id: i64, owner_id: String },
+    PortfolioHoldingDeleted {
+        id: i64,
+        owner_id: String,
+    },
     /// Carries `owner_id`/`currency` alongside the balance because a
     /// `CashBalance` for a never-deposited-into currency (`id: 0`) is not a
     /// real row to key off — the event fields are what the SSE stream and the
     /// frontend cache actually key on.
-    PortfolioCashUpdated { owner_id: String, currency: String, balance_minor: i64 },
+    PortfolioCashUpdated {
+        owner_id: String,
+        currency: String,
+        balance_minor: i64,
+    },
     PortfolioAuditLogged(PortfolioAuditEntry),
     PortfolioAlertCreated(crate::modules::portfolio::alerts::PriceAlert),
     PortfolioAlertTriggered(crate::modules::portfolio::alerts::PriceAlert),
-    PortfolioAlertDeleted { id: i64, owner_id: String },
+    PortfolioAlertDeleted {
+        id: i64,
+        owner_id: String,
+    },
     RecurringBillCreated(RecurringBill),
     RecurringBillUpdated(RecurringBill),
-    RecurringBillDeleted { id: i64, owner_id: String },
-    RecurringBillPaid { id: i64, owner_id: String, next_due_at: String },
+    RecurringBillDeleted {
+        id: i64,
+        owner_id: String,
+    },
+    RecurringBillPaid {
+        id: i64,
+        owner_id: String,
+        next_due_at: String,
+    },
     WebhookCreated(Webhook),
     WebhookUpdated(Webhook),
-    WebhookDeleted { id: String, owner_id: String },
-    WebhookTriggered { id: String, owner_id: String, outbox_id: String, room_id: String, severity: String },
-    AiConversationUpdated { id: String, owner_id: String },
-    AiConversationDeleted { id: String, owner_id: String },
-    AiConfigUpdated { owner_id: String },
+    WebhookDeleted {
+        id: String,
+        owner_id: String,
+    },
+    WebhookTriggered {
+        id: String,
+        owner_id: String,
+        outbox_id: String,
+        room_id: String,
+        severity: String,
+    },
+    AiConversationUpdated {
+        id: String,
+        owner_id: String,
+    },
+    AiConversationDeleted {
+        id: String,
+        owner_id: String,
+    },
+    AiConfigUpdated {
+        owner_id: String,
+    },
     FootprintCreated(crate::modules::footprints::models::Footprint),
     FootprintUpdated(crate::modules::footprints::models::Footprint),
-    FootprintDeleted { id: i64, owner_id: String },
+    FootprintDeleted {
+        id: i64,
+        owner_id: String,
+    },
     HabitCreated(crate::modules::habits::models::Habit),
     HabitUpdated(crate::modules::habits::models::Habit),
-    HabitDeleted { id: i64, owner_id: String },
-    HabitLogToggled { habit_id: i64, owner_id: String, log_date: String, completed: bool },
-    LifeProfileUpdated { owner_id: String, profile: crate::modules::life::models::LifeProfile },
+    HabitDeleted {
+        id: i64,
+        owner_id: String,
+    },
+    HabitLogToggled {
+        habit_id: i64,
+        owner_id: String,
+        log_date: String,
+        completed: bool,
+    },
+    LifeProfileUpdated {
+        owner_id: String,
+        profile: crate::modules::life::models::LifeProfile,
+    },
     LifeDayLogged(crate::modules::life::models::LifeDayLog),
-    LifeDayCleared { owner_id: String, date: String },
+    LifeDayCleared {
+        owner_id: String,
+        date: String,
+    },
     BookmarkCreated(crate::modules::bookmarks::models::Bookmark),
     BookmarkUpdated(crate::modules::bookmarks::models::Bookmark),
-    BookmarkDeleted { id: i64, owner_id: String },
+    BookmarkDeleted {
+        id: i64,
+        owner_id: String,
+    },
 }
 
 impl SystemEvent {
@@ -85,9 +157,7 @@ impl SystemEvent {
             SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.owner_id,
             SystemEvent::ReminderCreated(rem)
             | SystemEvent::ReminderUpdated(rem)
-            | SystemEvent::ReminderTriggered(rem) => {
-                &rem.owner_id
-            }
+            | SystemEvent::ReminderTriggered(rem) => &rem.owner_id,
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
             SystemEvent::ReminderCancelled { owner_id, .. } => owner_id,
             SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
@@ -103,7 +173,9 @@ impl SystemEvent {
             SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
             SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
             SystemEvent::PortfolioAuditLogged(entry) => &entry.owner_id,
-            SystemEvent::PortfolioAlertCreated(a) | SystemEvent::PortfolioAlertTriggered(a) => &a.owner_id,
+            SystemEvent::PortfolioAlertCreated(a) | SystemEvent::PortfolioAlertTriggered(a) => {
+                &a.owner_id
+            }
             SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
                 &b.owner_id
@@ -171,7 +243,8 @@ mod tests {
             owner_id: "@alice:a".to_string(),
         };
 
-        let json: serde_json::Value = serde_json::from_str(&serde_json::to_string(&ev).unwrap()).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&ev).unwrap()).unwrap();
         assert_eq!(json["type"], "TodoDeleted");
         assert_eq!(json["payload"]["id"], 1);
         assert_eq!(json["payload"]["owner_id"], "@alice:a");

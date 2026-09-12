@@ -123,10 +123,7 @@ impl AlertsRepository {
         Ok(alert)
     }
 
-    pub async fn list_for_owner(
-        pool: &SqlitePool,
-        owner_id: &str,
-    ) -> Result<Vec<PriceAlert>> {
+    pub async fn list_for_owner(pool: &SqlitePool, owner_id: &str) -> Result<Vec<PriceAlert>> {
         let alerts = sqlx::query_as::<_, PriceAlert>(
             r#"
             SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
@@ -174,27 +171,18 @@ impl AlertsRepository {
         Ok(symbols)
     }
 
-    pub async fn delete(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<bool> {
-        let rows = sqlx::query(
-            "DELETE FROM portfolio_price_alerts WHERE id = ? AND owner_id = ?;",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool> {
+        let rows = sqlx::query("DELETE FROM portfolio_price_alerts WHERE id = ? AND owner_id = ?;")
+            .bind(id)
+            .bind(owner_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
 
         Ok(rows > 0)
     }
 
-    pub async fn mark_triggered(
-        pool: &SqlitePool,
-        id: i64,
-    ) -> Result<bool> {
+    pub async fn mark_triggered(pool: &SqlitePool, id: i64) -> Result<bool> {
         let rows = sqlx::query(
             "UPDATE portfolio_price_alerts SET is_triggered = 1, triggered_at = CURRENT_TIMESTAMP WHERE id = ?;",
         )
@@ -208,10 +196,7 @@ impl AlertsRepository {
 }
 
 /// Formats a clean, readable notification for a triggered alert (both plain and HTML).
-pub fn format_alert_notification(
-    alert: &PriceAlert,
-    current_price_minor: i64,
-) -> (String, String) {
+pub fn format_alert_notification(alert: &PriceAlert, current_price_minor: i64) -> (String, String) {
     let cond = alert.parsed_condition();
     let exp = alert.currency_exponent;
     let target = (alert.target_price_minor as f64) / 10f64.powi(exp);
@@ -230,7 +215,14 @@ pub fn format_alert_notification(
 
     let plain = format!(
         "{} Price Alert: {} has {} target {:.2} {}! Current price: {:.2} {} ({:+.2}%)",
-        icon, alert.symbol, direction_word, target, alert.currency, current, alert.currency, diff_pct
+        icon,
+        alert.symbol,
+        direction_word,
+        target,
+        alert.currency,
+        current,
+        alert.currency,
+        diff_pct
     );
 
     let html = format!(
@@ -285,22 +277,35 @@ mod tests {
         assert_eq!(alert.target_price_minor, 70000_00);
         assert_eq!(alert.is_triggered, false);
 
-        let list = AlertsRepository::list_for_owner(&pool, owner).await.unwrap();
+        let list = AlertsRepository::list_for_owner(&pool, owner)
+            .await
+            .unwrap();
         assert_eq!(list.len(), 1);
 
         let symbols = AlertsRepository::list_active_symbols(&pool).await.unwrap();
         assert!(symbols.contains(&"BTC-USD".to_string()));
 
-        let active_btc = AlertsRepository::list_active_for_symbol(&pool, "BTC-USD").await.unwrap();
+        let active_btc = AlertsRepository::list_active_for_symbol(&pool, "BTC-USD")
+            .await
+            .unwrap();
         assert_eq!(active_btc.len(), 1);
 
-        AlertsRepository::mark_triggered(&pool, alert.id).await.unwrap();
-        let updated = AlertsRepository::find_by_id(&pool, alert.id, owner).await.unwrap().unwrap();
+        AlertsRepository::mark_triggered(&pool, alert.id)
+            .await
+            .unwrap();
+        let updated = AlertsRepository::find_by_id(&pool, alert.id, owner)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(updated.is_triggered);
 
-        let deleted = AlertsRepository::delete(&pool, alert.id, owner).await.unwrap();
+        let deleted = AlertsRepository::delete(&pool, alert.id, owner)
+            .await
+            .unwrap();
         assert!(deleted);
-        let empty = AlertsRepository::list_for_owner(&pool, owner).await.unwrap();
+        let empty = AlertsRepository::list_for_owner(&pool, owner)
+            .await
+            .unwrap();
         assert!(empty.is_empty());
     }
 }

@@ -110,14 +110,13 @@ impl SecurityEventRepository {
         kind: SecurityEventKind,
         detail: Option<&str>,
     ) {
-        let result = sqlx::query(
-            "INSERT INTO security_events (account_id, kind, detail) VALUES (?, ?, ?)",
-        )
-        .bind(account_id)
-        .bind(kind.as_str())
-        .bind(detail)
-        .execute(pool)
-        .await;
+        let result =
+            sqlx::query("INSERT INTO security_events (account_id, kind, detail) VALUES (?, ?, ?)")
+                .bind(account_id)
+                .bind(kind.as_str())
+                .bind(detail)
+                .execute(pool)
+                .await;
 
         if let Err(err) = result {
             tracing::error!(
@@ -161,7 +160,9 @@ mod tests {
     #[tokio::test]
     async fn test_events_are_recorded_and_listed_newest_first() {
         let pool = db().await;
-        let acct = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let acct = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         SecurityEventRepository::record(&pool, &acct, SecurityEventKind::SignedIn, None).await;
         SecurityEventRepository::record(
@@ -172,7 +173,9 @@ mod tests {
         )
         .await;
 
-        let events = SecurityEventRepository::list(&pool, &acct, 10).await.unwrap();
+        let events = SecurityEventRepository::list(&pool, &acct, 10)
+            .await
+            .unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, "matrix_linked");
         assert_eq!(events[0].detail.as_deref(), Some("@evan:mbm.one"));
@@ -182,13 +185,26 @@ mod tests {
     #[tokio::test]
     async fn test_the_log_is_per_account() {
         let pool = db().await;
-        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE).await.unwrap();
-        let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE).await.unwrap();
+        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         SecurityEventRepository::record(&pool, &theirs, SecurityEventKind::SignedIn, None).await;
 
-        assert!(SecurityEventRepository::list(&pool, &mine, 10).await.unwrap().is_empty());
-        assert_eq!(SecurityEventRepository::list(&pool, &theirs, 10).await.unwrap().len(), 1);
+        assert!(SecurityEventRepository::list(&pool, &mine, 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            SecurityEventRepository::list(&pool, &theirs, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     /// Recording must not be able to fail an action that already happened.

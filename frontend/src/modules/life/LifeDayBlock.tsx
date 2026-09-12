@@ -25,7 +25,7 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
   let stateClasses = '';
   if (day_type === 'present') {
     if (moodCfg) {
-      stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-zinc-950 shadow-xs`;
+      stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-neutral-950 shadow-xs`;
     } else {
       stateClasses =
         'bg-blue-600 dark:bg-blue-500 text-white font-bold ring-2 ring-blue-400/50';
@@ -34,11 +34,11 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
     stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold shadow-xs`;
   } else if (day_type === 'past') {
     stateClasses =
-      'bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700/80';
+      'bg-neutral-100 dark:bg-neutral-800/70 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700/80';
   } else {
     // Future: clean white or subtle dark
     stateClasses =
-      'bg-white dark:bg-zinc-900/60 text-zinc-400 dark:text-zinc-600 border border-zinc-200 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700';
+      'bg-white dark:bg-neutral-900/60 text-neutral-400 dark:text-neutral-600 border border-neutral-200 dark:border-neutral-800/80 hover:border-neutral-300 dark:hover:border-neutral-700';
   }
 
   const hasExtra = !!(activities && activities.length > 0) || !!note || !!weather;
@@ -63,7 +63,7 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
 
       {/* Mini dot indicator for extra details (note / activity / weather) when no mood or secondary */}
       {!moodCfg && hasExtra && (
-        <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+        <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-neutral-400 dark:bg-neutral-500" />
       )}
     </button>
   );

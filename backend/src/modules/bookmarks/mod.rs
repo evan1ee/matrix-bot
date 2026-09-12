@@ -71,15 +71,20 @@ impl BotModule for BookmarksModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         match ctx.command.as_str() {
-            "save" => {
-                Some(handler::handle_save_command(ctx, &db.pool, Some(&self.http_client), broadcaster).await)
-            }
-            "bookmarks" | "reading" => {
-                Some(handler::handle_list_command(ctx, &db.pool).await)
-            }
-            "bookmark" => {
-                Some(handler::handle_bookmark_subcommands(ctx, &db.pool, Some(&self.http_client), broadcaster).await)
-            }
+            "save" => Some(
+                handler::handle_save_command(ctx, &db.pool, Some(&self.http_client), broadcaster)
+                    .await,
+            ),
+            "bookmarks" | "reading" => Some(handler::handle_list_command(ctx, &db.pool).await),
+            "bookmark" => Some(
+                handler::handle_bookmark_subcommands(
+                    ctx,
+                    &db.pool,
+                    Some(&self.http_client),
+                    broadcaster,
+                )
+                .await,
+            ),
             _ => None,
         }
     }

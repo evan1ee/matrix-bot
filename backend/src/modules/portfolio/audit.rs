@@ -296,7 +296,18 @@ mod tests {
         let owner = "acct_alice";
 
         let e1 = record_audit_entry(
-            &pool, owner, "deposit", None, None, None, 500000, "USD", 2, None, Some("wire deposit"), None,
+            &pool,
+            owner,
+            "deposit",
+            None,
+            None,
+            None,
+            500000,
+            "USD",
+            2,
+            None,
+            Some("wire deposit"),
+            None,
         )
         .await
         .unwrap();
@@ -371,10 +382,11 @@ mod tests {
         .unwrap();
 
         // Direct UPDATE must be rejected by trigger
-        let update_res = sqlx::query("UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?")
-            .bind(e.id)
-            .execute(&pool)
-            .await;
+        let update_res =
+            sqlx::query("UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?")
+                .bind(e.id)
+                .execute(&pool)
+                .await;
         assert!(update_res.is_err(), "Trigger must abort UPDATE");
 
         // Direct DELETE must be rejected by trigger
@@ -408,7 +420,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(e.created_at.unwrap().timestamp_millis(), past_time.timestamp_millis());
+        assert_eq!(
+            e.created_at.unwrap().timestamp_millis(),
+            past_time.timestamp_millis()
+        );
 
         let report = verify_audit_chain(&pool, owner).await.unwrap();
         assert!(report.is_valid);

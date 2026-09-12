@@ -62,11 +62,12 @@ pub async fn update_settings(
 ) -> Result<Json<UserSettings>, ApiError> {
     // Validated here rather than at render time: an unknown zone stored now
     // would silently render as UTC forever, with nothing to point at.
-    let timezone = parse_timezone(&payload.timezone)
-        .ok_or_else(|| ApiError::bad_request("Unknown timezone. Use an IANA name such as Asia/Shanghai"))?;
+    let timezone = parse_timezone(&payload.timezone).ok_or_else(|| {
+        ApiError::bad_request("Unknown timezone. Use an IANA name such as Asia/Shanghai")
+    })?;
 
-    let currency = normalise_currency(&payload.currency)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let currency =
+        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let dev_room_id = payload.dev_room_id.and_then(|r| {
         let trimmed = r.trim();
@@ -80,7 +81,9 @@ pub async fn update_settings(
     let current = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
     let max_history_turns = if let Some(turns) = payload.max_history_turns {
         if !(1..=100).contains(&turns) {
-            return Err(ApiError::bad_request("max_history_turns must be between 1 and 100"));
+            return Err(ApiError::bad_request(
+                "max_history_turns must be between 1 and 100",
+            ));
         }
         turns
     } else {
@@ -140,9 +143,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_returns_defaults_before_anything_is_saved() {
         let state = state().await;
-        let settings = get_settings(State(state), AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"))
-            .await
-            .unwrap();
+        let settings = get_settings(
+            State(state),
+            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+        )
+        .await
+        .unwrap();
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
         assert_eq!(settings.max_history_turns, 10);
@@ -166,7 +172,9 @@ mod tests {
         assert_eq!(saved.dev_room_id, None);
         assert_eq!(saved.max_history_turns, 10);
 
-        let read = get_settings(State(state.clone()), user.clone()).await.unwrap();
+        let read = get_settings(State(state.clone()), user.clone())
+            .await
+            .unwrap();
         assert_eq!(read.0, saved.0);
 
         // Update dev_room_id and max_history_turns
@@ -195,7 +203,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{bad} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "{bad} must be rejected"
+            );
         }
     }
 
@@ -211,7 +223,11 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{bad} must be rejected");
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "{bad} must be rejected"
+            );
         }
     }
 
@@ -249,7 +265,12 @@ mod tests {
         .await
         .unwrap();
 
-        let local = get_settings(State(state), AuthUser::named("evan", "acct_evan")).await.unwrap();
-        assert_eq!(local.timezone, "UTC", "a local account must not inherit the MXID's settings");
+        let local = get_settings(State(state), AuthUser::named("evan", "acct_evan"))
+            .await
+            .unwrap();
+        assert_eq!(
+            local.timezone, "UTC",
+            "a local account must not inherit the MXID's settings"
+        );
     }
 }

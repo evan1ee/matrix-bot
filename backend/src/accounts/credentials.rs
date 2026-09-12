@@ -58,9 +58,8 @@ impl CredentialRepository {
         label: &str,
     ) -> Result<String, sqlx::Error> {
         let id = credential_id_string(passkey.cred_id());
-        let json = serde_json::to_string(passkey).map_err(|err| {
-            sqlx::Error::Protocol(format!("could not serialise passkey: {err}"))
-        })?;
+        let json = serde_json::to_string(passkey)
+            .map_err(|err| sqlx::Error::Protocol(format!("could not serialise passkey: {err}")))?;
 
         sqlx::query(
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
@@ -124,9 +123,8 @@ impl CredentialRepository {
         credential_id: &str,
         passkey: &Passkey,
     ) -> Result<(), sqlx::Error> {
-        let json = serde_json::to_string(passkey).map_err(|err| {
-            sqlx::Error::Protocol(format!("could not serialise passkey: {err}"))
-        })?;
+        let json = serde_json::to_string(passkey)
+            .map_err(|err| sqlx::Error::Protocol(format!("could not serialise passkey: {err}")))?;
 
         sqlx::query(
             "UPDATE webauthn_credentials SET passkey_json = ?, last_used_at = ? WHERE id = ?",
@@ -146,14 +144,15 @@ impl CredentialRepository {
         credential_id: &str,
         label: &str,
     ) -> Result<bool, sqlx::Error> {
-        let affected =
-            sqlx::query("UPDATE webauthn_credentials SET label = ? WHERE id = ? AND account_id = ?")
-                .bind(label)
-                .bind(credential_id)
-                .bind(account_id)
-                .execute(pool)
-                .await?
-                .rows_affected();
+        let affected = sqlx::query(
+            "UPDATE webauthn_credentials SET label = ? WHERE id = ? AND account_id = ?",
+        )
+        .bind(label)
+        .bind(credential_id)
+        .bind(account_id)
+        .execute(pool)
+        .await?
+        .rows_affected();
 
         Ok(affected > 0)
     }
@@ -191,7 +190,11 @@ impl CredentialRepository {
                 .await?
                 .rows_affected();
 
-        Ok(if affected > 0 { DeleteOutcome::Removed } else { DeleteOutcome::NotFound })
+        Ok(if affected > 0 {
+            DeleteOutcome::Removed
+        } else {
+            DeleteOutcome::NotFound
+        })
     }
 }
 
@@ -236,7 +239,9 @@ mod tests {
         add_raw(&pool, "cred_a2", "acct_a").await;
         add_raw(&pool, "cred_b1", "acct_b").await;
 
-        let mine = CredentialRepository::list_for_account(&pool, "acct_a").await.unwrap();
+        let mine = CredentialRepository::list_for_account(&pool, "acct_a")
+            .await
+            .unwrap();
         assert_eq!(mine.len(), 2);
         assert!(mine.iter().all(|c| c.account_id == "acct_a"));
     }
@@ -247,9 +252,16 @@ mod tests {
         let pool = db().await;
         add_raw(&pool, "cred_only", "acct_a").await;
 
-        let outcome = CredentialRepository::delete(&pool, "acct_a", "cred_only").await.unwrap();
+        let outcome = CredentialRepository::delete(&pool, "acct_a", "cred_only")
+            .await
+            .unwrap();
         assert_eq!(outcome, DeleteOutcome::WouldLockOut);
-        assert_eq!(CredentialRepository::count_for_account(&pool, "acct_a").await.unwrap(), 1);
+        assert_eq!(
+            CredentialRepository::count_for_account(&pool, "acct_a")
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -258,9 +270,16 @@ mod tests {
         add_raw(&pool, "cred_1", "acct_a").await;
         add_raw(&pool, "cred_2", "acct_a").await;
 
-        let outcome = CredentialRepository::delete(&pool, "acct_a", "cred_1").await.unwrap();
+        let outcome = CredentialRepository::delete(&pool, "acct_a", "cred_1")
+            .await
+            .unwrap();
         assert_eq!(outcome, DeleteOutcome::Removed);
-        assert_eq!(CredentialRepository::count_for_account(&pool, "acct_a").await.unwrap(), 1);
+        assert_eq!(
+            CredentialRepository::count_for_account(&pool, "acct_a")
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     /// A credential id is not a capability: knowing one must not let another
@@ -273,13 +292,24 @@ mod tests {
         add_raw(&pool, "cred_b1", "acct_b").await;
         add_raw(&pool, "cred_b2", "acct_b").await;
 
-        let outcome = CredentialRepository::delete(&pool, "acct_b", "cred_a1").await.unwrap();
+        let outcome = CredentialRepository::delete(&pool, "acct_b", "cred_a1")
+            .await
+            .unwrap();
         assert_eq!(outcome, DeleteOutcome::NotFound);
-        assert_eq!(CredentialRepository::count_for_account(&pool, "acct_a").await.unwrap(), 2);
+        assert_eq!(
+            CredentialRepository::count_for_account(&pool, "acct_a")
+                .await
+                .unwrap(),
+            2
+        );
 
-        let renamed =
-            CredentialRepository::rename(&pool, "acct_b", "cred_a1", "stolen").await.unwrap();
-        assert!(!renamed, "renaming another account's passkey must not succeed");
+        let renamed = CredentialRepository::rename(&pool, "acct_b", "cred_a1", "stolen")
+            .await
+            .unwrap();
+        assert!(
+            !renamed,
+            "renaming another account's passkey must not succeed"
+        );
     }
 
     /// A credential blob that will not parse must be skipped, not fatal — one
@@ -289,11 +319,18 @@ mod tests {
         let pool = db().await;
         add_raw(&pool, "cred_broken", "acct_a").await;
 
-        let usable = CredentialRepository::passkeys_for_account(&pool, "acct_a").await.unwrap();
-        assert!(usable.is_empty(), "the unparseable row is skipped rather than returned");
+        let usable = CredentialRepository::passkeys_for_account(&pool, "acct_a")
+            .await
+            .unwrap();
+        assert!(
+            usable.is_empty(),
+            "the unparseable row is skipped rather than returned"
+        );
 
         // The row is still listed, so the UI can show it and offer removal.
-        let listed = CredentialRepository::list_for_account(&pool, "acct_a").await.unwrap();
+        let listed = CredentialRepository::list_for_account(&pool, "acct_a")
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
     }
 }

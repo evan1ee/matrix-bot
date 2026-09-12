@@ -31,7 +31,11 @@ impl SettingsRepository {
         match Self::get(pool, owner_id).await {
             Ok(settings) => settings,
             Err(err) => {
-                tracing::warn!("Falling back to default settings for {}: {:?}", owner_id, err);
+                tracing::warn!(
+                    "Falling back to default settings for {}: {:?}",
+                    owner_id,
+                    err
+                );
                 UserSettings::default()
             }
         }
@@ -80,7 +84,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_user_with_no_row_gets_the_defaults() {
         let pool = pool().await;
-        let settings = SettingsRepository::get(&pool, "@evan:mbm.one").await.unwrap();
+        let settings = SettingsRepository::get(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
         assert_eq!(settings, UserSettings::default());
     }
 
@@ -150,7 +156,9 @@ mod tests {
         .unwrap();
 
         // The two identity spaces share a display name but never an owner_id.
-        let other = SettingsRepository::get(&pool, "@web-evan:api").await.unwrap();
+        let other = SettingsRepository::get(&pool, "@web-evan:api")
+            .await
+            .unwrap();
         assert_eq!(other, UserSettings::default());
     }
 }

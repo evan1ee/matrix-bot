@@ -90,11 +90,7 @@ async fn describe_room(room: &Room, bot_id: &UserId) -> Option<JoinedRoomInfo> {
     let is_direct = room.is_direct().await.unwrap_or(false);
 
     // If it's a direct message room, resolve the other member's name (e.g. "evan")
-    let mut resolved_name = if is_direct {
-        None
-    } else {
-        room.name()
-    };
+    let mut resolved_name = if is_direct { None } else { room.name() };
 
     // If still unresolved, try display_name()
     if resolved_name.is_none() {
@@ -108,7 +104,10 @@ async fn describe_room(room: &Room, bot_id: &UserId) -> Option<JoinedRoomInfo> {
 
     // If still unresolved or is_direct, look for the other joined member's display name or localpart
     if resolved_name.is_none() || is_direct {
-        if let Ok(members) = room.members_no_sync(matrix_sdk::RoomMemberships::JOIN).await {
+        if let Ok(members) = room
+            .members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await
+        {
             for m in &members {
                 if m.user_id() != bot_id {
                     let member_name = m
@@ -203,6 +202,56 @@ pub async fn discover_rooms_for_account(
 
     rooms.sort_by_key(|a| a.name.to_lowercase());
     rooms
+}
+
+/// Validates whether a room is joined by the account (checking cached rooms or discovering live).
+pub async fn is_room_authorized_for_account(
+    pool: &SqlitePool,
+    client: Option<&matrix_sdk::Client>,
+    account_id: &str,
+    room_id: &str,
+) -> bool {
+    // 1. Fast path: check cached account_rooms
+    if let Ok(Some(_)) = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM account_rooms WHERE account_id = ? AND room_id = ? LIMIT 1",
+    )
+    .bind(account_id)
+    .bind(room_id)
+    .fetch_optional(pool)
+    .await
+    {
+        return true;
+    }
+
+    // 2. If client is present, test live membership
+    if let Some(c) = client {
+        if let Ok(room_id_parsed) = <&matrix_sdk::ruma::RoomId>::try_from(room_id) {
+            if let Some(room) = c.get_room(room_id_parsed) {
+                if room.state() == matrix_sdk::RoomState::Joined {
+                    let linked = crate::accounts::AccountRepository::linked_mxids(pool, account_id)
+                        .await
+                        .unwrap_or_default();
+                    for mxid in linked {
+                        if let Ok(uid) = UserId::parse(&mxid) {
+                            if is_joined_member(&room, &uid).await {
+                                let _ = sqlx::query(
+                                    "INSERT OR IGNORE INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
+                                )
+                                .bind(account_id)
+                                .bind(room_id)
+                                .bind(room.name().unwrap_or_else(|| room_id.to_string()))
+                                .execute(pool)
+                                .await;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 #[utoipa::path(
@@ -330,7 +379,9 @@ mod tests {
             },
         ];
 
-        save_cached_rooms(&pool, "acct_test_rooms", &rooms).await.unwrap();
+        save_cached_rooms(&pool, "acct_test_rooms", &rooms)
+            .await
+            .unwrap();
 
         let cached = get_cached_rooms(&pool, "acct_test_rooms").await.unwrap();
         assert_eq!(cached.len(), 2);

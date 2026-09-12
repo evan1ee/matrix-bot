@@ -171,7 +171,9 @@ pub struct ModuleRegistry {
 
 impl ModuleRegistry {
     pub fn new() -> Self {
-        Self { modules: Vec::new() }
+        Self {
+            modules: Vec::new(),
+        }
     }
 
     /// Registers a new module. Called during bot initialization.
@@ -341,7 +343,12 @@ mod tests {
                 sender_mxid: "@tester:x".to_string(),
                 owner_id: "@alice:a".to_string(),
                 sender_name: "alice".to_string(),
-                command: body.split_whitespace().next().unwrap().trim_start_matches('!').to_string(),
+                command: body
+                    .split_whitespace()
+                    .next()
+                    .unwrap()
+                    .trim_start_matches('!')
+                    .to_string(),
                 raw_args: String::new(),
                 full_body: body.to_string(),
                 is_direct: true,
@@ -353,7 +360,7 @@ mod tests {
             );
         }
     }
-use crate::events::EventBroadcaster;
+    use crate::events::EventBroadcaster;
 
     /// A module that claims only the command it was told to claim.
     struct StubModule {
@@ -409,8 +416,14 @@ use crate::events::EventBroadcaster;
     async fn test_dispatch_returns_the_first_claiming_module() {
         let db = memory_db().await;
         let mut registry = ModuleRegistry::new();
-        registry.register(StubModule { label: "first", claims: "shared" });
-        registry.register(StubModule { label: "second", claims: "shared" });
+        registry.register(StubModule {
+            label: "first",
+            claims: "shared",
+        });
+        registry.register(StubModule {
+            label: "second",
+            claims: "shared",
+        });
 
         let reply = registry.dispatch(&ctx_for("shared"), &db, None).await;
         assert_eq!(reply.as_deref(), Some("handled by first"));
@@ -422,17 +435,29 @@ use crate::events::EventBroadcaster;
     async fn test_unclaimed_command_falls_through() {
         let db = memory_db().await;
         let mut registry = ModuleRegistry::new();
-        registry.register(StubModule { label: "todo", claims: "todo" });
+        registry.register(StubModule {
+            label: "todo",
+            claims: "todo",
+        });
 
-        assert!(registry.dispatch(&ctx_for("nonsense"), &db, None).await.is_none());
+        assert!(registry
+            .dispatch(&ctx_for("nonsense"), &db, None)
+            .await
+            .is_none());
     }
 
     #[tokio::test]
     async fn test_dispatch_reaches_a_later_module() {
         let db = memory_db().await;
         let mut registry = ModuleRegistry::new();
-        registry.register(StubModule { label: "todo", claims: "todo" });
-        registry.register(StubModule { label: "finance", claims: "expense" });
+        registry.register(StubModule {
+            label: "todo",
+            claims: "todo",
+        });
+        registry.register(StubModule {
+            label: "finance",
+            claims: "expense",
+        });
 
         let reply = registry.dispatch(&ctx_for("expense"), &db, None).await;
         assert_eq!(reply.as_deref(), Some("handled by finance"));
@@ -443,8 +468,14 @@ use crate::events::EventBroadcaster;
     #[test]
     fn test_help_covers_every_registered_module() {
         let mut registry = ModuleRegistry::new();
-        registry.register(StubModule { label: "todo", claims: "todo" });
-        registry.register(StubModule { label: "finance", claims: "expense" });
+        registry.register(StubModule {
+            label: "todo",
+            claims: "todo",
+        });
+        registry.register(StubModule {
+            label: "finance",
+            claims: "expense",
+        });
 
         let help = registry.get_all_help();
         assert_eq!(help.len(), 2);

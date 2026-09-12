@@ -1,4 +1,7 @@
-use axum::{extract::State, response::sse::{Event, Sse}};
+use axum::{
+    extract::State,
+    response::sse::{Event, Sse},
+};
 use futures_util::stream::StreamExt;
 use std::convert::Infallible;
 use std::time::Duration;
@@ -46,15 +49,13 @@ pub async fn sse_handler(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-
     let stream = owned_events(&state.broadcaster, user.owner_id()).filter_map(|msg| async move {
         let json_str = serde_json::to_string(&msg).ok()?;
         Some(Ok(Event::default().data(json_str)))
     });
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)),
-    ))
+    Ok(Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 #[cfg(test)]
@@ -102,18 +103,28 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         let state = test_state(pool.clone());
 
-        let account = AccountRepository::create(&pool, "evan", "active").await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", "active")
+            .await
+            .unwrap();
         let token = SessionRepository::create(&pool, &account, None, None, None)
             .await
             .unwrap();
 
         // A live cookie resolves to the owning account.
-        let session = SessionRepository::resolve(&pool, &token).await.unwrap().unwrap();
+        let session = SessionRepository::resolve(&pool, &token)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(session.account_id, account);
 
         // A revoked one does not, so the stream closes to it on reconnect.
-        SessionRepository::revoke(&pool, &session.id_hash).await.unwrap();
-        assert!(SessionRepository::resolve(&pool, &token).await.unwrap().is_none());
+        SessionRepository::revoke(&pool, &session.id_hash)
+            .await
+            .unwrap();
+        assert!(SessionRepository::resolve(&pool, &token)
+            .await
+            .unwrap()
+            .is_none());
 
         let _ = state;
     }
@@ -166,7 +177,11 @@ mod tests {
 
         let delivered: Vec<SystemEvent> = stream.collect().await;
 
-        assert_eq!(delivered.len(), 2, "expected exactly the subscriber's own events");
+        assert_eq!(
+            delivered.len(),
+            2,
+            "expected exactly the subscriber's own events"
+        );
         assert!(delivered.iter().all(|e| e.owner_id() == "acct_mine"));
         match &delivered[0] {
             SystemEvent::TodoCreated(item) => assert_eq!(item.text, "mine"),

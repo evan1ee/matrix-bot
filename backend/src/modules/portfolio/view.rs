@@ -54,7 +54,8 @@ pub fn signed_amount(minor: i64, exponent: u32) -> String {
 pub async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
     match PortfolioRepository::list(pool, owner_id).await {
         Ok(holdings) if holdings.is_empty() => {
-            "📈 No holdings yet. Add one with <code>!portfolio buy AAPL 10 @ 150.00</code>.".to_string()
+            "📈 No holdings yet. Add one with <code>!portfolio buy AAPL 10 @ 150.00</code>."
+                .to_string()
         }
         Ok(holdings) => {
             let mut html = "📈 <b>Your holdings:</b><br/>".to_string();

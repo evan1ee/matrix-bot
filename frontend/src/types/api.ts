@@ -3707,8 +3707,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description System health status */
+            /** @description System healthy */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description System degraded or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

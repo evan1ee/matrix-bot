@@ -26,7 +26,10 @@ pub enum LinkOutcome {
     Linked { account_id: String },
     /// The MXID's existing unclaimed account has data. The user is asked to
     /// confirm the merge in the web UI, where the counts can be shown.
-    NeedsMergeConfirmation { account_id: String, from_account: String },
+    NeedsMergeConfirmation {
+        account_id: String,
+        from_account: String,
+    },
     /// No such code, or it expired, or it has already been used.
     UnknownCode,
     /// This MXID already reaches a different account. One Matrix account maps
@@ -141,9 +144,9 @@ impl LinkRepository {
 
         match existing {
             // Already this account's — nothing to do.
-            Some(ref current) if *current == challenge.account_id => {
-                Ok(LinkOutcome::Linked { account_id: challenge.account_id })
-            }
+            Some(ref current) if *current == challenge.account_id => Ok(LinkOutcome::Linked {
+                account_id: challenge.account_id,
+            }),
             Some(current) => {
                 let account = super::AccountRepository::find(pool, &current).await?;
 
@@ -178,7 +181,9 @@ impl LinkRepository {
 
                 if let Some(prev) = previous_account {
                     if prev != challenge.account_id {
-                        let preview = super::MergeRepository::preview(pool, &prev).await.unwrap_or_default();
+                        let preview = super::MergeRepository::preview(pool, &prev)
+                            .await
+                            .unwrap_or_default();
                         if preview.total() > 0 {
                             return Ok(LinkOutcome::NeedsMergeConfirmation {
                                 account_id: challenge.account_id,
@@ -188,7 +193,9 @@ impl LinkRepository {
                     }
                 }
 
-                Ok(LinkOutcome::Linked { account_id: challenge.account_id })
+                Ok(LinkOutcome::Linked {
+                    account_id: challenge.account_id,
+                })
             }
         }
     }
@@ -245,7 +252,9 @@ mod tests {
     #[tokio::test]
     async fn test_codes_are_readable_and_unique() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         let a = LinkRepository::issue(&pool, &account).await.unwrap();
         let b = LinkRepository::issue(&pool, &account).await.unwrap();
@@ -262,13 +271,22 @@ mod tests {
     #[tokio::test]
     async fn test_a_code_is_accepted_however_it_is_typed() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
         let sloppy = code.to_lowercase().replace('-', " ");
-        let outcome = LinkRepository::claim(&pool, &sloppy, "@evan:mbm.one", true).await.unwrap();
+        let outcome = LinkRepository::claim(&pool, &sloppy, "@evan:mbm.one", true)
+            .await
+            .unwrap();
 
-        assert_eq!(outcome, LinkOutcome::Linked { account_id: account });
+        assert_eq!(
+            outcome,
+            LinkOutcome::Linked {
+                account_id: account
+            }
+        );
     }
 
     /// Proof of ownership is the sender, so the happy path is simply: the code
@@ -276,14 +294,25 @@ mod tests {
     #[tokio::test]
     async fn test_a_fresh_mxid_links_straight_away() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
-        let outcome = LinkRepository::claim(&pool, &code, "@evan:mbm.one", true).await.unwrap();
-        assert_eq!(outcome, LinkOutcome::Linked { account_id: account.clone() });
+        let outcome = LinkRepository::claim(&pool, &code, "@evan:mbm.one", true)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            LinkOutcome::Linked {
+                account_id: account.clone()
+            }
+        );
 
         assert_eq!(
-            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(account)
         );
     }
@@ -294,31 +323,46 @@ mod tests {
     #[tokio::test]
     async fn test_a_code_shown_in_a_public_room_is_refused_and_burned() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
-        let outcome = LinkRepository::claim(&pool, &code, "@evan:mbm.one", false).await.unwrap();
+        let outcome = LinkRepository::claim(&pool, &code, "@evan:mbm.one", false)
+            .await
+            .unwrap();
         assert_eq!(outcome, LinkOutcome::NotADirectMessage);
 
         // The bystander's attempt finds nothing left to use.
-        let stolen = LinkRepository::claim(&pool, &code, "@bystander:mbm.one", true).await.unwrap();
+        let stolen = LinkRepository::claim(&pool, &code, "@bystander:mbm.one", true)
+            .await
+            .unwrap();
         assert_eq!(stolen, LinkOutcome::UnknownCode);
 
-        assert!(AccountRepository::find_by_mxid(&pool, "@bystander:mbm.one").await.unwrap().is_none());
+        assert!(AccountRepository::find_by_mxid(&pool, "@bystander:mbm.one")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
     async fn test_a_code_is_single_use() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
         assert!(matches!(
-            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true).await.unwrap(),
+            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true)
+                .await
+                .unwrap(),
             LinkOutcome::Linked { .. }
         ));
         assert_eq!(
-            LinkRepository::claim(&pool, &code, "@someone:else.org", true).await.unwrap(),
+            LinkRepository::claim(&pool, &code, "@someone:else.org", true)
+                .await
+                .unwrap(),
             LinkOutcome::UnknownCode
         );
     }
@@ -326,7 +370,9 @@ mod tests {
     #[tokio::test]
     async fn test_an_expired_code_is_refused() {
         let pool = db().await;
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
         sqlx::query("UPDATE matrix_link_challenges SET expires_at = ? WHERE code = ?")
@@ -337,7 +383,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true).await.unwrap(),
+            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true)
+                .await
+                .unwrap(),
             LinkOutcome::UnknownCode
         );
     }
@@ -346,7 +394,9 @@ mod tests {
     async fn test_an_unknown_code_links_nothing() {
         let pool = db().await;
         assert_eq!(
-            LinkRepository::claim(&pool, "ZZZZ-ZZZZ", "@evan:mbm.one", true).await.unwrap(),
+            LinkRepository::claim(&pool, "ZZZZ-ZZZZ", "@evan:mbm.one", true)
+                .await
+                .unwrap(),
             LinkOutcome::UnknownCode
         );
     }
@@ -356,24 +406,32 @@ mod tests {
     #[tokio::test]
     async fn test_an_mxid_on_a_claimed_account_cannot_be_taken() {
         let pool = db().await;
-        let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE).await.unwrap();
+        let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
             .bind(&theirs)
             .execute(&pool)
             .await
             .unwrap();
 
-        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE).await.unwrap();
+        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &mine).await.unwrap();
 
         assert_eq!(
-            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true).await.unwrap(),
+            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true)
+                .await
+                .unwrap(),
             LinkOutcome::AlreadyLinked
         );
 
         // The link is untouched.
         assert_eq!(
-            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(theirs)
         );
     }
@@ -384,13 +442,22 @@ mod tests {
     #[tokio::test]
     async fn test_an_unclaimed_account_with_history_asks_to_merge() {
         let pool = db().await;
-        let old = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        let new = AccountRepository::create(&pool, "web", STATUS_ACTIVE).await.unwrap();
+        let old = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        let new = AccountRepository::create(&pool, "web", STATUS_ACTIVE)
+            .await
+            .unwrap();
         let code = LinkRepository::issue(&pool, &new).await.unwrap();
 
         assert_eq!(
-            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true).await.unwrap(),
-            LinkOutcome::NeedsMergeConfirmation { account_id: new, from_account: old }
+            LinkRepository::claim(&pool, &code, "@evan:mbm.one", true)
+                .await
+                .unwrap(),
+            LinkOutcome::NeedsMergeConfirmation {
+                account_id: new,
+                from_account: old
+            }
         );
     }
 
@@ -398,7 +465,9 @@ mod tests {
     #[tokio::test]
     async fn test_unlinking_keeps_the_data() {
         let pool = db().await;
-        let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
 
         sqlx::query(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
@@ -409,10 +478,15 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(LinkRepository::unlink(&pool, &account, "@evan:mbm.one").await.unwrap());
+        assert!(LinkRepository::unlink(&pool, &account, "@evan:mbm.one")
+            .await
+            .unwrap());
 
         // The MXID reaches nothing now.
-        assert!(AccountRepository::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap().is_none());
+        assert!(AccountRepository::find_by_mxid(&pool, "@evan:mbm.one")
+            .await
+            .unwrap()
+            .is_none());
 
         // The row is exactly where it was.
         let owner: String = sqlx::query_scalar("SELECT owner_id FROM todos WHERE text = 'keep me'")
@@ -427,11 +501,20 @@ mod tests {
     #[tokio::test]
     async fn test_an_unlinked_mxid_comes_back_as_a_stranger() {
         let pool = db().await;
-        let original = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        LinkRepository::unlink(&pool, &original, "@evan:mbm.one").await.unwrap();
+        let original = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        LinkRepository::unlink(&pool, &original, "@evan:mbm.one")
+            .await
+            .unwrap();
 
-        let fresh = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        assert_ne!(fresh, original, "the MXID must not inherit the account it was unlinked from");
+        let fresh = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        assert_ne!(
+            fresh, original,
+            "the MXID must not inherit the account it was unlinked from"
+        );
     }
 
     /// Unlinking is scoped to the account doing it: knowing an MXID must not
@@ -439,12 +522,20 @@ mod tests {
     #[tokio::test]
     async fn test_one_account_cannot_unlink_anothers_mxid() {
         let pool = db().await;
-        let theirs = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
-        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE).await.unwrap();
+        let theirs = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+            .await
+            .unwrap();
+        let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE)
+            .await
+            .unwrap();
 
-        assert!(!LinkRepository::unlink(&pool, &mine, "@evan:mbm.one").await.unwrap());
+        assert!(!LinkRepository::unlink(&pool, &mine, "@evan:mbm.one")
+            .await
+            .unwrap());
         assert_eq!(
-            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            AccountRepository::find_by_mxid(&pool, "@evan:mbm.one")
+                .await
+                .unwrap(),
             Some(theirs)
         );
     }

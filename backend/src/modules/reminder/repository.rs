@@ -54,12 +54,11 @@ impl ReminderRepository {
 
         let id = res.last_insert_rowid();
 
-        let reminder = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE id = ?"
-        ))
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
+        let reminder =
+            sqlx::query_as::<_, Reminder>(&format!("SELECT {COLUMNS} FROM reminders WHERE id = ?"))
+                .bind(id)
+                .fetch_one(pool)
+                .await?;
 
         Ok(reminder)
     }
@@ -148,21 +147,33 @@ impl ReminderRepository {
         Ok(())
     }
 
-    pub async fn increment_retry(pool: &SqlitePool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
-        sqlx::query("UPDATE reminders SET retry_count = retry_count + 1, trigger_at = ? WHERE id = ?")
-            .bind(new_trigger_at)
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn increment_retry(
+        pool: &SqlitePool,
+        id: i64,
+        new_trigger_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE reminders SET retry_count = retry_count + 1, trigger_at = ? WHERE id = ?",
+        )
+        .bind(new_trigger_at)
+        .bind(id)
+        .execute(pool)
+        .await?;
         Ok(())
     }
 
-    pub async fn reschedule(pool: &SqlitePool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
-        sqlx::query("UPDATE reminders SET trigger_at = ?, status = 'pending', retry_count = 0 WHERE id = ?")
-            .bind(new_trigger_at)
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn reschedule(
+        pool: &SqlitePool,
+        id: i64,
+        new_trigger_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE reminders SET trigger_at = ?, status = 'pending', retry_count = 0 WHERE id = ?",
+        )
+        .bind(new_trigger_at)
+        .bind(id)
+        .execute(pool)
+        .await?;
         Ok(())
     }
 
@@ -285,7 +296,9 @@ mod tests {
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, rem.id);
 
-        ReminderRepository::mark_triggered(&pool, rem.id).await.unwrap();
+        ReminderRepository::mark_triggered(&pool, rem.id)
+            .await
+            .unwrap();
 
         let due_after = ReminderRepository::get_due_reminders(&pool).await.unwrap();
         assert!(due_after.is_empty());
@@ -298,7 +311,14 @@ mod tests {
         let later = Utc::now() + Duration::hours(1);
 
         let rem = ReminderRepository::create(
-            &pool, "!room:a", "@bob:a", "bob", "Check oven", later, RecurrencePattern::None, None,
+            &pool,
+            "!room:a",
+            "@bob:a",
+            "bob",
+            "Check oven",
+            later,
+            RecurrencePattern::None,
+            None,
         )
         .await
         .unwrap();
@@ -335,7 +355,9 @@ mod tests {
         assert_eq!(updated.retry_count, 0);
 
         // Once it has fired, it is a delivery record, not an editable plan.
-        ReminderRepository::mark_triggered(&pool, rem.id).await.unwrap();
+        ReminderRepository::mark_triggered(&pool, rem.id)
+            .await
+            .unwrap();
         let after_fire = ReminderRepository::update_pending(
             &pool,
             "@bob:a",
@@ -346,7 +368,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(after_fire.is_none(), "a triggered reminder must not be editable");
+        assert!(
+            after_fire.is_none(),
+            "a triggered reminder must not be editable"
+        );
     }
 
     /// A failed delivery must neither be dropped nor retried forever.
@@ -356,7 +381,14 @@ mod tests {
         let past = Utc::now() - Duration::seconds(10);
 
         let rem = ReminderRepository::create(
-            &pool, "!room:a", "@bob:a", "bob", "Check oven", past, RecurrencePattern::None, None,
+            &pool,
+            "!room:a",
+            "@bob:a",
+            "bob",
+            "Check oven",
+            past,
+            RecurrencePattern::None,
+            None,
         )
         .await
         .unwrap();
@@ -378,7 +410,9 @@ mod tests {
         assert!(due.is_empty(), "exhausted reminder must stop being retried");
 
         // And the scheduler records the outcome rather than leaving it dangling.
-        ReminderRepository::mark_failed(&pool, rem.id).await.unwrap();
+        ReminderRepository::mark_failed(&pool, rem.id)
+            .await
+            .unwrap();
         let status: (String,) = sqlx::query_as("SELECT status FROM reminders WHERE id = ?")
             .bind(rem.id)
             .fetch_one(&pool)
@@ -395,7 +429,14 @@ mod tests {
         let past = Utc::now() - Duration::seconds(10);
 
         let rem = ReminderRepository::create(
-            &pool, "!room:a", "@bob:a", "bob", "Standup", past, RecurrencePattern::Daily, None,
+            &pool,
+            "!room:a",
+            "@bob:a",
+            "bob",
+            "Standup",
+            past,
+            RecurrencePattern::Daily,
+            None,
         )
         .await
         .unwrap();

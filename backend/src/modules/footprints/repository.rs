@@ -1,7 +1,9 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use super::models::{calculate_stay_duration, Footprint, FootprintCurrencySpend, FootprintsSummary};
+use super::models::{
+    calculate_stay_duration, Footprint, FootprintCurrencySpend, FootprintsSummary,
+};
 
 pub struct FootprintRepository;
 
@@ -65,17 +67,19 @@ impl FootprintRepository {
     }
 
     pub async fn find(pool: &SqlitePool, id: i64) -> Result<Option<Footprint>> {
-        let fp = sqlx::query_as::<_, Footprint>(
-            "SELECT * FROM footprints WHERE id = ?;",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+        let fp = sqlx::query_as::<_, Footprint>("SELECT * FROM footprints WHERE id = ?;")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
 
         Ok(fp)
     }
 
-    pub async fn find_owned(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Option<Footprint>> {
+    pub async fn find_owned(
+        pool: &SqlitePool,
+        id: i64,
+        owner_id: &str,
+    ) -> Result<Option<Footprint>> {
         let fp = sqlx::query_as::<_, Footprint>(
             "SELECT * FROM footprints WHERE id = ? AND owner_id = ?;",
         )
@@ -115,7 +119,8 @@ impl FootprintRepository {
         }
         if let Some(s) = search {
             let pattern = format!("%{}%", s);
-            q = q.bind(pattern.clone())
+            q = q
+                .bind(pattern.clone())
                 .bind(pattern.clone())
                 .bind(pattern.clone())
                 .bind(pattern);

@@ -77,10 +77,31 @@ pub async fn create_bookmark(
         return Err(ApiError::bad_request("URL cannot be empty"));
     }
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(ApiError::bad_request("URL must begin with http:// or https://"));
+        return Err(ApiError::bad_request(
+            "URL must begin with http:// or https://",
+        ));
     }
     if url.len() > 2048 {
-        return Err(ApiError::bad_request("URL exceeds maximum length of 2048 characters"));
+        return Err(ApiError::bad_request(
+            "URL exceeds maximum length of 2048 characters",
+        ));
+    }
+
+    if let Some(ref t) = payload.title {
+        if t.len() > 500 {
+            return Err(ApiError::bad_request("Title exceeds 500 characters"));
+        }
+    }
+
+    if let Some(ref tags) = payload.tags {
+        if tags.len() > 20 {
+            return Err(ApiError::bad_request("Cannot specify more than 20 tags"));
+        }
+        for tag in tags {
+            if tag.len() > 50 {
+                return Err(ApiError::bad_request("Tag exceeds 50 characters"));
+            }
+        }
     }
 
     let tags_str = payload
@@ -95,12 +116,8 @@ pub async fn create_bookmark(
         })
         .unwrap_or_default();
 
-    let meta = fetch_and_extract_metadata(
-        Some(&state.http_client),
-        url,
-        payload.title.as_deref(),
-    )
-    .await;
+    let meta =
+        fetch_and_extract_metadata(Some(&state.http_client), url, payload.title.as_deref()).await;
 
     let bookmark = BookmarksRepository::create(
         &state.db.pool,
@@ -118,7 +135,9 @@ pub async fn create_bookmark(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::BookmarkCreated(bookmark.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::BookmarkCreated(bookmark.clone()));
 
     Ok(Json(bookmark))
 }
@@ -174,7 +193,9 @@ pub async fn update_bookmark(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::BookmarkUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::BookmarkUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -196,7 +217,9 @@ pub async fn toggle_favorite(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::BookmarkUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::BookmarkUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -218,7 +241,9 @@ pub async fn toggle_archive(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::BookmarkUpdated(updated.clone()));
+    state
+        .broadcaster
+        .send(SystemEvent::BookmarkUpdated(updated.clone()));
 
     Ok(Json(updated))
 }
@@ -262,9 +287,10 @@ mod tests {
     async fn setup_state() -> (ApiState, String) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         crate::db::schema::run_migrations(&pool).await.unwrap();
-        let owner = crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-            .await
-            .unwrap();
+        let owner =
+            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
+                .await
+                .unwrap();
         let state = ApiState::new(
             Database { pool },
             EventBroadcaster::default(),
@@ -293,9 +319,13 @@ mod tests {
         assert_eq!(created.domain, "news.ycombinator.com");
 
         // 2. List
-        let list = list_bookmarks(user.clone(), State(state.clone()), Query(BookmarkQuery::default()))
-            .await
-            .unwrap();
+        let list = list_bookmarks(
+            user.clone(),
+            State(state.clone()),
+            Query(BookmarkQuery::default()),
+        )
+        .await
+        .unwrap();
         assert_eq!(list.len(), 1);
 
         // 3. Toggle Fav

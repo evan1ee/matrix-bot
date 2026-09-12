@@ -36,7 +36,10 @@ pub struct VerificationPolicy {
 
 impl VerificationPolicy {
     pub fn new(own_user: impl Into<String>, allowed: Vec<String>) -> Self {
-        Self { own_user: own_user.into(), allowed }
+        Self {
+            own_user: own_user.into(),
+            allowed,
+        }
     }
 
     /// Whether a verification request from `sender` should be answered.
@@ -73,31 +76,29 @@ pub fn register_verification_handlers(client: &Client, policy: VerificationPolic
     );
 
     let in_room_policy = policy.clone();
-    client.add_event_handler(
-        move |ev: OriginalSyncRoomMessageEvent, client: Client| {
-            let policy = in_room_policy.clone();
-            async move {
-                // Our own outgoing request lands back in this handler too — a
-                // room message is echoed to every member including the sender.
-                // Without this check the bot answers itself and logs a
-                // confusing "vanished before it could be answered" warning for
-                // a request nobody was ever meant to receive.
-                if client.user_id() == Some(ev.sender.as_ref()) {
-                    return;
-                }
-
-                if let MessageType::VerificationRequest(_) = &ev.content.msgtype {
-                    handle_request(
-                        client,
-                        policy,
-                        ev.sender.to_string(),
-                        ev.event_id.to_string(),
-                    )
-                    .await;
-                }
+    client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, client: Client| {
+        let policy = in_room_policy.clone();
+        async move {
+            // Our own outgoing request lands back in this handler too — a
+            // room message is echoed to every member including the sender.
+            // Without this check the bot answers itself and logs a
+            // confusing "vanished before it could be answered" warning for
+            // a request nobody was ever meant to receive.
+            if client.user_id() == Some(ev.sender.as_ref()) {
+                return;
             }
-        },
-    );
+
+            if let MessageType::VerificationRequest(_) = &ev.content.msgtype {
+                handle_request(
+                    client,
+                    policy,
+                    ev.sender.to_string(),
+                    ev.event_id.to_string(),
+                )
+                .await;
+            }
+        }
+    });
 
     // `!verify` lets an allowlisted user ask the bot to start the flow. Element
     // has no obvious Verify affordance for a bot you have never DMed, so the
@@ -156,7 +157,10 @@ async fn handle_request(
     }
 
     let Ok(user_id) = matrix_sdk::ruma::UserId::parse(&sender) else {
-        warn!("Verification request from an unparseable user ID: {}", sender);
+        warn!(
+            "Verification request from an unparseable user ID: {}",
+            sender
+        );
         return;
     };
 
@@ -165,13 +169,19 @@ async fn handle_request(
         .get_verification_request(&user_id, &flow_id)
         .await
     else {
-        warn!("Verification request {} from {} vanished before it could be answered", flow_id, sender);
+        warn!(
+            "Verification request {} from {} vanished before it could be answered",
+            flow_id, sender
+        );
         return;
     };
 
     info!("Accepting verification request from {}", sender);
     if let Err(err) = request.accept().await {
-        error!("Failed to accept verification request from {}: {:?}", sender, err);
+        error!(
+            "Failed to accept verification request from {}: {:?}",
+            sender, err
+        );
         return;
     }
 
@@ -179,7 +189,10 @@ async fn handle_request(
 }
 
 /// Runs a verification request to completion, whichever side started it.
-async fn drive_request(request: matrix_sdk::encryption::verification::VerificationRequest, sender: &str) {
+async fn drive_request(
+    request: matrix_sdk::encryption::verification::VerificationRequest,
+    sender: &str,
+) {
     let mut changes = request.changes();
     while let Some(state) = changes.next().await {
         match state {
@@ -201,7 +214,11 @@ async fn drive_request(request: matrix_sdk::encryption::verification::Verificati
                 break;
             }
             VerificationRequestState::Cancelled(info) => {
-                warn!("Verification with {} cancelled: {:?}", sender, info.reason());
+                warn!(
+                    "Verification with {} cancelled: {:?}",
+                    sender,
+                    info.reason()
+                );
                 break;
             }
             _ => {}
@@ -236,12 +253,18 @@ fn load_verified_users(path: &Path) -> HashSet<String> {
 }
 
 fn save_verified_users(path: &Path, users: &HashSet<String>) {
-    let Ok(bytes) = serde_json::to_vec(users) else { return };
+    let Ok(bytes) = serde_json::to_vec(users) else {
+        return;
+    };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Err(err) = std::fs::write(path, bytes) {
-        warn!("Could not persist verified users to {}: {}", path.display(), err);
+        warn!(
+            "Could not persist verified users to {}: {}",
+            path.display(),
+            err
+        );
     }
 }
 
@@ -252,7 +275,10 @@ fn mark_verification_complete(user: &str) {
     let mut users = load_verified_users(&path);
     if users.insert(user.to_string()) {
         save_verified_users(&path, &users);
-        info!("Recorded a completed verification with {} — will not ask again", user);
+        info!(
+            "Recorded a completed verification with {} — will not ask again",
+            user
+        );
     }
 }
 
@@ -273,7 +299,10 @@ pub async fn request_verification_from_allowlist(client: &Client, allowlist: &[S
 
     for user in allowlist {
         if already_done.contains(user) {
-            debug!("A completed verification with {} is on record; not asking again", user);
+            debug!(
+                "A completed verification with {} is on record; not asking again",
+                user
+            );
             continue;
         }
 
@@ -291,7 +320,10 @@ pub async fn request_verification_from_allowlist(client: &Client, allowlist: &[S
 
             match request_verification_with(client, user).await {
                 Ok(()) => {
-                    info!("Asked {} to verify the bot — accept the prompt in your client", user)
+                    info!(
+                        "Asked {} to verify the bot — accept the prompt in your client",
+                        user
+                    )
                 }
                 Err(err) => warn!("Could not ask {} to verify the bot: {}", user, err),
             }
@@ -302,7 +334,10 @@ pub async fn request_verification_from_allowlist(client: &Client, allowlist: &[S
 
 async fn identity_is_known(client: &Client, user: &str) -> bool {
     let Ok(user_id) = matrix_sdk::ruma::UserId::parse(user) else {
-        warn!("MATRIX_VERIFICATION_ALLOWLIST holds an unparseable user ID: {}", user);
+        warn!(
+            "MATRIX_VERIFICATION_ALLOWLIST holds an unparseable user ID: {}",
+            user
+        );
         return false;
     };
 
@@ -327,9 +362,7 @@ pub async fn request_verification_with(client: &Client, user: &str) -> Result<()
         .get_user_identity(&user_id)
         .await
         .map_err(|e| format!("could not look up {}: {}", user, e))?
-        .ok_or_else(|| {
-            format!("{} has no cross-signing identity the bot can see yet", user)
-        })?;
+        .ok_or_else(|| format!("{} has no cross-signing identity the bot can see yet", user))?;
 
     let request = identity
         .request_verification()
@@ -349,7 +382,10 @@ pub async fn request_verification_with(client: &Client, user: &str) -> Result<()
 /// see the module docs.
 async fn run_sas(sas: SasVerification, sender: &str) {
     if let Err(err) = sas.accept().await {
-        error!("Failed to accept SAS verification from {}: {:?}", sender, err);
+        error!(
+            "Failed to accept SAS verification from {}: {:?}",
+            sender, err
+        );
         return;
     }
 
@@ -365,7 +401,10 @@ async fn run_sas(sas: SasVerification, sender: &str) {
                 }
 
                 if let Err(err) = sas.confirm().await {
-                    error!("Failed to confirm SAS verification with {}: {:?}", sender, err);
+                    error!(
+                        "Failed to confirm SAS verification with {}: {:?}",
+                        sender, err
+                    );
                     return;
                 }
             }
@@ -375,7 +414,11 @@ async fn run_sas(sas: SasVerification, sender: &str) {
                 break;
             }
             SasState::Cancelled(info) => {
-                warn!("SAS verification with {} cancelled: {:?}", sender, info.reason());
+                warn!(
+                    "SAS verification with {} cancelled: {:?}",
+                    sender,
+                    info.reason()
+                );
                 break;
             }
             _ => {}

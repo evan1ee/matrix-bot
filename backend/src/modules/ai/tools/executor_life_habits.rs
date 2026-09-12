@@ -13,10 +13,14 @@ use crate::modules::settings::repository::SettingsRepository;
 fn normalize_footprint_category(input: &str) -> &'static str {
     let lower = input.trim().to_lowercase();
     match lower.as_str() {
-        "sightseeing" | "scenic" | "attraction" | "landmark" | "tourism" | "景区" | "景点" | "名胜" | "古迹" | "观光" => "sightseeing",
-        "food" | "dining" | "restaurant" | "cafe" | "coffee" | "bar" | "美食" | "餐饮" | "餐厅" | "咖啡" => "food",
-        "nature" | "park" | "parks" | "mountain" | "hiking" | "outdoor" | "beach" | "lake" | "自然" | "公园" | "山" | "森林" | "湖" | "海滩" | "徒步" => "nature",
-        "lodging" | "hotel" | "hostel" | "resort" | "inn" | "bnb" | "住宿" | "酒店" | "宾馆" | "民宿" => "lodging",
+        "sightseeing" | "scenic" | "attraction" | "landmark" | "tourism" | "景区" | "景点"
+        | "名胜" | "古迹" | "观光" => "sightseeing",
+        "food" | "dining" | "restaurant" | "cafe" | "coffee" | "bar" | "美食" | "餐饮" | "餐厅"
+        | "咖啡" => "food",
+        "nature" | "park" | "parks" | "mountain" | "hiking" | "outdoor" | "beach" | "lake"
+        | "自然" | "公园" | "山" | "森林" | "湖" | "海滩" | "徒步" => "nature",
+        "lodging" | "hotel" | "hostel" | "resort" | "inn" | "bnb" | "住宿" | "酒店" | "宾馆"
+        | "民宿" => "lodging",
         "roadtrip" | "road_trip" | "drive" | "camping" | "自驾" | "露营" => "roadtrip",
         "work" | "business" | "conference" | "office" | "出差" | "工作" | "会议" => "work",
         _ => "sightseeing",
@@ -32,7 +36,10 @@ pub async fn execute_life_habits_tool(
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    let today_str = Utc::now().with_timezone(&settings.tz()).format("%Y-%m-%d").to_string();
+    let today_str = Utc::now()
+        .with_timezone(&settings.tz())
+        .format("%Y-%m-%d")
+        .to_string();
 
     match name {
         "get_my_habits" => Some(async {

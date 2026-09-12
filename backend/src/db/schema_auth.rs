@@ -52,11 +52,9 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_matrix_links_account ON matrix_links(account_id);",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_matrix_links_account ON matrix_links(account_id);")
+        .execute(pool)
+        .await?;
 
     // Registered passkeys. `passkey_json` is the serialised `webauthn_rs`
     // credential, which carries the public key and the signature counter — the

@@ -5,7 +5,9 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::history::HistoryRepository;
-use crate::modules::portfolio::models::{cost_of, normalise_symbol, WithdrawOutcome, QUANTITY_EXPONENT};
+use crate::modules::portfolio::models::{
+    cost_of, normalise_symbol, WithdrawOutcome, QUANTITY_EXPONENT,
+};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::settings::repository::SettingsRepository;
 

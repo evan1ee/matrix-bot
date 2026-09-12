@@ -8,7 +8,10 @@ pub fn generate_help_html(module_helps: &[(String, Vec<CommandHelp>)]) -> String
         if commands.is_empty() {
             continue;
         }
-        html.push_str(&format!("📌 <b>{} Module:</b><br/>", html_escape(module_name)));
+        html.push_str(&format!(
+            "📌 <b>{} Module:</b><br/>",
+            html_escape(module_name)
+        ));
         for cmd in commands {
             html.push_str(&format!(
                 "• <code>{}</code> - {}<br/>",
@@ -19,7 +22,9 @@ pub fn generate_help_html(module_helps: &[(String, Vec<CommandHelp>)]) -> String
         html.push_str("<br/>");
     }
 
-    html.push_str("<i>Tip: You can use <code>!command</code> or mention me <code>@bot command</code>.</i>");
+    html.push_str(
+        "<i>Tip: You can use <code>!command</code> or mention me <code>@bot command</code>.</i>",
+    );
     html
 }
 

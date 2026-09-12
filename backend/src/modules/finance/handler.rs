@@ -47,16 +47,28 @@ pub async fn handle_finance_command(
     }
 
     let rest_lower = rest.to_lowercase();
-    let direction = if keyword == "income" { Direction::Income } else { Direction::Expense };
+    let direction = if keyword == "income" {
+        Direction::Income
+    } else {
+        Direction::Expense
+    };
 
     if rest_lower.is_empty() || rest_lower.starts_with("list") {
-        let page = rest.split_whitespace().nth(1).and_then(|p| p.parse().ok()).unwrap_or(1).max(1);
+        let page = rest
+            .split_whitespace()
+            .nth(1)
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(1)
+            .max(1);
         return handle_list(pool, owner_id, sender_name, page).await;
     }
     if rest_lower.starts_with("summary") {
         return handle_summary(pool, owner_id, sender_name).await;
     }
-    if rest_lower.starts_with("delete") || rest_lower.starts_with("remove") || rest_lower.starts_with("rm") {
+    if rest_lower.starts_with("delete")
+        || rest_lower.starts_with("remove")
+        || rest_lower.starts_with("rm")
+    {
         let id_str = rest.split_whitespace().nth(1).unwrap_or("");
         return handle_delete(pool, owner_id, id_str).await;
     }
@@ -64,10 +76,17 @@ pub async fn handle_finance_command(
         let args = rest[3..].trim();
         // The user's saved currency, so `!expense add 9.99 coffee` books in the
         // currency they actually spend in rather than a hardcoded USD.
-        let default_currency =
-            SettingsRepository::get_or_default(pool, owner_id).await.currency;
+        let default_currency = SettingsRepository::get_or_default(pool, owner_id)
+            .await
+            .currency;
         return handle_add(
-            pool, room_id, owner_id, sender_name, direction, args, &default_currency,
+            pool,
+            room_id,
+            owner_id,
+            sender_name,
+            direction,
+            args,
+            &default_currency,
         )
         .await;
     }
@@ -120,10 +139,19 @@ fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String
 
     let note = note_parts.join(" ");
     if note.len() > MAX_NOTE_LEN {
-        return Err(format!("Note is too long (max {} characters)", MAX_NOTE_LEN));
+        return Err(format!(
+            "Note is too long (max {} characters)",
+            MAX_NOTE_LEN
+        ));
     }
 
-    Ok(ParsedEntry { amount_minor, currency, exponent, note, category })
+    Ok(ParsedEntry {
+        amount_minor,
+        currency,
+        exponent,
+        note,
+        category,
+    })
 }
 
 async fn handle_add(
@@ -165,7 +193,11 @@ async fn handle_add(
         None => None,
     };
 
-    let note = if entry.note.is_empty() { None } else { Some(entry.note.as_str()) };
+    let note = if entry.note.is_empty() {
+        None
+    } else {
+        Some(entry.note.as_str())
+    };
 
     match FinanceRepository::create_transaction(
         pool,
@@ -186,10 +218,17 @@ async fn handle_add(
     {
         Ok(tx) => Some(format!(
             "{} Logged <b>{} {}</b>{}{} <i>(#{})</i>",
-            if direction == Direction::Expense { "💸" } else { "💰" },
+            if direction == Direction::Expense {
+                "💸"
+            } else {
+                "💰"
+            },
             html_escape(&format_amount(tx.amount_minor, entry.exponent)),
             html_escape(&tx.currency),
-            tx.note.as_deref().map(|n| format!(" — {}", html_escape(n))).unwrap_or_default(),
+            tx.note
+                .as_deref()
+                .map(|n| format!(" — {}", html_escape(n)))
+                .unwrap_or_default(),
             entry
                 .category
                 .as_deref()
@@ -240,7 +279,10 @@ fn format_ledger(items: &[Transaction], sender_name: &str, page: i64) -> String 
             if is_expense { "💸" } else { "💰" },
             html_escape(&format_amount(tx.amount_minor, tx.currency_exponent as u32)),
             html_escape(&tx.currency),
-            tx.note.as_deref().map(|n| format!(" — {}", html_escape(n))).unwrap_or_default(),
+            tx.note
+                .as_deref()
+                .map(|n| format!(" — {}", html_escape(n)))
+                .unwrap_or_default(),
             tx.category_name
                 .as_deref()
                 .map(|c| format!(" <i>[{}]</i>", html_escape(c)))
@@ -252,20 +294,20 @@ fn format_ledger(items: &[Transaction], sender_name: &str, page: i64) -> String 
     html
 }
 
-async fn handle_summary(
-    pool: &SqlitePool,
-    owner_id: &str,
-    sender_name: &str,
-) -> Option<String> {
+async fn handle_summary(pool: &SqlitePool, owner_id: &str, sender_name: &str) -> Option<String> {
     let now = Utc::now();
     let start = Utc
         .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
         .single()
         .unwrap_or(now);
     let end = if now.month() == 12 {
-        Utc.with_ymd_and_hms(now.year() + 1, 1, 1, 0, 0, 0).single().unwrap_or(now)
+        Utc.with_ymd_and_hms(now.year() + 1, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap_or(now)
     } else {
-        Utc.with_ymd_and_hms(now.year(), now.month() + 1, 1, 0, 0, 0).single().unwrap_or(now)
+        Utc.with_ymd_and_hms(now.year(), now.month() + 1, 1, 0, 0, 0)
+            .single()
+            .unwrap_or(now)
     };
 
     match FinanceRepository::summary(pool, owner_id, start, end).await {
@@ -337,8 +379,10 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
                 "🏷️ No categories yet. Add one with <code>!category add food</code>.".to_string(),
             ),
             Ok(cats) => {
-                let names: Vec<String> =
-                    cats.iter().map(|c| format!("<code>{}</code>", html_escape(&c.name))).collect();
+                let names: Vec<String> = cats
+                    .iter()
+                    .map(|c| format!("<code>{}</code>", html_escape(&c.name)))
+                    .collect();
                 Some(format!("🏷️ <b>Your categories:</b> {}", names.join(", ")))
             }
             Err(err) => {
@@ -354,10 +398,14 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
             return Some("⚠️ A category name must be 1–64 characters.".to_string());
         }
         return match FinanceRepository::create_category(pool, owner_id, name).await {
-            Ok(Some(cat)) => Some(format!("🏷️ Added category <b>{}</b>.", html_escape(&cat.name))),
-            Ok(None) => {
-                Some(format!("⚠️ You already have a category named <b>{}</b>.", html_escape(name)))
-            }
+            Ok(Some(cat)) => Some(format!(
+                "🏷️ Added category <b>{}</b>.",
+                html_escape(&cat.name)
+            )),
+            Ok(None) => Some(format!(
+                "⚠️ You already have a category named <b>{}</b>.",
+                html_escape(name)
+            )),
             Err(err) => {
                 error!("Failed to create category: {:?}", err);
                 Some("❌ Database error adding the category.".to_string())
@@ -365,7 +413,10 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
         };
     }
 
-    if let Some(name) = lower.strip_prefix("remove ").or_else(|| lower.strip_prefix("delete ")) {
+    if let Some(name) = lower
+        .strip_prefix("remove ")
+        .or_else(|| lower.strip_prefix("delete "))
+    {
         let name = rest[rest.len() - name.len()..].trim();
         return match FinanceRepository::find_category_by_name(pool, owner_id, name).await {
             Ok(Some(cat)) => match FinanceRepository::delete_category(pool, owner_id, cat.id).await
@@ -382,7 +433,10 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
                     Some("❌ Database error removing the category.".to_string())
                 }
             },
-            Ok(None) => Some(format!("⚠️ No category named <b>{}</b>.", html_escape(name))),
+            Ok(None) => Some(format!(
+                "⚠️ No category named <b>{}</b>.",
+                html_escape(name)
+            )),
             Err(err) => {
                 error!("Failed to look up category: {:?}", err);
                 Some("❌ Database error removing the category.".to_string())
@@ -453,8 +507,14 @@ mod tests {
 
     #[test]
     fn test_command_stripping() {
-        assert_eq!(strip_command("!expense add 5", "!expense add 5", "expense"), Some("add 5"));
-        assert_eq!(strip_command("expense list", "expense list", "expense"), Some("list"));
+        assert_eq!(
+            strip_command("!expense add 5", "!expense add 5", "expense"),
+            Some("add 5")
+        );
+        assert_eq!(
+            strip_command("expense list", "expense list", "expense"),
+            Some("list")
+        );
         assert_eq!(strip_command("!expense", "!expense", "expense"), Some(""));
         assert_eq!(strip_command("!todo add x", "!todo add x", "expense"), None);
     }
@@ -465,15 +525,28 @@ mod tests {
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // Add expense via !expense add
-        let add_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense add 12.50 USD lunch").await.unwrap();
+        let add_res = handle_finance_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!expense add 12.50 USD lunch",
+        )
+        .await
+        .unwrap();
         assert!(add_res.contains("Logged"));
 
         // Query via !finance
-        let fin_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!finance").await.unwrap();
+        let fin_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!finance")
+            .await
+            .unwrap();
         assert!(fin_res.contains("lunch"));
 
         // Delete via !expense rm 1
-        let del_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense rm 1").await.unwrap();
+        let del_res =
+            handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense rm 1")
+                .await
+                .unwrap();
         assert!(del_res.contains("Removed entry"));
     }
 }

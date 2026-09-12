@@ -1,6 +1,6 @@
-use std::time::Duration;
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
+use std::time::Duration;
 
 /// Formats a std::time::Duration into human readable string e.g. "10s", "5m 30s", "2h 15m"
 pub fn format_duration(d: Duration) -> String {
@@ -111,7 +111,13 @@ mod tests {
         let summer = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 7, 1, 12, 0, 0).unwrap();
         let winter = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 1, 12, 0, 0).unwrap();
 
-        assert_eq!(format_datetime(&summer, &Tz::Europe__Berlin), "2026-07-01 14:00 CEST");
-        assert_eq!(format_datetime(&winter, &Tz::Europe__Berlin), "2026-01-01 13:00 CET");
+        assert_eq!(
+            format_datetime(&summer, &Tz::Europe__Berlin),
+            "2026-07-01 14:00 CEST"
+        );
+        assert_eq!(
+            format_datetime(&winter, &Tz::Europe__Berlin),
+            "2026-01-01 13:00 CET"
+        );
     }
 }

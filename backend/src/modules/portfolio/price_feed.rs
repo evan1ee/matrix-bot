@@ -1,8 +1,8 @@
-use std::sync::OnceLock;
-use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use sqlx::SqlitePool;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -43,8 +43,8 @@ pub struct RefreshSummary {
 
 /// Known crypto symbols where Coinbase/CoinGecko spot lookup is primary.
 const KNOWN_CRYPTO: &[&str] = &[
-    "BTC", "ETH", "SOL", "DOGE", "ADA", "XRP", "DOT", "AVAX", "MATIC", "LINK",
-    "LTC", "BCH", "XLM", "UNI", "ATOM", "XMR", "ETC", "NEAR", "ALGO", "FIL",
+    "BTC", "ETH", "SOL", "DOGE", "ADA", "XRP", "DOT", "AVAX", "MATIC", "LINK", "LTC", "BCH", "XLM",
+    "UNI", "ATOM", "XMR", "ETC", "NEAR", "ALGO", "FIL",
 ];
 
 pub fn is_crypto_symbol(symbol: &str) -> bool {
@@ -94,7 +94,13 @@ pub fn parse_yahoo_chart_json(body: &str) -> Result<FetchedPrice, String> {
     let first = resp
         .chart
         .result
-        .and_then(|mut r| if r.is_empty() { None } else { Some(r.remove(0)) })
+        .and_then(|mut r| {
+            if r.is_empty() {
+                None
+            } else {
+                Some(r.remove(0))
+            }
+        })
         .ok_or_else(|| "Empty result list from Yahoo Finance".to_string())?;
 
     let price = first
@@ -166,8 +172,14 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
         }
 
         // Fallback to Yahoo Finance for crypto (e.g. BTC-USD)
-        let yf_sym = if clean_sym.contains('-') { clean_sym.clone() } else { format!("{}-USD", clean_sym) };
-        let session = crate::modules::portfolio::history_feed::get_yahoo_session().await.ok();
+        let yf_sym = if clean_sym.contains('-') {
+            clean_sym.clone()
+        } else {
+            format!("{}-USD", clean_sym)
+        };
+        let session = crate::modules::portfolio::history_feed::get_yahoo_session()
+            .await
+            .ok();
         let yf_url = if let Some((_, ref crumb)) = session {
             format!(
                 "https://query2.finance.yahoo.com/v8/finance/chart/{}?crumb={}&interval=1d&range=1d",
@@ -187,13 +199,19 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
 
         let res = req.send().await.map_err(|e| e.to_string())?;
         if !res.status().is_success() {
-            return Err(format!("Price lookup failed for {} with status {}", yf_sym, res.status()));
+            return Err(format!(
+                "Price lookup failed for {} with status {}",
+                yf_sym,
+                res.status()
+            ));
         }
         let body = res.text().await.map_err(|e| e.to_string())?;
         parse_yahoo_chart_json(&body)
     } else {
         // Stocks / ETFs / Indices
-        let session = crate::modules::portfolio::history_feed::get_yahoo_session().await.ok();
+        let session = crate::modules::portfolio::history_feed::get_yahoo_session()
+            .await
+            .ok();
         let yf_url = if let Some((_, ref crumb)) = session {
             format!(
                 "https://query2.finance.yahoo.com/v8/finance/chart/{}?crumb={}&interval=1d&range=1d",
@@ -213,7 +231,11 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
 
         let res = req.send().await.map_err(|e| e.to_string())?;
         if !res.status().is_success() {
-            return Err(format!("Yahoo Finance returned status {} for {}", res.status(), clean_sym));
+            return Err(format!(
+                "Yahoo Finance returned status {} for {}",
+                res.status(),
+                clean_sym
+            ));
         }
         let body = res.text().await.map_err(|e| e.to_string())?;
         parse_yahoo_chart_json(&body)
@@ -236,10 +258,11 @@ pub async fn refresh_holding_price(
 
     let price_minor = price_to_minor(fetched.price, holding.currency_exponent);
 
-    let updated = PortfolioRepository::set_price(pool, &holding.owner_id, &holding.symbol, price_minor)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Holding for {} not found", holding.symbol))?;
+    let updated =
+        PortfolioRepository::set_price(pool, &holding.owner_id, &holding.symbol, price_minor)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Holding for {} not found", holding.symbol))?;
 
     if let Some(b) = broadcaster {
         b.send(SystemEvent::PortfolioHoldingUpdated(updated.clone()));
@@ -384,7 +407,9 @@ pub async fn search_symbols(query: &str) -> Result<Vec<TickerSearchResult>, Stri
     let q_upper = q.to_uppercase();
     let matches: Vec<TickerSearchResult> = popular
         .iter()
-        .filter(|(sym, name, _, _)| sym.contains(&q_upper) || name.to_uppercase().contains(&q_upper))
+        .filter(|(sym, name, _, _)| {
+            sym.contains(&q_upper) || name.to_uppercase().contains(&q_upper)
+        })
         .map(|(sym, name, exch, qt)| TickerSearchResult {
             symbol: sym.to_string(),
             name: name.to_string(),

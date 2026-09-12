@@ -187,4 +187,3 @@ pub struct WebhookLogsResponse {
     pub limit: i64,
     pub offset: i64,
 }
-

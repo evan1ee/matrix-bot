@@ -22,7 +22,11 @@ pub struct AiUserConfig {
 
 impl AiUserConfig {
     pub fn redacted(mut self) -> Self {
-        self.has_api_key = self.api_key.as_ref().map(|k| !k.trim().is_empty()).unwrap_or(false);
+        self.has_api_key = self
+            .api_key
+            .as_ref()
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false);
         self.api_key = None;
         self
     }
@@ -35,25 +39,83 @@ pub struct VerifyAiKeyInput {
     pub model_name: Option<String>,
 }
 
+pub fn validate_ai_base_url(url_str: &str) -> Result<(), &'static str> {
+    let trimmed = url_str.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if trimmed.len() > 500 {
+        return Err("API base URL exceeds 500 characters");
+    }
+    let parsed = url::Url::parse(trimmed).map_err(|_| "API base URL is not a valid URL")?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("API base URL must use http or https scheme");
+    }
+
+    let host_str = parsed
+        .host_str()
+        .ok_or("API base URL must contain a valid host")?;
+    let host_lower = host_str.to_ascii_lowercase();
+
+    if host_lower == "169.254.169.254"
+        || host_lower.starts_with("169.254.")
+        || host_lower.starts_with("fe80:")
+        || host_lower.starts_with("[fe80:")
+    {
+        return Err("API base URL cannot target link-local metadata addresses");
+    }
+
+    let allow_private = std::env::var("AI_ALLOW_PRIVATE_BASE_URL")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+
+    if !allow_private {
+        if host_lower.ends_with(".internal")
+            || host_lower.ends_with(".local")
+            || host_lower == "localhost"
+            || host_lower.ends_with(".localhost")
+        {
+            return Err("API base URL cannot target internal or local domain names");
+        }
+
+        let ip = match parsed.host() {
+            Some(url::Host::Ipv4(ip)) => Some(std::net::IpAddr::V4(ip)),
+            Some(url::Host::Ipv6(ip)) => Some(std::net::IpAddr::V6(ip)),
+            _ => None,
+        };
+
+        if let Some(ip) = ip {
+            let is_disallowed = match ip {
+                std::net::IpAddr::V4(v4) => {
+                    v4.is_loopback()
+                        || v4.is_private()
+                        || v4.is_link_local()
+                        || v4.is_broadcast()
+                        || v4.is_documentation()
+                        || v4.octets()[0] == 0
+                        || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
+                }
+                std::net::IpAddr::V6(v6) => {
+                    v6.is_loopback()
+                        || v6.is_unspecified()
+                        || (v6.segments()[0] & 0xffc0) == 0xfe80
+                        || (v6.segments()[0] & 0xfe00) == 0xfc00
+                }
+            };
+
+            if is_disallowed {
+                return Err("API base URL cannot target private or loopback IP addresses");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl VerifyAiKeyInput {
     pub fn validate(&self) -> Result<(), &'static str> {
         if let Some(ref url_str) = self.api_base_url {
-            let trimmed = url_str.trim();
-            if trimmed.len() > 500 {
-                return Err("API base URL exceeds 500 characters");
-            }
-            if !trimmed.is_empty() {
-                let parsed = url::Url::parse(trimmed)
-                    .map_err(|_| "API base URL is not a valid URL")?;
-                if parsed.scheme() != "http" && parsed.scheme() != "https" {
-                    return Err("API base URL must use http or https scheme");
-                }
-                if let Some(host) = parsed.host_str() {
-                    if host == "169.254.169.254" || host.starts_with("169.254.") {
-                        return Err("API base URL cannot target link-local metadata addresses");
-                    }
-                }
-            }
+            validate_ai_base_url(url_str)?;
         }
         if let Some(ref key) = self.api_key {
             if key.len() > 500 {
@@ -89,22 +151,7 @@ pub struct UpdateAiConfigInput {
 impl UpdateAiConfigInput {
     pub fn validate(&self) -> Result<(), &'static str> {
         if let Some(ref url_str) = self.api_base_url {
-            let trimmed = url_str.trim();
-            if trimmed.len() > 500 {
-                return Err("API base URL exceeds 500 characters");
-            }
-            if !trimmed.is_empty() {
-                let parsed = url::Url::parse(trimmed)
-                    .map_err(|_| "API base URL is not a valid URL")?;
-                if parsed.scheme() != "http" && parsed.scheme() != "https" {
-                    return Err("API base URL must use http or https scheme");
-                }
-                if let Some(host) = parsed.host_str() {
-                    if host == "169.254.169.254" || host.starts_with("169.254.") {
-                        return Err("API base URL cannot target link-local metadata addresses");
-                    }
-                }
-            }
+            validate_ai_base_url(url_str)?;
         }
         if let Some(ref key) = self.api_key {
             if key.len() > 500 {
@@ -317,6 +364,33 @@ mod tests {
         assert_eq!(
             ssrf_metadata.validate().unwrap_err(),
             "API base URL cannot target link-local metadata addresses"
+        );
+
+        let ssrf_loopback = UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:8000/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_loopback.validate().unwrap_err(),
+            "API base URL cannot target private or loopback IP addresses"
+        );
+
+        let ssrf_localhost = UpdateAiConfigInput {
+            api_base_url: Some("http://localhost:11434/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_localhost.validate().unwrap_err(),
+            "API base URL cannot target internal or local domain names"
+        );
+
+        let ssrf_internal = UpdateAiConfigInput {
+            api_base_url: Some("http://service.internal/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_internal.validate().unwrap_err(),
+            "API base URL cannot target internal or local domain names"
         );
     }
 

@@ -77,11 +77,16 @@ pub async fn handle_ai_command(
                 return Some(handle_show_config(pool, owner_id).await);
             }
             if model_arg.len() > 500 {
-                return Some(format_error("Model name exceeds maximum length of 500 characters."));
+                return Some(format_error(
+                    "Model name exceeds maximum length of 500 characters.",
+                ));
             }
             return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
         }
-        if let Some(rest) = trimmed.strip_prefix("history").or_else(|| trimmed.strip_prefix("turns")) {
+        if let Some(rest) = trimmed
+            .strip_prefix("history")
+            .or_else(|| trimmed.strip_prefix("turns"))
+        {
             let num_arg = rest.trim();
             if num_arg.is_empty() {
                 return Some(handle_show_config(pool, owner_id).await);
@@ -162,11 +167,15 @@ pub async fn run_ai_turn(
     };
 
     // Record user message in SQLite
-    if let Err(e) = AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await {
+    if let Err(e) =
+        AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await
+    {
         warn!("Failed to persist user message: {}", e);
     }
 
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings =
+        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
+            .await;
     let tz = settings.tz();
     let max_history = settings.max_history_turns.clamp(1, 100);
 
@@ -334,7 +343,16 @@ pub async fn run_ai_turn(
         }
     }
 
-    if let Err(e) = AiRepository::add_message(pool, &conversation.id, "assistant", &final_content, None, None).await {
+    if let Err(e) = AiRepository::add_message(
+        pool,
+        &conversation.id,
+        "assistant",
+        &final_content,
+        None,
+        None,
+    )
+    .await
+    {
         warn!("Failed to persist assistant message: {}", e);
     }
 
@@ -367,7 +385,9 @@ async fn handle_reset(
     owner_id: &str,
     room_id: &str,
 ) -> String {
-    if let Ok(conv) = AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS).await {
+    if let Ok(conv) =
+        AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS).await
+    {
         if let Ok(true) = AiRepository::delete_conversation(pool, &conv.id, owner_id).await {
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::AiConversationDeleted {
@@ -382,11 +402,19 @@ async fn handle_reset(
 }
 
 async fn handle_show_config(pool: &SqlitePool, owner_id: &str) -> String {
-    let user_config = AiRepository::get_user_config(pool, owner_id).await.unwrap_or(None);
+    let user_config = AiRepository::get_user_config(pool, owner_id)
+        .await
+        .unwrap_or(None);
     let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings =
+        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
+            .await;
 
-    let key_status = if resolved.api_key.is_some() { "Configured (Hidden)" } else { "None" };
+    let key_status = if resolved.api_key.is_some() {
+        "Configured (Hidden)"
+    } else {
+        "None"
+    };
 
     format!(
         "🤖 <b>AI Assistant Configuration:</b><br/>\
@@ -414,10 +442,16 @@ async fn handle_set_history(
         _ => return format_error("Max history turns must be an integer between 1 and 100."),
     };
 
-    let mut settings = crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id).await;
+    let mut settings =
+        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
+            .await;
     settings.max_history_turns = turns;
 
-    match crate::modules::settings::repository::SettingsRepository::upsert(pool, owner_id, &settings).await {
+    match crate::modules::settings::repository::SettingsRepository::upsert(
+        pool, owner_id, &settings,
+    )
+    .await
+    {
         Ok(saved) => {
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::SettingsUpdated {
@@ -425,7 +459,10 @@ async fn handle_set_history(
                     settings: saved.clone(),
                 });
             }
-            format!("✅ AI max history turns updated to: <code>{}</code>", saved.max_history_turns)
+            format!(
+                "✅ AI max history turns updated to: <code>{}</code>",
+                saved.max_history_turns
+            )
         }
         Err(e) => {
             error!("Failed to update max history turns: {}", e);
@@ -454,7 +491,10 @@ async fn handle_set_model(
                 });
             }
             let model = cfg.model_name.unwrap_or_else(|| model_name.to_string());
-            format!("✅ AI model updated to: <code>{}</code>", html_escape(&model))
+            format!(
+                "✅ AI model updated to: <code>{}</code>",
+                html_escape(&model)
+            )
         }
         Err(e) => {
             error!("Failed to update AI model: {}", e);
@@ -495,9 +535,10 @@ mod tests {
     async fn setup_test() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let owner = crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
-            .await
-            .unwrap();
+        let owner =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
+                .await
+                .unwrap();
         (db, owner)
     }
 
@@ -648,7 +689,10 @@ mod tests {
 
         // Must return None so error is never posted to general chat room
         assert!(result1.is_none());
-        assert!(is_ai_error_alerted(), "Error state should be marked as alerted");
+        assert!(
+            is_ai_error_alerted(),
+            "Error state should be marked as alerted"
+        );
 
         // Second failure during same outage
         let result2 = handle_ai_command(
@@ -680,9 +724,16 @@ mod tests {
             .unwrap();
 
         // 1. User message
-        AiRepository::add_message(&db.pool, &conv.id, "user", "Add a task: buy milk", None, None)
-            .await
-            .unwrap();
+        AiRepository::add_message(
+            &db.pool,
+            &conv.id,
+            "user",
+            "Add a task: buy milk",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         // 2. Assistant tool call with empty content
         AiRepository::add_message(&db.pool, &conv.id, "assistant", "", None, None)
             .await
@@ -739,6 +790,7 @@ mod tests {
         );
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_live_xai_grok_tool_calling() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
@@ -795,14 +847,21 @@ mod tests {
         println!("Tools Executed: {:?}", result.tool_calls_executed);
         println!("Response:\n{}", result.message);
 
-        assert!(!result.tool_calls_executed.is_empty(), "Tool should have been executed");
-        assert!(result.tool_calls_executed.contains(&"get_my_tasks".to_string()));
         assert!(
-            result.message.contains("Deploy Matrix Bot") || result.message.contains("Audit cryptographic"),
+            !result.tool_calls_executed.is_empty(),
+            "Tool should have been executed"
+        );
+        assert!(result
+            .tool_calls_executed
+            .contains(&"get_my_tasks".to_string()));
+        assert!(
+            result.message.contains("Deploy Matrix Bot")
+                || result.message.contains("Audit cryptographic"),
             "Response should mention tasks"
         );
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_live_xai_grok_mutation_tools() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
@@ -832,12 +891,16 @@ mod tests {
         println!("Tools Executed: {:?}", task_result.tool_calls_executed);
         println!("Response:\n{}", task_result.message);
 
-        assert!(task_result.tool_calls_executed.contains(&"add_todo".to_string()));
+        assert!(task_result
+            .tool_calls_executed
+            .contains(&"add_todo".to_string()));
 
         // Verify task in SQLite DB
-        let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(&db.pool, &owner, None, 10, 0)
-            .await
-            .unwrap();
+        let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(
+            &db.pool, &owner, None, 10, 0,
+        )
+        .await
+        .unwrap();
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].text.contains("Prepare slide deck"));
         assert_eq!(tasks[0].priority, "high");
@@ -858,18 +921,23 @@ mod tests {
         println!("Tools Executed: {:?}", exp_result.tool_calls_executed);
         println!("Response:\n{}", exp_result.message);
 
-        assert!(exp_result.tool_calls_executed.contains(&"record_finance_entry".to_string()));
+        assert!(exp_result
+            .tool_calls_executed
+            .contains(&"record_finance_entry".to_string()));
 
         // Verify transaction in SQLite DB
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
-        let summary = crate::modules::finance::repository::FinanceRepository::summary(&db.pool, &owner, from, to)
-            .await
-            .unwrap();
+        let summary = crate::modules::finance::repository::FinanceRepository::summary(
+            &db.pool, &owner, from, to,
+        )
+        .await
+        .unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].expense_minor, 1850);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_live_xai_grok_multi_turn_and_context() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
@@ -922,6 +990,7 @@ mod tests {
         );
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_live_xai_grok_currency_rules_and_multi_action() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
@@ -951,30 +1020,46 @@ mod tests {
         println!("Response:\n{}", result.message);
 
         // Verify tools executed
-        assert!(result.tool_calls_executed.contains(&"record_finance_entry".to_string()));
-        assert!(result.tool_calls_executed.contains(&"set_reminder".to_string()));
+        assert!(result
+            .tool_calls_executed
+            .contains(&"record_finance_entry".to_string()));
+        assert!(result
+            .tool_calls_executed
+            .contains(&"set_reminder".to_string()));
 
         // Verify DB transactions
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
-        let summary = crate::modules::finance::repository::FinanceRepository::summary(&db.pool, &owner, from, to)
-            .await
-            .unwrap();
+        let summary = crate::modules::finance::repository::FinanceRepository::summary(
+            &db.pool, &owner, from, to,
+        )
+        .await
+        .unwrap();
         // Should have 2 separate currencies recorded: CNY and USD
-        assert_eq!(summary.len(), 2, "Must record separate currencies without blending");
+        assert_eq!(
+            summary.len(),
+            2,
+            "Must record separate currencies without blending"
+        );
         let currencies: Vec<_> = summary.iter().map(|s| s.currency.as_str()).collect();
         assert!(currencies.contains(&"CNY"));
         assert!(currencies.contains(&"USD"));
 
         // Verify reminder in DB
-        let reminders = crate::modules::reminder::repository::ReminderRepository::list_user_pending(&db.pool, &owner, 10, 0)
+        let reminders =
+            crate::modules::reminder::repository::ReminderRepository::list_user_pending(
+                &db.pool, &owner, 10, 0,
+            )
             .await
             .unwrap();
         assert_eq!(reminders.len(), 1);
         assert!(reminders[0].message.to_lowercase().contains("receipt"));
 
         // Verify response never sums different currencies together
-        assert!(!result.message.contains("57"), "Different currencies must never be added together");
+        assert!(
+            !result.message.contains("57"),
+            "Different currencies must never be added together"
+        );
     }
 
     #[tokio::test]
@@ -1029,7 +1114,10 @@ mod tests {
         )
         .await;
 
-        assert!(is_ai_error_alerted(), "Mentioned natural language message should be routed to AI engine");
+        assert!(
+            is_ai_error_alerted(),
+            "Mentioned natural language message should be routed to AI engine"
+        );
         clear_ai_error_state();
     }
 }

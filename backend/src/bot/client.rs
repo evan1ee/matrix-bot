@@ -137,7 +137,11 @@ fn archive_suffix() -> String {
 ///
 /// Best-effort: this is cleanup, not a precondition for the bot to run, so a
 /// failure here is logged and otherwise ignored.
-async fn delete_stale_device(client: &Client, config: &Config, device_id: &matrix_sdk::ruma::OwnedDeviceId) {
+async fn delete_stale_device(
+    client: &Client,
+    config: &Config,
+    device_id: &matrix_sdk::ruma::OwnedDeviceId,
+) {
     use matrix_sdk::ruma::api::client::uiaa;
 
     let devices = [device_id.clone()];
@@ -149,7 +153,10 @@ async fn delete_stale_device(client: &Client, config: &Config, device_id: &matri
     };
 
     let Some(uiaa_info) = err.as_uiaa_response() else {
-        warn!("Could not delete the previous device {}: {:?}", device_id, err);
+        warn!(
+            "Could not delete the previous device {}: {:?}",
+            device_id, err
+        );
         return;
     };
 
@@ -159,7 +166,10 @@ async fn delete_stale_device(client: &Client, config: &Config, device_id: &matri
     );
     password.session = uiaa_info.session.clone();
 
-    match client.delete_devices(&devices, Some(uiaa::AuthData::Password(password))).await {
+    match client
+        .delete_devices(&devices, Some(uiaa::AuthData::Password(password)))
+        .await
+    {
         Ok(_) => info!("Deleted the previous device {} from the account", device_id),
         Err(err) => warn!(
             "Could not delete the previous device {} even with password auth: {:?}. It will \
@@ -191,7 +201,10 @@ async fn restore_previous_session(client: &Client) -> bool {
     };
 
     if let Err(err) = client.matrix_auth().restore_session(session).await {
-        warn!("Could not restore the stored session ({}); logging in again", err);
+        warn!(
+            "Could not restore the stored session ({}); logging in again",
+            err
+        );
         let _ = std::fs::remove_file(SESSION_PATH);
         return false;
     }
@@ -314,7 +327,10 @@ impl BotClient {
                 warn!("MATRIX_RECOVERY_KEY is not set, so the new device starts with no room keys and cannot decrypt older messages");
             }
 
-            info!("No reusable Matrix session. Logging in as user: {}", user_id);
+            info!(
+                "No reusable Matrix session. Logging in as user: {}",
+                user_id
+            );
             let client = build_client(homeserver_input, clean_domain).await?;
             client
                 .matrix_auth()
@@ -426,7 +442,11 @@ mod tests {
     #[test]
     fn test_archive_suffix_is_filename_safe() {
         let suffix = archive_suffix();
-        assert!(suffix.chars().all(|c| c.is_ascii_digit() || c == '-'), "{}", suffix);
+        assert!(
+            suffix.chars().all(|c| c.is_ascii_digit() || c == '-'),
+            "{}",
+            suffix
+        );
     }
 
     /// Archiving must never destroy the old store: it can hold the only copy of

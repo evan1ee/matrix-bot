@@ -17,7 +17,10 @@ pub fn normalise_symbol(raw: &str) -> Result<String, String> {
     if symbol.is_empty() || symbol.len() > MAX_SYMBOL_LEN {
         return Err(format!("Symbol must be 1–{} characters", MAX_SYMBOL_LEN));
     }
-    if !symbol.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+    if !symbol
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
         return Err("Symbol must be letters, digits, '.' or '-' only".to_string());
     }
     Ok(symbol)
@@ -58,13 +61,15 @@ impl Holding {
 
     /// Current market value, or `None` while no price has been recorded.
     pub fn market_value_minor(&self) -> Option<i64> {
-        self.current_price_minor.map(|price| scale_product(self.quantity_minor, price))
+        self.current_price_minor
+            .map(|price| scale_product(self.quantity_minor, price))
     }
 
     /// `market value - cost basis`, or `None` while no price has been recorded.
     /// May legitimately be negative.
     pub fn unrealized_pl_minor(&self) -> Option<i64> {
-        self.market_value_minor().map(|value| value - self.cost_basis_minor())
+        self.market_value_minor()
+            .map(|value| value - self.cost_basis_minor())
     }
 }
 
@@ -150,16 +155,33 @@ pub struct CashBalance {
 
 #[allow(clippy::large_enum_variant)]
 pub enum BuyOutcome {
-    Ok { holding: Holding, cash: CashBalance },
-    CurrencyMismatch { existing_currency: String },
-    InsufficientCash { available_minor: i64, needed_minor: i64 },
+    Ok {
+        holding: Holding,
+        cash: CashBalance,
+    },
+    CurrencyMismatch {
+        existing_currency: String,
+    },
+    InsufficientCash {
+        available_minor: i64,
+        needed_minor: i64,
+    },
 }
 
 pub enum SellOutcome {
     NotFound,
-    ExceedsHolding { held_minor: i64 },
-    Closed { realized_pl_minor: i64, cash: CashBalance },
-    Reduced { holding: Holding, realized_pl_minor: i64, cash: CashBalance },
+    ExceedsHolding {
+        held_minor: i64,
+    },
+    Closed {
+        realized_pl_minor: i64,
+        cash: CashBalance,
+    },
+    Reduced {
+        holding: Holding,
+        realized_pl_minor: i64,
+        cash: CashBalance,
+    },
 }
 
 pub enum WithdrawOutcome {
@@ -174,24 +196,28 @@ pub fn build_summaries(
 ) -> Vec<PortfolioCurrencySummary> {
     let mut summaries: Vec<PortfolioCurrencySummary> = Vec::new();
 
-    let entry_for = |summaries: &mut Vec<PortfolioCurrencySummary>, currency: &str, exponent: i64| {
-        if !summaries.iter().any(|s| s.currency == currency) {
-            summaries.push(PortfolioCurrencySummary {
-                currency: currency.to_string(),
-                currency_exponent: exponent,
-                cost_basis_minor: 0,
-                market_value_minor: 0,
-                unrealized_pl_minor: 0,
-                priced_holdings: 0,
-                unpriced_holdings: 0,
-                cash_minor: 0,
-            });
-        }
-    };
+    let entry_for =
+        |summaries: &mut Vec<PortfolioCurrencySummary>, currency: &str, exponent: i64| {
+            if !summaries.iter().any(|s| s.currency == currency) {
+                summaries.push(PortfolioCurrencySummary {
+                    currency: currency.to_string(),
+                    currency_exponent: exponent,
+                    cost_basis_minor: 0,
+                    market_value_minor: 0,
+                    unrealized_pl_minor: 0,
+                    priced_holdings: 0,
+                    unpriced_holdings: 0,
+                    cash_minor: 0,
+                });
+            }
+        };
 
     for holding in holdings {
         entry_for(&mut summaries, &holding.currency, holding.currency_exponent);
-        let entry = summaries.iter_mut().find(|s| s.currency == holding.currency).expect("just inserted");
+        let entry = summaries
+            .iter_mut()
+            .find(|s| s.currency == holding.currency)
+            .expect("just inserted");
 
         entry.cost_basis_minor += holding.cost_basis_minor();
         match holding.unrealized_pl_minor() {
@@ -206,7 +232,10 @@ pub fn build_summaries(
 
     for cash in cash_balances {
         entry_for(&mut summaries, &cash.currency, cash.currency_exponent);
-        let entry = summaries.iter_mut().find(|s| s.currency == cash.currency).expect("just inserted");
+        let entry = summaries
+            .iter_mut()
+            .find(|s| s.currency == cash.currency)
+            .expect("just inserted");
         entry.cash_minor = cash.balance_minor;
     }
 
@@ -238,11 +267,19 @@ mod tests {
     #[test]
     fn test_cost_of_is_quantity_times_price() {
         let qty = 10 * 10i64.pow(QUANTITY_EXPONENT);
-        assert_eq!(cost_of(qty, 15000), 150000, "10 units @ $150.00 costs $1500.00");
+        assert_eq!(
+            cost_of(qty, 15000),
+            150000,
+            "10 units @ $150.00 costs $1500.00"
+        );
 
         // The same function is reused for a sell's gross proceeds, not just a
         // buy's cost — the two are the same computation at different prices.
-        assert_eq!(cost_of(qty, 18000), 180000, "10 units sold @ $180.00 returns $1800.00");
+        assert_eq!(
+            cost_of(qty, 18000),
+            180000,
+            "10 units sold @ $180.00 returns $1800.00"
+        );
     }
 
     #[test]
@@ -305,8 +342,16 @@ mod tests {
         let h = holding(qty, 15000, Some(18000));
 
         assert_eq!(h.cost_basis_minor(), 150000, "$1500.00 cost basis");
-        assert_eq!(h.market_value_minor(), Some(180000), "$1800.00 market value");
-        assert_eq!(h.unrealized_pl_minor(), Some(30000), "$300.00 unrealized gain");
+        assert_eq!(
+            h.market_value_minor(),
+            Some(180000),
+            "$1800.00 market value"
+        );
+        assert_eq!(
+            h.unrealized_pl_minor(),
+            Some(30000),
+            "$300.00 unrealized gain"
+        );
     }
 
     /// An unpriced holding has no market value and no unrealized P&L — `None`,

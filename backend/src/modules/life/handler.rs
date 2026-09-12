@@ -22,13 +22,20 @@ pub async fn handle_life_command(
     let mut parts = args.split_whitespace();
     let sub = parts.next().unwrap_or("").to_lowercase();
 
-    let today_str = chrono::Utc::now().naive_utc().date().format("%Y-%m-%d").to_string();
+    let today_str = chrono::Utc::now()
+        .naive_utc()
+        .date()
+        .format("%Y-%m-%d")
+        .to_string();
 
     match sub.as_str() {
         "stats" | "" => Some(handle_stats(pool, owner_id, &today_str).await),
         "today" => Some(handle_today(pool, owner_id, &today_str).await),
         "set-birth" | "birth" => {
-            let rest = args.trim_start_matches("set-birth").trim_start_matches("birth").trim();
+            let rest = args
+                .trim_start_matches("set-birth")
+                .trim_start_matches("birth")
+                .trim();
             Some(handle_set_birth(pool, broadcaster, owner_id, rest).await)
         }
         "log" => {
@@ -85,8 +92,14 @@ async fn handle_stats(pool: &SqlitePool, owner_id: &str, today_str: &str) -> Str
 async fn handle_today(pool: &SqlitePool, owner_id: &str, today_str: &str) -> String {
     match LifeRepository::get_day_log(pool, owner_id, today_str).await {
         Ok(Some(log)) => {
-            let note = log.note.map(|n| format!("<br/><i>\"{}\"</i>", html_escape(&n))).unwrap_or_default();
-            let weather = log.weather.map(|w| format!(" · 🌤️ {}", html_escape(&w))).unwrap_or_default();
+            let note = log
+                .note
+                .map(|n| format!("<br/><i>\"{}\"</i>", html_escape(&n)))
+                .unwrap_or_default();
+            let weather = log
+                .weather
+                .map(|w| format!(" · 🌤️ {}", html_escape(&w)))
+                .unwrap_or_default();
             format!(
                 "📅 <b>Today ({})</b><br/>\
                  Mood: <b>{}</b>{}{}",
@@ -181,12 +194,13 @@ async fn handle_log(
             if let Some(bc) = broadcaster {
                 bc.send(SystemEvent::LifeDayLogged(log.clone()));
             }
-            let note_disp = log.note.map(|n| format!("<br/><i>\"{}\"</i>", html_escape(&n))).unwrap_or_default();
+            let note_disp = log
+                .note
+                .map(|n| format!("<br/><i>\"{}\"</i>", html_escape(&n)))
+                .unwrap_or_default();
             format!(
                 "✅ <b>Day Recorded!</b> ({})<br/>Mood: <b>{}</b>{}",
-                today_str,
-                normalized_mood,
-                note_disp
+                today_str, normalized_mood, note_disp
             )
         }
         Err(e) => {
@@ -213,23 +227,33 @@ mod tests {
         let owner = "user_matrix_1";
 
         // Help
-        let help = handle_life_command(&pool, None, owner, "life", "help").await.unwrap();
+        let help = handle_life_command(&pool, None, owner, "life", "help")
+            .await
+            .unwrap();
         assert!(help.contains("Visualizing Life"));
 
         // Set birth
-        let set_res = handle_life_command(&pool, None, owner, "life", "set-birth 1990-01-01 80").await.unwrap();
+        let set_res = handle_life_command(&pool, None, owner, "life", "set-birth 1990-01-01 80")
+            .await
+            .unwrap();
         assert!(set_res.contains("Life Profile Updated"));
 
         // Log today
-        let log_res = handle_life_command(&pool, None, owner, "life", "log amazing Best day ever").await.unwrap();
+        let log_res = handle_life_command(&pool, None, owner, "life", "log amazing Best day ever")
+            .await
+            .unwrap();
         assert!(log_res.contains("Day Recorded"));
 
         // Today command
-        let today_res = handle_life_command(&pool, None, owner, "life", "today").await.unwrap();
+        let today_res = handle_life_command(&pool, None, owner, "life", "today")
+            .await
+            .unwrap();
         assert!(today_res.contains("amazing"));
 
         // Stats command
-        let stats_res = handle_life_command(&pool, None, owner, "life", "stats").await.unwrap();
+        let stats_res = handle_life_command(&pool, None, owner, "life", "stats")
+            .await
+            .unwrap();
         assert!(stats_res.contains("Life Grid Statistics"));
     }
 }

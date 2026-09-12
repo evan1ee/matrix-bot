@@ -26,7 +26,9 @@ pub async fn logout(
         .await
         .map_err(|err| ApiError::internal(format!("could not sign out: {err}")))?;
 
-    Ok(crate::api::auth::webauthn::clearing_session_cookie(state.cookie_secure))
+    Ok(crate::api::auth::webauthn::clearing_session_cookie(
+        state.cookie_secure,
+    ))
 }
 
 #[utoipa::path(
@@ -119,7 +121,8 @@ fn is_valid_server_name(s: &str) -> bool {
 fn is_valid_media_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
 
 /// Streams an upstream media response back to the caller, refusing anything that
@@ -200,7 +203,13 @@ pub async fn media_proxy(
 
     if let Some(token) = get_bot_matrix_access_token(&state).await {
         for media_url in authenticated_urls.iter().chain(legacy_urls.iter()) {
-            if let Ok(res) = state.http_client.get(media_url).bearer_auth(&token).send().await {
+            if let Ok(res) = state
+                .http_client
+                .get(media_url)
+                .bearer_auth(&token)
+                .send()
+                .await
+            {
                 if res.status().is_success() {
                     if let Some(response) = image_response(res).await {
                         return Ok(response);
@@ -220,7 +229,9 @@ pub async fn media_proxy(
         }
     }
 
-    Err(ApiError::not_found("Avatar media not found on Matrix homeserver"))
+    Err(ApiError::not_found(
+        "Avatar media not found on Matrix homeserver",
+    ))
 }
 
 #[cfg(test)]

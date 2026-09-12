@@ -1,8 +1,8 @@
-use std::sync::OnceLock;
-use std::time::Duration;
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE, SET_COOKIE, USER_AGENT};
 use serde::Deserialize;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::modules::portfolio::price_feed::is_crypto_symbol;
@@ -43,7 +43,11 @@ pub async fn fetch_coinbase_candles(symbol: &str) -> Result<Vec<(String, f64)>, 
 
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("Coinbase candles failed for {} with status {}", base_sym, res.status()));
+        return Err(format!(
+            "Coinbase candles failed for {} with status {}",
+            base_sym,
+            res.status()
+        ));
     }
 
     let text = res.text().await.map_err(|e| e.to_string())?;
@@ -146,10 +150,18 @@ pub async fn get_yahoo_session() -> Result<(String, String), String> {
         .map_err(|e| format!("Failed to getcrumb from Yahoo: {e}"))?;
 
     if !crumb_res.status().is_success() {
-        return Err(format!("Yahoo getcrumb returned status {}", crumb_res.status()));
+        return Err(format!(
+            "Yahoo getcrumb returned status {}",
+            crumb_res.status()
+        ));
     }
 
-    let crumb = crumb_res.text().await.map_err(|e| e.to_string())?.trim().to_string();
+    let crumb = crumb_res
+        .text()
+        .await
+        .map_err(|e| e.to_string())?
+        .trim()
+        .to_string();
     if crumb.is_empty() {
         return Err("Yahoo returned empty crumb".to_string());
     }
@@ -174,7 +186,13 @@ pub fn parse_yahoo_chart_history_json(body: &str) -> Result<Vec<(String, f64)>, 
     let first = resp
         .chart
         .result
-        .and_then(|mut r| if r.is_empty() { None } else { Some(r.remove(0)) })
+        .and_then(|mut r| {
+            if r.is_empty() {
+                None
+            } else {
+                Some(r.remove(0))
+            }
+        })
         .ok_or_else(|| "Empty result list from Yahoo Finance chart".to_string())?;
 
     let timestamps = first.timestamp.unwrap_or_default();
@@ -211,7 +229,10 @@ pub fn parse_yahoo_chart_history_json(body: &str) -> Result<Vec<(String, f64)>, 
     Ok(points)
 }
 
-pub async fn fetch_yahoo_chart_history(symbol: &str, range: &str) -> Result<Vec<(String, f64)>, String> {
+pub async fn fetch_yahoo_chart_history(
+    symbol: &str,
+    range: &str,
+) -> Result<Vec<(String, f64)>, String> {
     let client = get_client();
     let (cookie, crumb) = get_yahoo_session().await?;
 
@@ -234,7 +255,11 @@ pub async fn fetch_yahoo_chart_history(symbol: &str, range: &str) -> Result<Vec<
         .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(format!("Yahoo chart failed for {} with status {}", yf_sym, res.status()));
+        return Err(format!(
+            "Yahoo chart failed for {} with status {}",
+            yf_sym,
+            res.status()
+        ));
     }
 
     let text = res.text().await.map_err(|e| e.to_string())?;
@@ -257,7 +282,10 @@ pub fn timeframe_to_yahoo_range(timeframe: &str) -> &'static str {
 }
 
 /// Fetches daily historical closing prices for a symbol matching the given timeframe.
-pub async fn fetch_historical_prices(symbol: &str, timeframe: &str) -> Result<Vec<(String, f64)>, String> {
+pub async fn fetch_historical_prices(
+    symbol: &str,
+    timeframe: &str,
+) -> Result<Vec<(String, f64)>, String> {
     let clean = symbol.trim().to_uppercase();
 
     // Try Coinbase for crypto symbols first
@@ -291,7 +319,10 @@ fn filter_by_timeframe(points: Vec<(String, f64)>, timeframe: &str) -> Vec<(Stri
         .format("%Y-%m-%d")
         .to_string();
 
-    points.into_iter().filter(|(date, _)| date >= &cutoff).collect()
+    points
+        .into_iter()
+        .filter(|(date, _)| date >= &cutoff)
+        .collect()
 }
 
 #[cfg(test)]

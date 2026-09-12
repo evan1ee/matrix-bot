@@ -35,14 +35,10 @@ pub async fn get_portfolio_history(
     let timeframe = query.timeframe.as_deref().unwrap_or("1m");
     let currency = query.currency.as_deref().unwrap_or("USD");
 
-    let history = HistoryRepository::get_history(
-        &state.db.pool,
-        &user.owner_id(),
-        timeframe,
-        currency,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let history =
+        HistoryRepository::get_history(&state.db.pool, &user.owner_id(), timeframe, currency)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(history))
 }

@@ -71,15 +71,16 @@ impl BotModule for FootprintsModule {
 
 #[cfg(test)]
 mod tests {
-    use crate::modules::footprints::repository::FootprintRepository;
     use crate::db::Database;
+    use crate::modules::footprints::repository::FootprintRepository;
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id = crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@traveler:mbm.one")
-            .await
-            .unwrap();
+        let account_id =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@traveler:mbm.one")
+                .await
+                .unwrap();
         (db, account_id)
     }
 
@@ -117,12 +118,16 @@ mod tests {
             .unwrap();
         assert_eq!(list.len(), 1);
 
-        let stats = FootprintRepository::summary_stats(&db.pool, &owner).await.unwrap();
+        let stats = FootprintRepository::summary_stats(&db.pool, &owner)
+            .await
+            .unwrap();
         assert_eq!(stats.total_places, 1);
         assert_eq!(stats.total_countries, 1);
         assert_eq!(stats.total_days_traveled, 4);
 
-        let deleted = FootprintRepository::delete(&db.pool, created.id, &owner).await.unwrap();
+        let deleted = FootprintRepository::delete(&db.pool, created.id, &owner)
+            .await
+            .unwrap();
         assert!(deleted);
     }
 }

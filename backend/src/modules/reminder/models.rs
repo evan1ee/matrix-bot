@@ -116,16 +116,46 @@ mod tests {
 
     #[test]
     fn test_recurrence_pattern_conversion() {
-        assert_eq!(RecurrencePattern::from_str_or_default("daily"), RecurrencePattern::Daily);
-        assert_eq!(RecurrencePattern::from_str_or_default("day"), RecurrencePattern::Daily);
-        assert_eq!(RecurrencePattern::from_str_or_default("weekly"), RecurrencePattern::Weekly);
-        assert_eq!(RecurrencePattern::from_str_or_default("week"), RecurrencePattern::Weekly);
-        assert_eq!(RecurrencePattern::from_str_or_default("monthly"), RecurrencePattern::Monthly);
-        assert_eq!(RecurrencePattern::from_str_or_default("month"), RecurrencePattern::Monthly);
-        assert_eq!(RecurrencePattern::from_str_or_default("yearly"), RecurrencePattern::Yearly);
-        assert_eq!(RecurrencePattern::from_str_or_default("year"), RecurrencePattern::Yearly);
-        assert_eq!(RecurrencePattern::from_str_or_default("none"), RecurrencePattern::None);
-        assert_eq!(RecurrencePattern::from_str_or_default("random"), RecurrencePattern::None);
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("daily"),
+            RecurrencePattern::Daily
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("day"),
+            RecurrencePattern::Daily
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("weekly"),
+            RecurrencePattern::Weekly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("week"),
+            RecurrencePattern::Weekly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("monthly"),
+            RecurrencePattern::Monthly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("month"),
+            RecurrencePattern::Monthly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("yearly"),
+            RecurrencePattern::Yearly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("year"),
+            RecurrencePattern::Yearly
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("none"),
+            RecurrencePattern::None
+        );
+        assert_eq!(
+            RecurrencePattern::from_str_or_default("random"),
+            RecurrencePattern::None
+        );
 
         assert_eq!(RecurrencePattern::Daily.as_str(), "daily");
         assert_eq!(RecurrencePattern::Weekly.as_str(), "weekly");
@@ -136,11 +166,26 @@ mod tests {
 
     #[test]
     fn test_reminder_status_conversion() {
-        assert_eq!(ReminderStatus::from_str_or_default("pending"), ReminderStatus::Pending);
-        assert_eq!(ReminderStatus::from_str_or_default("triggered"), ReminderStatus::Triggered);
-        assert_eq!(ReminderStatus::from_str_or_default("cancelled"), ReminderStatus::Cancelled);
-        assert_eq!(ReminderStatus::from_str_or_default("failed"), ReminderStatus::Failed);
-        assert_eq!(ReminderStatus::from_str_or_default("unknown"), ReminderStatus::Pending);
+        assert_eq!(
+            ReminderStatus::from_str_or_default("pending"),
+            ReminderStatus::Pending
+        );
+        assert_eq!(
+            ReminderStatus::from_str_or_default("triggered"),
+            ReminderStatus::Triggered
+        );
+        assert_eq!(
+            ReminderStatus::from_str_or_default("cancelled"),
+            ReminderStatus::Cancelled
+        );
+        assert_eq!(
+            ReminderStatus::from_str_or_default("failed"),
+            ReminderStatus::Failed
+        );
+        assert_eq!(
+            ReminderStatus::from_str_or_default("unknown"),
+            ReminderStatus::Pending
+        );
 
         assert_eq!(ReminderStatus::Pending.as_str(), "pending");
         assert_eq!(ReminderStatus::Triggered.as_str(), "triggered");

@@ -1,13 +1,10 @@
 //! Linked Matrix identities, and the merge a link can require.
 
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 
 use crate::accounts::{
-    linking::LINK_CODE_TTL_MINUTES, AccountRepository, LinkRepository, MergePreview, MergeRepository,
-    SecurityEventKind, SecurityEventRepository,
+    linking::LINK_CODE_TTL_MINUTES, AccountRepository, LinkRepository, MergePreview,
+    MergeRepository, SecurityEventKind, SecurityEventRepository,
 };
 use crate::api::account::types::*;
 use crate::api::auth::extractor::VerifiedUser;
@@ -71,7 +68,12 @@ pub async fn pending_merge(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Option<PendingMerge>>, ApiError> {
-    let pending = state.pending_merges.read().await.get(&user.account_id).cloned();
+    let pending = state
+        .pending_merges
+        .read()
+        .await
+        .get(&user.account_id)
+        .cloned();
 
     let Some(from_account) = pending else {
         return Ok(Json(None));
@@ -81,7 +83,10 @@ pub async fn pending_merge(
         .await
         .map_err(ApiError::from)?;
 
-    Ok(Json(Some(PendingMerge { from_account, preview })))
+    Ok(Json(Some(PendingMerge {
+        from_account,
+        preview,
+    })))
 }
 
 #[utoipa::path(
@@ -145,7 +150,9 @@ pub async fn unlink(
         .map_err(ApiError::from)?;
 
     if !removed {
-        return Err(ApiError::not_found("That Matrix account is not linked here"));
+        return Err(ApiError::not_found(
+            "That Matrix account is not linked here",
+        ));
     }
 
     SecurityEventRepository::record(

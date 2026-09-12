@@ -104,8 +104,7 @@ pub struct ApiState {
     /// In memory, not in SQLite: a ceremony lives for seconds and is worthless
     /// afterwards, so durability would buy nothing and cost a table to sweep.
     /// This mirrors how `matrix_identity_cache` above is held.
-    pub webauthn_ceremonies:
-        std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,
+    pub webauthn_ceremonies: std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,
     /// Whether the session cookie is marked `Secure`. False only in development.
     pub cookie_secure: bool,
     /// The origin the SPA is served from, compared against `Origin` on every
@@ -206,7 +205,8 @@ impl ApiState {
         if trimmed == self.webauthn_origin.trim_end_matches('/') {
             return true;
         }
-        if (self.webauthn_origin.contains("localhost") || self.webauthn_origin.contains("127.0.0.1"))
+        if (self.webauthn_origin.contains("localhost")
+            || self.webauthn_origin.contains("127.0.0.1"))
             && (trimmed == "http://localhost:5173"
                 || trimmed == "http://localhost:8080"
                 || trimmed == "http://127.0.0.1:5173"
@@ -232,7 +232,10 @@ impl ApiState {
         ceremonies.retain(|_, pending| pending.expires_at > now);
         ceremonies.insert(
             id.clone(),
-            PendingCeremony { ceremony, expires_at: now + CEREMONY_TTL },
+            PendingCeremony {
+                ceremony,
+                expires_at: now + CEREMONY_TTL,
+            },
         );
 
         Ok(id)
@@ -246,7 +249,6 @@ impl ApiState {
         let pending = self.webauthn_ceremonies.write().await.remove(id)?;
         (pending.expires_at > Instant::now()).then_some(pending.ceremony)
     }
-
 }
 
 /// Builds the Relying Party.
@@ -259,8 +261,7 @@ pub fn build_webauthn(rp_id: &str, origin: &str) -> anyhow::Result<webauthn_rs::
     let parsed = url::Url::parse(origin)
         .map_err(|err| anyhow::anyhow!("WEBAUTHN_ORIGIN '{origin}' is not a URL: {err}"))?;
 
-    let mut builder = webauthn_rs::WebauthnBuilder::new(rp_id, &parsed)?
-        .rp_name("Matrix Bot");
+    let mut builder = webauthn_rs::WebauthnBuilder::new(rp_id, &parsed)?.rp_name("Matrix Bot");
 
     if rp_id == "localhost" || rp_id == "127.0.0.1" {
         builder = builder.allow_any_port(true);

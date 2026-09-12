@@ -1,13 +1,8 @@
 //! Signed-in devices.
 
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 
-use crate::accounts::{
-    SecurityEventKind, SecurityEventRepository, SessionRepository,
-};
+use crate::accounts::{SecurityEventKind, SecurityEventRepository, SessionRepository};
 use crate::api::account::types::*;
 use crate::api::auth::extractor::VerifiedUser;
 use crate::api::auth::types::{ApiState, AuthUser};
@@ -109,4 +104,3 @@ pub async fn revoke_session(
 
     Ok(Json(true))
 }
-

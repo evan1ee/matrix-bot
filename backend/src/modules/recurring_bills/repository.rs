@@ -56,7 +56,10 @@ impl RecurringBillRepository {
             .ok_or(sqlx::Error::RowNotFound)
     }
 
-    pub async fn get_by_id(pool: &SqlitePool, id: i64) -> Result<Option<RecurringBill>, sqlx::Error> {
+    pub async fn get_by_id(
+        pool: &SqlitePool,
+        id: i64,
+    ) -> Result<Option<RecurringBill>, sqlx::Error> {
         sqlx::query_as::<_, RecurringBill>("SELECT * FROM recurring_bills WHERE id = ?;")
             .bind(id)
             .fetch_optional(pool)
@@ -97,7 +100,9 @@ impl RecurringBillRepository {
         let due_day = payload.due_day.or(existing.due_day);
         let next_due_at = payload.next_due_at.unwrap_or(existing.next_due_at);
         let total_installments = payload.total_installments.or(existing.total_installments);
-        let paid_installments = payload.paid_installments.unwrap_or(existing.paid_installments);
+        let paid_installments = payload
+            .paid_installments
+            .unwrap_or(existing.paid_installments);
         let auto_pay = payload.auto_pay.unwrap_or(existing.auto_pay);
         let status = payload.status.unwrap_or(existing.status);
         let notes = payload.notes.or(existing.notes);
@@ -195,11 +200,12 @@ impl RecurringBillRepository {
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
 
-        let category_id = FinanceRepository::find_or_create_category(pool, &bill.owner_id, &bill.category)
-            .await
-            .ok()
-            .flatten()
-            .map(|c| c.id);
+        let category_id =
+            FinanceRepository::find_or_create_category(pool, &bill.owner_id, &bill.category)
+                .await
+                .ok()
+                .flatten()
+                .map(|c| c.id);
 
         let note = format!("Recurring bill: {}", bill.name);
         let tx = FinanceRepository::create_transaction(
@@ -227,7 +233,12 @@ impl RecurringBillRepository {
 pub fn advance_due_date(current_due_at: &str, frequency: &str) -> String {
     let parsed = NaiveDateTime::parse_from_str(current_due_at, "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(current_due_at, "%Y-%m-%dT%H:%M:%S"))
-        .or_else(|_| NaiveDateTime::parse_from_str(&format!("{} 00:00:00", current_due_at), "%Y-%m-%d %H:%M:%S"));
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(
+                &format!("{} 00:00:00", current_due_at),
+                "%Y-%m-%d %H:%M:%S",
+            )
+        });
 
     let dt = match parsed {
         Ok(ndt) => Utc.from_utc_datetime(&ndt),
