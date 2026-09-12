@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule, SystemEvent } from '../../core/types';
@@ -44,11 +44,19 @@ const AiAssistantView: React.FC<{
   const { timezone } = useSettings();
   const effectiveTimezone = timezone && timezone !== 'UTC' ? timezone : browserTimezone();
   const [prompt, setPrompt] = useState('');
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  const cachedConvs = queryClient.getQueryData<AiConversation[]>(['ai-conversations']);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    () => (cachedConvs && cachedConvs.length > 0 ? cachedConvs[0].id : null)
+  );
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRetroOpen, setIsRetroOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const prevMessagesLengthRef = useRef(0);
+  const prevConvIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (autoFocus) {
@@ -67,6 +75,9 @@ const AiAssistantView: React.FC<{
     queryFn: () => fetchApi<AiConversation[]>('/ai/conversations'),
   });
 
+  const effectiveConvId =
+    activeConversationId || (conversations.length > 0 ? conversations[0].id : null);
+
   // Mutations
   const chatMutation = useMutation({
     mutationFn: (text: string) =>
@@ -75,7 +86,7 @@ const AiAssistantView: React.FC<{
         timeoutMs: 90_000,
         body: JSON.stringify({
           prompt: text,
-          conversation_id: activeConversationId || (conversations.length > 0 ? conversations[0].id : undefined),
+          conversation_id: effectiveConvId || undefined,
           room_id: 'web_chat',
         }),
       }),
@@ -134,21 +145,51 @@ const AiAssistantView: React.FC<{
   }, [conversations, activeConversationId, chatMutation.isPending]);
 
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
-    queryKey: ['ai-messages', activeConversationId],
+    queryKey: ['ai-messages', effectiveConvId],
     queryFn: () =>
-      activeConversationId
-        ? fetchApi<AiMessage[]>(`/ai/conversations/${activeConversationId}/messages`)
+      effectiveConvId
+        ? fetchApi<AiMessage[]>(`/ai/conversations/${effectiveConvId}/messages`)
         : Promise.resolve([]),
-    enabled: !!activeConversationId,
+    enabled: !!effectiveConvId,
   });
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Instantly jump to the bottom when messages load or conversation changes,
+  // preventing the 1-second smooth scroll animation through the whole history.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el || messages.length === 0) return;
+
+    let raf: number | null = null;
+    const isDifferentConv = prevConvIdRef.current !== effectiveConvId;
+    const isInitialLoad = prevMessagesLengthRef.current === 0 && messages.length > 0;
+
+    if (isDifferentConv || isInitialLoad) {
+      el.scrollTop = el.scrollHeight;
+      raf = requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      });
+    } else if (messages.length > prevMessagesLengthRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
+
+    prevMessagesLengthRef.current = messages.length;
+    prevConvIdRef.current = effectiveConvId;
+
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
+  }, [messages, effectiveConvId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, chatMutation.isPending]);
+    if (chatMutation.isPending && containerRef.current) {
+      containerRef.current.scrollTo({
+        top: containerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, [chatMutation.isPending]);
 
   useEffect(() => {
     promptListener = (text: string, execute: boolean) => {
@@ -208,7 +249,10 @@ const AiAssistantView: React.FC<{
       fetchApi<void>(`/ai/conversations/${convId}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => {
+    onSuccess: (_data, convId) => {
+      queryClient.setQueryData<AiConversation[]>(['ai-conversations'], (old = []) =>
+        old.filter((c) => c.id !== convId)
+      );
       setActiveConversationId(null);
       queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
       queryClient.invalidateQueries({ queryKey: ['ai-messages'] });
@@ -268,10 +312,10 @@ const AiAssistantView: React.FC<{
             <span>Weekly Retro</span>
           </button>
 
-          {activeConversationId && (
+          {effectiveConvId && (
             <button
               type="button"
-              onClick={() => resetMutation.mutate(activeConversationId)}
+              onClick={() => resetMutation.mutate(effectiveConvId)}
               disabled={resetMutation.isPending}
               title="Reset current conversation"
               className="h-8 inline-flex items-center gap-1.5 px-3 text-xs font-medium rounded-md border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition cursor-pointer shadow-2xs"
@@ -293,7 +337,10 @@ const AiAssistantView: React.FC<{
       </div>
 
       {/* Messages Thread Container */}
-      <div className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5">
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5"
+      >
         {isLoadingMessages && messages.length === 0 && !chatMutation.isPending ? (
           <div className="py-20 text-center text-xs font-mono text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
         ) : messages.length === 0 && !chatMutation.isPending ? (
