@@ -6,6 +6,7 @@ use super::executor_bookmarks_webhooks;
 use super::executor_finance;
 use super::executor_life_habits;
 use super::executor_portfolio;
+use super::executor_reminder;
 use super::executor_todo;
 use crate::events::EventBroadcaster;
 
@@ -49,7 +50,21 @@ pub async fn execute(
         return res;
     }
 
-    // 3. Try todo / reminder / bills / settings tools
+    // 3. Try reminder tools
+    if let Some(res) = executor_reminder::execute_reminder_tool(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
+    {
+        return res;
+    }
+
+    // 4. Try todo / bills / settings tools
     if let Some(res) =
         executor_todo::execute_todo_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args)
             .await

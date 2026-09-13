@@ -102,7 +102,8 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                         "priority": { "type": "string", "enum": ["low", "medium", "high"], "description": "Task priority level" },
                         "due_in_minutes": { "type": "integer", "description": "Relative due time offset in minutes from now" },
                         "due_at": { "type": "string", "description": "Absolute ISO 8601 due timestamp" },
-                        "remind_before_minutes": { "type": "integer", "description": "Minutes before due_at to trigger a reminder" }
+                        "remind_before_minutes": { "type": "integer", "description": "Minutes before due_at to trigger a reminder" },
+                        "room": { "type": "string", "description": "Target room name or room ID. Defaults to user's direct chat room." }
                     },
                     "required": ["text"],
                     "additionalProperties": false
@@ -138,7 +139,8 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                         "note": { "type": "string", "description": "Description of the expense or income" },
                         "currency": { "type": "string", "description": "3-letter currency code (e.g. USD, EUR, CNY). Defaults to user currency" },
                         "category": { "type": "string", "description": "Category name (e.g. Food, Transport, Rent)" },
-                        "date": { "type": "string", "description": "Optional date of transaction in YYYY-MM-DD or ISO 8601 format (e.g. '2026-09-10'). Defaults to current time" }
+                        "date": { "type": "string", "description": "Optional date of transaction in YYYY-MM-DD or ISO 8601 format (e.g. '2026-09-10'). Defaults to current time" },
+                        "room": { "type": "string", "description": "Target room name or room ID. Defaults to current or user's direct chat room." }
                     },
                     "required": ["amount", "direction", "note"],
                     "additionalProperties": false
@@ -156,7 +158,8 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
                         "message": { "type": "string", "description": "Reminder text" },
                         "in_minutes": { "type": "integer", "description": "Relative delay in minutes from now" },
                         "trigger_at": { "type": "string", "description": "Absolute ISO 8601 trigger timestamp" },
-                        "recurrence": { "type": "string", "enum": ["none", "daily", "weekly", "monthly", "yearly"], "description": "Recurrence pattern" }
+                        "recurrence": { "type": "string", "enum": ["none", "daily", "weekly", "monthly", "yearly"], "description": "Recurrence pattern" },
+                        "room": { "type": "string", "description": "Target room name or room ID to deliver the reminder. Defaults to user's direct chat room." }
                     },
                     "required": ["message"],
                     "additionalProperties": false

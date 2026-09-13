@@ -6,6 +6,7 @@ pub mod executor_bookmarks_webhooks;
 pub mod executor_finance;
 pub mod executor_life_habits;
 pub mod executor_portfolio;
+pub mod executor_reminder;
 pub mod executor_todo;
 
 use crate::events::EventBroadcaster;

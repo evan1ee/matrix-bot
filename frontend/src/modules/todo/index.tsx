@@ -50,6 +50,7 @@ export interface TodoListResponse {
 interface JoinedRoomInfo {
   room_id: string;
   name: string;
+  is_direct?: boolean;
 }
 
 /** Lead-time presets, in minutes. `''` means no reminder. */

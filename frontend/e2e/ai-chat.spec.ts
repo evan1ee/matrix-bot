@@ -120,7 +120,7 @@ test('shows optimistic user message and clears input while AI is replying', asyn
         {
           id: 'conv_delay_test',
           owner_id: 'owner',
-          room_id: 'web_chat',
+          room_id: '!room1:example.com',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },

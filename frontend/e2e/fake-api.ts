@@ -1598,7 +1598,7 @@ export class FakeApi {
         conv = {
           id: `conv_${this.nextAiConvId++}`,
           owner_id: OWNER,
-          room_id: String(body?.room_id || 'web_chat'),
+          room_id: String(body?.room_id || '!room1:example.com'),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };

@@ -6,6 +6,9 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
+pub use super::config_cmd::{
+    format_error, handle_set_history, handle_set_model, handle_show_config,
+};
 use super::client::{AiClient, ResolvedAiConfig};
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 use super::repository::AiRepository;
@@ -192,6 +195,25 @@ pub async fn run_ai_turn(
     let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let now_utc_str = now_utc.to_rfc3339();
 
+    let default_room_id = crate::api::rooms::resolve_user_default_room(pool, owner_id).await;
+    let cached_rooms = crate::api::rooms::get_cached_rooms(pool, owner_id)
+        .await
+        .unwrap_or_default();
+    let mut room_desc = Vec::new();
+    for r in &cached_rooms {
+        if r.is_direct {
+            room_desc.push(format!("'{}' (user direct chat room, id: {})", r.name, r.room_id));
+        } else {
+            room_desc.push(format!("'{}' (id: {})", r.name, r.room_id));
+        }
+    }
+    let rooms_str = if room_desc.is_empty() {
+        "None discovered yet".to_string()
+    } else {
+        room_desc.join(", ")
+    };
+    let default_room_str = default_room_id.as_deref().unwrap_or(room_id);
+
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
         format!(
             "You are the central Brain and intelligent Personal Operating System for matrix-bot. \
@@ -201,12 +223,15 @@ pub async fn run_ai_turn(
              SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. When performing a daily or weekly reflection / summary, retrieve all needed data (daily log, habits, tasks, finance, footprints, reminders, life profile) in parallel during the first tool round rather than chaining sequential retrieval rounds. \
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
              TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
+             ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
              The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
             now_local_str = now_local_str,
             today_local = today_local,
             now_utc = now_utc_str,
             tz = settings.timezone,
             curr = settings.currency,
+            rooms = rooms_str,
+            default_room = default_room_str,
             owner_id = owner_id
         )
     });
@@ -401,108 +426,6 @@ async fn handle_reset(
     "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
 }
 
-async fn handle_show_config(pool: &SqlitePool, owner_id: &str) -> String {
-    let user_config = AiRepository::get_user_config(pool, owner_id)
-        .await
-        .unwrap_or(None);
-    let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
-
-    let key_status = if resolved.api_key.is_some() {
-        "Configured (Hidden)"
-    } else {
-        "None"
-    };
-
-    format!(
-        "🤖 <b>AI Assistant Configuration:</b><br/>\
-         • <b>Model:</b> <code>{}</code><br/>\
-         • <b>Endpoint:</b> <code>{}</code><br/>\
-         • <b>API Key:</b> {}<br/>\
-         • <b>Temperature:</b> <code>{}</code><br/>\
-         • <b>Max History Turns:</b> <code>{}</code>",
-        html_escape(&resolved.model_name),
-        html_escape(&resolved.api_base_url),
-        key_status,
-        resolved.temperature,
-        settings.max_history_turns
-    )
-}
-
-async fn handle_set_history(
-    pool: &SqlitePool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    turns_str: &str,
-) -> String {
-    let turns: i64 = match turns_str.parse() {
-        Ok(n) if (1..=100).contains(&n) => n,
-        _ => return format_error("Max history turns must be an integer between 1 and 100."),
-    };
-
-    let mut settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
-    settings.max_history_turns = turns;
-
-    match crate::modules::settings::repository::SettingsRepository::upsert(
-        pool, owner_id, &settings,
-    )
-    .await
-    {
-        Ok(saved) => {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::SettingsUpdated {
-                    owner_id: owner_id.to_string(),
-                    settings: saved.clone(),
-                });
-            }
-            format!(
-                "✅ AI max history turns updated to: <code>{}</code>",
-                saved.max_history_turns
-            )
-        }
-        Err(e) => {
-            error!("Failed to update max history turns: {}", e);
-            format_error("Failed to update max history turns setting.")
-        }
-    }
-}
-
-async fn handle_set_model(
-    pool: &SqlitePool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    model_name: &str,
-) -> String {
-    let input = crate::modules::ai::models::UpdateAiConfigInput {
-        model_name: Some(model_name.to_string()),
-        ..Default::default()
-    };
-
-    match AiRepository::upsert_user_config(pool, owner_id, &input).await {
-        Ok(cfg) => {
-            clear_ai_error_state();
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::AiConfigUpdated {
-                    owner_id: owner_id.to_string(),
-                });
-            }
-            let model = cfg.model_name.unwrap_or_else(|| model_name.to_string());
-            format!(
-                "✅ AI model updated to: <code>{}</code>",
-                html_escape(&model)
-            )
-        }
-        Err(e) => {
-            error!("Failed to update AI model: {}", e);
-            format_error("Failed to update AI model configuration.")
-        }
-    }
-}
-
 fn format_response(markdown_text: &str, model_name: &str) -> String {
     let html_rendered = crate::modules::webhook::renderer::markdown_to_html(markdown_text);
     format!(
@@ -510,10 +433,6 @@ fn format_response(markdown_text: &str, model_name: &str) -> String {
         html_rendered,
         html_escape(model_name)
     )
-}
-
-fn format_error(msg: &str) -> String {
-    format!("⚠️ <b>AI Assistant Error:</b> {}", html_escape(msg))
 }
 
 fn format_help() -> String {

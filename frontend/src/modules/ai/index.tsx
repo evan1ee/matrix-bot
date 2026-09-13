@@ -75,6 +75,13 @@ const AiAssistantView: React.FC<{
     queryFn: () => fetchApi<AiConversation[]>('/ai/conversations'),
   });
 
+  const { data: roomsData } = useQuery<{ room_id: string; name: string; is_direct?: boolean }[]>({
+    queryKey: ['rooms'],
+    queryFn: () => fetchApi('/rooms'),
+  });
+
+  const defaultRoom = roomsData?.find((r) => r.is_direct)?.room_id || roomsData?.[0]?.room_id;
+
   const effectiveConvId =
     activeConversationId || (conversations.length > 0 ? conversations[0].id : null);
 
@@ -87,7 +94,7 @@ const AiAssistantView: React.FC<{
         body: JSON.stringify({
           prompt: text,
           conversation_id: effectiveConvId || undefined,
-          room_id: 'web_chat',
+          room_id: defaultRoom || undefined,
         }),
       }),
     onSuccess: (data, variables) => {
@@ -99,7 +106,7 @@ const AiAssistantView: React.FC<{
           : {
               id: data.conversation_id,
               owner_id: '',
-              room_id: 'web_chat',
+              room_id: defaultRoom || '',
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };

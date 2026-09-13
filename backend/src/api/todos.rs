@@ -206,7 +206,25 @@ pub async fn create_todo(
         .map(TodoPriority::from_str_or_default)
         .unwrap_or(TodoPriority::Medium);
 
-    let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
+    let room_id = crate::api::rooms::resolve_target_room(
+        &state.db.pool,
+        &user.owner_id(),
+        payload.room_id.as_deref(),
+    )
+    .await;
+
+    let remind_room = if let Some(rr) = payload.remind_room_id.as_deref() {
+        Some(
+            crate::api::rooms::resolve_target_room(
+                &state.db.pool,
+                &user.owner_id(),
+                Some(rr),
+            )
+            .await,
+        )
+    } else {
+        None
+    };
 
     // Validate before writing, so a rejected reminder never leaves a task
     // behind with a lead time that was silently dropped.
@@ -217,7 +235,7 @@ pub async fn create_todo(
                 "remind_before_minutes requires a due_at to count back from",
             ));
         }
-        reminder_room(payload.remind_room_id.as_deref(), &room_id)?;
+        reminder_room(remind_room.as_deref(), &room_id)?;
     }
 
     let item = TodoRepository::add(
@@ -233,7 +251,7 @@ pub async fn create_todo(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let remind_room = reminder_room(payload.remind_room_id.as_deref(), &item.room_id)
+    let remind_room = reminder_room(remind_room.as_deref(), &item.room_id)
         .unwrap_or(&item.room_id)
         .to_string();
     due_reminder::sync(

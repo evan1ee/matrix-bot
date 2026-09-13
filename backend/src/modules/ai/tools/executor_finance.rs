@@ -209,9 +209,17 @@ pub async fn execute_finance_tool(
                     Utc::now()
                 };
 
+                let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
+                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
+                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                } else {
+                    room_id.to_string()
+                };
+
                 let tx = FinanceRepository::create_transaction(
                     pool,
-                    room_id,
+                    &target_room,
                     owner_id,
                     "AI Assistant",
                     direction.as_str(),

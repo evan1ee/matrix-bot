@@ -30,6 +30,7 @@ export interface ReminderListResponse {
 export interface JoinedRoomInfo {
   room_id: string;
   name: string;
+  is_direct?: boolean;
 }
 
 /** Duration units, and how many seconds one of each is worth. */
@@ -277,8 +278,9 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
   });
 
   React.useEffect(() => {
-    if (roomsData && roomsData.length > 0 && (!roomId || roomId === 'web')) {
-      setRoomId(roomsData[0].room_id);
+    if (roomsData && roomsData.length > 0 && (!roomId || roomId === 'web' || roomId === 'web_chat')) {
+      const defaultRoom = roomsData.find((r) => r.is_direct)?.room_id || roomsData[0].room_id;
+      setRoomId(defaultRoom);
     }
   }, [roomsData]);
 
@@ -364,7 +366,11 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
       setErrorMsg('Message exceeds 500 character limit.');
       return;
     }
-    const targetRoom = roomId || (roomsData && roomsData.length > 0 ? roomsData[0].room_id : 'web');
+    const targetRoom =
+      roomId ||
+      (roomsData && roomsData.length > 0
+        ? roomsData.find((r) => r.is_direct)?.room_id || roomsData[0].room_id
+        : 'web');
     createMutation.mutate({ room_id: targetRoom, message: message.trim(), seconds: computedSecs, recurrence });
   };
 
@@ -383,9 +389,17 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
   };
 
   const getRoomDisplayName = (id: string) => {
-    if (!roomsData) return id;
+    if (!roomsData) {
+      if (id === 'web' || id === 'web_chat') return 'Web';
+      return id;
+    }
     const match = roomsData.find((r) => r.room_id === id);
-    return match ? match.name : id;
+    if (match) return match.name;
+    if (id === 'web' || id === 'web_chat') {
+      const direct = roomsData.find((r) => r.is_direct);
+      return direct ? direct.name : 'Web';
+    }
+    return id;
   };
 
   return (
