@@ -346,9 +346,15 @@ pub async fn resolve_user_default_room(pool: &SqlitePool, account_id: &str) -> O
     }
 
     // 2. Room matching user's linked Matrix username
-    if let Ok(linked_mxids) = crate::accounts::AccountRepository::linked_mxids(pool, account_id).await {
+    if let Ok(linked_mxids) =
+        crate::accounts::AccountRepository::linked_mxids(pool, account_id).await
+    {
         for mxid in linked_mxids {
-            let localpart = mxid.trim_start_matches('@').split(':').next().unwrap_or(&mxid);
+            let localpart = mxid
+                .trim_start_matches('@')
+                .split(':')
+                .next()
+                .unwrap_or(&mxid);
             if let Ok(Some(room_id)) = sqlx::query_scalar::<_, String>(
                 "SELECT room_id FROM account_rooms WHERE account_id = ? AND LOWER(name) = LOWER(?) LIMIT 1;",
             )

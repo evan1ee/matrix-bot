@@ -215,12 +215,8 @@ pub async fn create_todo(
 
     let remind_room = if let Some(rr) = payload.remind_room_id.as_deref() {
         Some(
-            crate::api::rooms::resolve_target_room(
-                &state.db.pool,
-                &user.owner_id(),
-                Some(rr),
-            )
-            .await,
+            crate::api::rooms::resolve_target_room(&state.db.pool, &user.owner_id(), Some(rr))
+                .await,
         )
     } else {
         None

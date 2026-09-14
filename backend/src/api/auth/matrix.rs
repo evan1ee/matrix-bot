@@ -252,7 +252,11 @@ pub async fn issue_matrix_session(
         mxid: mxid.to_string(),
     });
 
-    Ok(with_session_cookie(body, &session_token, state.cookie_secure))
+    Ok(with_session_cookie(
+        body,
+        &session_token,
+        state.cookie_secure,
+    ))
 }
 
 #[cfg(test)]

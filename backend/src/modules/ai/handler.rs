@@ -6,10 +6,10 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
+use super::client::{AiClient, ResolvedAiConfig};
 pub use super::config_cmd::{
     format_error, handle_set_history, handle_set_model, handle_show_config,
 };
-use super::client::{AiClient, ResolvedAiConfig};
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 use super::repository::AiRepository;
 use super::tools::ToolRegistry;
@@ -202,7 +202,10 @@ pub async fn run_ai_turn(
     let mut room_desc = Vec::new();
     for r in &cached_rooms {
         if r.is_direct {
-            room_desc.push(format!("'{}' (user direct chat room, id: {})", r.name, r.room_id));
+            room_desc.push(format!(
+                "'{}' (user direct chat room, id: {})",
+                r.name, r.room_id
+            ));
         } else {
             room_desc.push(format!("'{}' (id: {})", r.name, r.room_id));
         }
