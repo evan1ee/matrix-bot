@@ -4,7 +4,6 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  Smile,
 } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
@@ -128,13 +127,6 @@ export const TimeBlocksView: React.FC = () => {
     }
   };
 
-  const jumpToMood = () => {
-    window.dispatchEvent(
-      new CustomEvent('app:navigate', {
-        detail: { moduleId: 'mood', date: selectedDate },
-      })
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -197,16 +189,6 @@ export const TimeBlocksView: React.FC = () => {
               <span>Back to today</span>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={jumpToMood}
-            className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1.5 shadow-2xs"
-            title="Open Mood & Reflection for this day"
-          >
-            <Smile className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
-            <span>Mood Reflection →</span>
-          </button>
         </div>
       </div>
 

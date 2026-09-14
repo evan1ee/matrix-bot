@@ -28,7 +28,7 @@ test.describe('Mood Module', () => {
     await app.getByRole('button', { name: /save daily reflection/i }).click();
 
     // Verify it transitions to the Sealed view with Logged badge
-    await expect(app.getByText('Logged', { exact: true })).toBeVisible();
+    await expect(app.getByText('Logged', { exact: true }).first()).toBeVisible();
     await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
     await expect(app.getByText('Shipped the new Mood module! Super focused.')).toBeVisible();
 
@@ -41,39 +41,30 @@ test.describe('Mood Module', () => {
     expect(logged?.note).toContain('Shipped the new Mood module');
   });
 
-  test('auto-logs activities from todos, transactions, and habits in day summary feed', async ({ app, api }) => {
+  test('does not show auto-logged activity and displays sealed reflection notes and feel', async ({ app, api }) => {
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // Seed a todo created today
-    api.seedTodo({
-      text: 'Deploy to production cluster',
-      priority: 'high',
-      completed: true,
-      created_at: `${todayStr}T10:30:00Z`,
+    // Seed a logged reflection
+    api.seedLifeDayLog({
+      log_date: todayStr,
+      mood: 'good',
+      weather: 'cloudy',
+      note: 'A quiet morning reflection.',
     });
 
-    // Seed a transaction today
-    api.seedTransaction({
-      direction: 'expense',
-      amount_minor: 4500,
-      currency: 'USD',
-      note: 'Team celebration dinner',
-      occurred_at: `${todayStr}T19:00:00Z`,
-    });
-
-    // Seed a completed habit today
-    const habit = api.seedHabit({ name: 'Evening Reading' });
-    api.seedHabitLog({ habit_id: habit.id, log_date: todayStr, completed: true });
-
-    // Open Mood module
     await gotoMood(app);
 
-    // Verify auto-logged activity feed shows the cross-module actions
-    await expect(app.getByText('Auto-logged Activity')).toBeVisible();
-    await expect(app.getByText(/Deploy to production cluster/i).first()).toBeVisible();
-    await expect(app.getByText(/Team celebration dinner/i)).toBeVisible();
-    await expect(app.getByText(/Evening Reading/i)).toBeVisible();
-    await expect(app.getByText(/-(USD|\$)45\.00/i)).toBeVisible();
+    // Verify Auto-logged Activity is NOT displayed anywhere in Mood module
+    await expect(app.getByText('Auto-logged Activity')).not.toBeVisible();
+
+    // Verify cross-navigation button to Time Blocks is NOT present
+    await expect(app.getByRole('button', { name: /open time blocks/i })).not.toBeVisible();
+    await expect(app.getByRole('button', { name: /time blocks →/i })).not.toBeVisible();
+
+    // Verify sealed reflection is shown
+    await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
+    await expect(app.getByText('A quiet morning reflection.')).toBeVisible();
+    await expect(app.getByRole('button', { name: /clear record/i })).toBeVisible();
   });
 
   test('clears a logged daily reflection', async ({ app, api }) => {
@@ -164,15 +155,5 @@ test.describe('Mood Module', () => {
     await expect(app.locator('[data-testid="datepicker-popover"]')).not.toBeVisible();
     await expect(datePickerTrigger).toContainText(todayStr);
   });
-
-  test('toolbar provides quick navigation to Time Blocks module', async ({ app }) => {
-    await gotoMood(app);
-
-    const timeBlocksBtn = app.getByRole('button', { name: /time blocks →/i });
-    await expect(timeBlocksBtn).toBeVisible();
-    await timeBlocksBtn.click();
-
-    await expect(app.getByRole('heading', { name: 'Time Blocks', exact: true })).toBeVisible();
-    await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
-  });
 });
+

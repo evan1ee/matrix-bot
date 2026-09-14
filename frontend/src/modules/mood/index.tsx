@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Clock,
   Trash2,
 } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
@@ -22,7 +21,6 @@ import {
   WEATHER_CONFIG,
   ACTIVITY_OPTIONS,
 } from '../life/types';
-import { LifeActivityFeed } from '../life/LifeActivityFeed';
 import { DatePicker } from '../../components/DatePicker';
 
 export const MoodView: React.FC = () => {
@@ -58,45 +56,50 @@ export const MoodView: React.FC = () => {
         const res = await fetchApi<any>(`/life/days/${selectedDate}`);
         if (!res) return null;
 
-        let parsedActs: string[] | null = null;
-        if (typeof res.activities === 'string') {
+        let acts: string[] = [];
+        if (Array.isArray(res.activities)) {
+          acts = res.activities;
+        } else if (typeof res.activities === 'string') {
           try {
-            parsedActs = JSON.parse(res.activities);
+            acts = JSON.parse(res.activities);
           } catch {
-            parsedActs = null;
+            acts = [];
           }
-        } else if (Array.isArray(res.activities)) {
-          parsedActs = res.activities;
         }
 
+        const dayType =
+          selectedDate === todayStr
+            ? 'present'
+            : selectedDate < todayStr
+              ? 'past'
+              : 'future';
+
         return {
-          date: res.log_date || selectedDate,
-          day_type: selectedDate === todayStr ? 'present' : selectedDate < todayStr ? 'past' : 'future',
-          mood: res.mood || null,
-          weather: res.weather || null,
-          activities: parsedActs,
-          note: res.note || null,
-          time_allocation: null,
+          date: res.log_date,
+          day_type: dayType,
+          mood: res.mood,
+          weather: res.weather,
+          activities: acts,
+          note: res.note,
+          time_allocation: res.time_allocation,
         };
       } catch (err: any) {
-        if (err?.message?.includes('404')) return null;
+        if (err?.status === 404 || err?.message?.includes('not found')) {
+          return null;
+        }
         throw err;
       }
     },
   });
 
   const isLogged = Boolean(dayLog?.mood);
-  const loggedMoodCfg = dayLog?.mood ? MOOD_CONFIG[dayLog.mood.toLowerCase() as MoodType] : undefined;
-  const loggedWeatherCfg = dayLog?.weather ? WEATHER_CONFIG[dayLog.weather.toLowerCase() as WeatherType] : undefined;
+  const isFormActive = !isLogged;
 
-  // Sync form inputs when dayLog data changes
+  // Sync loaded dayLog into form state
   useEffect(() => {
-    if (dayLog) {
-      const initialMood = (dayLog.mood?.toLowerCase() as MoodType) || 'good';
-      setSelectedMood(initialMood in MOOD_CONFIG ? initialMood : 'good');
-      const initialWeather = (dayLog.weather?.toLowerCase() as WeatherType) || null;
-      setSelectedWeather(initialWeather && initialWeather in WEATHER_CONFIG ? initialWeather : null);
-
+    if (dayLog && dayLog.mood) {
+      setSelectedMood(dayLog.mood.toLowerCase() as MoodType);
+      setSelectedWeather((dayLog.weather?.toLowerCase() as WeatherType) || null);
       let acts: string[] = [];
       if (Array.isArray(dayLog.activities)) {
         acts = dayLog.activities;
@@ -158,23 +161,14 @@ export const MoodView: React.FC = () => {
     setSelectedDate(cur.toISOString().split('T')[0]);
   };
 
-  const formattedDate = useMemo(() => {
-    return new Date(`${selectedDate}T12:00:00Z`).toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  }, [selectedDate]);
-
-  const handleToggleActivity = (actId: string) => {
+  const handleToggleActivity = (id: string) => {
     setSelectedActivities((prev) =>
-      prev.includes(actId) ? prev.filter((a) => a !== actId) : [...prev, actId]
+      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
     );
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setSaveError(null);
     try {
       await saveDayMutation.mutateAsync({
@@ -182,30 +176,40 @@ export const MoodView: React.FC = () => {
         mood: selectedMood,
         weather: selectedWeather,
         activities: selectedActivities,
-        note: note.trim() || null,
+        note: note.trim() || undefined,
       });
     } catch (err: any) {
-      setSaveError(err?.message || 'Failed to save daily reflection');
+      setSaveError(err?.message || 'Failed to save reflection');
     }
   };
 
   const handleConfirmDelete = async () => {
-    setSaveError(null);
     try {
       await deleteDayMutation.mutateAsync(selectedDate);
       setConfirmingClear(false);
     } catch (err: any) {
-      setSaveError(err?.message || 'Failed to clear day record');
+      setSaveError(err?.message || 'Failed to clear day log');
     }
   };
 
-  const jumpToTimeBlocks = () => {
-    window.dispatchEvent(
-      new CustomEvent('app:navigate', {
-        detail: { moduleId: 'time_blocks', date: selectedDate },
-      })
-    );
-  };
+  const formattedDate = useMemo(() => {
+    const d = new Date(`${selectedDate}T12:00:00Z`);
+    return d.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }, [selectedDate]);
+
+  const loggedMoodCfg = dayLog?.mood
+    ? MOOD_CONFIG[dayLog.mood.toLowerCase() as MoodType]
+    : undefined;
+  const loggedWeatherCfg = dayLog?.weather
+    ? WEATHER_CONFIG[dayLog.weather.toLowerCase() as WeatherType]
+    : undefined;
+
+
 
   return (
     <div className="space-y-6">
@@ -228,8 +232,8 @@ export const MoodView: React.FC = () => {
           )}
         </div>
 
-        {/* Date Navigator Controls */}
-        <div className="flex items-center gap-1.5">
+        {/* Date Navigator Controls & Fast Action Bridge */}
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -293,25 +297,129 @@ export const MoodView: React.FC = () => {
         </div>
       )}
 
-      {/* Main Content Grid: Left Form / Sealed View, Right Activity Feed & Time Blocks Bridge */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Reflection Form or Sealed View */}
+      {/* Redesigned Studio Layout: Left Vibe & Milestones, Right Reflection Prose & Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Mood, Weather, Activities & Milestones */}
         <div className="lg:col-span-6 space-y-6">
-          {isLogged ? (
-            /* Sealed/Logged View */
-            <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4">
+          {isFormActive ? (
+            <>
+              {/* Feel / Primary Mood & Weather Card */}
+              <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                    Feel & Environment
+                  </span>
+                  <span className="text-[10px] font-mono text-neutral-400">
+                    Record
+                  </span>
+                </div>
+
+                {/* Mood Selector */}
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2">
+                    Feel / Primary Mood
+                  </label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {(Object.keys(MOOD_CONFIG) as MoodType[]).map((moodKey) => {
+                      const config = MOOD_CONFIG[moodKey];
+                      const isSelected = selectedMood === moodKey;
+                      return (
+                        <button
+                          key={moodKey}
+                          type="button"
+                          onClick={() => setSelectedMood(moodKey)}
+                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                            isSelected
+                              ? `${config.bgClass} ${config.textClass} font-semibold ring-1 ring-neutral-900 dark:ring-neutral-100 shadow-xs`
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                          }`}
+                        >
+                          <span className="text-2xl mb-1">{config.emoji}</span>
+                          <span className="text-[11px]">{config.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Weather */}
+                <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2">
+                    Weather (optional)
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.keys(WEATHER_CONFIG) as WeatherType[]).map((wKey) => {
+                      const w = WEATHER_CONFIG[wKey];
+                      const isSelected = selectedWeather === wKey;
+                      return (
+                        <button
+                          key={wKey}
+                          type="button"
+                          onClick={() => setSelectedWeather(isSelected ? null : wKey)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100 shadow-2xs'
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                          }`}
+                        >
+                          <span>{w.emoji}</span>
+                          <span>{w.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Activities & Milestones Card */}
+              <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                    Activities & Milestones
+                  </span>
+                  <span className="text-[10px] font-mono text-neutral-400">
+                    {selectedActivities.length > 0
+                      ? `${selectedActivities.length} selected`
+                      : 'Optional'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {ACTIVITY_OPTIONS.map((act) => {
+                    const isChecked = selectedActivities.includes(act.id);
+                    return (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => handleToggleActivity(act.id)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
+                          isChecked
+                            ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100 shadow-2xs'
+                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                        }`}
+                      >
+                        <span>{act.emoji}</span>
+                        <span className="truncate">{act.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Logged Day Summary Card (Sealed View) */
+            <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Sealed Daily Reflection
+                  Day Summary
                 </span>
                 <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
                   Recorded
                 </span>
               </div>
 
-              {/* Mood Card */}
+              {/* Mood Banner */}
               <div
-                className={`flex items-center gap-3 p-3.5 rounded-lg border ${
+                className={`flex items-center gap-3 p-4 rounded-lg border ${
                   loggedMoodCfg
                     ? `${loggedMoodCfg.bgClass} ${loggedMoodCfg.textClass} font-semibold shadow-xs`
                     : 'bg-neutral-50 dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200'
@@ -320,42 +428,138 @@ export const MoodView: React.FC = () => {
                 <span className="text-3xl">{loggedMoodCfg?.emoji || '✨'}</span>
                 <div>
                   <div className="text-base font-bold capitalize">{loggedMoodCfg?.label || dayLog?.mood}</div>
-                  <div className="text-xs opacity-80">Recorded mood for this day</div>
+                  <div className="text-xs opacity-80">Primary recorded mood</div>
                 </div>
               </div>
 
-              {/* Weather */}
+              {/* Weather Banner */}
               {dayLog?.weather && (
                 <div>
-                  <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
+                  <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1.5">
                     Weather
                   </div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-800 dark:text-neutral-200">
                     <span className="text-sm">{loggedWeatherCfg?.emoji || '🌤️'}</span>
                     <span>{loggedWeatherCfg?.label || dayLog.weather}</span>
                   </div>
                 </div>
               )}
 
-              {/* Reflection Note */}
+              {/* Activities & Milestones Tags */}
               <div>
-                <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1">
+                <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1.5">
+                  Activities & Milestones
+                </div>
+                {dayLog?.activities && dayLog.activities.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {dayLog.activities.map((actId) => {
+                      const act = ACTIVITY_OPTIONS.find((a) => a.id === actId);
+                      return (
+                        <span
+                          key={actId}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                        >
+                          <span>{act?.emoji || '📌'}</span>
+                          <span>{act?.label || actId}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-neutral-400 dark:text-neutral-500 italic">
+                    No activities or milestones recorded for this day.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* Right Column: Reflection Notes & Actions */}
+        <div className="lg:col-span-6 space-y-6">
+          {isFormActive ? (
+            /* Editable Reflection Form */
+            <form
+              onSubmit={handleSave}
+              className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                  Record Daily Reflection
+                </span>
+                <span className="text-[10px] font-mono text-neutral-400">
+                  Unrecorded
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                    Notes & Reflection (optional)
+                  </label>
+                  <span className="text-[10px] font-mono text-neutral-400 tabular-nums">
+                    {note.length}/500
+                  </span>
+                </div>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="What happened today? Memories, achievements, or learnings..."
+                  maxLength={500}
+                  rows={8}
+                  className="w-full px-3.5 py-2.5 rounded-md text-xs border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-800/50 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 resize-none leading-relaxed"
+                />
+              </div>
+
+              {/* Submit Action */}
+              <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-end">
+                <button
+                  type="submit"
+                  disabled={saveDayMutation.isPending}
+                  className="h-9 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  {saveDayMutation.isPending && (
+                    <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-neutral-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                  )}
+                  <span>{saveDayMutation.isPending ? 'Saving...' : 'Save daily reflection'}</span>
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Sealed Daily Reflection View */
+            <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                  Sealed Daily Reflection
+                </span>
+                <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
+                  Logged
+                </span>
+              </div>
+
+              {/* Reflection Note Prose */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500">
                   Notes & Reflection
                 </div>
                 {dayLog?.note ? (
-                  <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap leading-relaxed">
+                  <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap leading-relaxed">
                     "{dayLog.note}"
                   </div>
                 ) : (
-                  <div className="p-3 rounded-md bg-neutral-50/50 dark:bg-neutral-800/30 border border-neutral-200/80 dark:border-neutral-800/80 text-xs text-neutral-400 dark:text-neutral-500 italic">
+                  <div className="p-3.5 rounded-md bg-neutral-50/50 dark:bg-neutral-800/30 border border-neutral-200/80 dark:border-neutral-800/80 text-xs text-neutral-400 dark:text-neutral-500 italic">
                     No reflection notes were recorded for this day.
                   </div>
                 )}
               </div>
 
-              {/* Clear Confirmation */}
+              {/* Clear Confirmation or Edit Actions */}
               {confirmingClear ? (
-                <div className="p-3 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 space-y-2.5">
+                <div className="p-3.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 space-y-2.5">
                   <p className="text-xs text-rose-800 dark:text-rose-200 font-medium">
                     Clear reflection record for {selectedDate}?
                   </p>
@@ -378,7 +582,7 @@ export const MoodView: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
+                <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
                   <button
                     type="button"
                     onClick={() => setConfirmingClear(true)}
@@ -390,200 +594,7 @@ export const MoodView: React.FC = () => {
                 </div>
               )}
             </div>
-          ) : (
-            /* Editable Reflection Form */
-            <form
-              onSubmit={handleSave}
-              className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Record Daily Reflection
-                </span>
-                <span className="text-[10px] font-mono text-neutral-400">
-                  Unrecorded
-                </span>
-              </div>
-
-              {/* Mood Selector */}
-              <div>
-                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
-                  Feel / Primary Mood
-                </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {(Object.keys(MOOD_CONFIG) as MoodType[]).map((moodKey) => {
-                    const config = MOOD_CONFIG[moodKey];
-                    const isSelected = selectedMood === moodKey;
-                    return (
-                      <button
-                        key={moodKey}
-                        type="button"
-                        onClick={() => setSelectedMood(moodKey)}
-                        className={`flex flex-col items-center justify-center p-2 rounded-lg border text-xs transition-all cursor-pointer ${
-                          isSelected
-                            ? `${config.bgClass} ${config.textClass} font-semibold ring-1 ring-neutral-900 dark:ring-neutral-100 shadow-xs`
-                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                        }`}
-                      >
-                        <span className="text-2xl mb-1">{config.emoji}</span>
-                        <span className="text-[11px]">{config.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Weather */}
-              <div>
-                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
-                  Weather (optional)
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.keys(WEATHER_CONFIG) as WeatherType[]).map((wKey) => {
-                    const w = WEATHER_CONFIG[wKey];
-                    const isSelected = selectedWeather === wKey;
-                    return (
-                      <button
-                        key={wKey}
-                        type="button"
-                        onClick={() => setSelectedWeather(isSelected ? null : wKey)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                          isSelected
-                            ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
-                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                        }`}
-                      >
-                        <span>{w.emoji}</span>
-                        <span>{w.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1">
-                  Notes & Reflection (optional)
-                </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="What happened today? Memories, achievements, or learnings..."
-                  maxLength={500}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-md text-xs border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-800/50 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 resize-none"
-                />
-                <div className="text-right text-[10px] text-neutral-400 mt-0.5 tabular-nums">
-                  {note.length}/500
-                </div>
-              </div>
-
-              {/* Submit Action */}
-              <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={saveDayMutation.isPending}
-                  className="h-9 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  {saveDayMutation.isPending && (
-                    <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-neutral-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                    </svg>
-                  )}
-                  <span>{saveDayMutation.isPending ? 'Saving...' : 'Save daily reflection'}</span>
-                </button>
-              </div>
-            </form>
           )}
-        </div>
-
-        {/* Right Column: Activities & Milestones, Auto-Logged Feed & Time Blocks Jump */}
-        <div className="lg:col-span-6 space-y-6">
-          {/* Activities & Milestones Card */}
-          <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                Activities & Milestones
-              </span>
-              <span className="text-[10px] font-mono text-neutral-400">
-                {isLogged
-                  ? dayLog?.activities?.length
-                    ? `${dayLog.activities.length} tagged`
-                    : 'None'
-                  : selectedActivities.length > 0
-                    ? `${selectedActivities.length} selected`
-                    : 'Optional'}
-              </span>
-            </div>
-
-            {isLogged ? (
-              dayLog?.activities && dayLog.activities.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {dayLog.activities.map((actId) => {
-                    const act = ACTIVITY_OPTIONS.find((a) => a.id === actId);
-                    return (
-                      <span
-                        key={actId}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
-                      >
-                        <span>{act?.emoji || '📌'}</span>
-                        <span>{act?.label || actId}</span>
-                      </span>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-[11px] text-neutral-400 dark:text-neutral-500 italic">
-                  No activities or milestones recorded for this day.
-                </p>
-              )
-            ) : (
-              <div className="grid grid-cols-2 gap-1.5">
-                {ACTIVITY_OPTIONS.map((act) => {
-                  const isChecked = selectedActivities.includes(act.id);
-                  return (
-                    <button
-                      key={act.id}
-                      type="button"
-                      onClick={() => handleToggleActivity(act.id)}
-                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
-                        isChecked
-                          ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100'
-                          : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                      }`}
-                    >
-                      <span>{act.emoji}</span>
-                      <span className="truncate">{act.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <LifeActivityFeed date={selectedDate} />
-
-          {/* Time Blocks Connective Jump Card */}
-          <div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                Time Blocks for {selectedDate}
-              </div>
-              <div className="text-[11px] text-neutral-500 mt-0.5">
-                Allocate sleep, deep work, and leisure in 15-minute intervals
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={jumpToTimeBlocks}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer inline-flex items-center gap-1.5"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>Open Time Blocks →</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_footprints_only_appear_on_arrival_or_departure_date() {
+    async fn test_footprints_only_appear_on_arrival_date() {
         let (state, pool) = create_test_state().await;
 
         // Trip from 2026-09-04 to 2026-09-14
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(res_arrival.stats.footprints, 1);
         assert_eq!(res_arrival.events[0].action, "arrived");
 
-        // 2. On intermediate date (e.g. 2026-09-10 or 2026-09-11): does NOT appear!
+        // 2. On intermediate date: does NOT appear
         let res_mid = get_day_activity(
             user.clone(),
             axum::extract::State(state.clone()),
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(res_mid.stats.footprints, 0);
         assert_eq!(res_mid.events.len(), 0);
 
-        // 3. On departure date: appears as "departed"
+        // 3. On departure date: does NOT appear
         let res_dep = get_day_activity(
             user,
             axum::extract::State(state),
@@ -275,7 +275,7 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(res_dep.stats.footprints, 1);
-        assert_eq!(res_dep.events[0].action, "departed");
+        assert_eq!(res_dep.stats.footprints, 0);
+        assert_eq!(res_dep.events.len(), 0);
     }
 }

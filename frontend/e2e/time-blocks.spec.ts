@@ -83,16 +83,6 @@ test.describe('Time Blocks Module', () => {
     await expect(datePickerTrigger).toContainText(todayStr);
   });
 
-  test('toolbar provides quick navigation to Mood module', async ({ app }) => {
-    await gotoTimeBlocks(app);
-
-    const moodBtn = app.getByRole('button', { name: /mood reflection →/i });
-    await expect(moodBtn).toBeVisible();
-    await moodBtn.click();
-
-    await expect(app.getByRole('heading', { name: 'Mood', exact: true })).toBeVisible();
-  });
-
   test('preserves existing mood and reflections when saving time allocation', async ({ app, api }) => {
     const todayStr = new Date().toISOString().split('T')[0];
 

@@ -393,18 +393,16 @@ pub(crate) async fn query_footprints(
         title: String,
         city: Option<String>,
         country: Option<String>,
-        arrival_date: String,
         created_at: Option<DateTime<Utc>>,
     }
 
     let rows = sqlx::query_as::<_, FootprintRow>(
-        "SELECT title, city, country, arrival_date, created_at \
+        "SELECT title, city, country, created_at \
          FROM footprints \
-         WHERE owner_id = ? AND (arrival_date = ? OR departure_date = ?) \
+         WHERE owner_id = ? AND arrival_date = ? \
          ORDER BY created_at",
     )
     .bind(owner)
-    .bind(date)
     .bind(date)
     .fetch_all(pool)
     .await
@@ -420,11 +418,7 @@ pub(crate) async fn query_footprints(
         } else {
             Some(loc_parts.join(", "))
         };
-        let action = if row.arrival_date == date {
-            "arrived"
-        } else {
-            "departed"
-        };
+        let action = "arrived";
         let time = row.created_at.and_then(|dt| {
             if dt.format("%Y-%m-%d").to_string() == date {
                 extract_time(&Some(dt))
