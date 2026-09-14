@@ -1,63 +1,84 @@
-name: Build Docker image
+name: Build and Push Docker Image
 
-# Manual only — this never fires on push.
 on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*.*.*', 'v*.*', 'v*' ]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag (also always tagged with the short commit SHA)"
+        description: "Custom image tag (also always tagged with short commit SHA)"
         required: true
         default: latest
       push:
-        description: "Push to GHCR (uncheck to build only)"
+        description: "Push to Docker Hub (uncheck to build only)"
         type: boolean
         default: true
 
 jobs:
   build:
+    name: Build & Push to Docker Hub
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
-        if: inputs.push
+      - name: Log in to Docker Hub
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # GHCR rejects uppercase paths; github.repository is not guaranteed to be
-      # lowercase, so normalize it rather than relying on the current spelling.
-      - name: Resolve image name
-        id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Resolve Docker Hub image tags
+        id: tags
+        run: |
+          REPO="${{ secrets.DOCKERHUB_REPO }}"
+          if [ -z "$REPO" ]; then
+            if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+              REPO="${{ secrets.DOCKERHUB_USERNAME }}/matrix-bot"
+            else
+              echo "::error::Missing DOCKERHUB_USERNAME secret! Please add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN to your GitHub repository secrets."
+              exit 1
+            fi
+          fi
+          
+          SHORT_SHA="${GITHUB_SHA::7}"
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAGS="${REPO}:${{ inputs.tag }},${REPO}:${SHORT_SHA}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAGS="${REPO}:${{ github.ref_name }},${REPO}:latest,${REPO}:${SHORT_SHA}"
+          else
+            TAGS="${REPO}:latest,${REPO}:${SHORT_SHA}"
+          fi
+          
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ inputs.push }}
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ inputs.tag }}
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          platforms: linux/amd64
+          push: ${{ secrets.DOCKERHUB_USERNAME != '' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Summary
         run: |
           {
-            echo "### Image"
+            echo "### Docker Hub Image Summary"
+            echo "Successfully built for repository: **${{ steps.tags.outputs.repo }}**"
+            echo ""
+            echo "Tags generated:"
             echo '```'
-            echo "${{ steps.image.outputs.name }}:${{ inputs.tag }}"
-            echo "${{ steps.image.outputs.name }}:${{ github.sha }}"
+            echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n'
             echo '```'
-            echo "Pushed: ${{ inputs.push }}"
+            echo "Pushed: ${{ secrets.DOCKERHUB_USERNAME != '' && (github.event_name != 'workflow_dispatch' || inputs.push) }}"
           } >> "$GITHUB_STEP_SUMMARY"
