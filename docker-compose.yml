@@ -11,6 +11,7 @@ services:
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8080
+      - ENVIRONMENT=${ENVIRONMENT:-}
       - DATABASE_URL=sqlite:///app/data/bot_data.db?mode=rwc
       - DATABASE_MAX_CONNECTIONS=10
       - RUST_LOG=info,matrix_bot=info

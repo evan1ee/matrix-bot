@@ -7,10 +7,11 @@ use std::env;
 /// run on development WebAuthn settings — which must never disagree, so it is
 /// one function rather than two copies of the same expression.
 fn is_production() -> bool {
-    env::var("ENVIRONMENT")
-        .map(|v| v.to_lowercase() == "production")
-        .unwrap_or(false)
-        || cfg!(not(debug_assertions))
+    match env::var("ENVIRONMENT").map(|v| v.to_lowercase()).as_deref() {
+        Ok("development") | Ok("local") | Ok("test") => false,
+        Ok("production") => true,
+        _ => cfg!(not(debug_assertions)),
+    }
 }
 
 #[derive(Debug, Clone)]
