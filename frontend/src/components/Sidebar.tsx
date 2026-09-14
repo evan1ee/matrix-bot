@@ -47,8 +47,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Finance',
     items: [
-      { id: 'finance', label: 'Expenses', icon: Wallet },
       { id: 'portfolio', label: 'Portfolio', icon: TrendingUp },
+      { id: 'finance', label: 'Expenses', icon: Wallet },
       { id: 'recurring_bills', label: 'Bills', icon: Receipt },
     ],
   },
