@@ -13,7 +13,8 @@ import { aiModule } from './modules/ai';
 import { footprintsModule } from './modules/footprints';
 import { habitsModule } from './modules/habits';
 import { lifeModule } from './modules/life';
-import { journalModule } from './modules/journal';
+import { moodModule } from './modules/mood';
+import { timeBlocksModule } from './modules/time_blocks';
 import { bookmarksModule } from './modules/bookmarks';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
@@ -24,7 +25,7 @@ import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, journalModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }

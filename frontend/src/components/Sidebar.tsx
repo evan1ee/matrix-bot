@@ -5,7 +5,7 @@ import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
   Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
-  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, NotebookPen, Settings, LogIn, Sun, Moon, LucideIcon
+  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, Smile, Settings, LogIn, Sun, Moon, LucideIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -55,7 +55,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Lifestyle',
     items: [
-      { id: 'journal', label: 'Daily Log', icon: NotebookPen },
+      { id: 'mood', label: 'Mood', icon: Smile },
+      { id: 'time_blocks', label: 'Time Blocks', icon: Clock },
       { id: 'footprints', label: 'Footprints', icon: Compass },
       { id: 'life', label: 'Life Grid', icon: Hourglass },
     ],

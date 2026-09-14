@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { NotebookPen, Calendar, Sparkles } from 'lucide-react';
+import { Smile, Calendar, Sparkles } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
@@ -119,7 +119,7 @@ export const LifeView: React.FC = () => {
   };
 
   const handleLogToday = () => {
-    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal' } }));
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'mood' } }));
   };
 
   const profile = profileData?.profile || null;
@@ -220,8 +220,8 @@ export const LifeView: React.FC = () => {
             onClick={handleLogToday}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
           >
-            <NotebookPen className="w-3.5 h-3.5" />
-            <span>Daily Log →</span>
+            <Smile className="w-3.5 h-3.5" />
+            <span>Log Mood →</span>
           </button>
         )}
 
@@ -287,8 +287,11 @@ export const LifeView: React.FC = () => {
           setIsDayModalOpen(false);
           setSelectedDay(null);
         }}
-        onOpenJournal={(date) => {
-          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal', date } }));
+        onOpenMood={(date) => {
+          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'mood', date } }));
+        }}
+        onOpenTimeBlocks={(date) => {
+          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'time_blocks', date } }));
         }}
       />
 

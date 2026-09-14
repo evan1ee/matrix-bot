@@ -8,14 +8,16 @@ interface LifeDayModalProps {
   day: LifeDayItem | null;
   isOpen: boolean;
   onClose: () => void;
-  onOpenJournal?: (date: string) => void;
+  onOpenMood?: (date: string) => void;
+  onOpenTimeBlocks?: (date: string) => void;
 }
 
 export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   day,
   isOpen,
   onClose,
-  onOpenJournal,
+  onOpenMood,
+  onOpenTimeBlocks,
 }) => {
   const isLogged = Boolean(day?.mood);
   const loggedMoodCfg = day?.mood ? MOOD_CONFIG[day.mood.toLowerCase() as MoodType] : undefined;
@@ -214,21 +216,34 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
 
           {/* Footer Actions */}
           <div className="flex items-center justify-between pt-4 mt-6 border-t border-neutral-100 dark:border-neutral-800">
-            {onOpenJournal ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenJournal(day.date);
-                  onClose();
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Open this day in Daily Log →</span>
-              </button>
-            ) : (
-              <div />
-            )}
+            <div className="flex items-center gap-4">
+              {onOpenMood && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenMood(day.date);
+                    onClose();
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Open in Mood →</span>
+                </button>
+              )}
+              {onOpenTimeBlocks && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenTimeBlocks(day.date);
+                    onClose();
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Time Blocks →</span>
+                </button>
+              )}
+            </div>
 
             <button
               type="button"

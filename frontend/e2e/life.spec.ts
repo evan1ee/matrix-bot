@@ -41,18 +41,18 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     expect(api.lifeProfile?.birth_date).toBe('1995-05-15');
   });
 
-  test('navigates to Daily Log from header and inspects view-only day retrospective modal', async ({ app, api }) => {
+  test('navigates to Mood from header and inspects view-only day retrospective modal', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
 
     await gotoLife(app);
 
     await expect(app.getByRole('heading', { name: /lifespan day grid/i })).toBeVisible();
 
-    // Click Daily Log header button
-    await app.getByRole('button', { name: /daily log →/i }).click();
+    // Click Log Mood header button
+    await app.getByRole('button', { name: /log mood →/i }).click();
 
-    // Verify navigation to Daily Log module
-    await expect(app.getByRole('heading', { name: 'Daily Log' })).toBeVisible();
+    // Verify navigation to Mood module
+    await expect(app.getByRole('heading', { name: 'Mood', exact: true })).toBeVisible();
 
     // Navigate back to Life Grid
     await gotoLife(app);
@@ -63,7 +63,8 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
 
     // Verify view-only retrospective modal is shown
     await expect(app.getByText(/retrospective for this day/i)).toBeVisible();
-    await expect(app.getByRole('button', { name: /open this day in daily log →/i })).toBeVisible();
+    await expect(app.getByRole('button', { name: /open in mood →/i })).toBeVisible();
+    await expect(app.getByRole('button', { name: /time blocks →/i })).toBeVisible();
 
     // Close modal
     await app.getByRole('button', { name: /close/i }).first().click();
@@ -187,7 +188,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     }
   });
 
-  test('logged day is strictly view-only in life grid with navigation link to daily log', async ({ app, api }) => {
+  test('logged day is strictly view-only in life grid with navigation link to mood', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
     const todayStr = new Date().toISOString().split('T')[0];
     api.seedLifeDayLog({
@@ -228,14 +229,14 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    // Click "Open this day in Daily Log →" to navigate to journal
-    const navToJournalBtn = app.getByRole('button', { name: /open this day in daily log →/i });
-    await expect(navToJournalBtn).toBeVisible();
-    await navToJournalBtn.click();
+    // Click "Open in Mood →" to navigate to mood module
+    const navToMoodBtn = app.getByRole('button', { name: /open in mood →/i });
+    await expect(navToMoodBtn).toBeVisible();
+    await navToMoodBtn.click();
 
-    // Modal should close and Daily Log module should be opened
+    // Modal should close and Mood module should be opened
     await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).not.toBeVisible();
-    await expect(app.getByRole('heading', { name: 'Daily Log' })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Mood', exact: true })).toBeVisible();
     await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
     await expect(app.getByText('A memorable milestone day')).toBeVisible();
   });
