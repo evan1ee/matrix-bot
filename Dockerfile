@@ -34,7 +34,7 @@ RUN cargo build --release --bin matrix-bot
 FROM debian:bookworm-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 curl gosu \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -g 10001 app \
  && useradd -u 10001 -g app -s /usr/sbin/nologin app
@@ -43,12 +43,13 @@ WORKDIR /app
 
 COPY --from=build /src/target/release/matrix-bot /usr/local/bin/matrix-bot
 COPY --from=web   /src/backend/web/dist          /app/web/dist
+COPY docker-entrypoint.sh                        /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # `api/mod.rs` probes ./web/dist first, and `bot/client.rs` hardcodes the crypto
 # store at the relative path `data/bot_store` — both resolve against WORKDIR, so
 # /app must stay the working directory.
 RUN mkdir -p /app/data && chown -R app:app /app
-USER app
 
 ENV API_HOST=0.0.0.0 \
     API_PORT=8080 \
@@ -60,4 +61,5 @@ VOLUME ["/app/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://127.0.0.1:8080/api/v1/health || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["matrix-bot"]
