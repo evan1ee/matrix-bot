@@ -31,7 +31,7 @@ jobs:
       - name: Verify OpenAPI spec is up-to-date
         run: |
           cargo run --bin generate-openapi
-          git diff --exit-code frontend/src/api/openapi.json
+          git diff --exit-code backend/openapi.json
 
   frontend:
     name: Frontend CI (build & typecheck)
