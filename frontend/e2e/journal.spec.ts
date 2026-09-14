@@ -206,4 +206,60 @@ test.describe('Daily Log (Journal Module)', () => {
     await expect(app.locator('[data-testid="datepicker-popover"]')).not.toBeVisible();
     await expect(datePickerTrigger).toContainText(todayStr);
   });
+
+  test('cleanly separates Mood (feel, weather, note) and Time Blocks sections with independent saves', async ({
+    app,
+    api,
+  }) => {
+    await gotoJournal(app);
+
+    // Verify Mood & Reflection section tab is active by default
+    const moodTab = app.getByRole('button', { name: /Mood & Reflection/i });
+    const timeTab = app.getByRole('button', { name: 'Time Blocks (24h Time Grid)' });
+    await expect(moodTab).toBeVisible();
+    await expect(timeTab).toBeVisible();
+
+    // Verify Mood section inputs are present
+    await expect(app.getByText('Feel / Primary Mood')).toBeVisible();
+    await expect(app.getByText(/Weather/i).first()).toBeVisible();
+    await expect(app.getByPlaceholder(/What happened today/i)).toBeVisible();
+
+    // Fill Mood (Feel, Weather, Note)
+    await app.getByRole('button', { name: /Good/i }).first().click();
+    await app.getByRole('button', { name: /Cloudy/i }).first().click();
+    await app.getByPlaceholder(/What happened today/i).fill('Calm productive afternoon.');
+    await app.getByRole('button', { name: /save daily reflection/i }).click();
+
+    // Confirm Mood is sealed
+    await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
+    await expect(app.getByText('Calm productive afternoon.')).toBeVisible();
+
+    // Switch to Time Blocks tab
+    await timeTab.click();
+
+    // Verify Time Blocks section is active
+    await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
+    await expect(app.getByRole('button', { name: /workday/i })).toBeVisible();
+
+    // Allocate time blocks
+    await app.getByRole('button', { name: /workday/i }).click();
+    await app.getByRole('button', { name: /save time blocks/i }).click();
+    await expect(app.getByText(/✓ Time blocks saved|✓ Saved/i).first()).toBeVisible();
+
+    // Switch back to Mood tab using back button
+    await app.getByRole('button', { name: /← Back to Mood & Reflection/i }).click();
+
+    // Mood section remains sealed with its data
+    await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
+    await expect(app.getByText('Calm productive afternoon.')).toBeVisible();
+
+    // Verify both mood and time allocation are stored in API
+    const todayStr = new Date().toISOString().split('T')[0];
+    const log = api.lifeDayLogs.find((l) => l.log_date === todayStr);
+    expect(log).toBeDefined();
+    expect(log?.mood).toBe('good');
+    expect(log?.weather).toBe('cloudy');
+    expect(log?.note).toBe('Calm productive afternoon.');
+    expect(log?.time_allocation).toContain('deep_work');
+  });
 });

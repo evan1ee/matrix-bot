@@ -32,7 +32,7 @@ export const JournalView: React.FC = () => {
   const queryClient = useQueryClient();
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [activeTab, setActiveTab] = useState<'summary' | 'time'>('summary');
+  const [activeTab, setActiveTab] = useState<'mood' | 'time'>('mood');
 
   // Form state
   const [selectedMood, setSelectedMood] = useState<MoodType>('good');
@@ -354,34 +354,39 @@ export const JournalView: React.FC = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Sections / Tabs */}
       <div className="flex items-center gap-6 border-b border-neutral-200 dark:border-neutral-800 text-xs">
         <button
           type="button"
-          onClick={() => setActiveTab('summary')}
-          className={`py-2.5 -mb-px flex items-center gap-1.5 border-b-2 font-medium transition-colors cursor-pointer ${
-            activeTab === 'summary'
-              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
+          onClick={() => setActiveTab('mood')}
+          className={`py-2.5 -mb-px flex items-center gap-2 border-b-2 font-medium transition-colors cursor-pointer ${
+            activeTab === 'mood'
+              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100 font-semibold'
               : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
           }`}
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Day Summary & Activities</span>
+          <span>Mood & Reflection</span>
+          {isLogged && (
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60">
+              {loggedMoodCfg?.label || 'Logged'}
+            </span>
+          )}
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('time')}
-          className={`py-2.5 -mb-px flex items-center gap-1.5 border-b-2 font-medium transition-colors cursor-pointer ${
+          className={`py-2.5 -mb-px flex items-center gap-2 border-b-2 font-medium transition-colors cursor-pointer ${
             activeTab === 'time'
-              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
+              ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100 font-semibold'
               : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
           }`}
         >
           <Clock className="w-3.5 h-3.5" />
-          <span>24h Time Grid</span>
+          <span>Time Blocks (24h Time Grid)</span>
           {Number(timeTrackedHours) > 0 && (
-            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
               {timeTrackedHours}h
             </span>
           )}
@@ -396,8 +401,8 @@ export const JournalView: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 1: Day Summary & Auto-Logged Activity Feed */}
-      {activeTab === 'summary' && (
+      {/* Section 1: Mood (Feel, Weather, Note) & Auto-Logged Activities */}
+      {activeTab === 'mood' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Reflection Form or Sealed View */}
           <div className="lg:col-span-6 space-y-6">
@@ -512,7 +517,7 @@ export const JournalView: React.FC = () => {
                 {/* Mood Selector */}
                 <div>
                   <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
-                    Primary Mood
+                    Feel / Primary Mood
                   </label>
                   <div className="grid grid-cols-5 gap-2">
                     {(Object.keys(MOOD_CONFIG) as MoodType[]).map((moodKey) => {
@@ -674,13 +679,13 @@ export const JournalView: React.FC = () => {
               <div>
                 <div className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
                   {Number(timeTrackedHours) > 0
-                    ? `${timeTrackedHours}h Tracked in 24-Hour Timeline`
-                    : '24-Hour Time Allocation'}
+                    ? `${timeTrackedHours}h Tracked in Time Blocks`
+                    : 'Time Allocation (24-Hour Blocks)'}
                 </div>
                 <div className="text-[11px] text-neutral-500 mt-0.5">
                   {Number(timeTrackedHours) > 0
                     ? 'Mapped across 15-minute intervals'
-                    : 'Map deep work, sleep & leisure blocks'}
+                    : 'Map deep work, sleep, exercise & leisure blocks'}
                 </div>
               </div>
               <button
@@ -688,14 +693,14 @@ export const JournalView: React.FC = () => {
                 onClick={() => setActiveTab('time')}
                 className="px-3 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
               >
-                {Number(timeTrackedHours) > 0 ? 'Edit Blocks →' : 'Open Grid →'}
+                {Number(timeTrackedHours) > 0 ? 'Edit Time Blocks →' : 'Open Time Blocks →'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Tab 2: 24-Hour Time Grid */}
+      {/* Section 2: Time Blocks (24-Hour Time Allocation Grid) */}
       {activeTab === 'time' && (
         <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
           <LifeTimeGrid
@@ -712,7 +717,7 @@ export const JournalView: React.FC = () => {
                 ? 'Update your intraday blocks anytime today'
                 : isLogged
                 ? 'Past day time blocks are sealed'
-                : 'Save time blocks or switch to Day Summary'}
+                : 'Save time blocks or switch to Mood & Reflection'}
             </span>
             <div className="flex items-center gap-2.5">
               {(!isLogged || selectedDate === todayStr) && (
@@ -727,10 +732,10 @@ export const JournalView: React.FC = () => {
               )}
               <button
                 type="button"
-                onClick={() => setActiveTab('summary')}
+                onClick={() => setActiveTab('mood')}
                 className="px-3.5 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
               >
-                ← Back to Day Summary
+                ← Back to Mood & Reflection
               </button>
             </div>
           </div>
