@@ -3,6 +3,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::models::Direction;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
@@ -214,9 +215,9 @@ pub async fn execute_tool(
                 };
 
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -280,4 +281,117 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_financial_summary",
+            "Fetch financial summaries including expense and income totals broken down by category and currency. Currencies are separate and must never be summed together without exchange rates.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "list_finance_transactions",
+            "List recent financial transactions with optional filters for type (income/expense) or category.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of transactions to return (default 20, max 100)"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Offset for pagination"
+                    },
+                    "entry_type": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Optional filter by transaction type"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional filter by category name"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_spending_by_category",
+            "Get a breakdown of expenses grouped by category for a given month (defaults to current month).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "month": {
+                        "type": "string",
+                        "description": "Optional month in YYYY-MM format. Defaults to current month."
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "record_finance_entry",
+            "Record a new financial expense or income transaction with amount, category, currency, and optional description.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "entry_type": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Type: 'expense' or 'income' (required)"
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Decimal monetary amount (required, e.g. 42.50)"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Category name, e.g. Food, Salary, Transport (required)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of the transaction"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "Optional currency code (e.g. USD, EUR, TWD)"
+                    },
+                    "occurred_at": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 timestamp or YYYY-MM-DD"
+                    },
+                    "room": {
+                        "type": "string",
+                        "description": "Matrix room name or room ID"
+                    }
+                },
+                "required": ["entry_type", "amount", "category"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_finance_entry",
+            "Delete an expense or income transaction by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the financial transaction to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

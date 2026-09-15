@@ -267,6 +267,23 @@ pub struct ToolDefinition {
     pub function: FunctionDefinition,
 }
 
+impl ToolDefinition {
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: name.into(),
+                description: description.into(),
+                parameters,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDefinition {
     pub name: String,

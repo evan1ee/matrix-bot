@@ -66,13 +66,13 @@ The system unifies two distinct interaction models — fast, deterministic chat 
 
 2. **Deterministic Commands vs. Natural Language**:
    - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/bot/dispatcher.rs`](backend/src/bot/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
-   - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio.rs`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`).
+   - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool schemas are colocated directly within their domain tool files.
 
 3. **Unified Domain Layer**:
-   - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Business logic, validations, and ownership isolation are never duplicated.
+   - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
 
 4. **Persistence & Real-Time Sync**:
-   - All state modifications persist directly to SQLite using runtime SQLx query binding with write-ahead logging (WAL).
+   - All state modifications persist directly to SQLite using runtime SQLx query binding with write-ahead logging (WAL). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
    - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
 
 ---

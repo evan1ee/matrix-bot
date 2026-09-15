@@ -3,6 +3,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
@@ -165,4 +166,85 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_habits",
+            "Fetch all configured habits for the user, including today's completion status and current streaks.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "log_habit",
+            "Record habit completion or check-in for a given date.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "habit_id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the habit to log (required)"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Optional date string in YYYY-MM-DD format (defaults to today)"
+                    },
+                    "completed": {
+                        "type": "boolean",
+                        "description": "Whether the habit was completed (defaults to true)"
+                    },
+                    "value": {
+                        "type": "number",
+                        "description": "Optional numeric value for measurable habits"
+                    }
+                },
+                "required": ["habit_id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "create_habit",
+            "Create a new habit tracking goal with target frequency (daily, weekly, weekdays).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name or title of the habit (required)"
+                    },
+                    "frequency": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "weekdays"],
+                        "description": "Habit target frequency (defaults to daily)"
+                    },
+                    "target_per_period": {
+                        "type": "integer",
+                        "description": "Target completion count per frequency period (defaults to 1)"
+                    }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_habit",
+            "Delete a habit and all its logged history by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the habit to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

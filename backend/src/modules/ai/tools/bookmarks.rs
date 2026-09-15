@@ -2,6 +2,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
 use crate::modules::bookmarks::models::BookmarkQuery;
 use crate::modules::bookmarks::repository::BookmarksRepository;
@@ -155,4 +156,100 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "save_bookmark",
+            "Save and bookmark a URL with automated metadata title extraction and tags.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to bookmark (required)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title for the bookmark"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional notes or summary of the bookmarked link"
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Comma-separated tags (e.g. rust, ai, reading)"
+                    }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_my_bookmarks",
+            "Fetch saved bookmarks with optional tag filtering.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "tag": {
+                        "type": "string",
+                        "description": "Optional tag filter"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of bookmarks to return (default 20, max 100)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "toggle_bookmark_favorite",
+            "Toggle favorite / star status on a bookmark by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the bookmark to favorite/unfavorite (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "archive_bookmark",
+            "Toggle archive status on a bookmark by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the bookmark to archive (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_bookmark",
+            "Permanently delete a saved bookmark by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the bookmark to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

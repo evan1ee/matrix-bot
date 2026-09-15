@@ -214,5 +214,23 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Password login compatibility table
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS web_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let _ = sqlx::query("ALTER TABLE web_users ADD COLUMN account_id TEXT;")
+        .execute(pool)
+        .await;
+
     Ok(())
 }

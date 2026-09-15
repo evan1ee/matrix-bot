@@ -1,6 +1,8 @@
+use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -47,4 +49,46 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_settings",
+            "Fetch the user's active configuration settings, including timezone, display currency, and dev room.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "update_my_settings",
+            "Update user configuration preferences such as timezone, display currency, or default dev room.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "IANA timezone string (e.g. America/New_York, Asia/Taipei, UTC)"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "3-letter currency code (e.g. USD, EUR, TWD)"
+                    },
+                    "dev_room_id": {
+                        "type": "string",
+                        "description": "Matrix room ID for development / testing"
+                    },
+                    "max_history_turns": {
+                        "type": "integer",
+                        "description": "Maximum chat history turns to retain in context (1-100)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

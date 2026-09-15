@@ -3,6 +3,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::recurring_bills::models::CreateBillPayload;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 use crate::modules::settings::repository::SettingsRepository;
@@ -191,4 +192,93 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_recurring_bills",
+            "Fetch recurring bills and subscriptions, including amounts, recurrence patterns, and next due dates.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "create_recurring_bill",
+            "Create a new recurring subscription or bill schedule with automated payment reminders.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Name or title of the recurring bill/subscription (required)"
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Decimal amount to pay each cycle (required)"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "3-letter currency code (e.g. USD, EUR, TWD)"
+                    },
+                    "frequency": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly", "yearly"],
+                        "description": "Billing recurrence cycle (required)"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "First/next due date in ISO 8601 or YYYY-MM-DD"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category"
+                    }
+                },
+                "required": ["title", "amount", "frequency"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_recurring_bill",
+            "Delete a recurring bill schedule by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the recurring bill to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "pay_recurring_bill",
+            "Mark a recurring bill/subscription as paid for the current cycle, advancing its next due date and recording an expense transaction.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the recurring bill to record payment for (required)"
+                    },
+                    "paid_date": {
+                        "type": "string",
+                        "description": "Optional payment date in YYYY-MM-DD or ISO 8601 (defaults to current time)"
+                    },
+                    "record_expense": {
+                        "type": "boolean",
+                        "description": "Whether to also record an expense transaction in Finance module (defaults to true)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

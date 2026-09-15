@@ -3,6 +3,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::ai::retrospective::generate_weekly_retrospective;
 use crate::modules::footprints::repository::FootprintRepository;
 use crate::modules::habits::repository::HabitsRepository;
@@ -267,4 +268,149 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "log_life_day",
+            "Log a daily journal entry, mood rating (1-5), headline, and tags in the Life Grid module.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format (defaults to today in user's timezone)"
+                    },
+                    "score": {
+                        "type": "integer",
+                        "description": "Overall day score (1-5)"
+                    },
+                    "mood": {
+                        "type": "string",
+                        "description": "Mood descriptor (e.g. happy, productive, stressed, calm)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short summary or headline for the day"
+                    },
+                    "journal": {
+                        "type": "string",
+                        "description": "Detailed journal entry or reflection for the day"
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Comma-separated tags (e.g. work, family, vacation)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_daily_log",
+            "Fetch the journal entry, mood score, and reflection for a specific date (defaults to today).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format (defaults to today)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_life_profile",
+            "Fetch user life profile, current age in weeks, total estimated lifespan, and life percentage lived.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_my_footprints",
+            "Fetch recorded places and geographic footprints visited by the user.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of footprints to return (default 20, max 100)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "record_footprint",
+            "Record a geographic check-in or visited place in the user's travel footprints map.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "place_name": {
+                        "type": "string",
+                        "description": "Name of the place, city, or venue visited (required)"
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "description": "Latitude coordinate"
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "description": "Longitude coordinate"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category (e.g. travel, restaurant, work, nature)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes or impressions about the visit"
+                    },
+                    "visited_at": {
+                        "type": "string",
+                        "description": "Optional visit timestamp in ISO-8601 or YYYY-MM-DD format"
+                    }
+                },
+                "required": ["place_name"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_footprint",
+            "Delete a footprint/travel pin by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the footprint to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_weekly_retrospective",
+            "Generate an aggregated retrospective summary for a given week covering tasks completed, financial flow, habits, and mood.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "week_offset": {
+                        "type": "integer",
+                        "description": "0 for this week, 1 for last week, etc. (defaults to 0)"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

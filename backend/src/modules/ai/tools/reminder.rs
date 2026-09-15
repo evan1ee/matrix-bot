@@ -2,9 +2,11 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::settings::repository::SettingsRepository;
+use serde_json::json;
 
 pub async fn execute_tool(
     pool: &SqlitePool,
@@ -68,9 +70,9 @@ pub async fn execute_tool(
                 };
 
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -134,4 +136,66 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_reminders",
+            "Fetch upcoming pending reminders scheduled for the user.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "set_reminder",
+            "Schedule a future reminder for the user. Supports relative time ('in_minutes') or absolute time ('trigger_at') and recurring intervals.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Reminder text or message (required)"
+                    },
+                    "in_minutes": {
+                        "type": "integer",
+                        "description": "Minutes from now when reminder should trigger (e.g. 10, 60)"
+                    },
+                    "trigger_at": {
+                        "type": "string",
+                        "description": "Absolute ISO-8601 timestamp when reminder triggers (e.g. 2026-03-30T18:00:00Z)"
+                    },
+                    "recurrence": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly", "yearly"],
+                        "description": "Optional recurring frequency"
+                    },
+                    "room": {
+                        "type": "string",
+                        "description": "Matrix room name or room ID to send reminder to"
+                    }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "cancel_reminder",
+            "Cancel a scheduled pending reminder by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the reminder to cancel (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

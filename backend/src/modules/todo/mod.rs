@@ -7,6 +7,7 @@ use crate::modules::{BotModule, CommandContext, CommandHelp};
 pub mod due_reminder;
 pub mod handler;
 pub mod models;
+pub mod mutate;
 pub mod repository;
 pub mod view;
 

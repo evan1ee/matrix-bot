@@ -3,9 +3,11 @@ use chrono_tz::Tz;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
+use serde_json::json;
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(due_str) {
@@ -69,9 +71,9 @@ pub async fn execute_tool(
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -231,4 +233,118 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_tasks",
+            "Fetch tasks and to-dos owned by the user, including status, priority, and due dates.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "completed": {
+                        "type": "boolean",
+                        "description": "Optional filter: true for completed tasks, false for active tasks"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "add_todo",
+            "Add a new task/to-do for the user. Supports priority and due dates.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The task or todo description (required)"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "urgent"],
+                        "description": "Task priority level"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "Due date/time in ISO-8601 (e.g. 2026-03-30T18:00:00Z) or YYYY-MM-DD"
+                    },
+                    "remind_before_minutes": {
+                        "type": "integer",
+                        "description": "Minutes before due_date to alert (e.g. 15, 60)"
+                    },
+                    "room": {
+                        "type": "string",
+                        "description": "Matrix room name or room ID to associate with the task"
+                    }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "complete_todo",
+            "Mark a task/to-do as completed by its ID or exact text match.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to mark as completed"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Exact or partial text match of the todo to complete"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "update_todo",
+            "Update an existing task's description, priority, or due date.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to update (required)"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "New description text"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "urgent"],
+                        "description": "New priority level"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "New due date in ISO 8601 format"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_todo",
+            "Permanently delete a task/to-do by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

@@ -12,8 +12,9 @@ This document defines the architectural conventions, coding rules, frontend desi
 
 2. **Embedded Axum REST API Layer**:
    - Web API endpoints live in `backend/src/api/` (`auth.rs`, `todos.rs`, `reminders.rs`, `bookmarks.rs`, `finance.rs`, `portfolio.rs`, `habits.rs`, `life.rs`, `sse.rs`, `health.rs`).
-   - Use `ApiError` in [`backend/src/error.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/error.rs) for all REST API error responses to guarantee standardized JSON `{ "error": "...", "code": 400 }` output.
-   - Every state-modifying action (create, update, delete, trigger) must emit a `SystemEvent` via `EventBroadcaster` in [`backend/src/events.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/events.rs) for real-time SSE streaming.
+   - The route table is modularized into domain sub-routers in [`backend/src/api/routes.rs`](backend/src/api/routes.rs) and aggregated via `api_routes()`.
+   - Use `ApiError` in [`backend/src/error.rs`](backend/src/error.rs) for all REST API error responses to guarantee standardized JSON `{ "error": "...", "code": 400 }` output.
+   - Every state-modifying action (create, update, delete, trigger) must emit a `SystemEvent` via `EventBroadcaster` in [`backend/src/events.rs`](backend/src/events.rs) for real-time SSE streaming.
    - Every `SystemEvent` variant must expose its owner through `SystemEvent::owner_id()`. The broadcast channel is process-wide and the SSE handler delivers an event only to that owner — a variant with no owner would either leak across users or never be delivered.
    - Enforce input length validation (max 500 chars) on all API payload strings to prevent DoS/database bloat.
 
@@ -22,9 +23,13 @@ This document defines the architectural conventions, coding rules, frontend desi
      code** (target < 300). The count is lines above the `#[cfg(test)]` module —
      tests live beside the code they cover and are not counted against it.
    - Split along a real seam, never by line count alone. Examples:
-     `db/schema.rs` → DDL vs `db/backfill.rs` vs `db/schema_auth.rs`;
+     `db/schema.rs` → modular domain DDLs (`schema_todos.rs`, `schema_finance.rs`, `schema_portfolio.rs`, etc.);
+     `db/rooms.rs` → room resolution repository, preventing domain layer coupling to `api/rooms`;
      `api/account.rs` → one file per concern;
-     `portfolio/handler.rs` → `view.rs` (renders, never writes) and `cash.rs`.
+     `api/mod.rs` → server lifecycle in `mod.rs` vs route definitions in `routes.rs`;
+     `portfolio/handler.rs` → `view.rs` (renders, never writes) and `cash.rs`;
+     `todo/handler.rs` → dispatch & view in `handler.rs` and mutations in `mutate.rs`;
+     `ai/tools/portfolio/` → submodules `cash.rs`, `alerts.rs`, `mod.rs`.
    - Decompose feature modules into standard sub-files:
      - `mod.rs`: Module struct & `BotModule` trait implementation
      - `models.rs`: Structs & Enums (e.g. `ReminderStatus`, `TodoPriority`, `Bookmark`)
@@ -34,25 +39,27 @@ This document defines the architectural conventions, coding rules, frontend desi
 
 4. **Database & SQLx Persistence Rules**:
    - Use runtime SQLx query binding (`sqlx::query(...)` and `sqlx::query_as::<_, Model>(...)`) with `.bind(...)` rather than compile-time checked macros (`query!`) to allow seamless DB connection switching without compile-time database URL requirements.
-   - Always run table DDL migrations in [`backend/src/db/schema.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/db/schema.rs) using `CREATE TABLE IF NOT EXISTS` and backwards-compatible `ALTER TABLE` statements.
+   - Always run table DDL migrations using `CREATE TABLE IF NOT EXISTS` and backwards-compatible `ALTER TABLE` statements in modular schema files (`backend/src/db/schema_*.rs`) orchestrated through [`backend/src/db/schema.rs`](backend/src/db/schema.rs).
+   - Never couple domain repositories or bot modules to API modules: room caching and resolution must reside in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs) so all layers access rooms without inverted dependencies.
    - SQLite pools must be initialized with `WAL` journal mode (`journal_mode=WAL`), `busy_timeout=5000`, and configurable max connections via `DATABASE_MAX_CONNECTIONS`.
 
 5. **Matrix Response & Formatting Rules**:
    - Always construct Matrix responses using HTML formatting (`RoomMessageEventContent::text_html(&plain_text, &reply_html)`).
-   - Use `html_escape()` in [`backend/src/utils/html.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/utils/html.rs) for all user-supplied input strings embedded in HTML messages (escaping `<`, `>`, `&`, `"`, `'`).
-   - Use `strip_html()` in [`backend/src/utils/html.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/utils/html.rs) for the plain-text fallback argument to ensure push notifications don't render raw HTML tags.
+   - Use `html_escape()` in [`backend/src/utils/html.rs`](backend/src/utils/html.rs) for all user-supplied input strings embedded in HTML messages (escaping `<`, `>`, `&`, `"`, `'`).
+   - Use `strip_html()` in [`backend/src/utils/html.rs`](backend/src/utils/html.rs) for the plain-text fallback argument to ensure push notifications don't render raw HTML tags.
    - **Quoted Message Context (`CommandContext.quoted`)**: Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in [`backend/src/bot/quote.rs`](backend/src/bot/quote.rs) into `QuotedMessage`. Modules must support quoted context:
      - AI module: injects quoted content into context prompts via `QuotedMessage::to_context_prompt()`.
      - Todo / Reminder: if the user supplies no description or an empty default, uses the quoted text as the task / reminder body.
 
 6. **AI Tools & Live Web Search Architecture**:
    - **Universal Function Calling**: Define tools using standard OpenAI `type: "function"` schema in [`backend/src/modules/ai/search.rs`](backend/src/modules/ai/search.rs). Never use provider-specific proprietary tool variants (e.g. xAI `web_search`) on chat completions to maintain cross-provider compatibility across Grok, OpenAI, Claude, and local models.
+   - **Colocated Tool Schemas**: Each domain tool file (`backend/src/modules/ai/tools/*.rs`) exports `pub fn tool_definitions() -> Vec<ToolDefinition>` that defines the JSON schemas for its own tools alongside their execution implementations. The central [`definitions.rs`](backend/src/modules/ai/tools/definitions.rs) is a lightweight aggregator that merges all domain definitions.
    - **Selective Intent Gating**: Web search must be enabled conditionally via `should_enable_web_search()` (fact-checking, verification, breaking news) and omitted for routine productivity commands (todos, reminders, expenses, general coding) to avoid unnecessary search latency and token bloat.
    - **Dual Search Backend**: Primary queries use Tavily Search API (`TAVILY_API_KEY`) returning clean relevance-scored snippets; gracefully falls back to keyless DuckDuckGo HTML scraping if no key is set or on API errors.
    - **Proxy Awareness**: Search HTTP clients must respect `AI_PROXY` / `HTTPS_PROXY` so requests route through the user's configured local proxy.
    - **Concurrent Tool Execution**: When an LLM returns multiple tool calls within a turn, execute them concurrently using `futures_util::future::join_all` rather than sequentially in a loop.
    - **Timeouts & Deduplication**: Long-running multi-turn research requests need generous router ceilings (Axum `TimeoutLayer` >= 180s). Prevent duplicate database records on immediate retries by checking the active conversation's tail message before inserting.
-   - **Domain-Grouped Tool Architecture**: AI tools in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) are organized strictly by domain module (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio.rs`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool executors directly invoke domain SQLx repositories (`TodoRepository`, `FinanceRepository`, etc.) rather than through anemic pass-through layers, preserving single-responsibility and ensuring files remain well below 500 lines.
+   - **Domain-Grouped Tool Architecture**: AI tools in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) are organized strictly by domain module (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool executors directly invoke domain SQLx repositories (`TodoRepository`, `FinanceRepository`, etc.) rather than through anemic pass-through layers, preserving single-responsibility and ensuring files remain well below 500 lines.
 
 7. **Frontend Design System & UI Craft (Following `Design.md`)**:
    All web interfaces must strictly adhere to the Vercel editorial visual standards documented in [`Design.md`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/Design.md):

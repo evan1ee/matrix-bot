@@ -1,5 +1,7 @@
+use serde_json::json;
 use sqlx::SqlitePool;
 
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::webhook::repository::WebhookRepository;
 
 pub async fn execute_tool(
@@ -37,4 +39,38 @@ pub async fn execute_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_webhooks",
+            "List all configured inbound webhooks, their destination rooms, and delivery statistics.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_webhook_logs",
+            "Fetch recent delivery logs and incoming payloads for a specific webhook ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "webhook_id": {
+                        "type": "string",
+                        "description": "Webhook ID string (e.g. 'whk_...')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of logs to return (default 10)"
+                    }
+                },
+                "required": ["webhook_id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

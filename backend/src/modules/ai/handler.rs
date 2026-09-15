@@ -228,8 +228,8 @@ pub async fn run_ai_turn(
     let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let now_utc_str = now_utc.to_rfc3339();
 
-    let default_room_id = crate::api::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::api::rooms::get_cached_rooms(pool, owner_id)
+    let default_room_id = crate::db::rooms::resolve_user_default_room(pool, owner_id).await;
+    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id)
         .await
         .unwrap_or_default();
     let mut room_desc = Vec::new();

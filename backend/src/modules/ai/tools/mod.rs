@@ -1,8 +1,6 @@
 pub mod bills;
 pub mod bookmarks;
 pub mod definitions;
-pub mod definitions_extended;
-pub mod definitions_life;
 pub mod executor;
 pub mod finance;
 pub mod habits;

@@ -130,7 +130,7 @@ pub async fn create_reminder(
         .map(RecurrencePattern::from_str_or_default)
         .unwrap_or(RecurrencePattern::None);
 
-    let room_id = crate::api::rooms::resolve_target_room(
+    let room_id = crate::db::rooms::resolve_target_room(
         &state.db.pool,
         &user.owner_id(),
         payload.room_id.as_deref(),
