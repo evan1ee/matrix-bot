@@ -46,13 +46,17 @@ export interface LifeProfileResponse {
   stats?: LifeProfileStats | null;
 }
 
+export const ACTIVITY_COLOR = '#6366f1'; // Indigo-500
+
 export interface LifeHorizonDay {
   index: number;
   year: number;
   date: string;
-  status: 'past_empty' | 'past_logged' | 'present' | 'future';
+  status: 'past_empty' | 'past_logged' | 'past_activity' | 'present' | 'future';
   mood: string | null;
   time_allocation?: string | null;
+  has_activity?: boolean;
+  activity_count?: number;
 }
 
 export interface LifeDayItem {
@@ -63,6 +67,8 @@ export interface LifeDayItem {
   activities?: string[] | null;
   note?: string | null;
   time_allocation?: TimeAllocation | null;
+  has_activity?: boolean;
+  activity_count?: number;
 }
 
 export interface LifeYearView {

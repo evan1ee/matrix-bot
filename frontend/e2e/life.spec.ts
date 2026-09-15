@@ -285,5 +285,32 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
   });
+
+  test('marks days with auto-logged activity events as Auto-Tracked in life grid', async ({ app, api }) => {
+    api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
+
+    const pastDate = '2026-05-10';
+
+    // Seed a todo on pastDate with no mood logged
+    api.seedTodo({
+      text: 'Draft Q2 roadmaps',
+      priority: 'high',
+      completed: true,
+      created_at: `${pastDate}T09:00:00Z`,
+    });
+
+    await gotoLife(app);
+
+    // Verify Auto-Tracked legend is present in the UI
+    await expect(app.getByText('Auto-Tracked').first()).toBeVisible();
+
+    // Verify the horizon API in browser context returned has_activity: true and status past_activity for pastDate
+    const horizon = await app.evaluate(() => fetch('/api/v1/life/horizon').then((r) => r.json()));
+    const day = horizon.find((d: any) => d.date === pastDate);
+    expect(day).toBeDefined();
+    expect(day.has_activity).toBe(true);
+    expect(day.activity_count).toBeGreaterThan(0);
+    expect(day.status).toBe('past_activity');
+  });
 });
 

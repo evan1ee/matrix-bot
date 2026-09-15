@@ -32,6 +32,8 @@ export const LifeDayBlock: React.FC<LifeDayBlockProps> = ({
     }
   } else if (moodCfg) {
     stateClasses = `${moodCfg.bgClass} ${moodCfg.textClass} font-semibold shadow-xs`;
+  } else if (day.has_activity) {
+    stateClasses = 'bg-indigo-500 text-white font-semibold shadow-xs';
   } else if (day_type === 'past') {
     stateClasses =
       'bg-neutral-100 dark:bg-neutral-800/70 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700/80';
