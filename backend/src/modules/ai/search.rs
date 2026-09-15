@@ -88,13 +88,87 @@ pub fn grok_search_tools() -> Vec<serde_json::Value> {
     vec![web_search_tool_definition()]
 }
 
-/// Executes a live web search via DuckDuckGo and formats the top snippets.
+/// Executes a live web search, using Tavily if `TAVILY_API_KEY` is set,
+/// otherwise falling back to DuckDuckGo HTML scraping.
 pub async fn execute_web_search(query: &str) -> Result<String, String> {
     let query_trimmed = query.trim();
     if query_trimmed.is_empty() {
         return Err("Search query cannot be empty".to_string());
     }
 
+    if let Ok(api_key) = std::env::var("TAVILY_API_KEY") {
+        if !api_key.is_empty() {
+            return execute_tavily_search(query_trimmed, &api_key).await;
+        }
+    }
+
+    execute_duckduckgo_search(query_trimmed).await
+}
+
+/// Executes a web search via the Tavily API (optimized for AI/LLM consumption).
+async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let body = serde_json::json!({
+        "query": query,
+        "search_depth": "basic",
+        "max_results": 5,
+        "include_answer": false
+    });
+
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Tavily search request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_body = resp.text().await.unwrap_or_default();
+        tracing::warn!("Tavily API error ({}): {}, falling back to DuckDuckGo", status, error_body);
+        return execute_duckduckgo_search(query).await;
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Tavily response: {}", e))?;
+
+    let results = json["results"].as_array();
+    if results.is_none() || results.unwrap().is_empty() {
+        return Ok(format!(
+            "No web search results found for query: '{}'. Analyze based on prior knowledge.",
+            query
+        ));
+    }
+
+    let mut output = format!("Top web search results for '{}' (via Tavily):\n\n", query);
+    for (i, result) in results.unwrap().iter().take(5).enumerate() {
+        let title = result["title"].as_str().unwrap_or("Untitled");
+        let url = result["url"].as_str().unwrap_or("");
+        let content = result["content"].as_str().unwrap_or("");
+        let score = result["score"].as_f64().unwrap_or(0.0);
+        output.push_str(&format!(
+            "{}. **{}** (relevance: {:.0}%)\n   {}\n   Source: {}\n\n",
+            i + 1,
+            title,
+            score * 100.0,
+            content,
+            url,
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Executes a web search via DuckDuckGo HTML scraping (fallback).
+async fn execute_duckduckgo_search(query: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -102,7 +176,7 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
 
     let resp = client
         .get("https://html.duckduckgo.com/html/")
-        .query(&[("q", query_trimmed)])
+        .query(&[("q", query)])
         .header(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -121,11 +195,11 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
     if results.is_empty() {
         return Ok(format!(
             "No web search results found for query: '{}'. Analyze based on prior knowledge.",
-            query_trimmed
+            query
         ));
     }
 
-    let mut output = format!("Top web search results for '{}':\n\n", query_trimmed);
+    let mut output = format!("Top web search results for '{}' (via DuckDuckGo):\n\n", query);
     for (i, (title, snippet)) in results.iter().take(5).enumerate() {
         output.push_str(&format!("{}. **{}**\n   {}\n\n", i + 1, title, snippet));
     }
