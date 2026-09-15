@@ -152,15 +152,10 @@ mod tests {
     #[test]
     fn test_parse_quoted_reply_fact_check() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
-        let msg = "> <@bob:matrix.org> The moon is made of green cheese.\n\n@hellobot fact check this";
-        let ctx = CommandParser::parse_message(
-            msg,
-            None,
-            &bot_id,
-            "!room:matrix.org",
-            "alice",
-        )
-        .unwrap();
+        let msg =
+            "> <@bob:matrix.org> The moon is made of green cheese.\n\n@hellobot fact check this";
+        let ctx =
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
 
         assert_eq!(ctx.command, "fact");
         assert_eq!(ctx.raw_args, "check this");
@@ -176,14 +171,8 @@ mod tests {
     fn test_parse_quoted_reply_add_todo() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Review security audit before Monday\n\n@hellobot add todo";
-        let ctx = CommandParser::parse_message(
-            msg,
-            None,
-            &bot_id,
-            "!room:matrix.org",
-            "alice",
-        )
-        .unwrap();
+        let ctx =
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
 
         assert_eq!(ctx.command, "add");
         assert_eq!(ctx.raw_args, "todo");
@@ -196,14 +185,8 @@ mod tests {
     fn test_parse_quoted_reply_bare_mention() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Important news snippet\n\n@hellobot";
-        let ctx = CommandParser::parse_message(
-            msg,
-            None,
-            &bot_id,
-            "!room:matrix.org",
-            "alice",
-        )
-        .unwrap();
+        let ctx =
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
 
         assert_eq!(ctx.command, "ai");
         assert!(ctx.quoted.is_some());
@@ -214,13 +197,7 @@ mod tests {
     fn test_parse_quoted_message_without_bot_mention_is_ignored() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Quoted chat\n\nI disagree with your point.";
-        let res = CommandParser::parse_message(
-            msg,
-            None,
-            &bot_id,
-            "!room:matrix.org",
-            "alice",
-        );
+        let res = CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice");
         assert!(res.is_none());
     }
 }

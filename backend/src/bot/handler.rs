@@ -115,7 +115,8 @@ pub fn register_handlers(
             } else {
                 let trimmed = text_content.body.trim();
                 if is_direct && !trimmed.is_empty() {
-                    let (quoted, prompt) = crate::bot::quote::extract_quote_and_prompt(trimmed, formatted_body);
+                    let (quoted, prompt) =
+                        crate::bot::quote::extract_quote_and_prompt(trimmed, formatted_body);
                     ParsedCommand {
                         room_id: room.room_id().to_string(),
                         sender_name: ev.sender.localpart().to_string(),
@@ -130,10 +131,12 @@ pub fn register_handlers(
                 }
             };
 
-            let replied_event_id = crate::bot::quote::extract_replied_event_id(&ev.content.relates_to);
+            let replied_event_id =
+                crate::bot::quote::extract_replied_event_id(&ev.content.relates_to);
             if let Some(ref eid) = replied_event_id {
                 if parsed.quoted.is_none() {
-                    parsed.quoted = crate::bot::quote::resolve_quoted_event_from_room(&room, eid).await;
+                    parsed.quoted =
+                        crate::bot::quote::resolve_quoted_event_from_room(&room, eid).await;
                 } else if let Some(ref mut q) = parsed.quoted {
                     if q.event_id.is_none() {
                         q.event_id = Some(eid.clone());

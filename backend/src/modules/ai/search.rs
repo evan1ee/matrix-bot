@@ -107,7 +107,10 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
     }
 
     if let Some(api_key) = get_tavily_api_key() {
-        tracing::info!("Executing web search via Tavily API for query: '{}'", query_trimmed);
+        tracing::info!(
+            "Executing web search via Tavily API for query: '{}'",
+            query_trimmed
+        );
         return execute_tavily_search(query_trimmed, &api_key).await;
     }
 
@@ -119,8 +122,8 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
 }
 
 fn build_search_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs));
+    let mut builder =
+        reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs));
 
     let proxy_url = std::env::var("AI_PROXY")
         .or_else(|_| std::env::var("HTTPS_PROXY"))
@@ -167,7 +170,11 @@ async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, Str
     if !resp.status().is_success() {
         let status = resp.status();
         let error_body = resp.text().await.unwrap_or_default();
-        tracing::warn!("Tavily API error ({}): {}, falling back to DuckDuckGo", status, error_body);
+        tracing::warn!(
+            "Tavily API error ({}): {}, falling back to DuckDuckGo",
+            status,
+            error_body
+        );
         return execute_duckduckgo_search(query).await;
     }
 
@@ -188,7 +195,11 @@ async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, Str
         ));
     }
 
-    tracing::info!("Tavily search returned {} results for '{}'", items.len(), query);
+    tracing::info!(
+        "Tavily search returned {} results for '{}'",
+        items.len(),
+        query
+    );
 
     let mut output = format!("Top web search results for '{}' (via Tavily):\n\n", query);
     for (i, result) in items.iter().take(5).enumerate() {
@@ -211,7 +222,10 @@ async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, Str
 
 /// Executes a web search via DuckDuckGo HTML scraping (fallback).
 async fn execute_duckduckgo_search(query: &str) -> Result<String, String> {
-    tracing::info!("Executing web search via DuckDuckGo fallback for query: '{}'", query);
+    tracing::info!(
+        "Executing web search via DuckDuckGo fallback for query: '{}'",
+        query
+    );
     let client = build_search_http_client(10)?;
 
     let resp = client
@@ -239,7 +253,10 @@ async fn execute_duckduckgo_search(query: &str) -> Result<String, String> {
         ));
     }
 
-    let mut output = format!("Top web search results for '{}' (via DuckDuckGo):\n\n", query);
+    let mut output = format!(
+        "Top web search results for '{}' (via DuckDuckGo):\n\n",
+        query
+    );
     for (i, (title, snippet)) in results.iter().take(5).enumerate() {
         output.push_str(&format!("{}. **{}**\n   {}\n\n", i + 1, title, snippet));
     }
@@ -377,11 +394,31 @@ mod tests {
     #[test]
     fn test_web_search_enabled_on_fact_checking() {
         let cfg = xai_config();
-        assert!(should_enable_web_search(&cfg, "fact check this statement", None));
-        assert!(should_enable_web_search(&cfg, "Please verify if this is accurate", None));
-        assert!(should_enable_web_search(&cfg, "is it true that NASA found life?", None));
-        assert!(should_enable_web_search(&cfg, "search: latest SpaceX launch", None));
-        assert!(should_enable_web_search(&cfg, "what is the latest news on AI?", None));
+        assert!(should_enable_web_search(
+            &cfg,
+            "fact check this statement",
+            None
+        ));
+        assert!(should_enable_web_search(
+            &cfg,
+            "Please verify if this is accurate",
+            None
+        ));
+        assert!(should_enable_web_search(
+            &cfg,
+            "is it true that NASA found life?",
+            None
+        ));
+        assert!(should_enable_web_search(
+            &cfg,
+            "search: latest SpaceX launch",
+            None
+        ));
+        assert!(should_enable_web_search(
+            &cfg,
+            "what is the latest news on AI?",
+            None
+        ));
     }
 
     #[test]
@@ -394,19 +431,47 @@ mod tests {
         };
 
         assert!(should_enable_web_search(&cfg, "true?", Some(&quoted)));
-        assert!(should_enable_web_search(&cfg, "is this real?", Some(&quoted)));
+        assert!(should_enable_web_search(
+            &cfg,
+            "is this real?",
+            Some(&quoted)
+        ));
         assert!(should_enable_web_search(&cfg, "fact check", Some(&quoted)));
     }
 
     #[test]
     fn test_web_search_disabled_for_normal_tasks() {
         let cfg = xai_config();
-        assert!(!should_enable_web_search(&cfg, "add todo buy milk tomorrow", None));
-        assert!(!should_enable_web_search(&cfg, "remind me in 10 minutes to check oven", None));
-        assert!(!should_enable_web_search(&cfg, "record expense 25 USD lunch", None));
-        assert!(!should_enable_web_search(&cfg, "How do I implement binary search in Rust?", None));
-        assert!(!should_enable_web_search(&cfg, "Translate this text to French: Hello", None));
-        assert!(!should_enable_web_search(&cfg, "Draft a friendly email to my team", None));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "add todo buy milk tomorrow",
+            None
+        ));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "remind me in 10 minutes to check oven",
+            None
+        ));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "record expense 25 USD lunch",
+            None
+        ));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "How do I implement binary search in Rust?",
+            None
+        ));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "Translate this text to French: Hello",
+            None
+        ));
+        assert!(!should_enable_web_search(
+            &cfg,
+            "Draft a friendly email to my team",
+            None
+        ));
     }
 
     #[test]

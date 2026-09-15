@@ -126,7 +126,16 @@ pub async fn handle_ai_command(
         )));
     }
 
-    match run_ai_turn(pool, broadcaster, owner_id, room_id, None, &effective_prompt).await {
+    match run_ai_turn(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        None,
+        &effective_prompt,
+    )
+    .await
+    {
         Ok(result) => {
             clear_ai_error_state();
             Some(format_response(&result.message, &result.model_used))
@@ -182,14 +191,19 @@ pub async fn run_ai_turn(
     };
 
     // Record user message in SQLite if not an exact immediate retry of the latest message
-    let is_immediate_duplicate = match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
-        Ok(msgs) => msgs.last().map(|m| m.role == "user" && m.content == prompt_trimmed).unwrap_or(false),
-        Err(_) => false,
-    };
+    let is_immediate_duplicate =
+        match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
+            Ok(msgs) => msgs
+                .last()
+                .map(|m| m.role == "user" && m.content == prompt_trimmed)
+                .unwrap_or(false),
+            Err(_) => false,
+        };
 
     if !is_immediate_duplicate {
         if let Err(e) =
-            AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await
+            AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None)
+                .await
         {
             warn!("Failed to persist user message: {}", e);
         }

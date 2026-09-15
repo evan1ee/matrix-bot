@@ -1,7 +1,5 @@
 use matrix_sdk::room::Room;
-use matrix_sdk::ruma::events::room::message::{
-    MessageType, Relation, RoomMessageEvent,
-};
+use matrix_sdk::ruma::events::room::message::{MessageType, Relation, RoomMessageEvent};
 use matrix_sdk::ruma::events::AnyMessageLikeEvent;
 use matrix_sdk::ruma::events::AnyTimelineEvent;
 use matrix_sdk::ruma::EventId;
@@ -60,7 +58,9 @@ pub fn extract_quote_and_prompt(
 
 /// Extracts replied event ID from room message relation (if present).
 pub fn extract_replied_event_id(
-    relates_to: &Option<Relation<matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation>>,
+    relates_to: &Option<
+        Relation<matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation>,
+    >,
 ) -> Option<String> {
     match relates_to {
         Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.to_string()),
@@ -81,7 +81,10 @@ pub async fn resolve_quoted_event_from_room(
     let any_event = match timeline_event.event.deserialize() {
         Ok(ev) => ev,
         Err(err) => {
-            warn!("Failed to deserialize timeline event {}: {:?}", event_id_str, err);
+            warn!(
+                "Failed to deserialize timeline event {}: {:?}",
+                event_id_str, err
+            );
             return None;
         }
     };
@@ -256,7 +259,10 @@ mod tests {
         assert!(quote_opt.is_some());
         let q = quote_opt.unwrap();
         assert_eq!(q.author.as_deref(), Some("@alice:matrix.org"));
-        assert_eq!(q.body, "Global temperatures rose by 1.5 degrees.\nMore info soon.");
+        assert_eq!(
+            q.body,
+            "Global temperatures rose by 1.5 degrees.\nMore info soon."
+        );
         assert_eq!(prompt, "@bot fact check this");
     }
 
@@ -274,7 +280,8 @@ mod tests {
     #[test]
     fn test_extract_from_html_matrix_reply() {
         let html = "<mx-reply><blockquote><a href=\"https://matrix.to/#/!room/$event\">In reply to</a> <a href=\"https://matrix.to/#/@bob:matrix.org\">@bob:matrix.org</a><br>Please submit your expenses by Friday 5pm.</blockquote></mx-reply><a href=\"https://matrix.to/#/@bot:matrix.org\">@bot</a> add todo";
-        let plain = "> <@bob:matrix.org> Please submit your expenses by Friday 5pm.\n\n@bot add todo";
+        let plain =
+            "> <@bob:matrix.org> Please submit your expenses by Friday 5pm.\n\n@bot add todo";
         let (quote_opt, prompt) = extract_quote_and_prompt(plain, Some(html));
         assert!(quote_opt.is_some());
         let q = quote_opt.unwrap();
@@ -299,7 +306,9 @@ mod tests {
             event_id: None,
         };
         let ctx_prompt = q.to_context_prompt("fact check this");
-        assert!(ctx_prompt.contains("[Context: Replying to quoted message from @alice:matrix.org]:"));
+        assert!(
+            ctx_prompt.contains("[Context: Replying to quoted message from @alice:matrix.org]:")
+        );
         assert!(ctx_prompt.contains("The earth is flat."));
         assert!(ctx_prompt.contains("User request: fact check this"));
     }

@@ -501,15 +501,17 @@ mod tests {
         assert!(res.contains("Buy apples"));
         assert!(res.contains("HIGH"));
 
-        let res_done = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None)
-            .await
-            .unwrap();
+        let res_done =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None)
+                .await
+                .unwrap();
         assert!(res_done.contains("Marked Task"));
         assert!(!res_done.contains("not found"));
 
-        let res_empty_add = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add", None)
-            .await
-            .unwrap();
+        let res_empty_add =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add", None)
+                .await
+                .unwrap();
         assert!(res_empty_add.contains("Usage:"));
     }
 
@@ -517,7 +519,15 @@ mod tests {
     async fn test_handle_todo_edit_and_priority() {
         let pool = setup_test_db().await;
 
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Test task", None).await;
+        handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add Test task",
+            None,
+        )
+        .await;
 
         let res_edit = handle_todo_command(
             &pool,
@@ -549,17 +559,27 @@ mod tests {
     async fn test_handle_todo_list_and_clear() {
         let pool = setup_test_db().await;
 
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Task A", None).await;
+        handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add Task A",
+            None,
+        )
+        .await;
         handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None).await;
 
-        let res_list = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
-            .await
-            .unwrap();
+        let res_list =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
+                .await
+                .unwrap();
         assert!(res_list.contains("Your Tasks"));
 
-        let res_clear = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo clear", None)
-            .await
-            .unwrap();
+        let res_clear =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo clear", None)
+                .await
+                .unwrap();
         assert!(res_clear.contains("Cleared"));
     }
 
@@ -598,15 +618,23 @@ mod tests {
             None,
         )
         .await;
-        let res_del = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo delete 1", None)
-            .await
-            .unwrap();
+        let res_del = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo delete 1",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_del.contains("Deleted Task"));
 
         // Alice tries to delete non-existent task
-        let res_notfound = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1", None)
-            .await
-            .unwrap();
+        let res_notfound =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1", None)
+                .await
+                .unwrap();
         assert!(res_notfound.contains("not found"));
     }
 
@@ -634,9 +662,10 @@ mod tests {
         assert!(res.contains("Added Task"));
         assert!(res.contains("Remember to review PR 42"));
 
-        let res_list = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
-            .await
-            .unwrap();
+        let res_list =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
+                .await
+                .unwrap();
         assert!(res_list.contains("Remember to review PR 42"));
     }
 }

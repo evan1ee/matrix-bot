@@ -63,7 +63,11 @@ pub async fn handle_reminder_command(
                         Some(format!("⏰ <b>Pending Reminders for {}:</b><br/>You have no pending reminders. Use <code>!remind &lt;time&gt; &lt;msg&gt;</code> to set one.", html_escape(sender_name)))
                     }
                 } else {
-                    let mut lines = vec![format!("⏰ <b>Pending Reminders for {} (Page {}):</b>", html_escape(sender_name), page)];
+                    let mut lines = vec![format!(
+                        "⏰ <b>Pending Reminders for {} (Page {}):</b>",
+                        html_escape(sender_name),
+                        page
+                    )];
                     for r in &reminders {
                         let formatted_time = format_datetime(&r.trigger_at, &tz);
                         let recurrence_label = match r.recurrence.as_str() {
@@ -71,7 +75,13 @@ pub async fn handle_reminder_command(
                             "weekly" => " 🔄 <i>(weekly)</i>",
                             _ => "",
                         };
-                        lines.push(format!("• [<b>#{}</b>] <code>{}</code> — {}{}", r.id, formatted_time, html_escape(&r.message), recurrence_label));
+                        lines.push(format!(
+                            "• [<b>#{}</b>] <code>{}</code> — {}{}",
+                            r.id,
+                            formatted_time,
+                            html_escape(&r.message),
+                            recurrence_label
+                        ));
                     }
                     Some(lines.join("<br/>"))
                 }
@@ -228,15 +238,22 @@ mod tests {
     async fn test_handle_reminder_set_list_cancel() {
         let pool = setup_test_db().await;
 
-        let res_set =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 10s Check oven", None)
-                .await
-                .unwrap();
+        let res_set = handle_reminder_command(
+            &pool,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind 10s Check oven",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_set.contains("Reminder #1 set!"));
 
-        let res_list = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list", None)
-            .await
-            .unwrap();
+        let res_list =
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list", None)
+                .await
+                .unwrap();
         assert!(res_list.contains("Pending Reminders for bob"));
         assert!(res_list.contains("Check oven"));
 
@@ -258,10 +275,19 @@ mod tests {
         assert!(res_reminders.contains("no pending reminders"));
 
         // Add a reminder and cancel via rm
-        handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 20s Check water", None).await;
-        let res_rm = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2", None)
-            .await
-            .unwrap();
+        handle_reminder_command(
+            &pool,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind 20s Check water",
+            None,
+        )
+        .await;
+        let res_rm =
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2", None)
+                .await
+                .unwrap();
         assert!(res_rm.contains("Cancelled reminder"));
     }
 
