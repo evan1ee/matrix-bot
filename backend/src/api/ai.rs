@@ -49,7 +49,7 @@ pub async fn chat(
     .await;
 
     let turn_result = tokio::time::timeout(
-        std::time::Duration::from_secs(90),
+        std::time::Duration::from_secs(180),
         run_ai_turn(
             &state.db.pool,
             Some(&state.broadcaster),
@@ -61,8 +61,8 @@ pub async fn chat(
     )
     .await
     .map_err(|_| {
-        error!("AI chat execution timed out after 90s for {}", owner_id);
-        ApiError::gateway_timeout("AI response timed out after 90 seconds. Please try again.")
+        error!("AI chat execution timed out after 180s for {}", owner_id);
+        ApiError::gateway_timeout("AI response timed out after 180 seconds. Please try again.")
     })?
     .map_err(|e| {
         error!("AI chat execution error for {}: {}", owner_id, e);

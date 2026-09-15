@@ -90,7 +90,7 @@ const AiAssistantView: React.FC<{
     mutationFn: (text: string) =>
       fetchApi<AiChatResponse>('/ai/chat', {
         method: 'POST',
-        timeoutMs: 90_000,
+        timeoutMs: 180_000,
         body: JSON.stringify({
           prompt: text,
           conversation_id: effectiveConvId || undefined,
