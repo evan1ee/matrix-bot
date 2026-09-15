@@ -221,7 +221,7 @@ AI_MODEL=grok-4.6
 AI_PROXY=http://127.0.0.1:7897
 
 # Live Web Search (Tavily API with DuckDuckGo fallback)
-TAVILY_AI_API_KEY=tvly-...
+TAVILY_API_KEY=tvly-...
 ```
 
 ⚠️ **`WEBAUTHN_RP_ID` is baked into every passkey at creation.** Changing it
