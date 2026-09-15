@@ -271,19 +271,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`
                       }
                     >
-                      {collapsed ? (
-                        <Icon className="w-4 h-4 shrink-0" />
-                      ) : (
-                        <>
-                          <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
-                            {isActive && (
-                              <div className="absolute -left-[14px] w-[3px] h-4 rounded-r-full bg-[var(--color-text-primary)]" />
-                            )}
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <span className="truncate">{item.label}</span>
-                        </>
-                      )}
+                      <Icon className="w-4 h-4 shrink-0" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
                     </button>
                   </li>
                 );

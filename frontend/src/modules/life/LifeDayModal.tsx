@@ -32,18 +32,19 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     }
     if (totalBlocks === 0) return null;
 
+    const blockHours = day.time_allocation.length <= 96 ? 0.25 : 5 / 60;
     const breakdown = Object.entries(counts).map(([catId, blocks]) => {
       const cfg = TIME_CATEGORIES[catId as keyof typeof TIME_CATEGORIES];
       return {
         id: catId,
         label: cfg?.label || catId,
         emoji: cfg?.emoji || '⏱️',
-        hours: (blocks * 0.25).toFixed(1),
+        hours: (blocks * blockHours).toFixed(1),
       };
     });
 
     return {
-      totalHours: (totalBlocks * 0.25).toFixed(1),
+      totalHours: (totalBlocks * blockHours).toFixed(1),
       breakdown,
     };
   }, [day?.time_allocation]);

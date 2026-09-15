@@ -271,34 +271,35 @@ impl LifeRepository {
         .fetch_all(pool)
         .await?;
 
-        let mut deep_work_blocks: i64 = 0;
-        let mut total_sleep_blocks: i64 = 0;
+        let mut total_deep_work_hours_acc: f64 = 0.0;
+        let mut total_sleep_hours_acc: f64 = 0.0;
         let mut days_with_sleep: i64 = 0;
 
         for (alloc_json_opt,) in allocations {
             if let Some(ref alloc_json) = alloc_json_opt {
                 if let Ok(blocks) = serde_json::from_str::<Vec<Option<String>>>(alloc_json) {
-                    let mut day_sleep: i64 = 0;
+                    let block_hours = if blocks.len() <= 96 { 0.25 } else { 5.0 / 60.0 };
+                    let mut day_sleep_hours: f64 = 0.0;
                     for b in blocks {
                         if let Some(cat) = b {
                             if cat == "deep_work" {
-                                deep_work_blocks += 1;
+                                total_deep_work_hours_acc += block_hours;
                             } else if cat == "sleep" {
-                                day_sleep += 1;
+                                day_sleep_hours += block_hours;
                             }
                         }
                     }
-                    if day_sleep > 0 {
-                        total_sleep_blocks += day_sleep;
+                    if day_sleep_hours > 0.0 {
+                        total_sleep_hours_acc += day_sleep_hours;
                         days_with_sleep += 1;
                     }
                 }
             }
         }
 
-        let total_deep_work_hours = (deep_work_blocks as f64 * 0.25 * 10.0).round() / 10.0;
+        let total_deep_work_hours = (total_deep_work_hours_acc * 10.0).round() / 10.0;
         let average_sleep_hours = if days_with_sleep > 0 {
-            ((total_sleep_blocks as f64 / days_with_sleep as f64 * 0.25) * 10.0).round() / 10.0
+            ((total_sleep_hours_acc / days_with_sleep as f64) * 10.0).round() / 10.0
         } else {
             0.0
         };

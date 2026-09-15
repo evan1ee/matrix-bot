@@ -16,7 +16,7 @@ export const TimeBlocksView: React.FC = () => {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
-  const [timeAllocation, setTimeAllocation] = useState<TimeAllocation>(() => Array(96).fill(null));
+  const [timeAllocation, setTimeAllocation] = useState<TimeAllocation>(() => Array(288).fill(null));
   const [timeSaveSuccess, setTimeSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -69,10 +69,10 @@ export const TimeBlocksView: React.FC = () => {
   useEffect(() => {
     if (dayLog && Array.isArray(dayLog.time_allocation) && dayLog.time_allocation.length > 0) {
       const full = [...dayLog.time_allocation];
-      while (full.length < 96) full.push(null);
+      while (full.length < 288) full.push(null);
       setTimeAllocation(full);
     } else {
-      setTimeAllocation(Array(96).fill(null));
+      setTimeAllocation(Array(288).fill(null));
     }
     setTimeSaveSuccess(false);
     setSaveError(null);
@@ -113,7 +113,7 @@ export const TimeBlocksView: React.FC = () => {
 
   const timeTrackedHours = useMemo(() => {
     const count = timeAllocation.filter(Boolean).length;
-    return (count * 0.25).toFixed(1);
+    return ((count * 5) / 60).toFixed(1);
   }, [timeAllocation]);
 
   const handleSaveTime = async () => {
@@ -155,7 +155,7 @@ export const TimeBlocksView: React.FC = () => {
             <button
               type="button"
               onClick={() => shiftDate(-1)}
-              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors duration-150 cursor-pointer shrink-0 shadow-2xs"
               title="Previous day"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -173,7 +173,7 @@ export const TimeBlocksView: React.FC = () => {
             <button
               type="button"
               onClick={() => shiftDate(1)}
-              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors duration-150 cursor-pointer shrink-0 shadow-2xs"
               title="Next day"
             >
               <ChevronRight className="w-4 h-4" />
@@ -184,7 +184,7 @@ export const TimeBlocksView: React.FC = () => {
             <button
               type="button"
               onClick={() => setSelectedDate(todayStr)}
-              className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1 shadow-2xs"
+              className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors duration-150 cursor-pointer shrink-0 inline-flex items-center gap-1 shadow-2xs"
             >
               <span>Back to today</span>
             </button>
@@ -226,7 +226,7 @@ export const TimeBlocksView: React.FC = () => {
                 type="button"
                 disabled={saveTimeMutation.isPending}
                 onClick={handleSaveTime}
-                className="px-4 py-1.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-700 bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+                className="px-4 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-150 cursor-pointer disabled:opacity-50 shadow-2xs"
               >
                 {saveTimeMutation.isPending ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}
               </button>
@@ -241,7 +241,7 @@ export const TimeBlocksView: React.FC = () => {
 export const timeBlocksModule: FrontendModule = {
   id: 'time_blocks',
   name: 'Time Blocks',
-  description: '24-Hour visual time allocation grid across 15-minute intervals',
+  description: '24-Hour visual time allocation grid across 5-minute intervals',
   iconName: 'Clock',
   navTab: {
     label: 'Time Blocks',

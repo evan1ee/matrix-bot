@@ -12,11 +12,18 @@ test.describe('Time Blocks Module', () => {
     await expect(app.getByText('24-Hour Time Allocation')).toBeVisible();
     await expect(app.getByText(/0\.0h \/ 24h tracked/i)).toBeVisible();
 
-    // Paint a single block
+    // Paint a single block and verify hover timestamp HUD (no numbers inside block)
     const block53 = app.locator('[data-block-idx="53"]');
     await expect(block53).toBeVisible();
+    await expect(block53).toHaveText('');
+
+    // Hover over block 53 (04:25 - 04:30) to inspect floating timestamp HUD
+    await block53.hover();
+    await expect(app.locator('[data-testid="time-block-hud"]')).toBeVisible();
+    await expect(app.locator('[data-testid="time-block-hud"]')).toContainText('04:25 – 04:30');
+
     await block53.click();
-    await expect(app.getByText(/0\.3h \/ 24h tracked/i).first()).toBeVisible();
+    await expect(app.getByText(/0\.1h \/ 24h tracked/i).first()).toBeVisible();
 
     // Reset with Clear preset
     const clearPreset = app.getByRole('button', { name: /clear/i }).first();
