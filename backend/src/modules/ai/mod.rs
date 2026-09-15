@@ -11,6 +11,7 @@ pub mod handler;
 pub mod models;
 pub mod repository;
 pub mod retrospective;
+pub mod search;
 pub mod tools;
 
 use matrix_sdk::Client;
@@ -87,6 +88,7 @@ impl BotModule for AiModule {
             &ctx.full_body,
             ctx.is_direct,
             ctx.is_mentioned,
+            ctx.quoted.as_ref(),
         )
         .await
     }

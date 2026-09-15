@@ -431,7 +431,7 @@ pub async fn start_api_server(
         .fallback_service(ServeDir::new(web_dist))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
-        .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
+        .layer(TimeoutLayer::new(std::time::Duration::from_secs(180)))
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
         .with_state(state);
 

@@ -159,6 +159,13 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
           const moodKey = d.mood.toLowerCase() as keyof typeof MOOD_CONFIG;
           ctx.fillStyle = MOOD_CONFIG[moodKey]?.color || '#10b981';
           ctx.fillRect(x, y, bw, bh);
+          if (d.has_activity && bw >= 6) {
+            ctx.fillStyle = '#6366f1';
+            ctx.fillRect(x + bw - 2.5, y + 1, 1.5, 1.5);
+          }
+        } else if (d.status === 'past_activity' || (!d.mood && d.has_activity)) {
+          ctx.fillStyle = '#6366f1';
+          ctx.fillRect(x, y, bw, bh);
         } else if (d.status === 'past_empty') {
           ctx.fillStyle = emptyPastColor;
           ctx.fillRect(x, y, bw, bh);
@@ -288,6 +295,11 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-xs capitalize';
         el.style.backgroundColor = conf?.color || '#10b981';
         el.textContent = `${conf?.emoji ?? '✨'} ${d.mood}`;
+      } else if (d.status === 'past_activity' || d.has_activity) {
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-xs';
+        el.style.backgroundColor = '#6366f1';
+        const cnt = d.activity_count || 1;
+        el.textContent = `⚡ ${cnt} ${cnt === 1 ? 'Activity' : 'Activities'}`;
       } else if (d.status === 'past_empty') {
         el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-neutral-700 dark:bg-neutral-300 text-neutral-200 dark:text-neutral-800';
         el.style.backgroundColor = '';
@@ -317,6 +329,11 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
         } catch {
           timeSummary = '';
         }
+      }
+      if (d.has_activity && d.mood) {
+        const cnt = d.activity_count || 1;
+        const actLabel = `📝 ${cnt} ${cnt === 1 ? 'act' : 'acts'}`;
+        timeSummary = timeSummary ? `${timeSummary} · ${actLabel}` : actLabel;
       }
       tooltipTimeRef.current.textContent = timeSummary;
       tooltipTimeRef.current.style.display = timeSummary ? 'inline' : 'none';
@@ -454,6 +471,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
           {[
             { label: 'Past', cls: 'bg-neutral-200 dark:bg-neutral-800' },
             { label: 'Today', cls: 'bg-blue-500 ring-1 ring-blue-400' },
+            { label: 'Auto-Tracked', cls: 'bg-indigo-500' },
             { label: 'Amazing', cls: 'bg-amber-400 dark:bg-amber-500' },
             { label: 'Good', cls: 'bg-emerald-500' },
             { label: 'Neutral', cls: 'bg-cyan-500' },

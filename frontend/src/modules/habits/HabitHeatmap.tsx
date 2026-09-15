@@ -17,25 +17,25 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
     return map;
   }, [days]);
 
-  // Generate 52 weeks (364 days) ending on today or current date
+  // Generate 52 weeks (approx 1 year) ending on today or specified current date
   const { weeks, monthLabels } = useMemo(() => {
     const now = today ? new Date(today + 'T00:00:00') : new Date();
     // End date is today
     const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-    // Find previous Sunday to start week alignment or Monday
-    // We display 53 columns (approx 1 year)
-    const totalDays = 52 * 7;
-    const startDate = new Date(endDate);
-    startDate.setDate(endDate.getDate() - totalDays + (6 - endDate.getDay()));
 
-    const weeksArr: { date: string; count: number; dayOfWeek: number; month: number }[][] = [];
-    const months: { name: string; weekIndex: number }[] = [];
-    let currentWeek: { date: string; count: number; dayOfWeek: number; month: number }[] = [];
-    let lastMonth = -1;
+    // The current week's Sunday (0 = Sun, 1 = Mon, ..., 6 = Sat)
+    const endDayOfWeek = endDate.getDay();
+    const thisWeekSunday = new Date(endDate);
+    thisWeekSunday.setDate(endDate.getDate() - endDayOfWeek);
+
+    // 52 weeks total (51 full weeks before this week + this week)
+    const startDate = new Date(thisWeekSunday);
+    startDate.setDate(thisWeekSunday.getDate() - 51 * 7);
+
+    const weeksArr: { date: string; count: number; dayOfWeek: number; month: number; dayOfMonth: number }[][] = [];
+    let currentWeek: { date: string; count: number; dayOfWeek: number; month: number; dayOfMonth: number }[] = [];
 
     const cur = new Date(startDate);
-    let weekIdx = 0;
 
     while (cur <= endDate) {
       const y = cur.getFullYear();
@@ -45,26 +45,19 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
       const count = dayMap.get(dateStr) || 0;
       const dayOfWeek = cur.getDay(); // 0 = Sun, 6 = Sat
       const month = cur.getMonth();
-
-      if (month !== lastMonth && currentWeek.length === 0) {
-        months.push({
-          name: cur.toLocaleString('en-US', { month: 'short' }),
-          weekIndex: weekIdx,
-        });
-        lastMonth = month;
-      }
+      const dayOfMonth = cur.getDate();
 
       currentWeek.push({
         date: dateStr,
         count,
         dayOfWeek,
         month,
+        dayOfMonth,
       });
 
       if (dayOfWeek === 6 || cur.getTime() === endDate.getTime()) {
         weeksArr.push(currentWeek);
         currentWeek = [];
-        weekIdx++;
       }
 
       cur.setDate(cur.getDate() + 1);
@@ -73,6 +66,28 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
     if (currentWeek.length > 0) {
       weeksArr.push(currentWeek);
     }
+
+    // Determine month label positions based on where each month begins
+    const months: { name: string; weekIndex: number }[] = [];
+    const firstMonthStart = weeksArr.findIndex((w) => w.some((d) => d.dayOfMonth === 1));
+    if (firstMonthStart >= 2 && weeksArr.length > 0 && weeksArr[0].length > 0) {
+      const d0 = new Date(weeksArr[0][0].date + 'T00:00:00');
+      months.push({
+        name: d0.toLocaleString('en-US', { month: 'short' }),
+        weekIndex: 0,
+      });
+    }
+
+    weeksArr.forEach((w, wIdx) => {
+      const firstOfMonth = w.find((d) => d.dayOfMonth === 1);
+      if (firstOfMonth) {
+        const d = new Date(firstOfMonth.date + 'T00:00:00');
+        months.push({
+          name: d.toLocaleString('en-US', { month: 'short' }),
+          weekIndex: wIdx,
+        });
+      }
+    });
 
     return { weeks: weeksArr, monthLabels: months };
   }, [dayMap, today]);
@@ -86,66 +101,70 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
 
   return (
     <div className="relative w-full overflow-x-auto select-none pt-1">
-      {/* Month Labels */}
-      <div className="flex text-[10px] font-mono text-neutral-400 mb-1.5 pl-6 min-w-[720px]">
-        {weeks.map((_, i) => {
-          const m = monthLabels.find((ml) => ml.weekIndex === i);
-          return (
-            <div key={i} className="w-3 mr-1 text-center shrink-0">
-              {m ? m.name : ''}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex items-start gap-2 min-w-[720px]">
+      <div className="flex items-start gap-2 min-w-[760px]">
         {/* Day of Week Labels */}
-        <div className="flex flex-col gap-1 text-[9px] font-mono text-neutral-400 shrink-0 select-none pt-0.5">
-          <span className="h-2.5 leading-none"></span>
+        <div className="flex flex-col gap-1 text-[9px] font-mono text-neutral-400 dark:text-neutral-500 shrink-0 select-none pt-5">
+          <span className="h-2.5 leading-none" />
           <span className="h-2.5 leading-none">Mon</span>
-          <span className="h-2.5 leading-none"></span>
+          <span className="h-2.5 leading-none" />
           <span className="h-2.5 leading-none">Wed</span>
-          <span className="h-2.5 leading-none"></span>
+          <span className="h-2.5 leading-none" />
           <span className="h-2.5 leading-none">Fri</span>
-          <span className="h-2.5 leading-none"></span>
+          <span className="h-2.5 leading-none" />
         </div>
 
-        {/* Heatmap Grid */}
-        <div className="flex gap-1">
-          {weeks.map((week, wIdx) => (
-            <div key={wIdx} className="flex flex-col gap-1">
-              {/* Ensure 7 slots per week */}
-              {Array.from({ length: 7 }).map((_, dIdx) => {
-                const day = week.find((d) => d.dayOfWeek === dIdx);
-                if (!day) {
-                  return <div key={dIdx} className="w-2.5 h-2.5" />;
-                }
-                return (
-                  <div
-                    key={day.date}
-                    data-date={day.date}
-                    data-count={day.count}
-                    className={`w-2.5 h-2.5 rounded-xs transition-colors cursor-pointer ${getColorClass(day.count)} hover:ring-1 hover:ring-neutral-400 dark:hover:ring-neutral-200`}
-                    onMouseEnter={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setHoveredDay({
-                        date: day.date,
-                        count: day.count,
-                        x: rect.left + window.scrollX,
-                        y: rect.top + window.scrollY - 30,
-                      });
-                    }}
-                    onMouseLeave={() => setHoveredDay(null)}
-                  />
-                );
-              })}
-            </div>
-          ))}
+        {/* Heatmap Column: Month labels on top, grid below */}
+        <div className="flex flex-col select-none">
+          {/* Month Labels Track: strictly aligned with week columns (each column is 14px = 10px cell + 4px gap) */}
+          <div className="relative h-4 mb-1" style={{ width: `${weeks.length * 14}px` }}>
+            {monthLabels.map((m) => (
+              <span
+                key={`${m.name}-${m.weekIndex}`}
+                className="absolute text-[10px] font-mono text-neutral-400 dark:text-neutral-500 leading-none select-none"
+                style={{ left: `${m.weekIndex * 14}px` }}
+              >
+                {m.name}
+              </span>
+            ))}
+          </div>
+
+          {/* Heatmap Grid */}
+          <div className="flex gap-1">
+            {weeks.map((week, wIdx) => (
+              <div key={wIdx} className="flex flex-col gap-1">
+                {/* Ensure 7 slots per week: 0=Sun, 1=Mon, ..., 6=Sat */}
+                {Array.from({ length: 7 }).map((_, dIdx) => {
+                  const day = week.find((d) => d.dayOfWeek === dIdx);
+                  if (!day) {
+                    return <div key={dIdx} className="w-2.5 h-2.5" />;
+                  }
+                  return (
+                    <div
+                      key={day.date}
+                      data-date={day.date}
+                      data-count={day.count}
+                      className={`w-2.5 h-2.5 rounded-xs transition-colors cursor-pointer touch-none ${getColorClass(day.count)} hover:ring-1 hover:ring-neutral-400 dark:hover:ring-neutral-200`}
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setHoveredDay({
+                          date: day.date,
+                          count: day.count,
+                          x: rect.left + rect.width / 2,
+                          y: rect.top - 6,
+                        });
+                      }}
+                      onMouseLeave={() => setHoveredDay(null)}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Legend & Stats Footer */}
-      <div className="flex items-center justify-between mt-3 text-[11px] font-mono text-neutral-500 min-w-[720px]">
+      <div className="flex items-center justify-between mt-3 text-[11px] font-mono text-neutral-500 dark:text-neutral-400 min-w-[760px]">
         <div className="flex items-center gap-1.5">
           <span>Less</span>
           <div className="w-2.5 h-2.5 rounded-xs bg-neutral-200 dark:bg-neutral-800" />
@@ -160,8 +179,8 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
       {/* Floating Tooltip */}
       {hoveredDay && (
         <div
-          className="fixed z-50 px-2 py-1 text-xs font-mono rounded bg-neutral-900 text-white dark:bg-neutral-100 dark:text-black shadow-md pointer-events-none transform -translate-x-1/2"
-          style={{ left: hoveredDay.x + 5, top: hoveredDay.y }}
+          className="fixed z-50 px-2 py-1 text-xs font-mono rounded bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-md pointer-events-none transform -translate-x-1/2 -translate-y-full"
+          style={{ left: hoveredDay.x, top: hoveredDay.y }}
         >
           {hoveredDay.count} {hoveredDay.count === 1 ? 'habit' : 'habits'} on {hoveredDay.date}
         </div>

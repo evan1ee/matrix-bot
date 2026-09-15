@@ -47,6 +47,8 @@ pub struct ParsedCommand {
     pub full_body: String,
     /// Whether the bot was explicitly mentioned (@bot or pill).
     pub is_mentioned: bool,
+    /// Optional quoted message context if the message is a reply or quote.
+    pub quoted: Option<crate::bot::quote::QuotedMessage>,
 }
 
 impl ParsedCommand {
@@ -67,6 +69,7 @@ impl ParsedCommand {
             full_body: self.full_body,
             is_direct,
             is_mentioned: self.is_mentioned,
+            quoted: self.quoted,
         }
     }
 }
@@ -105,6 +108,8 @@ pub struct CommandContext {
     pub is_direct: bool,
     /// Whether the bot was explicitly mentioned in the room.
     pub is_mentioned: bool,
+    /// Optional quoted message context if the message is a reply or quote.
+    pub quoted: Option<crate::bot::quote::QuotedMessage>,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -353,6 +358,7 @@ mod tests {
                 full_body: body.to_string(),
                 is_direct: true,
                 is_mentioned: false,
+                quoted: None,
             };
             assert!(
                 registry.dispatch(&ctx, &db, None).await.is_some(),
@@ -403,6 +409,7 @@ mod tests {
             full_body: format!("!{}", command),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         }
     }
 

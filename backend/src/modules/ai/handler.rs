@@ -55,11 +55,12 @@ pub async fn handle_ai_command(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
         let trimmed = raw_args.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
         if trimmed.eq_ignore_ascii_case("retro")
@@ -100,21 +101,41 @@ pub async fn handle_ai_command(
     } else if is_direct || is_mentioned {
         let trimmed = full_body.trim();
         if trimmed.is_empty() {
-            return None;
+            if quoted.is_some() {
+                ""
+            } else {
+                return None;
+            }
+        } else {
+            trimmed
         }
-        trimmed
     } else {
         return None;
     };
 
-    if prompt.len() > MAX_PROMPT_LENGTH {
+    let effective_prompt = if let Some(q) = quoted {
+        q.to_context_prompt(prompt)
+    } else {
+        prompt.to_string()
+    };
+
+    if effective_prompt.len() > MAX_PROMPT_LENGTH {
         return Some(format_error(&format!(
             "Prompt exceeds maximum length of {} characters.",
             MAX_PROMPT_LENGTH
         )));
     }
 
-    match run_ai_turn(pool, broadcaster, owner_id, room_id, None, prompt).await {
+    match run_ai_turn(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        None,
+        &effective_prompt,
+    )
+    .await
+    {
         Ok(result) => {
             clear_ai_error_state();
             Some(format_response(&result.message, &result.model_used))
@@ -169,11 +190,23 @@ pub async fn run_ai_turn(
             .map_err(|e| e.to_string())?
     };
 
-    // Record user message in SQLite
-    if let Err(e) =
-        AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await
-    {
-        warn!("Failed to persist user message: {}", e);
+    // Record user message in SQLite if not an exact immediate retry of the latest message
+    let is_immediate_duplicate =
+        match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
+            Ok(msgs) => msgs
+                .last()
+                .map(|m| m.role == "user" && m.content == prompt_trimmed)
+                .unwrap_or(false),
+            Err(_) => false,
+        };
+
+    if !is_immediate_duplicate {
+        if let Err(e) =
+            AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None)
+                .await
+        {
+            warn!("Failed to persist user message: {}", e);
+        }
     }
 
     let settings =
@@ -227,6 +260,7 @@ pub async fn run_ai_turn(
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
              TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
              ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
+             QUOTED REPLIES & CONTEXT: When the prompt contains [Context: Replying to quoted message from ...]: 1) FACT CHECKING: If asked to fact check or verify, critically evaluate the claims with objective facts, indicate accuracy/truthfulness, and clarify misconceptions; 2) EXPLANATION: If asked to explain or summarize, break down concepts clearly and articulately; 3) COMMENTARY: If asked for thoughts or commentary, provide balanced, insightful observations; 4) ACTION CREATION: If asked to add a todo, task, or reminder, extract the commitment from the quote and call the appropriate tool (`add_todo`, `create_reminder`). \
              The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
             now_local_str = now_local_str,
             today_local = today_local,
@@ -265,7 +299,15 @@ pub async fn run_ai_turn(
     }
 
     let client = get_ai_client();
-    let tools = ToolRegistry::get_tool_definitions();
+    let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
+        .into_iter()
+        .filter_map(|t| serde_json::to_value(t).ok())
+        .collect();
+
+    if super::search::should_enable_web_search(&resolved_config, prompt_trimmed, None) {
+        info!("Enabling web_search tool for prompt: {}", prompt_trimmed);
+        tool_values.push(super::search::web_search_tool_definition());
+    }
 
     let mut iteration = 0;
     let max_iterations = 3;
@@ -279,7 +321,7 @@ pub async fn run_ai_turn(
             messages: chat_messages.clone(),
             temperature: Some(resolved_config.temperature),
             max_tokens: Some(resolved_config.max_tokens),
-            tools: Some(tools.clone()),
+            tools: Some(tool_values.clone()),
             tool_choice: None,
             stream: Some(false),
         };
@@ -311,28 +353,36 @@ pub async fn run_ai_turn(
                             name: None,
                         });
 
-                        for tool_call in tool_calls {
+                        let tool_futures = tool_calls.iter().map(|tool_call| {
                             let func_name = tool_call.function.name.clone();
                             let tool_call_id = tool_call.id.clone();
-                            tool_calls_executed.push(func_name.clone());
-                            info!(
-                                "AI turn [{}/{}] executing tool: {} for owner {}",
-                                iteration, max_iterations, func_name, owner_id
-                            );
+                            let args = tool_call.function.arguments.clone();
+                            async move {
+                                info!(
+                                    "AI turn [{}/{}] executing tool: {} for owner {}",
+                                    iteration, max_iterations, func_name, owner_id
+                                );
+                                let result_str = match ToolRegistry::execute_tool(
+                                    pool,
+                                    broadcaster,
+                                    owner_id,
+                                    room_id,
+                                    &func_name,
+                                    &args,
+                                )
+                                .await
+                                {
+                                    Ok(res) => res,
+                                    Err(err) => format!("Error executing tool: {}", err),
+                                };
+                                (tool_call_id, func_name, result_str)
+                            }
+                        });
 
-                            let result_str = match ToolRegistry::execute_tool(
-                                pool,
-                                broadcaster,
-                                owner_id,
-                                room_id,
-                                &func_name,
-                                &tool_call.function.arguments,
-                            )
-                            .await
-                            {
-                                Ok(res) => res,
-                                Err(err) => format!("Error executing tool: {}", err),
-                            };
+                        let execution_results = futures_util::future::join_all(tool_futures).await;
+
+                        for (tool_call_id, func_name, result_str) in execution_results {
+                            tool_calls_executed.push(func_name.clone());
 
                             // Persist tool result message in SQLite
                             let _ = AiRepository::add_message(
@@ -480,6 +530,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -497,6 +548,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -520,6 +572,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -537,6 +590,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -554,6 +608,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -571,6 +626,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -606,6 +662,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await;
 
@@ -629,6 +686,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await;
         assert!(result2.is_none());
@@ -1004,6 +1062,7 @@ mod tests {
             "明天早上8点提醒我写邮件",
             false,
             false,
+            None,
         )
         .await;
         assert!(unhandled.is_none());
@@ -1033,12 +1092,58 @@ mod tests {
             "明天早上8点提醒我写邮件",
             false,
             true, // is_mentioned = true
+            None,
         )
         .await;
 
         assert!(
             is_ai_error_alerted(),
             "Mentioned natural language message should be routed to AI engine"
+        );
+        clear_ai_error_state();
+    }
+
+    #[tokio::test]
+    async fn test_ai_quoted_context_prompt_routing() {
+        let (db, owner) = setup_test().await;
+        clear_ai_error_state();
+
+        let input = crate::modules::ai::models::UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("invalid-key".to_string()),
+            model_name: Some("test-model".to_string()),
+            ..Default::default()
+        };
+        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+            .await
+            .unwrap();
+
+        let quote = crate::bot::quote::QuotedMessage {
+            author: Some("@bob:mbm.one".to_string()),
+            body: "The earth is flat and gravity is an illusion.".to_string(),
+            event_id: None,
+        };
+
+        // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
+        let _ = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "Alice",
+            "fact",
+            "check this",
+            "fact check this",
+            false,
+            true,
+            Some(&quote),
+        )
+        .await;
+
+        assert!(
+            is_ai_error_alerted(),
+            "Quoted reply should trigger AI processing"
         );
         clear_ai_error_state();
     }

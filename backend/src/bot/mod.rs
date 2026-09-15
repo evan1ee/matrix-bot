@@ -28,6 +28,7 @@ pub mod dispatcher;
 pub mod handler;
 pub mod linking;
 pub mod notify;
+pub mod quote;
 pub mod self_verify;
 pub mod verification;
 

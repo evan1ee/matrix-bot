@@ -51,6 +51,8 @@ pub struct LifeHorizonDay {
     pub date: String,
     pub mood: String,
     pub time_allocation: Option<String>,
+    pub has_activity: bool,
+    pub activity_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

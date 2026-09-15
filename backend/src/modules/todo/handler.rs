@@ -21,6 +21,7 @@ pub async fn handle_todo_command(
     owner_id: &str,
     sender_name: &str,
     clean_body: &str,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
@@ -57,7 +58,7 @@ pub async fn handle_todo_command(
     let args_lower = args_body.to_lowercase();
 
     if args_lower.starts_with("add") {
-        handle_add(pool, room_id, owner_id, sender_name, args_body).await
+        handle_add(pool, room_id, owner_id, sender_name, args_body, quoted).await
     } else if args_lower.starts_with("done") {
         handle_done(pool, room_id, args_body).await
     } else if args_lower.starts_with("edit") {
@@ -94,14 +95,21 @@ async fn handle_add(
     owner_id: &str,
     sender_name: &str,
     args_body: &str,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     let mut raw_text = args_body[3..].trim();
+    let quoted_text_holder;
     if raw_text.is_empty() {
-        return Some(
-            "⚠️ Usage: <code>!todo add &lt;task description&gt;</code> \
-                      (e.g. <code>!todo add [high] Buy milk</code>)"
-                .to_string(),
-        );
+        if let Some(q) = quoted {
+            quoted_text_holder = q.body.trim().to_string();
+            raw_text = &quoted_text_holder;
+        } else {
+            return Some(
+                "⚠️ Usage: <code>!todo add &lt;task description&gt;</code> \
+                          (e.g. <code>!todo add [high] Buy milk</code>)"
+                    .to_string(),
+            );
+        }
     }
 
     let mut priority = TodoPriority::Medium;
@@ -485,6 +493,7 @@ mod tests {
             "@alice:1",
             "alice",
             "!todo add [high] Buy apples",
+            None,
         )
         .await
         .unwrap();
@@ -492,15 +501,17 @@ mod tests {
         assert!(res.contains("Buy apples"));
         assert!(res.contains("HIGH"));
 
-        let res_done = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1")
-            .await
-            .unwrap();
+        let res_done =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None)
+                .await
+                .unwrap();
         assert!(res_done.contains("Marked Task"));
         assert!(!res_done.contains("not found"));
 
-        let res_empty_add = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add")
-            .await
-            .unwrap();
+        let res_empty_add =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add", None)
+                .await
+                .unwrap();
         assert!(res_empty_add.contains("Usage:"));
     }
 
@@ -508,7 +519,15 @@ mod tests {
     async fn test_handle_todo_edit_and_priority() {
         let pool = setup_test_db().await;
 
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Test task").await;
+        handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add Test task",
+            None,
+        )
+        .await;
 
         let res_edit = handle_todo_command(
             &pool,
@@ -516,6 +535,7 @@ mod tests {
             "@alice:1",
             "alice",
             "!todo edit 1 Updated task",
+            None,
         )
         .await
         .unwrap();
@@ -527,6 +547,7 @@ mod tests {
             "@alice:1",
             "alice",
             "!todo priority 1 high",
+            None,
         )
         .await
         .unwrap();
@@ -538,17 +559,27 @@ mod tests {
     async fn test_handle_todo_list_and_clear() {
         let pool = setup_test_db().await;
 
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add Task A").await;
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1").await;
+        handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add Task A",
+            None,
+        )
+        .await;
+        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None).await;
 
-        let res_list = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list")
-            .await
-            .unwrap();
+        let res_list =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
+                .await
+                .unwrap();
         assert!(res_list.contains("Your Tasks"));
 
-        let res_clear = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo clear")
-            .await
-            .unwrap();
+        let res_clear =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo clear", None)
+                .await
+                .unwrap();
         assert!(res_clear.contains("Cleared"));
     }
 
@@ -556,7 +587,7 @@ mod tests {
     async fn test_handle_unknown_command() {
         let pool = setup_test_db().await;
 
-        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo foobar")
+        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo foobar", None)
             .await
             .unwrap();
         assert!(res.contains("Unknown todo command"));
@@ -568,7 +599,7 @@ mod tests {
 
         let long_text = "x".repeat(501);
         let cmd = format!("!todo add {}", long_text);
-        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", &cmd)
+        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", &cmd, None)
             .await
             .unwrap();
         assert!(res.contains("too long"));
@@ -584,17 +615,57 @@ mod tests {
             "@alice:1",
             "alice",
             "!todo add Task to remove",
+            None,
         )
         .await;
-        let res_del = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo delete 1")
-            .await
-            .unwrap();
+        let res_del = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo delete 1",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_del.contains("Deleted Task"));
 
         // Alice tries to delete non-existent task
-        let res_notfound = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1")
-            .await
-            .unwrap();
+        let res_notfound =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1", None)
+                .await
+                .unwrap();
         assert!(res_notfound.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_todo_add_with_quoted_message() {
+        let pool = setup_test_db().await;
+        let quoted = crate::bot::quote::QuotedMessage {
+            author: Some("bob".to_string()),
+            body: "Remember to review PR 42".to_string(),
+            event_id: None,
+        };
+
+        // !todo add without description, should take quoted body
+        let res = handle_todo_command(
+            &pool,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add",
+            Some(&quoted),
+        )
+        .await
+        .unwrap();
+
+        assert!(res.contains("Added Task"));
+        assert!(res.contains("Remember to review PR 42"));
+
+        let res_list =
+            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
+                .await
+                .unwrap();
+        assert!(res_list.contains("Remember to review PR 42"));
     }
 }

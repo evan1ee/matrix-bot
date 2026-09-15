@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { X, Calendar, Clock } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { LifeDayItem, MoodType, WeatherType } from './types';
 import { MOOD_CONFIG, WEATHER_CONFIG, ACTIVITY_OPTIONS, TIME_CATEGORIES } from './types';
 import { LifeActivityFeed } from './LifeActivityFeed';
@@ -8,14 +8,12 @@ interface LifeDayModalProps {
   day: LifeDayItem | null;
   isOpen: boolean;
   onClose: () => void;
-  onOpenJournal?: (date: string) => void;
 }
 
 export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   day,
   isOpen,
   onClose,
-  onOpenJournal,
 }) => {
   const isLogged = Boolean(day?.mood);
   const loggedMoodCfg = day?.mood ? MOOD_CONFIG[day.mood.toLowerCase() as MoodType] : undefined;
@@ -34,18 +32,19 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
     }
     if (totalBlocks === 0) return null;
 
+    const blockHours = day.time_allocation.length <= 96 ? 0.25 : 5 / 60;
     const breakdown = Object.entries(counts).map(([catId, blocks]) => {
       const cfg = TIME_CATEGORIES[catId as keyof typeof TIME_CATEGORIES];
       return {
         id: catId,
         label: cfg?.label || catId,
         emoji: cfg?.emoji || '⏱️',
-        hours: (blocks * 0.25).toFixed(1),
+        hours: (blocks * blockHours).toFixed(1),
       };
     });
 
     return {
-      totalHours: (totalBlocks * 0.25).toFixed(1),
+      totalHours: (totalBlocks * blockHours).toFixed(1),
       breakdown,
     };
   }, [day?.time_allocation]);
@@ -213,23 +212,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
           </div>
 
           {/* Footer Actions */}
-          <div className="flex items-center justify-between pt-4 mt-6 border-t border-neutral-100 dark:border-neutral-800">
-            {onOpenJournal ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenJournal(day.date);
-                  onClose();
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Open this day in Daily Log →</span>
-              </button>
-            ) : (
-              <div />
-            )}
-
+          <div className="flex items-center justify-end pt-4 mt-6 border-t border-neutral-100 dark:border-neutral-800">
             <button
               type="button"
               onClick={onClose}

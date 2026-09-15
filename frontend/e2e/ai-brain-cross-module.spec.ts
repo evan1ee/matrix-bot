@@ -24,8 +24,8 @@ test.describe('AI Brain Central Integration & Cross-Module Triggers', () => {
     ).toBeVisible();
   });
 
-  test('Daily Log module "AI Reflection" button invokes AI Brain with contextual prompt', async ({ app }) => {
-    await gotoApp(app, TAB.journal);
+  test('Mood module "AI Reflection" button invokes AI Brain with contextual prompt', async ({ app }) => {
+    await gotoApp(app, TAB.mood);
 
     const aiReflectionBtn = app.getByRole('button', { name: 'AI Reflection' });
     await expect(aiReflectionBtn).toBeVisible();

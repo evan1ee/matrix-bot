@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { NotebookPen, Calendar, Sparkles } from 'lucide-react';
+import { Smile, Calendar, Sparkles } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { fetchApi } from '../../core/apiClient';
 import type { FrontendModule, SystemEvent } from '../../core/types';
@@ -119,7 +119,7 @@ export const LifeView: React.FC = () => {
   };
 
   const handleLogToday = () => {
-    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal' } }));
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'mood' } }));
   };
 
   const profile = profileData?.profile || null;
@@ -159,9 +159,24 @@ export const LifeView: React.FC = () => {
     const endYear = birthYear + lifespan - 1;
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const loggedMap = new Map<string, { mood: string | null; time_allocation?: string | null }>();
+    const loggedMap = new Map<
+      string,
+      {
+        mood: string | null;
+        time_allocation?: string | null;
+        has_activity?: boolean;
+        activity_count?: number;
+      }
+    >();
     for (const d of horizonDays) {
-      if (d.date) loggedMap.set(d.date, { mood: d.mood, time_allocation: d.time_allocation });
+      if (d.date) {
+        loggedMap.set(d.date, {
+          mood: d.mood,
+          time_allocation: d.time_allocation,
+          has_activity: d.has_activity,
+          activity_count: d.activity_count,
+        });
+      }
     }
 
     const result: LifeHorizonDay[] = [];
@@ -172,16 +187,22 @@ export const LifeView: React.FC = () => {
       const curDate = new Date(Date.UTC(yr, 0, 1));
       for (let d = 0; d < daysInYear; d++) {
         const dateStr = curDate.toISOString().split('T')[0];
-        let status: 'past_empty' | 'past_logged' | 'present' | 'future' = 'past_empty';
         const loggedEntry = loggedMap.get(dateStr);
         const loggedMood = loggedEntry?.mood || null;
+        const hasActivity = Boolean(loggedEntry?.has_activity || (loggedEntry?.activity_count ?? 0) > 0);
+        const activityCount = loggedEntry?.activity_count ?? 0;
+
+        let status: 'past_empty' | 'past_logged' | 'past_activity' | 'present' | 'future' = 'past_empty';
         if (dateStr === todayStr) {
           status = 'present';
         } else if (dateStr > todayStr) {
           status = 'future';
         } else if (loggedMood) {
           status = 'past_logged';
+        } else if (hasActivity) {
+          status = 'past_activity';
         }
+
         result.push({
           index: idx++,
           year: yr,
@@ -189,6 +210,8 @@ export const LifeView: React.FC = () => {
           status,
           mood: loggedMood,
           time_allocation: loggedEntry?.time_allocation || null,
+          has_activity: hasActivity,
+          activity_count: activityCount,
         });
         curDate.setUTCDate(curDate.getUTCDate() + 1);
       }
@@ -220,8 +243,8 @@ export const LifeView: React.FC = () => {
             onClick={handleLogToday}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors cursor-pointer"
           >
-            <NotebookPen className="w-3.5 h-3.5" />
-            <span>Daily Log →</span>
+            <Smile className="w-3.5 h-3.5" />
+            <span>Log Mood →</span>
           </button>
         )}
 
@@ -287,9 +310,6 @@ export const LifeView: React.FC = () => {
           setIsDayModalOpen(false);
           setSelectedDay(null);
         }}
-        onOpenJournal={(date) => {
-          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'journal', date } }));
-        }}
       />
 
       {/* Profile / Onboarding Modal */}
@@ -318,7 +338,13 @@ export const lifeModule: FrontendModule = {
     if (
       event.type === 'LifeProfileUpdated' ||
       event.type === 'LifeDayLogged' ||
-      event.type === 'LifeDayCleared'
+      event.type === 'LifeDayCleared' ||
+      event.type.startsWith('Todo') ||
+      event.type.startsWith('Transaction') ||
+      event.type.startsWith('Habit') ||
+      event.type.startsWith('Bookmark') ||
+      event.type.startsWith('Footprint') ||
+      event.type.startsWith('Reminder')
     ) {
       queryClient.invalidateQueries({ queryKey: ['life-profile'] });
       queryClient.invalidateQueries({ queryKey: ['life-horizon'] });

@@ -145,9 +145,9 @@ pub async fn upsert_day(
 
     let time_allocation_json = match payload.time_allocation {
         Some(ref blocks) => {
-            if blocks.len() > 96 {
+            if blocks.len() > 288 {
                 return Err(ApiError::bad_request(
-                    "Time allocation cannot exceed 96 blocks.",
+                    "Time allocation cannot exceed 288 blocks.",
                 ));
             }
             serde_json::to_string(blocks).ok()
@@ -187,9 +187,9 @@ pub async fn update_time_allocation(
         ));
     }
 
-    if payload.time_allocation.len() > 96 {
+    if payload.time_allocation.len() > 288 {
         return Err(ApiError::bad_request(
-            "Time allocation cannot exceed 96 blocks.",
+            "Time allocation cannot exceed 288 blocks.",
         ));
     }
 

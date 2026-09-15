@@ -99,6 +99,7 @@ mod tests {
             full_body: "!hello".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
 
         let dummy_db = Database {

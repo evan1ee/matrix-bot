@@ -2123,12 +2123,38 @@ export class FakeApi {
       const birth = new Date(this.lifeProfile.birth_date);
       const todayStr = new Date().toISOString().split('T')[0];
       const logMap = new Map(this.lifeDayLogs.map((l) => [l.log_date, l]));
+
+      const actCountMap = new Map<string, number>();
+      const addAct = (dateStr: string | null | undefined) => {
+        if (!dateStr) return;
+        const d = dateStr.slice(0, 10);
+        actCountMap.set(d, (actCountMap.get(d) || 0) + 1);
+      };
+      for (const t of this.todos) {
+        addAct(t.created_at);
+        if (t.due_at) addAct(t.due_at);
+      }
+      for (const tx of this.transactions) {
+        addAct(tx.occurred_at);
+      }
+      for (const hl of this.habitLogs) {
+        addAct(hl.log_date);
+      }
+      for (const r of this.reminders) {
+        addAct(r.trigger_at);
+      }
+      for (const b of this.bookmarks) {
+        addAct(b.created_at);
+      }
+
       const totalDays = Math.min(36500, Math.floor(this.lifeProfile.expected_lifespan_years * 365.25));
       const horizon = [];
       const cur = new Date(birth);
       for (let i = 0; i < totalDays; i++) {
         const dateStr = cur.toISOString().split('T')[0];
         const log = logMap.get(dateStr);
+        const actCount = actCountMap.get(dateStr) || 0;
+        const hasActivity = actCount > 0;
         let status = 'past_empty';
         if (dateStr === todayStr) {
           status = 'present';
@@ -2136,6 +2162,8 @@ export class FakeApi {
           status = 'future';
         } else if (log && log.mood) {
           status = 'past_logged';
+        } else if (hasActivity) {
+          status = 'past_activity';
         }
         horizon.push({
           index: i,
@@ -2144,6 +2172,8 @@ export class FakeApi {
           status,
           mood: log?.mood ?? null,
           time_allocation: log?.time_allocation ?? null,
+          has_activity: hasActivity,
+          activity_count: actCount,
         });
         cur.setUTCDate(cur.getUTCDate() + 1);
       }

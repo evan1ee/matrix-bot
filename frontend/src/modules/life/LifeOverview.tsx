@@ -104,6 +104,9 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
           const moodKey = d.mood.toLowerCase() as keyof typeof MOOD_CONFIG;
           ctx.fillStyle = MOOD_CONFIG[moodKey]?.color || '#10b981';
           ctx.fillRect(x, y, bw, bh);
+        } else if (d.status === 'past_activity' || (!d.mood && d.has_activity)) {
+          ctx.fillStyle = '#6366f1';
+          ctx.fillRect(x, y, bw, bh);
         } else if (d.status === 'past_empty') {
           ctx.fillStyle = emptyPastColor;
           ctx.fillRect(x, y, bw, bh);
@@ -230,6 +233,11 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
         el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-xs capitalize';
         el.style.backgroundColor = conf?.color || '#10b981';
         el.textContent = `${conf?.emoji ?? '✨'} ${d.mood}`;
+      } else if (d.status === 'past_activity' || d.has_activity) {
+        el.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-xs';
+        el.style.backgroundColor = '#6366f1';
+        const cnt = d.activity_count || 1;
+        el.textContent = `⚡ ${cnt} ${cnt === 1 ? 'Activity' : 'Activities'}`;
       } else if (d.status === 'past_empty') {
         el.className = 'px-1.5 py-0.5 rounded text-[10px] bg-neutral-700 dark:bg-neutral-300 text-neutral-200 dark:text-neutral-800';
         el.style.backgroundColor = '';
@@ -323,6 +331,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
           {[
             { label: 'Past', cls: 'bg-neutral-200 dark:bg-neutral-800' },
             { label: 'Today', cls: 'bg-blue-500 ring-1 ring-blue-400' },
+            { label: 'Auto-Tracked', cls: 'bg-indigo-500' },
             { label: 'Logged', cls: 'bg-amber-400 dark:bg-amber-500' },
             { label: 'Future', cls: 'bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800' },
           ].map((item) => (

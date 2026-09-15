@@ -12,8 +12,8 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 ## 🌟 Features
 
 - 🤖 **Core** — greetings (`!hello`), latency ping (`!ping`), dynamic module-driven help (`!help`).
-- 📋 **To-Dos** — priorities, due dates, lead-time reminder scheduling, per-user and room-wide views, task editing, and pagination.
-- ⏰ **Reminders** — one-off and recurring (daily, weekly, monthly, yearly), persisted across process restarts with downtime catch-up and exponential retry backoff.
+- 📋 **To-Dos** — priorities, due dates, lead-time reminder scheduling, personal & room-wide views, task editing, pagination, and quoted message context capture (replying `!todo add` uses quoted text).
+- ⏰ **Reminders** — one-off and recurring (daily, weekly, monthly, yearly), persisted across process restarts with downtime catch-up, exponential retry backoff, and quoted message context capture (replying `!remind <time>` uses quoted text).
 - 💰 **Finance** — expense and income ledger with customizable categories and monthly summaries. Amounts are stored strictly as integer minor units throughout (zero floating-point inaccuracies).
 - 📈 **Portfolio** — asset holdings with weighted-average cost basis, realized & unrealized P&L, live ticker price fetching, custom price alerts, cash balance gating, manual position recording, and a tamper-evident SHA-256 audit hash chain.
 - 🧾 **Recurring bills** — payment schedules, recurring frequencies, advance reminder notifications, auto-pay marking, and payment history.
@@ -22,7 +22,7 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - ⏳ **Life Grid & Daily Journal** — Memento Mori lifespan visualization (interactive weeks & decades grid), daily reflection logs (mood, weather, notes), cross-module daily activity timelines, and lifespan statistics.
 - 📍 **Footprints** — travel & location check-in logs with country/city pins, ratings, visited places timeline, and journey statistics.
 - 🔔 **Webhooks** — inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility (`/bot:token/sendMessage`), and a durable retry delivery queue. See [`docs/webhooks.md`](docs/webhooks.md).
-- 🧠 **AI Assistant** — contextual conversation threads, per-user LLM configuration (OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives across spending and productivity.
+- 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, and conversation history turns, respected by all modules for consistent date/time rendering.
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
 
@@ -132,8 +132,8 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | Module | Commands | Description |
 |---|---|---|
 | **Core** | `!hello / !hi [name]`, `!ping`, `!help` | Greetings, ping/latency diagnostic, dynamic module command help |
-| **To-Do** | `!todo add [[high\|low]] <task>`<br>`!todo [list\|room] [page]`<br>`!todo done <id>`<br>`!todo priority <id> <low\|medium\|high>`<br>`!todo due <id> <time> [remind <lead>]`<br>`!todo edit <id> <new text>`<br>`!todo clear [room]` | Task management with priorities, due dates, advance reminders, room-wide or personal scoping, and pagination |
-| **Reminder** | `!remind [daily\|weekly] <time> <message>`<br>`!remind list`<br>`!remind cancel <id>` | One-off and recurring reminders, scheduled in user timezone with automatic restart recovery |
+| **To-Do** | `!todo add [[high\|low]] <task>`<br>↳ *Or quote reply:* `!todo add` (uses quoted body)<br>`!todo [list\|room] [page]`<br>`!todo done <id>`<br>`!todo priority <id> <low\|medium\|high>`<br>`!todo due <id> <time> [remind <lead>]`<br>`!todo edit <id> <new text>`<br>`!todo clear [room]` | Task management with priorities, due dates, advance reminders, room-wide or personal scoping, and pagination |
+| **Reminder** | `!remind [daily\|weekly] <time> <message>`<br>↳ *Or quote reply:* `!remind <time>` (uses quoted body)<br>`!remind list`<br>`!remind cancel <id>` | One-off and recurring reminders, scheduled in user timezone with automatic restart recovery |
 | **Finance** | `!expense add <amount> [CUR] <note> [-c <cat>]`<br>`!income add <amount> [CUR] <note> [-c <cat>]`<br>`!expense list [page]`<br>`!expense summary`<br>`!expense delete <id>`<br>`!category [add\|list\|remove] <name>` | Double-entry-style ledger, category breakdowns, monthly summaries, integer minor units (no float rounding errors) |
 | **Portfolio** | `!portfolio [list]`<br>`!portfolio summary`<br>`!portfolio buy <sym> <qty> @ <price> [CUR]`<br>`!portfolio record <sym> <qty> @ <price> [CUR]`<br>`!portfolio sell <sym> <qty> @ <price>`<br>`!portfolio price <sym> <price>`<br>`!portfolio refresh`<br>`!portfolio note <sym> [text]`<br>`!portfolio remove <sym>`<br>`!portfolio cash [deposit\|withdraw] <amt> [CUR]` | Holdings tracking with cash balance gating, market value, realized P&L, manual price recording or automated live quotes (`!portfolio refresh`), and notes |
 | **Recurring Bills** | `!bill add <name> <amt> <cur> <cat> [frequency]`<br>`!bill list`<br>`!bill pay <id>`<br>`!bill remind <id> <minutes\|off>`<br>`!bill delete <id>` | Fixed schedules, instalment tracking, advance due date reminders, and payment history |
@@ -143,7 +143,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **Daily Log** | `!journal [date]` (or `!daily`)<br>`!journal log <mood> [\| weather] [\| note]`<br>`!journal activities [date]`<br>`!journal clear [date]` | Daily retrospective logging, mood tracking, weather notes, and cross-module daily activity summaries |
 | **Footprints** | `!footprint list`<br>`!footprint add <name> [\| date] [\| rating] [\| note]`<br>`!footprint delete <id>` | Visited places log, travel timeline, ratings (1-5 stars), and journey statistics |
 | **Webhooks** | `!webhook list`<br>`!webhook create <name> [room]`<br>`!webhook test <id>`<br>`!webhook revoke <id>` | Inbound webhook endpoints for external services, custom alert cards, and Telegram Bot API emulation |
-| **AI Assistant** | `!ai <prompt>`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, room context memory, model selection, and weekly executive retrospectives |
+| **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>` | Configure per-user timezone and default currency, applied across all modules |
 | **Account** | `!link <code>`<br>`!recover` | Link Matrix account to web/native identity, initiate delayed recovery |
 
@@ -212,6 +212,16 @@ API_REGISTRATION_SECRET=optional_secret_gating_registration
 # and must match where the browser loads the page.
 WEBAUTHN_RP_ID=localhost
 WEBAUTHN_ORIGIN=http://localhost:5173
+
+# --- AI Assistant & Live Web Search -------------------------------------------
+AI_ENDPOINT=https://api.x.ai/v1
+AI_API_KEY=xai-...
+AI_MODEL=grok-4.6
+# Optional outbound HTTP proxy for AI & search (e.g. for mainland China networks)
+AI_PROXY=http://127.0.0.1:7897
+
+# Live Web Search (Tavily API with DuckDuckGo fallback)
+TAVILY_AI_API_KEY=tvly-...
 ```
 
 ⚠️ **`WEBAUTHN_RP_ID` is baked into every passkey at creation.** Changing it
@@ -232,7 +242,7 @@ Open <http://localhost:5173> — the port `WEBAUTHN_ORIGIN` names.
 
 ```bash
 cargo check                            # must be warning-free
-cargo test                             # 473 tests passing
+cargo test                             # 494+ tests passing
 npm --prefix frontend run build        # TypeScript & production bundle
 npx --prefix frontend playwright test  # 169 E2E specs
 ```

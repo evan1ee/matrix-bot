@@ -13,6 +13,7 @@ pub async fn handle_reminder_command(
     owner_id: &str,
     sender_name: &str,
     clean_body: &str,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
@@ -59,44 +60,50 @@ pub async fn handle_reminder_command(
                     if page > 1 {
                         Some(format!("⏰ <b>Pending Reminders (Page {}):</b><br/>No more reminders on this page.", page))
                     } else {
-                        Some("⏰ You have no pending reminders.".to_string())
+                        Some(format!("⏰ <b>Pending Reminders for {}:</b><br/>You have no pending reminders. Use <code>!remind &lt;time&gt; &lt;msg&gt;</code> to set one.", html_escape(sender_name)))
                     }
                 } else {
-                    let mut html = format!(
-                        "⏰ <b>Pending Reminders for {} (Page {}):</b><br/>",
+                    let mut lines = vec![format!(
+                        "⏰ <b>Pending Reminders for {} (Page {}):</b>",
                         html_escape(sender_name),
                         page
-                    );
-                    for r in reminders {
-                        let rec_str = if r.recurrence != "none" {
-                            format!(" 🔄 <i>({})</i>", r.recurrence)
-                        } else {
-                            String::new()
+                    )];
+                    for r in &reminders {
+                        let formatted_time = format_datetime(&r.trigger_at, &tz);
+                        let recurrence_label = match r.recurrence.as_str() {
+                            "daily" => " 🔄 <i>(daily)</i>",
+                            "weekly" => " 🔄 <i>(weekly)</i>",
+                            _ => "",
                         };
-                        html.push_str(&format!(
-                            "• [<b>#{}</b>] <i>\"{}\"</i> at <b>{}</b>{}<br/>",
+                        lines.push(format!(
+                            "• [<b>#{}</b>] <code>{}</code> — {}{}",
                             r.id,
+                            formatted_time,
                             html_escape(&r.message),
-                            format_datetime(&r.trigger_at, &tz),
-                            rec_str
+                            recurrence_label
                         ));
                     }
-                    html.push_str("<br/><i>(Use <code>!remind cancel &lt;id&gt;</code> to cancel a reminder)</i>");
-                    Some(html)
+                    Some(lines.join("<br/>"))
                 }
             }
             Err(err) => {
-                error!("Failed to fetch pending reminders: {:?}", err);
-                Some("❌ Database error loading reminders.".to_string())
+                error!("Failed listing reminders: {:?}", err);
+                Some("❌ Database error retrieving reminders.".to_string())
             }
         }
     }
-    // 2. !remind cancel <id> / delete <id> / rm <id>
-    else if clean_lower.contains(" cancel")
-        || clean_lower.contains(" delete")
-        || clean_lower.contains(" rm")
+    // 2. !remind cancel <id> / !remind rm <id>
+    else if clean_lower.starts_with("remind cancel ")
+        || clean_lower.starts_with("!remind cancel ")
+        || clean_lower.starts_with("remind rm ")
+        || clean_lower.starts_with("!remind rm ")
     {
-        let id_str = clean_body.split_whitespace().last().unwrap_or("");
+        let id_str = clean_body
+            .trim_start_matches("!remind cancel ")
+            .trim_start_matches("remind cancel ")
+            .trim_start_matches("!remind rm ")
+            .trim_start_matches("remind rm ")
+            .trim();
 
         if id_str.is_empty() {
             return Some("⚠️ Usage: <code>!remind cancel &lt;id&gt;</code> (or <code>!remind rm &lt;id&gt;</code>)".to_string());
@@ -140,7 +147,10 @@ pub async fn handle_reminder_command(
             (RecurrencePattern::None, raw_args)
         };
 
-        if let Some((dur, msg)) = parse_reminder_args(args_to_parse) {
+        if let Some((dur, mut msg)) = parse_reminder_args(args_to_parse) {
+            if (msg == "Reminder!" || msg.is_empty()) && quoted.is_some() {
+                msg = quoted.unwrap().body.clone();
+            }
             // Security: Message length limit (300 chars)
             if msg.len() > 300 {
                 return Some(
@@ -228,40 +238,80 @@ mod tests {
     async fn test_handle_reminder_set_list_cancel() {
         let pool = setup_test_db().await;
 
-        let res_set =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 10s Check oven")
-                .await
-                .unwrap();
+        let res_set = handle_reminder_command(
+            &pool,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind 10s Check oven",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_set.contains("Reminder #1 set!"));
 
-        let res_list = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list")
-            .await
-            .unwrap();
+        let res_list =
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list", None)
+                .await
+                .unwrap();
         assert!(res_list.contains("Pending Reminders for bob"));
         assert!(res_list.contains("Check oven"));
 
         let res_cancel =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind cancel 1")
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind cancel 1", None)
                 .await
                 .unwrap();
         assert!(res_cancel.contains("Cancelled reminder"));
 
-        let res_bare = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind")
+        let res_bare = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind", None)
             .await
             .unwrap();
         assert!(res_bare.contains("no pending reminders"));
 
         let res_reminders =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!reminders")
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!reminders", None)
                 .await
                 .unwrap();
         assert!(res_reminders.contains("no pending reminders"));
 
         // Add a reminder and cancel via rm
-        handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind 20s Check water").await;
-        let res_rm = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2")
-            .await
-            .unwrap();
+        handle_reminder_command(
+            &pool,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind 20s Check water",
+            None,
+        )
+        .await;
+        let res_rm =
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2", None)
+                .await
+                .unwrap();
         assert!(res_rm.contains("Cancelled reminder"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_reminder_with_quoted_message() {
+        let pool = setup_test_db().await;
+        let quoted = crate::bot::quote::QuotedMessage {
+            author: Some("alice".to_string()),
+            body: "Deployment scheduled at midnight".to_string(),
+            event_id: None,
+        };
+
+        let res = handle_reminder_command(
+            &pool,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind 10m",
+            Some(&quoted),
+        )
+        .await
+        .unwrap();
+
+        assert!(res.contains("Reminder #1 set!"));
+        assert!(res.contains("Deployment scheduled at midnight"));
     }
 }

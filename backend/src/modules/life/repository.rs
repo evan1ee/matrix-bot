@@ -175,12 +175,56 @@ impl LifeRepository {
     ) -> Result<Vec<LifeHorizonDay>, sqlx::Error> {
         sqlx::query_as::<_, LifeHorizonDay>(
             r#"
-            SELECT log_date AS date, mood, time_allocation
-            FROM life_day_logs
-            WHERE owner_id = ?
-            ORDER BY log_date ASC
+            WITH user_activities AS (
+                SELECT date(created_at) AS act_date FROM todos WHERE owner_id = ? AND created_at IS NOT NULL
+                UNION ALL
+                SELECT date(due_at) AS act_date FROM todos WHERE owner_id = ? AND due_at IS NOT NULL
+                UNION ALL
+                SELECT date(occurred_at) AS act_date FROM transactions WHERE owner_id = ? AND occurred_at IS NOT NULL
+                UNION ALL
+                SELECT date(created_at) AS act_date FROM portfolio_audit_log WHERE owner_id = ? AND created_at IS NOT NULL
+                UNION ALL
+                SELECT log_date AS act_date FROM habit_logs WHERE owner_id = ? AND log_date IS NOT NULL
+                UNION ALL
+                SELECT date(trigger_at) AS act_date FROM reminders WHERE owner_id = ? AND trigger_at IS NOT NULL
+                UNION ALL
+                SELECT date(created_at) AS act_date FROM bookmarks WHERE owner_id = ? AND created_at IS NOT NULL
+                UNION ALL
+                SELECT arrival_date AS act_date FROM footprints WHERE owner_id = ? AND arrival_date IS NOT NULL
+            ),
+            activity_counts AS (
+                SELECT act_date, COUNT(*) AS cnt 
+                FROM user_activities 
+                WHERE act_date IS NOT NULL AND act_date != ''
+                GROUP BY act_date
+            ),
+            all_dates AS (
+                SELECT log_date AS d_date FROM life_day_logs WHERE owner_id = ?
+                UNION
+                SELECT act_date AS d_date FROM activity_counts
+            )
+            SELECT 
+                all_dates.d_date AS date,
+                COALESCE(l.mood, '') AS mood,
+                l.time_allocation AS time_allocation,
+                (COALESCE(ac.cnt, 0) > 0) AS has_activity,
+                COALESCE(ac.cnt, 0) AS activity_count
+            FROM all_dates
+            LEFT JOIN life_day_logs l ON l.owner_id = ? AND l.log_date = all_dates.d_date
+            LEFT JOIN activity_counts ac ON ac.act_date = all_dates.d_date
+            WHERE all_dates.d_date IS NOT NULL AND all_dates.d_date != ''
+            ORDER BY all_dates.d_date ASC
             "#,
         )
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
+        .bind(owner_id)
         .bind(owner_id)
         .fetch_all(pool)
         .await
@@ -227,34 +271,35 @@ impl LifeRepository {
         .fetch_all(pool)
         .await?;
 
-        let mut deep_work_blocks: i64 = 0;
-        let mut total_sleep_blocks: i64 = 0;
+        let mut total_deep_work_hours_acc: f64 = 0.0;
+        let mut total_sleep_hours_acc: f64 = 0.0;
         let mut days_with_sleep: i64 = 0;
 
         for (alloc_json_opt,) in allocations {
             if let Some(ref alloc_json) = alloc_json_opt {
                 if let Ok(blocks) = serde_json::from_str::<Vec<Option<String>>>(alloc_json) {
-                    let mut day_sleep: i64 = 0;
+                    let block_hours = if blocks.len() <= 96 { 0.25 } else { 5.0 / 60.0 };
+                    let mut day_sleep_hours: f64 = 0.0;
                     for b in blocks {
                         if let Some(cat) = b {
                             if cat == "deep_work" {
-                                deep_work_blocks += 1;
+                                total_deep_work_hours_acc += block_hours;
                             } else if cat == "sleep" {
-                                day_sleep += 1;
+                                day_sleep_hours += block_hours;
                             }
                         }
                     }
-                    if day_sleep > 0 {
-                        total_sleep_blocks += day_sleep;
+                    if day_sleep_hours > 0.0 {
+                        total_sleep_hours_acc += day_sleep_hours;
                         days_with_sleep += 1;
                     }
                 }
             }
         }
 
-        let total_deep_work_hours = (deep_work_blocks as f64 * 0.25 * 10.0).round() / 10.0;
+        let total_deep_work_hours = (total_deep_work_hours_acc * 10.0).round() / 10.0;
         let average_sleep_hours = if days_with_sleep > 0 {
-            ((total_sleep_blocks as f64 / days_with_sleep as f64 * 0.25) * 10.0).round() / 10.0
+            ((total_sleep_hours_acc / days_with_sleep as f64) * 10.0).round() / 10.0
         } else {
             0.0
         };
@@ -296,11 +341,11 @@ impl LifeRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema_life::run_life_schema;
+    use crate::db::schema::run_migrations;
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_life_schema(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -386,6 +431,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(horizon.len(), 1);
+        assert_eq!(horizon[0].mood, "amazing");
+        assert_eq!(horizon[0].has_activity, false);
 
         let deleted = LifeRepository::delete_day_log(&pool, owner, "2026-09-04")
             .await
@@ -395,5 +442,32 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_horizon_includes_auto_logged_activity_days() {
+        let pool = setup_test_db().await;
+        let owner = "user_test_activity";
+
+        // Insert a todo for a date without a life_day_log
+        sqlx::query(
+            r#"
+            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at)
+            VALUES ('!room:matrix.org', ?, 'Alice', 'Workout task', 'medium', 0, '2026-09-10 10:00:00')
+            "#,
+        )
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let horizon = LifeRepository::get_horizon_days(&pool, owner)
+            .await
+            .unwrap();
+        assert_eq!(horizon.len(), 1);
+        assert_eq!(horizon[0].date, "2026-09-10");
+        assert_eq!(horizon[0].mood, "");
+        assert_eq!(horizon[0].has_activity, true);
+        assert_eq!(horizon[0].activity_count, 1);
     }
 }

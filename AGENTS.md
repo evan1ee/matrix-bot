@@ -41,8 +41,19 @@ This document defines the architectural conventions, coding rules, frontend desi
    - Always construct Matrix responses using HTML formatting (`RoomMessageEventContent::text_html(&plain_text, &reply_html)`).
    - Use `html_escape()` in [`backend/src/utils/html.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/utils/html.rs) for all user-supplied input strings embedded in HTML messages (escaping `<`, `>`, `&`, `"`, `'`).
    - Use `strip_html()` in [`backend/src/utils/html.rs`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/backend/src/utils/html.rs) for the plain-text fallback argument to ensure push notifications don't render raw HTML tags.
+   - **Quoted Message Context (`CommandContext.quoted`)**: Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in [`backend/src/bot/quote.rs`](backend/src/bot/quote.rs) into `QuotedMessage`. Modules must support quoted context:
+     - AI module: injects quoted content into context prompts via `QuotedMessage::to_context_prompt()`.
+     - Todo / Reminder: if the user supplies no description or an empty default, uses the quoted text as the task / reminder body.
 
-6. **Frontend Design System & UI Craft (Following `Design.md`)**:
+6. **AI Tools & Live Web Search Architecture**:
+   - **Universal Function Calling**: Define tools using standard OpenAI `type: "function"` schema in [`backend/src/modules/ai/search.rs`](backend/src/modules/ai/search.rs). Never use provider-specific proprietary tool variants (e.g. xAI `web_search`) on chat completions to maintain cross-provider compatibility across Grok, OpenAI, Claude, and local models.
+   - **Selective Intent Gating**: Web search must be enabled conditionally via `should_enable_web_search()` (fact-checking, verification, breaking news) and omitted for routine productivity commands (todos, reminders, expenses, general coding) to avoid unnecessary search latency and token bloat.
+   - **Dual Search Backend**: Primary queries use Tavily Search API (`TAVILY_AI_API_KEY` / `TAVILY_API_KEY`) returning clean relevance-scored snippets; gracefully falls back to keyless DuckDuckGo HTML scraping if no key is set or on API errors.
+   - **Proxy Awareness**: Search HTTP clients must respect `AI_PROXY` / `HTTPS_PROXY` so requests route through the user's configured local proxy.
+   - **Concurrent Tool Execution**: When an LLM returns multiple tool calls within a turn, execute them concurrently using `futures_util::future::join_all` rather than sequentially in a loop.
+   - **Timeouts & Deduplication**: Long-running multi-turn research requests need generous router ceilings (Axum `TimeoutLayer` >= 180s). Prevent duplicate database records on immediate retries by checking the active conversation's tail message before inserting.
+
+7. **Frontend Design System & UI Craft (Following `Design.md`)**:
    All web interfaces must strictly adhere to the Vercel editorial visual standards documented in [`Design.md`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/Design.md):
    - **Outer Shell & Shared Gutters**:
      - The top-level [`AppShell`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/frontend/src/components/AppShell.tsx) provides the outer responsive gutters (`<main className="flex-1 overflow-y-auto px-6 md:px-8 py-6 flex flex-col">`).

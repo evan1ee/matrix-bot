@@ -262,6 +262,7 @@ mod tests {
             full_body: "!save https://example.com/rust-tips rust,coding".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
 
         let reply = handle_save_command(&ctx, &pool, None, None).await;
@@ -278,6 +279,7 @@ mod tests {
             full_body: "!bookmarks".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
 
         let list_reply = handle_list_command(&list_ctx, &pool).await;
@@ -295,6 +297,7 @@ mod tests {
             full_body: "!bookmark fav 1".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
         let fav_reply = handle_bookmark_subcommands(&fav_ctx, &pool, None, None).await;
         assert!(fav_reply.contains("Starred ⭐"));
@@ -310,6 +313,7 @@ mod tests {
             full_body: "!bookmark archive 1".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
         let arch_reply = handle_bookmark_subcommands(&arch_ctx, &pool, None, None).await;
         assert!(arch_reply.contains("Archived 📦"));

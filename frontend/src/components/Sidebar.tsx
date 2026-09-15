@@ -5,7 +5,7 @@ import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
   Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
-  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, NotebookPen, Settings, LogIn, Sun, Moon, LucideIcon
+  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, Smile, Settings, LogIn, Sun, Moon, LucideIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -47,15 +47,16 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Finance',
     items: [
-      { id: 'finance', label: 'Expenses', icon: Wallet },
       { id: 'portfolio', label: 'Portfolio', icon: TrendingUp },
+      { id: 'finance', label: 'Expenses', icon: Wallet },
       { id: 'recurring_bills', label: 'Bills', icon: Receipt },
     ],
   },
   {
     title: 'Lifestyle',
     items: [
-      { id: 'journal', label: 'Daily Log', icon: NotebookPen },
+      { id: 'mood', label: 'Mood', icon: Smile },
+      { id: 'time_blocks', label: 'Time Blocks', icon: Clock },
       { id: 'footprints', label: 'Footprints', icon: Compass },
       { id: 'life', label: 'Life Grid', icon: Hourglass },
     ],
@@ -220,7 +221,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Bot className="w-3.5 h-3.5" />
             </div>
             <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text-primary)] whitespace-nowrap">
-              Matrix Halo Bot
+              Matrix Bot
             </span>
           </div>
 
@@ -270,19 +271,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }`
                       }
                     >
-                      {collapsed ? (
-                        <Icon className="w-4 h-4 shrink-0" />
-                      ) : (
-                        <>
-                          <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
-                            {isActive && (
-                              <div className="absolute -left-[14px] w-[3px] h-4 rounded-r-full bg-[var(--color-text-primary)]" />
-                            )}
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <span className="truncate">{item.label}</span>
-                        </>
-                      )}
+                      <Icon className="w-4 h-4 shrink-0" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
                     </button>
                   </li>
                 );

@@ -329,6 +329,7 @@ mod tests {
             full_body: "!journal help".to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         };
 
         let help = handle_journal_command(&pool, None, &ctx).await.unwrap();

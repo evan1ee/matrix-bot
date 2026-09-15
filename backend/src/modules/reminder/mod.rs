@@ -62,6 +62,7 @@ impl BotModule for ReminderModule {
             &ctx.owner_id,
             &ctx.sender_name,
             &ctx.full_body,
+            ctx.quoted.as_ref(),
         )
         .await
     }
@@ -95,6 +96,7 @@ mod tests {
             full_body: body.to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         }
     }
 

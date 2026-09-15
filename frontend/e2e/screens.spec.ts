@@ -73,7 +73,10 @@ test('@screens the module views', async ({ app, api }) => {
     ['08-bills', TAB.bills],
     ['09-webhooks', TAB.webhooks],
     ['10-bookmarks', TAB.bookmarks],
+    ['11-habits', TAB.habits],
     ['12-ai-assistant', TAB.ai],
+    ['13-mood', TAB.mood],
+    ['14-time-blocks', TAB.time_blocks],
   ] as const) {
     await app.getByRole('button', { name: tab, exact: true }).click();
     await shot(app, n);
