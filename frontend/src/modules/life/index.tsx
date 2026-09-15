@@ -310,12 +310,6 @@ export const LifeView: React.FC = () => {
           setIsDayModalOpen(false);
           setSelectedDay(null);
         }}
-        onOpenMood={(date) => {
-          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'mood', date } }));
-        }}
-        onOpenTimeBlocks={(date) => {
-          window.dispatchEvent(new CustomEvent('app:navigate', { detail: { moduleId: 'time_blocks', date } }));
-        }}
       />
 
       {/* Profile / Onboarding Modal */}

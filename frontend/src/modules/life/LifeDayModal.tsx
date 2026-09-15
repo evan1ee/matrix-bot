@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { X, Calendar, Clock } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { LifeDayItem, MoodType, WeatherType } from './types';
 import { MOOD_CONFIG, WEATHER_CONFIG, ACTIVITY_OPTIONS, TIME_CATEGORIES } from './types';
 import { LifeActivityFeed } from './LifeActivityFeed';
@@ -8,16 +8,12 @@ interface LifeDayModalProps {
   day: LifeDayItem | null;
   isOpen: boolean;
   onClose: () => void;
-  onOpenMood?: (date: string) => void;
-  onOpenTimeBlocks?: (date: string) => void;
 }
 
 export const LifeDayModal: React.FC<LifeDayModalProps> = ({
   day,
   isOpen,
   onClose,
-  onOpenMood,
-  onOpenTimeBlocks,
 }) => {
   const isLogged = Boolean(day?.mood);
   const loggedMoodCfg = day?.mood ? MOOD_CONFIG[day.mood.toLowerCase() as MoodType] : undefined;
@@ -215,36 +211,7 @@ export const LifeDayModal: React.FC<LifeDayModalProps> = ({
           </div>
 
           {/* Footer Actions */}
-          <div className="flex items-center justify-between pt-4 mt-6 border-t border-neutral-100 dark:border-neutral-800">
-            <div className="flex items-center gap-4">
-              {onOpenMood && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenMood(day.date);
-                    onClose();
-                  }}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Open in Mood →</span>
-                </button>
-              )}
-              {onOpenTimeBlocks && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenTimeBlocks(day.date);
-                    onClose();
-                  }}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-900 dark:text-neutral-100 hover:underline cursor-pointer"
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Time Blocks →</span>
-                </button>
-              )}
-            </div>
-
+          <div className="flex items-center justify-end pt-4 mt-6 border-t border-neutral-100 dark:border-neutral-800">
             <button
               type="button"
               onClick={onClose}

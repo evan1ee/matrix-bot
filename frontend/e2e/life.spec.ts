@@ -61,10 +61,10 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     // Open Today in Life Grid to inspect view-only retrospective modal
     await app.getByRole('button', { name: /open today/i }).click();
 
-    // Verify view-only retrospective modal is shown
+    // Verify view-only retrospective modal is shown with only Close action
     await expect(app.getByText(/retrospective for this day/i)).toBeVisible();
-    await expect(app.getByRole('button', { name: /open in mood →/i })).toBeVisible();
-    await expect(app.getByRole('button', { name: /time blocks →/i })).toBeVisible();
+    await expect(app.getByRole('button', { name: /open in mood →/i })).not.toBeVisible();
+    await expect(app.getByRole('button', { name: /time blocks →/i })).not.toBeVisible();
 
     // Close modal
     await app.getByRole('button', { name: /close/i }).first().click();
@@ -188,7 +188,7 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     }
   });
 
-  test('logged day is strictly view-only in life grid with navigation link to mood', async ({ app, api }) => {
+  test('logged day is strictly view-only in life grid', async ({ app, api }) => {
     api.seedLifeProfile({ birth_date: '1995-05-15', expected_lifespan_years: 80 });
     const todayStr = new Date().toISOString().split('T')[0];
     api.seedLifeDayLog({
@@ -222,6 +222,10 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
     await expect(app.getByRole('button', { name: /save record/i })).not.toBeVisible();
     await expect(app.getByRole('button', { name: /clear record/i })).not.toBeVisible();
 
+    // Verify cross-navigation buttons are NOT present in modal footer
+    await expect(app.getByRole('button', { name: /open in mood →/i })).not.toBeVisible();
+    await expect(app.getByRole('button', { name: /time blocks →/i })).not.toBeVisible();
+
     const brainDir = process.env.BRAIN_DIR;
     if (brainDir && fs.existsSync(brainDir)) {
       await app.screenshot({
@@ -229,16 +233,9 @@ test.describe('Visualizing Life (Lifespan Grid)', () => {
       });
     }
 
-    // Click "Open in Mood →" to navigate to mood module
-    const navToMoodBtn = app.getByRole('button', { name: /open in mood →/i });
-    await expect(navToMoodBtn).toBeVisible();
-    await navToMoodBtn.click();
-
-    // Modal should close and Mood module should be opened
+    // Close modal via Close button
+    await app.getByRole('dialog').getByRole('button', { name: /close/i }).click();
     await expect(app.getByText(/Life Grid view-only retrospective for this day/i)).not.toBeVisible();
-    await expect(app.getByRole('heading', { name: 'Mood', exact: true })).toBeVisible();
-    await expect(app.getByText('Sealed Daily Reflection')).toBeVisible();
-    await expect(app.getByText('A memorable milestone day')).toBeVisible();
   });
 
   test('auto-logs activities from todos, transactions, and habits in view-only retrospective feed', async ({ app, api }) => {
