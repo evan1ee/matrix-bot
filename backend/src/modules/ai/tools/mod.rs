@@ -1,13 +1,17 @@
+pub mod bills;
+pub mod bookmarks;
 pub mod definitions;
 pub mod definitions_extended;
 pub mod definitions_life;
 pub mod executor;
-pub mod executor_bookmarks_webhooks;
-pub mod executor_finance;
-pub mod executor_life_habits;
-pub mod executor_portfolio;
-pub mod executor_reminder;
-pub mod executor_todo;
+pub mod finance;
+pub mod habits;
+pub mod life;
+pub mod portfolio;
+pub mod reminder;
+pub mod settings;
+pub mod todo;
+pub mod webhooks;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;

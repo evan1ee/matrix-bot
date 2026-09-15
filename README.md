@@ -28,6 +28,55 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 
 ---
 
+## 🏛️ System Architecture
+
+The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent SQLite storage:
+
+```
+                                      Matrix
+                                        │
+                      ┌─────────────────┴─────────────────┐
+                      │                                   │
+                  Command                         Natural Language
+             (!todo, !finance)                  (@bot ..., direct DM)
+                      │                                   │
+                      │                                  LLM
+                      │                             (xAI / OpenAI)
+                      │                                   │
+                      │                              Tool Calling ────► Live Web Search
+                      │                            (add_todo, etc.)     (Tavily / DDG)
+                      │                                   │
+                      └─────────────────┬─────────────────┘
+                                        │
+                                        ▼
+                                   Domain Layer
+                     (Todo, Finance, Portfolio, Habits, etc.)
+                                        │
+                      ┌─────────────────┴─────────────────┐
+                      ▼                                   ▼
+             SQLite Persistence                    SSE Broadcaster
+             (SQLx WAL Engine)                   (Real-Time Web/iOS)
+```
+
+### Core Architecture Highlights
+
+1. **Dual Ingress (Matrix & REST/SSE)**:
+   - **Matrix Chat**: Inbound events arrive over Matrix rooms and are classified as either explicit commands or natural language queries.
+   - **REST API & SSE**: An embedded Axum web server provides REST endpoints (`/api/v1/*`) and real-time SSE event streaming (`/api/v1/events`) for the React Web UI and native iOS client (Element X).
+
+2. **Deterministic Commands vs. Natural Language**:
+   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/bot/dispatcher.rs`](backend/src/bot/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
+   - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio.rs`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`).
+
+3. **Unified Domain Layer**:
+   - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Business logic, validations, and ownership isolation are never duplicated.
+
+4. **Persistence & Real-Time Sync**:
+   - All state modifications persist directly to SQLite using runtime SQLx query binding with write-ahead logging (WAL).
+   - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
+
+---
+
 ## 🔐 Authentication & Multi-Client Architecture
 
 The backend supports multiple client surfaces with strict ownership isolation:

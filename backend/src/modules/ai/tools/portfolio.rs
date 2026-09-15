@@ -11,7 +11,7 @@ use crate::modules::portfolio::models::{
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::settings::repository::SettingsRepository;
 
-pub async fn execute_portfolio_tool(
+pub async fn execute_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,

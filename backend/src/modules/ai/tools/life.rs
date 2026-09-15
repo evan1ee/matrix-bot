@@ -1,0 +1,270 @@
+use chrono::Utc;
+use serde_json::json;
+use sqlx::SqlitePool;
+
+use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::retrospective::generate_weekly_retrospective;
+use crate::modules::footprints::repository::FootprintRepository;
+use crate::modules::habits::repository::HabitsRepository;
+use crate::modules::life::repository::LifeRepository;
+use crate::modules::settings::repository::SettingsRepository;
+
+fn normalize_footprint_category(input: &str) -> &'static str {
+    let lower = input.trim().to_lowercase();
+    match lower.as_str() {
+        "sightseeing" | "scenic" | "attraction" | "landmark" | "tourism" | "景区" | "景点"
+        | "名胜" | "古迹" | "观光" => "sightseeing",
+        "food" | "dining" | "restaurant" | "cafe" | "coffee" | "bar" | "美食" | "餐饮" | "餐厅"
+        | "咖啡" => "food",
+        "nature" | "park" | "parks" | "mountain" | "hiking" | "outdoor" | "beach" | "lake"
+        | "自然" | "公园" | "山" | "森林" | "湖" | "海滩" | "徒步" => "nature",
+        "lodging" | "hotel" | "hostel" | "resort" | "inn" | "bnb" | "住宿" | "酒店" | "宾馆"
+        | "民宿" => "lodging",
+        "roadtrip" | "road_trip" | "drive" | "camping" | "自驾" | "露营" => "roadtrip",
+        "work" | "business" | "conference" | "office" | "出差" | "工作" | "会议" => "work",
+        _ => "sightseeing",
+    }
+}
+
+pub async fn execute_tool(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    name: &str,
+    args: &serde_json::Value,
+) -> Option<Result<String, String>> {
+    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let today_str = Utc::now()
+        .with_timezone(&settings.tz())
+        .format("%Y-%m-%d")
+        .to_string();
+
+    match name {
+        "log_life_day" => Some(
+            async {
+                let mood = args
+                    .get("mood")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Field 'mood' is required")?;
+                let note = args.get("note").and_then(|v| v.as_str());
+                let weather = args.get("weather").and_then(|v| v.as_str());
+                let activities: Option<Vec<String>> =
+                    args.get("activities").and_then(|v| v.as_array()).map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect()
+                    });
+                let date_str = args
+                    .get("date")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| today_str.clone());
+
+                let activities_json = activities
+                    .as_ref()
+                    .and_then(|acts| serde_json::to_string(acts).ok());
+
+                let existing = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if existing.is_some() {
+                    return Err(format!(
+                        "A log for date {} already exists and cannot be edited. It can only be cleared.",
+                        date_str
+                    ));
+                }
+
+                let log = LifeRepository::upsert_day_log(
+                    pool,
+                    owner_id,
+                    &date_str,
+                    mood,
+                    weather,
+                    activities_json.as_deref(),
+                    note,
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+
+                if let Some(b) = broadcaster {
+                    b.send(SystemEvent::LifeDayLogged(log.clone()));
+                }
+
+                serde_json::to_string(&log).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "get_life_profile" => Some(
+            async {
+                let profile = LifeRepository::get_profile(pool, owner_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let stats = LifeRepository::get_stats(pool, owner_id, &today_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_string(&json!({
+                    "profile": profile,
+                    "stats": stats,
+                }))
+                .map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "get_daily_log" => Some(
+            async {
+                let date_str = args
+                    .get("date")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| today_str.clone());
+
+                let day_log = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let habits = HabitsRepository::find_all_with_status(pool, owner_id, &date_str)
+                    .await
+                    .unwrap_or_default();
+
+                serde_json::to_string(&json!({
+                    "date": date_str,
+                    "day_log": day_log,
+                    "habits_status": habits,
+                }))
+                .map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "get_weekly_retrospective" => Some(
+            async {
+                let retro = generate_weekly_retrospective(pool, owner_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_string(&retro).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "get_my_footprints" => Some(
+            async {
+                let footprints =
+                    FootprintRepository::list_by_owner(pool, owner_id, None, None, None)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10) as usize;
+                let sliced: Vec<_> = footprints.into_iter().take(limit).collect();
+                serde_json::to_string(&sliced).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "record_footprint" => Some(
+            async {
+                let title = args
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Field 'title' is required")?;
+                let lat = args
+                    .get("latitude")
+                    .and_then(|v| v.as_f64())
+                    .ok_or("Field 'latitude' is required")?;
+                let lon = args
+                    .get("longitude")
+                    .and_then(|v| v.as_f64())
+                    .ok_or("Field 'longitude' is required")?;
+                let city = args.get("city").and_then(|v| v.as_str());
+                let country = args.get("country").and_then(|v| v.as_str());
+                let raw_category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("sightseeing");
+                let category = normalize_footprint_category(raw_category);
+                let rating = args
+                    .get("rating")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    .clamp(0, 5);
+                let spend_str = args
+                    .get("spend_amount")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("0");
+                let currency = args
+                    .get("currency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&settings.currency);
+                let note = args.get("note").and_then(|v| v.as_str());
+                let arrival_date = args
+                    .get("arrival_date")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&today_str);
+                let departure_date = args.get("departure_date").and_then(|v| v.as_str());
+
+                let spend_minor = (spend_str.parse::<f64>().unwrap_or(0.0) * 100.0) as i64;
+
+                let fp = FootprintRepository::create(
+                    pool,
+                    owner_id,
+                    title,
+                    lat,
+                    lon,
+                    country,
+                    city,
+                    None,
+                    arrival_date,
+                    departure_date,
+                    spend_minor,
+                    currency,
+                    2,
+                    rating,
+                    category,
+                    note,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+
+                if let Some(b) = broadcaster {
+                    b.send(SystemEvent::FootprintCreated(fp.clone()));
+                }
+
+                serde_json::to_string(&fp).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        "delete_footprint" => Some(
+            async {
+                let id = args
+                    .get("id")
+                    .and_then(|v| v.as_i64())
+                    .ok_or("Field 'id' is required")?;
+                let ok = FootprintRepository::delete(pool, id, owner_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                if !ok {
+                    return Err(format!("Footprint #{} not found or not owned by user", id));
+                }
+
+                if let Some(b) = broadcaster {
+                    b.send(SystemEvent::FootprintDeleted {
+                        id,
+                        owner_id: owner_id.to_string(),
+                    });
+                }
+
+                serde_json::to_string(&json!({
+                    "id": id,
+                    "deleted": true
+                }))
+                .map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
+        _ => None,
+    }
+}

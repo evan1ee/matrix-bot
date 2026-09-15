@@ -52,6 +52,7 @@ This document defines the architectural conventions, coding rules, frontend desi
    - **Proxy Awareness**: Search HTTP clients must respect `AI_PROXY` / `HTTPS_PROXY` so requests route through the user's configured local proxy.
    - **Concurrent Tool Execution**: When an LLM returns multiple tool calls within a turn, execute them concurrently using `futures_util::future::join_all` rather than sequentially in a loop.
    - **Timeouts & Deduplication**: Long-running multi-turn research requests need generous router ceilings (Axum `TimeoutLayer` >= 180s). Prevent duplicate database records on immediate retries by checking the active conversation's tail message before inserting.
+   - **Domain-Grouped Tool Architecture**: AI tools in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) are organized strictly by domain module (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio.rs`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool executors directly invoke domain SQLx repositories (`TodoRepository`, `FinanceRepository`, etc.) rather than through anemic pass-through layers, preserving single-responsibility and ensuring files remain well below 500 lines.
 
 7. **Frontend Design System & UI Craft (Following `Design.md`)**:
    All web interfaces must strictly adhere to the Vercel editorial visual standards documented in [`Design.md`](file:///Users/nosinx/Documents/GitHub/matrix-hello-bot/Design.md):

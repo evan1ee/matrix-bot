@@ -6,7 +6,7 @@ use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
-pub async fn execute_reminder_tool(
+pub async fn execute_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,

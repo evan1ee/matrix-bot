@@ -8,7 +8,7 @@ use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amo
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
-pub async fn execute_finance_tool(
+pub async fn execute_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -101,19 +101,23 @@ pub async fn execute_finance_tool(
                 match matched {
                     Some(s) => {
                         let total_expense = s.expense_minor;
-                        let categories: Vec<_> = s.categories.into_iter().map(|c| {
-                        let pct = if total_expense > 0 {
-                            (c.expense_minor as f64 / total_expense as f64) * 100.0
-                        } else {
-                            0.0
-                        };
-                        json!({
-                            "category": c.category.unwrap_or_else(|| "Uncategorized".to_string()),
-                            "expense_minor": c.expense_minor,
-                            "income_minor": c.income_minor,
-                            "expense_percentage": format!("{:.1}%", pct),
-                        })
-                    }).collect();
+                        let categories: Vec<_> = s
+                            .categories
+                            .into_iter()
+                            .map(|c| {
+                                let pct = if total_expense > 0 {
+                                    (c.expense_minor as f64 / total_expense as f64) * 100.0
+                                } else {
+                                    0.0
+                                };
+                                json!({
+                                    "category": c.category.unwrap_or_else(|| "Uncategorized".to_string()),
+                                    "expense_minor": c.expense_minor,
+                                    "income_minor": c.income_minor,
+                                    "expense_percentage": format!("{:.1}%", pct),
+                                })
+                            })
+                            .collect();
 
                         Ok(json!({
                             "currency": s.currency,
