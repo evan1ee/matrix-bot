@@ -25,6 +25,14 @@ test.describe('Time Blocks Module', () => {
     await block53.click();
     await expect(app.getByText(/0\.1h \/ 24h tracked/i).first()).toBeVisible();
 
+    // Click again to unrecord
+    await block53.click();
+    await expect(app.getByText(/0\.0h \/ 24h tracked/i).first()).toBeVisible();
+
+    // Click again to re-record
+    await block53.click();
+    await expect(app.getByText(/0\.1h \/ 24h tracked/i).first()).toBeVisible();
+
     // Reset with Clear preset
     const clearPreset = app.getByRole('button', { name: /clear/i }).first();
     await clearPreset.click();

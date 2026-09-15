@@ -47,7 +47,10 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
   const selectedCategoryRef = useRef<TimeCategoryId | 'erase'>('deep_work');
   const timelineRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false);
+  const timeAllocationRef = useRef<TimeAllocation>(timeAllocation);
+  const dragModeRef = useRef<'paint' | 'unrecord'>('paint');
 
+  timeAllocationRef.current = timeAllocation;
   selectedCategoryRef.current = selectedCategory;
 
   // Window pointerup listener to ensure drag always ends cleanly
@@ -112,15 +115,15 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     return { totalHours, categoryStats, totalAssigned };
   }, [timeAllocation]);
 
-  const paintBlock = (idx: number, category: TimeCategoryId | 'erase') => {
+  const setBlockValue = (idx: number, val: string | null) => {
     if (readOnly) return;
-    const currentVal = timeAllocation[idx] || null;
-    const newVal = category === 'erase' ? null : category;
-    if (currentVal === newVal) return;
+    const currentVal = timeAllocationRef.current[idx] || null;
+    if (currentVal === val) return;
 
-    const next = [...timeAllocation];
+    const next = [...timeAllocationRef.current];
     while (next.length < 288) next.push(null);
-    next[idx] = newVal;
+    next[idx] = val;
+    timeAllocationRef.current = next;
     onChange(next);
   };
 
@@ -129,7 +132,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const catId = (timeAllocation[blockIdx] || null) as TimeCategoryId | null;
+    const catId = (timeAllocationRef.current[blockIdx] || null) as TimeCategoryId | null;
     const cfg = catId ? TIME_CATEGORIES[catId] : null;
     const { range } = getBlockTimeRange(blockIdx);
     setHoveredBlock({ idx: blockIdx, range, cfg, x, y });
@@ -139,14 +142,33 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     if (readOnly || e.button !== 0) return;
     isMouseDownRef.current = true;
     lastPaintedIdxRef.current = idx;
-    paintBlock(idx, selectedCategoryRef.current);
+
+    const currentVal = timeAllocationRef.current[idx] || null;
+    const activeCategory = selectedCategoryRef.current;
+
+    if (activeCategory === 'erase') {
+      dragModeRef.current = 'unrecord';
+      setBlockValue(idx, null);
+    } else if (currentVal === activeCategory) {
+      // Click again the block for unrecord
+      dragModeRef.current = 'unrecord';
+      setBlockValue(idx, null);
+    } else {
+      dragModeRef.current = 'paint';
+      setBlockValue(idx, activeCategory);
+    }
     updateHoveredBlock(e, idx);
   };
 
   const handleBlockPointerEnter = (e: React.PointerEvent, idx: number) => {
     if (!readOnly && isMouseDownRef.current && lastPaintedIdxRef.current !== idx) {
       lastPaintedIdxRef.current = idx;
-      paintBlock(idx, selectedCategoryRef.current);
+      const activeCategory = selectedCategoryRef.current;
+      const valToSet =
+        dragModeRef.current === 'unrecord' || activeCategory === 'erase'
+          ? null
+          : activeCategory;
+      setBlockValue(idx, valToSet);
     }
     updateHoveredBlock(e, idx);
   };
@@ -154,7 +176,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
   // Quick preset fills
   const applyPreset = (type: 'sleep' | 'workday' | 'clear') => {
     if (readOnly) return;
-    const next = [...timeAllocation];
+    const next = [...timeAllocationRef.current];
     while (next.length < 288) next.push(null);
 
     if (type === 'sleep') {
@@ -167,6 +189,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
     } else if (type === 'clear') {
       for (let i = 0; i < 288; i++) next[i] = null;
     }
+    timeAllocationRef.current = next;
     onChange(next);
   };
 
