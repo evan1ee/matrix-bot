@@ -237,7 +237,7 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
                   lastPaintedIdxRef.current = null;
                 }}
                 title={`${range} • ${cfg ? `${cfg.emoji} ${cfg.label}` : 'Unallocated'}`}
-                className={`h-5 rounded-[2px] border transition-colors duration-150 select-none ${
+                className={`h-5 rounded-[2px] border transition-colors duration-150 select-none touch-none ${
                   readOnly ? 'cursor-default' : 'cursor-pointer'
                 } ${
                   cfg

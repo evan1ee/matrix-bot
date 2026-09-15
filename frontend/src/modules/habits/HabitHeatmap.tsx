@@ -143,7 +143,7 @@ export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ days, today }) => {
                       key={day.date}
                       data-date={day.date}
                       data-count={day.count}
-                      className={`w-2.5 h-2.5 rounded-xs transition-colors cursor-pointer ${getColorClass(day.count)} hover:ring-1 hover:ring-neutral-400 dark:hover:ring-neutral-200`}
+                      className={`w-2.5 h-2.5 rounded-xs transition-colors cursor-pointer touch-none ${getColorClass(day.count)} hover:ring-1 hover:ring-neutral-400 dark:hover:ring-neutral-200`}
                       onMouseEnter={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
                         setHoveredDay({
