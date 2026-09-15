@@ -18,8 +18,9 @@ impl CommandParser {
         room_id: &str,
         sender_localpart: &str,
     ) -> Option<ParsedCommand> {
-        let body = body.trim();
-        if body.is_empty() {
+        let (quoted, prompt) = crate::bot::quote::extract_quote_and_prompt(body, formatted_body);
+        let prompt_trimmed = prompt.trim();
+        if prompt_trimmed.is_empty() && quoted.is_none() {
             return None;
         }
 
@@ -27,14 +28,14 @@ impl CommandParser {
         let full_mxid = own_id.to_string();
         let short_mention = format!("@{}", localpart);
 
-        let body_lower = body.to_lowercase();
+        let body_lower = prompt_trimmed.to_lowercase();
         let localpart_lower = localpart.to_lowercase();
 
         let is_html_mentioned = formatted_body
             .map(|f| f.contains(&full_mxid) || f.contains(&short_mention))
             .unwrap_or(false);
 
-        let is_plain_mentioned = body.contains(&full_mxid)
+        let is_plain_mentioned = prompt_trimmed.contains(&full_mxid)
             || body_lower.contains(&short_mention.to_lowercase())
             || body_lower.starts_with(&format!("{}:", localpart_lower))
             || body_lower.starts_with(&format!("{},", localpart_lower))
@@ -42,13 +43,13 @@ impl CommandParser {
             || body_lower == localpart_lower;
 
         let is_mentioned = is_plain_mentioned || is_html_mentioned;
-        let is_command_prefix = body.starts_with('!');
+        let is_command_prefix = prompt_trimmed.starts_with('!');
 
         if !is_command_prefix && !is_mentioned {
             return None;
         }
 
-        let mut clean_body = body
+        let mut clean_body = prompt_trimmed
             .replace(&full_mxid, "")
             .replace(&short_mention, "")
             .trim()
@@ -68,13 +69,22 @@ impl CommandParser {
             .trim()
             .to_string();
 
-        let mut parts = clean_body.splitn(2, ' ');
-        let raw_command = parts
-            .next()
-            .unwrap_or("")
-            .trim_start_matches('!')
-            .to_string();
-        let raw_args = parts.next().unwrap_or("").trim().to_string();
+        let (raw_command, raw_args) = if clean_body.is_empty() {
+            if quoted.is_some() {
+                ("ai".to_string(), String::new())
+            } else {
+                return None;
+            }
+        } else {
+            let mut parts = clean_body.splitn(2, ' ');
+            let cmd = parts
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('!')
+                .to_string();
+            let args = parts.next().unwrap_or("").trim().to_string();
+            (cmd, args)
+        };
 
         Some(ParsedCommand {
             room_id: room_id.to_string(),
@@ -83,6 +93,7 @@ impl CommandParser {
             raw_args,
             full_body: clean_body,
             is_mentioned,
+            quoted,
         })
     }
 }
@@ -134,6 +145,81 @@ mod tests {
             &bot_id,
             "!room:matrix.org",
             "charlie",
+        );
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_parse_quoted_reply_fact_check() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let msg = "> <@bob:matrix.org> The moon is made of green cheese.\n\n@hellobot fact check this";
+        let ctx = CommandParser::parse_message(
+            msg,
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "fact");
+        assert_eq!(ctx.raw_args, "check this");
+        assert_eq!(ctx.full_body, "fact check this");
+        assert!(ctx.is_mentioned);
+        assert!(ctx.quoted.is_some());
+        let q = ctx.quoted.unwrap();
+        assert_eq!(q.author.as_deref(), Some("@bob:matrix.org"));
+        assert_eq!(q.body, "The moon is made of green cheese.");
+    }
+
+    #[test]
+    fn test_parse_quoted_reply_add_todo() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let msg = "> Review security audit before Monday\n\n@hellobot add todo";
+        let ctx = CommandParser::parse_message(
+            msg,
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "add");
+        assert_eq!(ctx.raw_args, "todo");
+        assert!(ctx.quoted.is_some());
+        let q = ctx.quoted.unwrap();
+        assert_eq!(q.body, "Review security audit before Monday");
+    }
+
+    #[test]
+    fn test_parse_quoted_reply_bare_mention() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let msg = "> Important news snippet\n\n@hellobot";
+        let ctx = CommandParser::parse_message(
+            msg,
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "ai");
+        assert!(ctx.quoted.is_some());
+        assert_eq!(ctx.quoted.unwrap().body, "Important news snippet");
+    }
+
+    #[test]
+    fn test_parse_quoted_message_without_bot_mention_is_ignored() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let msg = "> Quoted chat\n\nI disagree with your point.";
+        let res = CommandParser::parse_message(
+            msg,
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
         );
         assert!(res.is_none());
     }

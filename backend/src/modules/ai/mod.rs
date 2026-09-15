@@ -87,6 +87,7 @@ impl BotModule for AiModule {
             &ctx.full_body,
             ctx.is_direct,
             ctx.is_mentioned,
+            ctx.quoted.as_ref(),
         )
         .await
     }

@@ -94,6 +94,7 @@ mod tests {
             full_body: body.to_string(),
             is_direct: true,
             is_mentioned: false,
+            quoted: None,
         }
     }
 

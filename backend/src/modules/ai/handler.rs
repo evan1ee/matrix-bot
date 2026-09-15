@@ -55,11 +55,12 @@ pub async fn handle_ai_command(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
         let trimmed = raw_args.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
         if trimmed.eq_ignore_ascii_case("retro")
@@ -100,21 +101,32 @@ pub async fn handle_ai_command(
     } else if is_direct || is_mentioned {
         let trimmed = full_body.trim();
         if trimmed.is_empty() {
-            return None;
+            if quoted.is_some() {
+                ""
+            } else {
+                return None;
+            }
+        } else {
+            trimmed
         }
-        trimmed
     } else {
         return None;
     };
 
-    if prompt.len() > MAX_PROMPT_LENGTH {
+    let effective_prompt = if let Some(q) = quoted {
+        q.to_context_prompt(prompt)
+    } else {
+        prompt.to_string()
+    };
+
+    if effective_prompt.len() > MAX_PROMPT_LENGTH {
         return Some(format_error(&format!(
             "Prompt exceeds maximum length of {} characters.",
             MAX_PROMPT_LENGTH
         )));
     }
 
-    match run_ai_turn(pool, broadcaster, owner_id, room_id, None, prompt).await {
+    match run_ai_turn(pool, broadcaster, owner_id, room_id, None, &effective_prompt).await {
         Ok(result) => {
             clear_ai_error_state();
             Some(format_response(&result.message, &result.model_used))
@@ -227,6 +239,7 @@ pub async fn run_ai_turn(
              CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
              TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
              ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
+             QUOTED REPLIES & CONTEXT: When the prompt contains [Context: Replying to quoted message from ...]: 1) FACT CHECKING: If asked to fact check or verify, critically evaluate the claims with objective facts, indicate accuracy/truthfulness, and clarify misconceptions; 2) EXPLANATION: If asked to explain or summarize, break down concepts clearly and articulately; 3) COMMENTARY: If asked for thoughts or commentary, provide balanced, insightful observations; 4) ACTION CREATION: If asked to add a todo, task, or reminder, extract the commitment from the quote and call the appropriate tool (`add_todo`, `create_reminder`). \
              The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
             now_local_str = now_local_str,
             today_local = today_local,
@@ -480,6 +493,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -497,6 +511,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -520,6 +535,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -537,6 +553,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -554,6 +571,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -571,6 +589,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -606,6 +625,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await;
 
@@ -629,6 +649,7 @@ mod tests {
             "",
             false,
             false,
+            None,
         )
         .await;
         assert!(result2.is_none());
@@ -1004,6 +1025,7 @@ mod tests {
             "明天早上8点提醒我写邮件",
             false,
             false,
+            None,
         )
         .await;
         assert!(unhandled.is_none());
@@ -1033,12 +1055,58 @@ mod tests {
             "明天早上8点提醒我写邮件",
             false,
             true, // is_mentioned = true
+            None,
         )
         .await;
 
         assert!(
             is_ai_error_alerted(),
             "Mentioned natural language message should be routed to AI engine"
+        );
+        clear_ai_error_state();
+    }
+
+    #[tokio::test]
+    async fn test_ai_quoted_context_prompt_routing() {
+        let (db, owner) = setup_test().await;
+        clear_ai_error_state();
+
+        let input = crate::modules::ai::models::UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("invalid-key".to_string()),
+            model_name: Some("test-model".to_string()),
+            ..Default::default()
+        };
+        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+            .await
+            .unwrap();
+
+        let quote = crate::bot::quote::QuotedMessage {
+            author: Some("@bob:mbm.one".to_string()),
+            body: "The earth is flat and gravity is an illusion.".to_string(),
+            event_id: None,
+        };
+
+        // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
+        let _ = handle_ai_command(
+            &db.pool,
+            None,
+            None,
+            "!room:mbm.one",
+            &owner,
+            "Alice",
+            "fact",
+            "check this",
+            "fact check this",
+            false,
+            true,
+            Some(&quote),
+        )
+        .await;
+
+        assert!(
+            is_ai_error_alerted(),
+            "Quoted reply should trigger AI processing"
         );
         clear_ai_error_state();
     }

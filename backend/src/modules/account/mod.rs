@@ -243,6 +243,7 @@ mod tests {
             full_body: format!("!{command}"),
             is_direct,
             is_mentioned: false,
+            quoted: None,
         }
     }
 

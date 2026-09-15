@@ -104,7 +104,7 @@ pub fn register_handlers(
                 Err(_) => room.is_direct().await.unwrap_or(false),
             };
 
-            let parsed = if let Some(parsed) = CommandParser::parse_message(
+            let mut parsed = if let Some(parsed) = CommandParser::parse_message(
                 &text_content.body,
                 formatted_body,
                 &own_id,
@@ -115,18 +115,31 @@ pub fn register_handlers(
             } else {
                 let trimmed = text_content.body.trim();
                 if is_direct && !trimmed.is_empty() {
+                    let (quoted, prompt) = crate::bot::quote::extract_quote_and_prompt(trimmed, formatted_body);
                     ParsedCommand {
                         room_id: room.room_id().to_string(),
                         sender_name: ev.sender.localpart().to_string(),
                         command: "ai".to_string(),
-                        raw_args: trimmed.to_string(),
-                        full_body: trimmed.to_string(),
+                        raw_args: prompt.clone(),
+                        full_body: prompt,
                         is_mentioned: false,
+                        quoted,
                     }
                 } else {
                     return;
                 }
             };
+
+            let replied_event_id = crate::bot::quote::extract_replied_event_id(&ev.content.relates_to);
+            if let Some(ref eid) = replied_event_id {
+                if parsed.quoted.is_none() {
+                    parsed.quoted = crate::bot::quote::resolve_quoted_event_from_room(&room, eid).await;
+                } else if let Some(ref mut q) = parsed.quoted {
+                    if q.event_id.is_none() {
+                        q.event_id = Some(eid.clone());
+                    }
+                }
+            }
 
             info!(
                 "Command received in [{}] from [{}]: command='{}', args='{}'",

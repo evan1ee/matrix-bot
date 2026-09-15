@@ -221,7 +221,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Bot className="w-3.5 h-3.5" />
             </div>
             <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text-primary)] whitespace-nowrap">
-              Matrix Halo Bot
+              Matrix Bot
             </span>
           </div>
 
