@@ -283,9 +283,9 @@ pub async fn run_ai_turn(
         .filter_map(|t| serde_json::to_value(t).ok())
         .collect();
 
-    if super::search::should_enable_grok_search(&resolved_config, prompt_trimmed, None) {
-        info!("Enabling xAI Grok web_search & x_search for prompt: {}", prompt_trimmed);
-        tool_values.extend(super::search::grok_search_tools());
+    if super::search::should_enable_web_search(&resolved_config, prompt_trimmed, None) {
+        info!("Enabling web_search tool for prompt: {}", prompt_trimmed);
+        tool_values.push(super::search::web_search_tool_definition());
     }
 
     let mut iteration = 0;

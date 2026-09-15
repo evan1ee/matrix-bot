@@ -28,8 +28,20 @@ pub async fn execute(
         serde_json::from_str(args_json).map_err(|e| format!("Invalid JSON arguments: {}", e))?
     };
 
-    if name == "web_search" || name == "x_search" {
-        return Ok("Server-side search processed by provider.".to_string());
+    if name == "web_search" {
+        let query = parsed_args
+            .get("query")
+            .and_then(|q| q.as_str())
+            .unwrap_or("")
+            .trim();
+        if query.is_empty() {
+            return Err("Missing 'query' parameter for web_search".to_string());
+        }
+        return crate::modules::ai::search::execute_web_search(query).await;
+    }
+
+    if name == "x_search" {
+        return Ok("X/Twitter search processed.".to_string());
     }
 
     // 1. Try portfolio tools
