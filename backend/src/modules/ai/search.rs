@@ -88,7 +88,17 @@ pub fn grok_search_tools() -> Vec<serde_json::Value> {
     vec![web_search_tool_definition()]
 }
 
-/// Executes a live web search, using Tavily if `TAVILY_API_KEY` is set,
+/// Returns the configured Tavily API key from environment, checking both
+/// `TAVILY_AI_API_KEY` and `TAVILY_API_KEY`.
+pub fn get_tavily_api_key() -> Option<String> {
+    std::env::var("TAVILY_AI_API_KEY")
+        .or_else(|_| std::env::var("TAVILY_API_KEY"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|k| !k.is_empty())
+}
+
+/// Executes a live web search, using Tavily if `TAVILY_AI_API_KEY` or `TAVILY_API_KEY` is set,
 /// otherwise falling back to DuckDuckGo HTML scraping.
 pub async fn execute_web_search(query: &str) -> Result<String, String> {
     let query_trimmed = query.trim();
@@ -96,23 +106,49 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
         return Err("Search query cannot be empty".to_string());
     }
 
-    if let Ok(api_key) = std::env::var("TAVILY_API_KEY") {
-        if !api_key.is_empty() {
-            return execute_tavily_search(query_trimmed, &api_key).await;
+    if let Some(api_key) = get_tavily_api_key() {
+        tracing::info!("Executing web search via Tavily API for query: '{}'", query_trimmed);
+        return execute_tavily_search(query_trimmed, &api_key).await;
+    }
+
+    tracing::info!(
+        "No Tavily API key set (checked TAVILY_AI_API_KEY and TAVILY_API_KEY); using DuckDuckGo fallback for: '{}'",
+        query_trimmed
+    );
+    execute_duckduckgo_search(query_trimmed).await
+}
+
+fn build_search_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs));
+
+    let proxy_url = std::env::var("AI_PROXY")
+        .or_else(|_| std::env::var("HTTPS_PROXY"))
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("ALL_PROXY"))
+        .or_else(|_| std::env::var("all_proxy"))
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+
+    if let Some(proxy_str) = proxy_url {
+        let trimmed = proxy_str.trim();
+        if let Ok(proxy) = reqwest::Proxy::all(trimmed) {
+            tracing::debug!("Web search client configured with proxy: {}", trimmed);
+            builder = builder.proxy(proxy);
         }
     }
 
-    execute_duckduckgo_search(query_trimmed).await
+    builder
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 /// Executes a web search via the Tavily API (optimized for AI/LLM consumption).
 async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = build_search_http_client(15)?;
 
     let body = serde_json::json!({
+        "api_key": api_key,
         "query": query,
         "search_depth": "basic",
         "max_results": 5,
@@ -141,15 +177,21 @@ async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, Str
         .map_err(|e| format!("Failed to parse Tavily response: {}", e))?;
 
     let results = json["results"].as_array();
-    if results.is_none() || results.unwrap().is_empty() {
+    let empty_vec = Vec::new();
+    let items = results.unwrap_or(&empty_vec);
+
+    if items.is_empty() {
+        tracing::info!("Tavily search returned 0 results for '{}'", query);
         return Ok(format!(
             "No web search results found for query: '{}'. Analyze based on prior knowledge.",
             query
         ));
     }
 
+    tracing::info!("Tavily search returned {} results for '{}'", items.len(), query);
+
     let mut output = format!("Top web search results for '{}' (via Tavily):\n\n", query);
-    for (i, result) in results.unwrap().iter().take(5).enumerate() {
+    for (i, result) in items.iter().take(5).enumerate() {
         let title = result["title"].as_str().unwrap_or("Untitled");
         let url = result["url"].as_str().unwrap_or("");
         let content = result["content"].as_str().unwrap_or("");
@@ -169,10 +211,8 @@ async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, Str
 
 /// Executes a web search via DuckDuckGo HTML scraping (fallback).
 async fn execute_duckduckgo_search(query: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    tracing::info!("Executing web search via DuckDuckGo fallback for query: '{}'", query);
+    let client = build_search_http_client(10)?;
 
     let resp = client
         .get("https://html.duckduckgo.com/html/")
@@ -367,6 +407,22 @@ mod tests {
         assert!(!should_enable_web_search(&cfg, "How do I implement binary search in Rust?", None));
         assert!(!should_enable_web_search(&cfg, "Translate this text to French: Hello", None));
         assert!(!should_enable_web_search(&cfg, "Draft a friendly email to my team", None));
+    }
+
+    #[test]
+    fn test_get_tavily_api_key() {
+        std::env::remove_var("TAVILY_AI_API_KEY");
+        std::env::remove_var("TAVILY_API_KEY");
+        assert_eq!(get_tavily_api_key(), None);
+
+        std::env::set_var("TAVILY_API_KEY", "key_plain");
+        assert_eq!(get_tavily_api_key(), Some("key_plain".to_string()));
+
+        std::env::set_var("TAVILY_AI_API_KEY", "key_ai");
+        assert_eq!(get_tavily_api_key(), Some("key_ai".to_string()));
+
+        std::env::remove_var("TAVILY_AI_API_KEY");
+        std::env::remove_var("TAVILY_API_KEY");
     }
 
     #[test]
