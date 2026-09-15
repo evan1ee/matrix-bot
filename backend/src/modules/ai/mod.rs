@@ -11,6 +11,7 @@ pub mod handler;
 pub mod models;
 pub mod repository;
 pub mod retrospective;
+pub mod search;
 pub mod tools;
 
 use matrix_sdk::Client;

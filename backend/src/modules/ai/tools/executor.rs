@@ -28,6 +28,10 @@ pub async fn execute(
         serde_json::from_str(args_json).map_err(|e| format!("Invalid JSON arguments: {}", e))?
     };
 
+    if name == "web_search" || name == "x_search" {
+        return Ok("Server-side search processed by provider.".to_string());
+    }
+
     // 1. Try portfolio tools
     if let Some(res) =
         executor_portfolio::execute_portfolio_tool(pool, broadcaster, owner_id, name, &parsed_args)

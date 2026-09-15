@@ -278,7 +278,15 @@ pub async fn run_ai_turn(
     }
 
     let client = get_ai_client();
-    let tools = ToolRegistry::get_tool_definitions();
+    let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
+        .into_iter()
+        .filter_map(|t| serde_json::to_value(t).ok())
+        .collect();
+
+    if super::search::should_enable_grok_search(&resolved_config, prompt_trimmed, None) {
+        info!("Enabling xAI Grok web_search & x_search for prompt: {}", prompt_trimmed);
+        tool_values.extend(super::search::grok_search_tools());
+    }
 
     let mut iteration = 0;
     let max_iterations = 3;
@@ -292,7 +300,7 @@ pub async fn run_ai_turn(
             messages: chat_messages.clone(),
             temperature: Some(resolved_config.temperature),
             max_tokens: Some(resolved_config.max_tokens),
-            tools: Some(tools.clone()),
+            tools: Some(tool_values.clone()),
             tool_choice: None,
             stream: Some(false),
         };
