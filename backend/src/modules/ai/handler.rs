@@ -181,11 +181,18 @@ pub async fn run_ai_turn(
             .map_err(|e| e.to_string())?
     };
 
-    // Record user message in SQLite
-    if let Err(e) =
-        AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await
-    {
-        warn!("Failed to persist user message: {}", e);
+    // Record user message in SQLite if not an exact immediate retry of the latest message
+    let is_immediate_duplicate = match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
+        Ok(msgs) => msgs.last().map(|m| m.role == "user" && m.content == prompt_trimmed).unwrap_or(false),
+        Err(_) => false,
+    };
+
+    if !is_immediate_duplicate {
+        if let Err(e) =
+            AiRepository::add_message(pool, &conversation.id, "user", prompt_trimmed, None, None).await
+        {
+            warn!("Failed to persist user message: {}", e);
+        }
     }
 
     let settings =
@@ -332,28 +339,36 @@ pub async fn run_ai_turn(
                             name: None,
                         });
 
-                        for tool_call in tool_calls {
+                        let tool_futures = tool_calls.iter().map(|tool_call| {
                             let func_name = tool_call.function.name.clone();
                             let tool_call_id = tool_call.id.clone();
-                            tool_calls_executed.push(func_name.clone());
-                            info!(
-                                "AI turn [{}/{}] executing tool: {} for owner {}",
-                                iteration, max_iterations, func_name, owner_id
-                            );
+                            let args = tool_call.function.arguments.clone();
+                            async move {
+                                info!(
+                                    "AI turn [{}/{}] executing tool: {} for owner {}",
+                                    iteration, max_iterations, func_name, owner_id
+                                );
+                                let result_str = match ToolRegistry::execute_tool(
+                                    pool,
+                                    broadcaster,
+                                    owner_id,
+                                    room_id,
+                                    &func_name,
+                                    &args,
+                                )
+                                .await
+                                {
+                                    Ok(res) => res,
+                                    Err(err) => format!("Error executing tool: {}", err),
+                                };
+                                (tool_call_id, func_name, result_str)
+                            }
+                        });
 
-                            let result_str = match ToolRegistry::execute_tool(
-                                pool,
-                                broadcaster,
-                                owner_id,
-                                room_id,
-                                &func_name,
-                                &tool_call.function.arguments,
-                            )
-                            .await
-                            {
-                                Ok(res) => res,
-                                Err(err) => format!("Error executing tool: {}", err),
-                            };
+                        let execution_results = futures_util::future::join_all(tool_futures).await;
+
+                        for (tool_call_id, func_name, result_str) in execution_results {
+                            tool_calls_executed.push(func_name.clone());
 
                             // Persist tool result message in SQLite
                             let _ = AiRepository::add_message(
