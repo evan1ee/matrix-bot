@@ -144,7 +144,7 @@ export const TimeBlocksView: React.FC = () => {
           )}
           {Number(timeTrackedHours) > 0 && (
             <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-              {timeTrackedHours}h / 24h Tracked
+              {timeTrackedHours}h / 24h tracked
             </span>
           )}
         </div>
@@ -210,7 +210,7 @@ export const TimeBlocksView: React.FC = () => {
         />
 
         <div className="flex items-center justify-between pt-3 border-t border-neutral-100 dark:border-neutral-800">
-          <span className="text-xs text-neutral-500 font-mono">
+          <span className="text-xs text-neutral-500 font-sans">
             {timeSaveSuccess
               ? '✓ Time blocks saved'
               : selectedDate === todayStr
@@ -226,9 +226,15 @@ export const TimeBlocksView: React.FC = () => {
                 type="button"
                 disabled={saveTimeMutation.isPending}
                 onClick={handleSaveTime}
-                className="px-4 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-150 cursor-pointer disabled:opacity-50 shadow-2xs"
+                className="h-8 px-4 text-xs font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-white rounded-md shadow-xs transition-colors duration-150 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
               >
-                {saveTimeMutation.isPending ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}
+                {saveTimeMutation.isPending && (
+                  <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-neutral-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                )}
+                <span>{saveTimeMutation.isPending ? 'Saving...' : timeSaveSuccess ? '✓ Saved' : 'Save time blocks'}</span>
               </button>
             )}
           </div>

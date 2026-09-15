@@ -238,7 +238,7 @@ export const MoodView: React.FC = () => {
             <button
               type="button"
               onClick={() => shiftDate(-1)}
-              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors duration-150 cursor-pointer shrink-0 shadow-2xs"
               title="Previous day"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -256,7 +256,7 @@ export const MoodView: React.FC = () => {
             <button
               type="button"
               onClick={() => shiftDate(1)}
-              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="h-8 w-8 flex items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors duration-150 cursor-pointer shrink-0 shadow-2xs"
               title="Next day"
             >
               <ChevronRight className="w-4 h-4" />
@@ -267,7 +267,7 @@ export const MoodView: React.FC = () => {
             <button
               type="button"
               onClick={() => setSelectedDate(todayStr)}
-              className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1 shadow-2xs"
+              className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors duration-150 cursor-pointer shrink-0 inline-flex items-center gap-1 shadow-2xs"
             >
               <span>Back to today</span>
             </button>
@@ -280,7 +280,7 @@ export const MoodView: React.FC = () => {
                 `Generate a thoughtful reflection and summary of my activities, mood, habits, and highlights for ${selectedDate}.`
               )
             }
-            className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1.5 shadow-2xs"
+            className="h-8 px-2.5 rounded-md text-xs font-medium border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors duration-150 cursor-pointer shrink-0 inline-flex items-center gap-1.5 shadow-2xs"
             title="Ask AI Brain to reflect on this day"
           >
             <Sparkles className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
@@ -306,8 +306,8 @@ export const MoodView: React.FC = () => {
               {/* Feel / Primary Mood & Weather Card */}
               <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                    Feel & Environment
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+                    Feel & environment
                   </span>
                   <span className="text-[10px] font-mono text-neutral-400">
                     Record
@@ -316,8 +316,8 @@ export const MoodView: React.FC = () => {
 
                 {/* Mood Selector */}
                 <div>
-                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2">
-                    Feel / Primary Mood
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans mb-2">
+                    Feel / primary mood
                   </label>
                   <div className="grid grid-cols-5 gap-2">
                     {(Object.keys(MOOD_CONFIG) as MoodType[]).map((moodKey) => {
@@ -328,14 +328,14 @@ export const MoodView: React.FC = () => {
                           key={moodKey}
                           type="button"
                           onClick={() => setSelectedMood(moodKey)}
-                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs transition-colors duration-150 cursor-pointer ${
                             isSelected
                               ? `${config.bgClass} ${config.textClass} font-semibold ring-1 ring-neutral-900 dark:ring-neutral-100 shadow-xs`
-                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
                           }`}
                         >
                           <span className="text-2xl mb-1">{config.emoji}</span>
-                          <span className="text-[11px]">{config.label}</span>
+                          <span className="text-[11px] font-sans">{config.label}</span>
                         </button>
                       );
                     })}
@@ -344,7 +344,7 @@ export const MoodView: React.FC = () => {
 
                 {/* Weather */}
                 <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800">
-                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-2">
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans mb-2">
                     Weather (optional)
                   </label>
                   <div className="flex flex-wrap gap-2">
@@ -356,14 +356,14 @@ export const MoodView: React.FC = () => {
                           key={wKey}
                           type="button"
                           onClick={() => setSelectedWeather(isSelected ? null : wKey)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors duration-150 cursor-pointer ${
                             isSelected
                               ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100 shadow-2xs'
-                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                              : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
                           }`}
                         >
                           <span>{w.emoji}</span>
-                          <span>{w.label}</span>
+                          <span className="font-sans">{w.label}</span>
                         </button>
                       );
                     })}
@@ -374,8 +374,8 @@ export const MoodView: React.FC = () => {
               {/* Activities & Milestones Card */}
               <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                    Activities & Milestones
+                  <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+                    Activities & milestones
                   </span>
                   <span className="text-[10px] font-mono text-neutral-400">
                     {selectedActivities.length > 0
@@ -391,14 +391,14 @@ export const MoodView: React.FC = () => {
                         key={act.id}
                         type="button"
                         onClick={() => handleToggleActivity(act.id)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium border transition-colors text-left cursor-pointer ${
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium border transition-colors duration-150 text-left cursor-pointer ${
                           isChecked
                             ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 border-neutral-900 dark:border-neutral-100 shadow-2xs'
-                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
                         }`}
                       >
                         <span>{act.emoji}</span>
-                        <span className="truncate">{act.label}</span>
+                        <span className="truncate font-sans">{act.label}</span>
                       </button>
                     );
                   })}
@@ -409,8 +409,8 @@ export const MoodView: React.FC = () => {
             /* Logged Day Summary Card (Sealed View) */
             <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Day Summary
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+                  Day summary
                 </span>
                 <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
                   Recorded
@@ -427,28 +427,28 @@ export const MoodView: React.FC = () => {
               >
                 <span className="text-3xl">{loggedMoodCfg?.emoji || '✨'}</span>
                 <div>
-                  <div className="text-base font-bold capitalize">{loggedMoodCfg?.label || dayLog?.mood}</div>
-                  <div className="text-xs opacity-80">Primary recorded mood</div>
+                  <div className="text-base font-bold capitalize font-sans">{loggedMoodCfg?.label || dayLog?.mood}</div>
+                  <div className="text-xs opacity-80 font-sans">Primary recorded mood</div>
                 </div>
               </div>
 
               {/* Weather Banner */}
               {dayLog?.weather && (
                 <div>
-                  <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1.5">
+                  <div className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans mb-1.5">
                     Weather
                   </div>
                   <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs font-medium text-neutral-800 dark:text-neutral-200">
                     <span className="text-sm">{loggedWeatherCfg?.emoji || '🌤️'}</span>
-                    <span>{loggedWeatherCfg?.label || dayLog.weather}</span>
+                    <span className="font-sans">{loggedWeatherCfg?.label || dayLog.weather}</span>
                   </div>
                 </div>
               )}
 
               {/* Activities & Milestones Tags */}
               <div>
-                <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500 mb-1.5">
-                  Activities & Milestones
+                <div className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans mb-1.5">
+                  Activities & milestones
                 </div>
                 {dayLog?.activities && dayLog.activities.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -460,13 +460,13 @@ export const MoodView: React.FC = () => {
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
                         >
                           <span>{act?.emoji || '📌'}</span>
-                          <span>{act?.label || actId}</span>
+                          <span className="font-sans">{act?.label || actId}</span>
                         </span>
                       );
                     })}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-neutral-400 dark:text-neutral-500 italic">
+                  <p className="text-[11px] text-neutral-400 dark:text-neutral-500 italic font-sans">
                     No activities or milestones recorded for this day.
                   </p>
                 )}
@@ -485,8 +485,8 @@ export const MoodView: React.FC = () => {
               className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Record Daily Reflection
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+                  Record daily reflection
                 </span>
                 <span className="text-[10px] font-mono text-neutral-400">
                   Unrecorded
@@ -495,8 +495,8 @@ export const MoodView: React.FC = () => {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400">
-                    Notes & Reflection (optional)
+                  <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">
+                    Notes & reflection (optional)
                   </label>
                   <span className="text-[10px] font-mono text-neutral-400 tabular-nums">
                     {note.length}/500
@@ -508,7 +508,7 @@ export const MoodView: React.FC = () => {
                   placeholder="What happened today? Memories, achievements, or learnings..."
                   maxLength={500}
                   rows={8}
-                  className="w-full px-3.5 py-2.5 rounded-md text-xs border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-800/50 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 resize-none leading-relaxed"
+                  className="w-full px-3.5 py-2.5 rounded-md text-xs border border-neutral-200 dark:border-neutral-700 bg-neutral-50/50 dark:bg-neutral-800/50 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 resize-none leading-relaxed font-sans"
                 />
               </div>
 
@@ -517,7 +517,7 @@ export const MoodView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={saveDayMutation.isPending}
-                  className="h-9 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
+                  className="h-8 px-4 text-xs font-medium text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-md shadow-xs transition-colors duration-150 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
                 >
                   {saveDayMutation.isPending && (
                     <svg className="animate-spin -ml-0.5 mr-1 h-3 w-3 text-white dark:text-neutral-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -533,8 +533,8 @@ export const MoodView: React.FC = () => {
             /* Sealed Daily Reflection View */
             <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-900 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Sealed Daily Reflection
+                <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+                  Sealed daily reflection
                 </span>
                 <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
                   Logged
@@ -543,15 +543,15 @@ export const MoodView: React.FC = () => {
 
               {/* Reflection Note Prose */}
               <div className="space-y-1.5">
-                <div className="text-[10px] font-mono font-medium uppercase tracking-wider text-neutral-500">
-                  Notes & Reflection
+                <div className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">
+                  Notes & reflection
                 </div>
                 {dayLog?.note ? (
-                  <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap leading-relaxed">
+                  <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap leading-relaxed font-sans">
                     "{dayLog.note}"
                   </div>
                 ) : (
-                  <div className="p-3.5 rounded-md bg-neutral-50/50 dark:bg-neutral-800/30 border border-neutral-200/80 dark:border-neutral-800/80 text-xs text-neutral-400 dark:text-neutral-500 italic">
+                  <div className="p-3.5 rounded-md bg-neutral-50/50 dark:bg-neutral-800/30 border border-neutral-200/80 dark:border-neutral-800/80 text-xs text-neutral-400 dark:text-neutral-500 italic font-sans">
                     No reflection notes were recorded for this day.
                   </div>
                 )}

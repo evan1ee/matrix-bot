@@ -262,8 +262,8 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
-          <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-            24-Hour Time Allocation
+          <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 font-sans">
+            24-hour time allocation
           </span>
           <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 tabular-nums">
             ({stats.totalHours}h / 24h tracked)
@@ -384,18 +384,18 @@ export const LifeTimeGrid: React.FC<LifeTimeGridProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2.5 gap-y-0.5">
           {/* Sub-column 1: 00:00 - 12:00 */}
           <div className="space-y-0.5">
-            <div className="text-[9px] font-mono font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
-              <span>00:00 – 12:00</span>
-              <span>Morning</span>
+            <div className="text-[10px] text-neutral-400 dark:text-neutral-500 pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
+              <span className="font-mono tabular-nums">00:00 – 12:00</span>
+              <span className="font-sans font-medium">Morning</span>
             </div>
             {Array.from({ length: 12 }).map((_, i) => renderHourRow(i))}
           </div>
 
           {/* Sub-column 2: 12:00 - 24:00 */}
           <div className="space-y-0.5">
-            <div className="text-[9px] font-mono font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
-              <span>12:00 – 24:00</span>
-              <span>Evening</span>
+            <div className="text-[10px] text-neutral-400 dark:text-neutral-500 pb-0.5 border-b border-neutral-100 dark:border-neutral-800 flex justify-between px-1">
+              <span className="font-mono tabular-nums">12:00 – 24:00</span>
+              <span className="font-sans font-medium">Evening</span>
             </div>
             {Array.from({ length: 12 }).map((_, i) => renderHourRow(i + 12))}
           </div>
