@@ -243,6 +243,31 @@
         ]
       }
     },
+    "/api/v1/account/passkeys/add/start": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "operationId": "add_passkey_start",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyStart"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/account/passkeys/{id}": {
       "put": {
         "tags": [
@@ -1105,6 +1130,46 @@
             "session_cookie": []
           }
         ]
+      }
+    },
+    "/api/v1/auth/passkey/enroll/start": {
+      "post": {
+        "tags": [
+          "auth::webauthn"
+        ],
+        "operationId": "enroll_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Challenge to pass to navigator.credentials.create",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyStart"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired enrollment token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/auth/passkey/login/finish": {
@@ -5141,6 +5206,18 @@
           },
           "domain": {
             "type": "string"
+          }
+        }
+      },
+      "EnrollStartRequest": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Single-use enrollment token generated from Matrix chat `!passkey add`."
           }
         }
       },

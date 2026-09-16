@@ -44,6 +44,10 @@ fn routes_auth() -> Router<auth::ApiState> {
             post(auth::recovery::redeem_recovery),
         )
         .route(
+            "/auth/passkey/enroll/start",
+            post(auth::webauthn::enroll_start),
+        )
+        .route(
             "/auth/passkey/register/start",
             post(auth::webauthn::register_start),
         )
@@ -68,6 +72,10 @@ fn routes_auth() -> Router<auth::ApiState> {
 fn routes_account() -> Router<auth::ApiState> {
     Router::new()
         .route("/account/passkeys", get(account::passkeys::list_passkeys))
+        .route(
+            "/account/passkeys/add/start",
+            post(account::passkeys::add_passkey_start),
+        )
         .route(
             "/account/passkeys/:id",
             put(account::passkeys::rename_passkey).delete(account::passkeys::delete_passkey),

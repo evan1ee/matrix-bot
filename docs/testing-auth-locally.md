@@ -117,16 +117,30 @@ Security in a signed-in tab. There is a red banner with a **Cancel recovery**
 button, and cancelling deliberately does *not* require a passkey — you may be
 racing the clock on a phone.
 
+### Enroll a passkey from Matrix chat (`!passkey add` / `!web`)
+
+If your Matrix account is your primary identity, you can attach a passkey directly from chat without registering an orphan web account first:
+
+1. Send `!passkey add` (or `!web`) to the bot **in a direct message**.
+2. The bot replies with a single-use 15-minute link (e.g. `http://localhost:5173/?enroll=<token>`).
+3. Opening the link triggers the passkey registration ceremony and immediately links the new passkey to your existing Matrix account.
+4. Additional passkeys can be added anytime using the **+ Add a passkey** button in Settings → Security, or by issuing `!passkey add` again.
+
+### Manage passkeys and sessions from Matrix (`!passkeys` & `!unlink`)
+
+You can inspect and revoke passkeys and sessions directly from Matrix chat:
+
+- **`!passkeys`** (or `!passkey list`): Lists all passkeys attached to your account with index numbers (e.g. `#1 Touch ID`, `#2 YubiKey`).
+- **`!unlink passkey <n>`**: Removes the specified passkey. Because the Matrix account is the primary root identity, removing the last passkey is safely permitted without locking you out of your account.
+- **`!unlink sessions`**: Signs out all active web sessions across all devices directly from chat.
+
 ### The Matrix ceiling
 
-These should all refuse and point at the web app, from any room:
+These actions still refuse and point at the web app, because they require web-only step-up assertion or direct browser downloads:
 
 ```
-!export      !unlink      !passkey      !sessions      !recoverycodes
+!export      !recoverycodes
 ```
-
-That refusal is what makes step-up meaningful: Matrix cannot prompt for a
-passkey, so it gets no route to a privileged action at all.
 
 ## Resetting
 

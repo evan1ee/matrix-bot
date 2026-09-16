@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Copy,
@@ -25,7 +26,7 @@ import {
   useSecurityEvents,
   useSensitiveAction,
 } from '../core/security';
-import { describePasskeyError } from '../core/passkey';
+import { addPasskey, describePasskeyError } from '../core/passkey';
 import { formatDateTimeInZone } from '../core/settings';
 import { useSettings } from '../core/settings';
 
@@ -158,9 +159,11 @@ function parseDevice(userAgent?: string | null): ParsedDevice {
  */
 export const SecurityPanel: React.FC = () => {
   const settings = useSettings();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
+  const [isAddingPasskey, setIsAddingPasskey] = useState(false);
 
   const passkeys = usePasskeys();
   const links = useLinkedAccounts();
@@ -171,6 +174,20 @@ export const SecurityPanel: React.FC = () => {
 
   const fmt = (iso: string | null) =>
     iso ? formatDateTimeInZone(iso, settings.timezone) : '—';
+
+  const handleAddPasskey = async () => {
+    setIsAddingPasskey(true);
+    setError(null);
+    try {
+      await addPasskey();
+      queryClient.invalidateQueries({ queryKey: SECURITY_KEYS.passkeys });
+      queryClient.invalidateQueries({ queryKey: SECURITY_KEYS.events });
+    } catch (err) {
+      setError(describePasskeyError(err));
+    } finally {
+      setIsAddingPasskey(false);
+    }
+  };
 
   const run = <T,>(m: { mutateAsync: (a: T) => Promise<unknown>; isPending: boolean }, arg: T) => {
     setError(null);
@@ -298,22 +315,38 @@ export const SecurityPanel: React.FC = () => {
             </li>
           )}
         </ul>
+
+        <Button
+          busy={isAddingPasskey}
+          className="self-start"
+          onClick={handleAddPasskey}
+        >
+          <KeyRound size={14} />
+          Add a passkey
+        </Button>
       </Section>
 
       <Section
         title="Matrix accounts"
-        hint="Send the code to the bot in a direct message. Anything you add from Matrix lands here too."
+        hint="Matrix account is your primary identity. You can link multiple passkeys to it, or attach secondary Matrix accounts."
       >
         <ul className="flex flex-col gap-2">
-          {links.data?.map((mxid) => (
+          {links.data?.map((mxid, idx) => (
             <li
               key={mxid}
               className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
             >
               <Link2 size={16} className="shrink-0 text-neutral-500" />
-              <span className="min-w-0 flex-1 truncate text-sm text-neutral-900 dark:text-neutral-100">
-                {mxid}
-              </span>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="truncate text-sm text-neutral-900 dark:text-neutral-100 font-mono">
+                  {mxid}
+                </span>
+                {idx === 0 && (
+                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    primary identity
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 aria-label={`Unlink ${mxid}`}

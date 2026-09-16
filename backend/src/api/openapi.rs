@@ -24,6 +24,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
     paths(
         health::health_check,
         sse::sse_handler,
+        auth::webauthn::enroll_start,
         auth::webauthn::register_start,
         auth::webauthn::register_finish,
         auth::webauthn::login_start,
@@ -31,6 +32,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         auth::matrix::login_with_matrix,
         auth::logout,
         account::passkeys::list_passkeys,
+        account::passkeys::add_passkey_start,
         account::passkeys::rename_passkey,
         account::passkeys::delete_passkey,
         account::links::list_links,
@@ -126,6 +128,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             health::HealthResponse,
             auth::webauthn::CeremonyStart,
             auth::webauthn::RegisterStartRequest,
+            auth::webauthn::EnrollStartRequest,
             auth::webauthn::RegisterFinishRequest,
             auth::webauthn::LoginFinishRequest,
             auth::webauthn::SessionResponse,

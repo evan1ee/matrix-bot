@@ -122,6 +122,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/passkeys/add/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["add_passkey_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/passkeys/{id}": {
         parameters: {
             query?: never;
@@ -496,6 +512,22 @@ export interface paths {
         get: operations["media_proxy"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkey/enroll/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enroll_start"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1567,6 +1599,10 @@ export interface components {
             count: number;
             domain: string;
         };
+        EnrollStartRequest: {
+            /** @description Single-use enrollment token generated from Matrix chat `!passkey add`. */
+            token: string;
+        };
         HealthResponse: {
             db_status: string;
             service: string;
@@ -2535,6 +2571,25 @@ export interface operations {
             };
         };
     };
+    add_passkey_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+        };
+    };
     rename_passkey: {
         parameters: {
             query?: never;
@@ -3129,6 +3184,39 @@ export interface operations {
             };
             /** @description Media not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    enroll_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Challenge to pass to navigator.credentials.create */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+            /** @description Invalid or expired enrollment token */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

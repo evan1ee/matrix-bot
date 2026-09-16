@@ -10,10 +10,62 @@ use crate::accounts::{
 };
 use crate::api::account::types::*;
 use crate::api::auth::extractor::VerifiedUser;
-use crate::api::auth::types::{ApiState, AuthUser};
+use crate::api::auth::types::{ApiState, AuthUser, Ceremony};
+use crate::api::auth::webauthn::CeremonyStart;
 use crate::error::ApiError;
 
 // ---------------------------------------------------------------- passkeys --
+
+#[utoipa::path(
+    post,
+    tag = "account",
+    path = "/api/v1/account/passkeys/add/start",
+    responses((status = 200, body = CeremonyStart)),
+    security(("session_cookie" = []))
+)]
+pub async fn add_passkey_start(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<CeremonyStart>, ApiError> {
+    let handle = crate::accounts::account_id_to_handle(&user.account_id)
+        .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
+
+    let stored = CredentialRepository::list_for_account(&state.db.pool, &user.account_id)
+        .await
+        .unwrap_or_default();
+    let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
+        .iter()
+        .filter_map(|c| c.passkey())
+        .map(|p| p.cred_id().clone())
+        .collect();
+    let exclude_opt = if exclude.is_empty() {
+        None
+    } else {
+        Some(exclude)
+    };
+
+    let (options, reg_state) = state
+        .webauthn
+        .start_passkey_registration(handle, &user.display_name, &user.display_name, exclude_opt)
+        .map_err(|err| {
+            tracing::error!("Could not start passkey registration: {:?}", err);
+            ApiError::internal("Could not start passkey registration")
+        })?;
+
+    let ceremony_id = state
+        .stash_ceremony(Ceremony::Registration {
+            account_id: user.account_id,
+            display_name: user.display_name,
+            state: reg_state,
+        })
+        .await?;
+
+    Ok(Json(CeremonyStart {
+        ceremony_id,
+        options: serde_json::to_value(&options)
+            .map_err(|err| ApiError::internal(err.to_string()))?,
+    }))
+}
 
 #[utoipa::path(
     get,

@@ -137,6 +137,28 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Single-use enrollment tokens for registering a passkey directly to a Matrix account.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS passkey_enrollment_tokens (
+            token       TEXT PRIMARY KEY,
+            account_id  TEXT NOT NULL,
+            created_at  TIMESTAMP NOT NULL,
+            expires_at  TIMESTAMP NOT NULL,
+            consumed_at TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_enrollment_tokens_account \
+         ON passkey_enrollment_tokens(account_id);",
+    )
+    .execute(pool)
+    .await?;
+
     // Single-use recovery codes, bcrypt-hashed for the same reason a password
     // would be: a leaked backup must not hand someone a way in.
     sqlx::query(

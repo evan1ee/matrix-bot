@@ -42,6 +42,12 @@ pub struct RegisterStartRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct EnrollStartRequest {
+    /// Single-use enrollment token generated from Matrix chat `!passkey add`.
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RegisterFinishRequest {
     pub ceremony_id: String,
     /// The authenticator's response, verbatim.
@@ -140,6 +146,78 @@ pub async fn register_start(
 
 #[utoipa::path(
     post,
+    path = "/api/v1/auth/passkey/enroll/start",
+    request_body = EnrollStartRequest,
+    responses(
+        (status = 200, description = "Challenge to pass to navigator.credentials.create", body = CeremonyStart),
+        (status = 400, description = "Invalid or expired enrollment token", body = ApiErrorResponse)
+    )
+)]
+pub async fn enroll_start(
+    State(state): State<ApiState>,
+    Json(payload): Json<EnrollStartRequest>,
+) -> Result<Json<CeremonyStart>, ApiError> {
+    let token = payload.token.trim();
+    let account_id =
+        crate::accounts::EnrollmentRepository::validate_and_consume(&state.db.pool, token)
+            .await
+            .map_err(|err| {
+                ApiError::internal(format!("could not validate enrollment token: {err}"))
+            })?
+            .ok_or_else(|| ApiError::bad_request("Enrollment link is invalid or has expired."))?;
+
+    let account = AccountRepository::find(&state.db.pool, &account_id)
+        .await
+        .map_err(|err| ApiError::internal(format!("could not find account: {err}")))?
+        .ok_or_else(|| ApiError::bad_request("Account not found"))?;
+
+    let handle = crate::accounts::account_id_to_handle(&account_id)
+        .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
+
+    let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
+        .await
+        .unwrap_or_default();
+    let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
+        .iter()
+        .filter_map(|c| c.passkey())
+        .map(|p| p.cred_id().clone())
+        .collect();
+    let exclude_opt = if exclude.is_empty() {
+        None
+    } else {
+        Some(exclude)
+    };
+
+    let (options, reg_state) = state
+        .webauthn
+        .start_passkey_registration(
+            handle,
+            &account.display_name,
+            &account.display_name,
+            exclude_opt,
+        )
+        .map_err(|err| {
+            tracing::error!("Could not start passkey registration: {:?}", err);
+            ApiError::internal("Could not start passkey registration")
+        })?;
+
+    let ceremony_id = state
+        .stash_ceremony(Ceremony::Registration {
+            account_id,
+            display_name: account.display_name,
+            state: reg_state,
+        })
+        .await?;
+
+    Ok(Json(CeremonyStart {
+        ceremony_id,
+        options: serde_json::to_value(&options)
+            .map_err(|err| ApiError::internal(err.to_string()))?,
+    }))
+}
+
+#[utoipa::path(
+    post,
     path = "/api/v1/auth/passkey/register/finish",
     request_body = RegisterFinishRequest,
     responses(
@@ -171,15 +249,18 @@ pub async fn register_finish(
             ApiError::bad_request("That passkey could not be verified")
         })?;
 
-    // Only now does the account become real.
-    AccountRepository::create_with_id(
-        &state.db.pool,
-        &account_id,
-        &display_name,
-        crate::accounts::STATUS_ACTIVE,
+    // Activate or create the account.
+    sqlx::query(
+        "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, 'active') \
+         ON CONFLICT(id) DO UPDATE SET status = 'active'",
     )
+    .bind(&account_id)
+    .bind(&display_name)
+    .execute(&state.db.pool)
     .await
-    .map_err(|err| ApiError::internal(format!("could not create the account: {err}")))?;
+    .map_err(|err| {
+        ApiError::internal(format!("could not activate or create the account: {err}"))
+    })?;
 
     let label = payload
         .label
@@ -191,6 +272,14 @@ pub async fn register_finish(
     CredentialRepository::add(&state.db.pool, &account_id, &passkey, label)
         .await
         .map_err(|err| ApiError::internal(format!("could not store the passkey: {err}")))?;
+
+    crate::accounts::SecurityEventRepository::record(
+        &state.db.pool,
+        &account_id,
+        crate::accounts::SecurityEventKind::PasskeyAdded,
+        Some(label),
+    )
+    .await;
 
     issue_session(&state, &account_id, &display_name, &headers).await
 }
@@ -616,5 +705,38 @@ mod tests {
             "sign-out must expire the cookie"
         );
         assert!(cookie.contains("mb_session="));
+    }
+
+    #[tokio::test]
+    async fn test_enroll_start_validates_and_stashes_ceremony() {
+        let state = state_with_secret(None).await;
+        // Auto-provision an account
+        let account_id = AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
+            .await
+            .unwrap();
+
+        // Issue enrollment token
+        let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
+            .await
+            .unwrap();
+
+        // enroll_start
+        let res = enroll_start(
+            State(state.clone()),
+            Json(EnrollStartRequest { token: token.clone() }),
+        )
+        .await
+        .unwrap();
+
+        assert!(!res.ceremony_id.is_empty());
+        assert!(state.webauthn_ceremonies.read().await.contains_key(&res.ceremony_id));
+
+        // Reusing same token is rejected
+        let second = enroll_start(
+            State(state.clone()),
+            Json(EnrollStartRequest { token }),
+        )
+        .await;
+        assert!(second.is_err());
     }
 }

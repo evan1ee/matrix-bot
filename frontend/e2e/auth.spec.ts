@@ -210,3 +210,28 @@ test('the page never holds the session where a script could read it', async ({ a
   expect(exposed.session).toEqual([]);
   expect(exposed.cookie).not.toContain('mb_session');
 });
+
+test('registers a passkey using an enrollment token (?enroll=...) from Matrix chat', async ({
+  anonApp,
+  api,
+}) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/?enroll=valid_token_123');
+
+  // Modal automatically opens with enrollment prompt
+  const dialog = anonApp.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/Link Matrix Passkey/i)).toBeVisible();
+
+  await dialog.getByRole('button', { name: /Activate passkey for this device/i }).click();
+
+  await expect(anonApp.getByText(DASHBOARD_READY)).toBeVisible();
+
+  // Both halves of enrollment ran
+  const enrollStart = api.requests.find((r) => r.url === '/auth/passkey/enroll/start');
+  expect(enrollStart).toBeTruthy();
+  expect(enrollStart?.body).toEqual({ token: 'valid_token_123' });
+
+  const enrollFinish = api.requests.find((r) => r.url === '/auth/passkey/register/finish');
+  expect(enrollFinish).toBeTruthy();
+});

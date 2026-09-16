@@ -172,6 +172,59 @@ export async function signOut(): Promise<void> {
 }
 
 /**
+ * Enrolls a passkey using a single-use token issued from Matrix chat (!passkey add).
+ */
+export async function enrollPasskey(token: string): Promise<AccountSummary> {
+  const start = await fetchApi<CeremonyStart>('/auth/passkey/enroll/start', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+
+  const credential = (await navigator.credentials.create(
+    toCreationOptions(start.options)
+  )) as PublicKeyCredential | null;
+
+  if (!credential) {
+    throw new Error('No passkey was created');
+  }
+
+  return fetchApi<AccountSummary>('/auth/passkey/register/finish', {
+    method: 'POST',
+    body: JSON.stringify({
+      ceremony_id: start.ceremony_id,
+      credential: serialiseRegistration(credential),
+      label: passkeyLabel(),
+    }),
+  });
+}
+
+/**
+ * Adds another passkey to an already signed-in account.
+ */
+export async function addPasskey(): Promise<AccountSummary> {
+  const start = await fetchApi<CeremonyStart>('/account/passkeys/add/start', {
+    method: 'POST',
+  });
+
+  const credential = (await navigator.credentials.create(
+    toCreationOptions(start.options)
+  )) as PublicKeyCredential | null;
+
+  if (!credential) {
+    throw new Error('No passkey was created');
+  }
+
+  return fetchApi<AccountSummary>('/auth/passkey/register/finish', {
+    method: 'POST',
+    body: JSON.stringify({
+      ceremony_id: start.ceremony_id,
+      credential: serialiseRegistration(credential),
+      label: passkeyLabel(),
+    }),
+  });
+}
+
+/**
  * A recognisable name for the device being registered.
  *
  * Best-effort and cosmetic: it only has to help someone spot which entry to

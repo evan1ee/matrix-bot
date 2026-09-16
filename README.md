@@ -85,11 +85,15 @@ The backend supports multiple client surfaces with strict ownership isolation:
 - **Native iOS & Element X**: **1-Step Matrix Session Exchange** (`POST /api/v1/auth/matrix/login`). The native client exchanges its existing homeserver access token for an opaque backend session token, transmitted via standard `Authorization: Bearer <session_token>` headers.
 - **Matrix Chat**: Bot commands are authenticated via cryptographic Matrix room event signatures, resolved to account owners through linked identities.
 
-**Local accounts own the data.** A Matrix account is something you *attach* to a
-local account, not an identity in its own right. Every todo, reminder,
-transaction, bill, habit, bookmark, and holding belongs to an account; the same person signing in
-on the web, using the native iOS app, and messaging the bot in Matrix is one owner with one unified dataset.
+**Matrix account is the primary identity.** Every todo, reminder,
+transaction, bill, habit, bookmark, and holding belongs to an account. Whether messaging the bot in Matrix, browsing on the web, or using the native iOS app, you are one owner with one unified dataset.
 
+- **Matrix-Driven Passkey Enrollment (`!passkey add` or `!web`)** — send `!passkey add` (or `!web`) to the bot in a direct message. The bot generates a single-use 15-minute enrollment link that opens the web UI and registers a WebAuthn passkey directly to your existing Matrix account without creating orphan accounts.
+- **Multiple Passkeys** — attach multiple passkeys (e.g. MacBook Touch ID, Windows Hello, iPhone Face ID, YubiKey) to a single account. Additional passkeys can be added anytime from chat via `!passkey add` or via the **+ Add a passkey** button in the Web UI Security Panel.
+- **Chat Management & Revocation (`!passkeys` & `!unlink`)**:
+  - `!passkeys` (or `!passkey list`) — lists all registered passkeys with index numbers, labels, and creation dates.
+  - `!unlink passkey <n>` — deletes the specified passkey directly from chat. Because your Matrix identity is the primary identity, removing the last passkey is safely permitted without locking you out of your account.
+  - `!unlink sessions` — revokes all active web sessions across all devices directly from chat.
 - **Web Sign-in** — one button. Credentials are discoverable, so the browser offers
   the passkey and the credential itself identifies the account. There is no
   username or password field.
@@ -102,10 +106,7 @@ on the web, using the native iOS app, and messaging the bot in Matrix is one own
   cancels it.
 - **Merging** — linking a Matrix account that already has history reports what
   it holds and asks before moving anything.
-- **Step-up** — linking, unlinking, managing passkeys, signing out other devices
-  and generating recovery codes all need a passkey assertion from the last five
-  minutes. Matrix commands cannot reach any of them, because Matrix has no way
-  to prompt for a passkey.
+- **Step-up** — sensitive actions in the web UI (managing passkeys, unlinking identities, signing out other devices, generating recovery codes) require a recent passkey assertion within the last 5 minutes.
 - **Recovery** — ten single-use codes, plus `!recover` from a linked Matrix
   account. The latter is announced immediately, waits 24 hours, can be cancelled
   from any signed-in device, and then grants a session that may register a

@@ -766,6 +766,21 @@ export class FakeApi {
     // specs exercise is the browser half: the base64url conversions, the
     // options mapping, and how the UI reacts. Verifying an assertion is the
     // server's job and is covered by the Rust tests.
+    if (path === '/auth/passkey/enroll/start' && method === 'POST') {
+      if (!body?.token || body.token === 'invalid') {
+        return json(route, 400, { error: 'Enrollment link is invalid or has expired.', code: 400 });
+      }
+      return json(route, 200, {
+        ceremony_id: 'ceremony_enroll',
+        options: { publicKey: registrationOptions(DISPLAY_NAME) },
+      });
+    }
+    if (path === '/account/passkeys/add/start' && method === 'POST') {
+      return json(route, 200, {
+        ceremony_id: 'ceremony_add_passkey',
+        options: { publicKey: registrationOptions(DISPLAY_NAME) },
+      });
+    }
     if (path === '/auth/passkey/register/start' && method === 'POST') {
       return json(route, 200, {
         ceremony_id: 'ceremony_register',
@@ -774,6 +789,12 @@ export class FakeApi {
     }
     if (path === '/auth/passkey/register/finish' && method === 'POST') {
       this.signedIn = true;
+      this.passkeys.push({
+        id: `pk_${Date.now()}`,
+        label: body?.label || 'Passkey',
+        created_at: new Date().toISOString(),
+        last_used_at: new Date().toISOString(),
+      });
       return json(route, 200, { account_id: OWNER, display_name: DISPLAY_NAME });
     }
     if (path === '/auth/passkey/login/start' && method === 'POST') {

@@ -48,6 +48,11 @@ const AppContent: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
+  const [enrollToken, setEnrollToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('enroll') || params.get('token');
+  });
 
   const { user, isSignedIn, isLoading } = useSession();
   const refreshSession = useRefreshSession();
@@ -57,6 +62,12 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (enrollToken) {
+      setIsAuthOpen(true);
+    }
+  }, [enrollToken]);
 
   // Support decoupled module navigation events
   useEffect(() => {
@@ -128,9 +139,16 @@ const AppContent: React.FC = () => {
 
       <AuthModal
         isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onSuccess={refreshSession}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setEnrollToken(null);
+        }}
+        onSuccess={() => {
+          setEnrollToken(null);
+          refreshSession();
+        }}
         user={user}
+        enrollToken={enrollToken}
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
