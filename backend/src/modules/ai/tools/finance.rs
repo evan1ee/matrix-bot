@@ -148,7 +148,7 @@ pub async fn execute_tool(
             .await,
         ),
 
-        "record_finance_entry" => Some(
+        "record_finance_entry" | "add_expense" => Some(
             async {
                 let amount_str = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
                     format!("{:.2}", num)

@@ -27,7 +27,7 @@ pub async fn execute_tool(
             .await,
         ),
 
-        "create_recurring_bill" => Some(
+        "create_recurring_bill" | "add_bill" => Some(
             async {
                 let name_val = args
                     .get("name")

@@ -15,7 +15,7 @@ pub fn build_ocr_prompt(caption: Option<&str>, ocr_text: &str) -> String {
         Please analyze this content and perform the appropriate actions:\n\
         1. Receipt / Invoice / Payment: If this is a receipt, ticket, invoice, or restaurant bill:\n\
            - Extract merchant, total amount (note: minor units in cents), currency (USD, CNY, EUR, etc.), date, and category.\n\
-           - Call `add_expense` (or `add_bill` for recurring subscriptions).\n\
+           - Call `record_finance_entry` (or `create_recurring_bill` for recurring subscriptions).\n\
         2. To-Do List / Notes: If this is a task list, whiteboard photo, or action items:\n\
            - Extract each task and call `add_todo`.\n\
         3. Appointments / Deadlines: If this mentions an appointment, event, or deadline:\n\
@@ -37,7 +37,7 @@ mod tests {
         let prompt = build_ocr_prompt(Some("dinner with colleagues"), "SHAKE SHACK\nTotal: $16.50");
         assert!(prompt.contains("dinner with colleagues"));
         assert!(prompt.contains("SHAKE SHACK"));
-        assert!(prompt.contains("add_expense"));
+        assert!(prompt.contains("record_finance_entry"));
     }
 
     #[test]
