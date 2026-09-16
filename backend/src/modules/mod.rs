@@ -24,6 +24,7 @@ pub mod settings;
 pub mod todo;
 pub mod webhook;
 pub mod ocr;
+pub mod voice;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.

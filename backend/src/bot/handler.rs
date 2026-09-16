@@ -186,6 +186,100 @@ pub fn register_handlers(
                 return;
             }
 
+            // Handle incoming audio attachments / voice notes
+            if let MessageType::Audio(ref audio_content) = ev.content.msgtype {
+                let is_mentioned = audio_content.body.contains(own_id.as_str())
+                    || audio_content.body.contains(own_id.localpart());
+
+                if !is_direct && !is_mentioned {
+                    return;
+                }
+
+                let _ = room.typing_notice(true).await;
+                let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
+                    &db.pool,
+                    ev.sender.as_str(),
+                )
+                .await
+                {
+                    Ok(owner_id) => owner_id,
+                    Err(err) => {
+                        error!("Could not resolve account for {}: {:?}", ev.sender, err);
+                        let _ = room.typing_notice(false).await;
+                        return;
+                    }
+                };
+
+                let audio_bytes = match room
+                    .client()
+                    .media()
+                    .get_file(audio_content.clone(), true)
+                    .await
+                {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) => {
+                        warn!(
+                            "Audio media attachment returned empty body in room {}",
+                            room.room_id()
+                        );
+                        let _ = room.typing_notice(false).await;
+                        let content = RoomMessageEventContent::text_plain(
+                            "❌ Could not download audio attachment.",
+                        );
+                        let _ = room.send(content).await;
+                        return;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to fetch audio file in room {}: {:?}",
+                            room.room_id(),
+                            err
+                        );
+                        let _ = room.typing_notice(false).await;
+                        let content = RoomMessageEventContent::text_plain(
+                            "❌ Failed to download or decrypt audio attachment.",
+                        );
+                        let _ = room.send(content).await;
+                        return;
+                    }
+                };
+
+                let voice_config = crate::modules::voice::VoiceConfig {
+                    enabled: std::env::var("VOICE_ENABLED")
+                        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                        .unwrap_or(true),
+                    model_dir: std::path::PathBuf::from(
+                        std::env::var("VOICE_MODEL_DIR")
+                            .unwrap_or_else(|_| "data/voice_models".to_string()),
+                    ),
+                    language: std::env::var("VOICE_LANGUAGE")
+                        .unwrap_or_else(|_| "auto".to_string()),
+                };
+
+                let reply_html = crate::modules::voice::process_audio_event(
+                    &db,
+                    broadcaster.as_ref(),
+                    &room,
+                    &owner_id,
+                    &audio_bytes,
+                    &voice_config,
+                )
+                .await;
+
+                let _ = room.typing_notice(false).await;
+
+                let plain_text = crate::utils::strip_html(&reply_html);
+                let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
+                if let Err(err) = room.send(content).await {
+                    error!(
+                        "Failed to send voice reply to room {}: {:?}",
+                        room.room_id(),
+                        err
+                    );
+                }
+                return;
+            }
+
             let MessageType::Text(ref text_content) = ev.content.msgtype else {
                 return;
             };
