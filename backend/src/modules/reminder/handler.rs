@@ -199,7 +199,7 @@ pub async fn handle_reminder_command(
                         RecurrencePattern::None => "",
                     };
                     Some(format!(
-                        "⏱️ <b>Reminder #{} set!</b> I will remind you in <b>{}</b> (at {}) for: <i>\"{}\"</i>{}",
+                        "⏱️ <b>Reminder #{} set!</b> I will remind you in <b>{}</b> (at {}) for: <i>\"{}\"</i>{}<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>",
                         reminder.id,
                         format_duration(dur),
                         format_datetime(&trigger_at, &tz),

@@ -24,7 +24,10 @@ pub fn register_handlers(
     // 1. Authorized invite event handler
     crate::bot::invite::register_invite_handler(client, db.clone());
 
-    // 2. Incoming message event handler
+    // 2. Reaction event handler
+    crate::bot::reaction::register_reaction_handler(client, db.clone(), broadcaster.clone());
+
+    // 3. Incoming message event handler
     let bot_user_id = match client.user_id() {
         Some(id) => id.to_owned(),
         None => {
@@ -411,12 +414,24 @@ pub fn register_handlers(
                         indicator.finish_with_reply(&plain_text, &reply_html).await;
                     } else {
                         let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                        if let Err(err) = room.send(content).await {
-                            error!(
-                                "Failed to send message to room {}: {:?}",
-                                room.room_id(),
-                                err
-                            );
+                        match room.send(content).await {
+                            Ok(resp) => {
+                                crate::bot::reaction_targets::try_record_from_reply(
+                                    &db.pool,
+                                    resp.event_id.as_str(),
+                                    room.room_id().as_str(),
+                                    &cmd_ctx.owner_id,
+                                    &reply_html,
+                                )
+                                .await;
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Failed to send message to room {}: {:?}",
+                                    room.room_id(),
+                                    err
+                                );
+                            }
                         }
                     }
                 }

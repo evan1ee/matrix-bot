@@ -62,11 +62,28 @@ async fn deliver_to_matrix(
 
     if let Some(room) = ctx.client.get_room(room_id) {
         match room.send(content.clone()).await {
-            Ok(_) => {
+            Ok(resp) => {
                 info!(
                     "Delivered reminder #{} to Matrix room {}",
                     reminder.id, reminder.room_id
                 );
+                let (entity_type, entity_id) = if reminder.source_kind.as_deref() == Some("todo")
+                    && reminder.source_id.is_some()
+                {
+                    ("todo", reminder.source_id.unwrap())
+                } else {
+                    ("reminder", reminder.id)
+                };
+                let _ = crate::bot::reaction_targets::record_target(
+                    &ctx.db.pool,
+                    resp.event_id.as_str(),
+                    reminder.room_id.as_str(),
+                    entity_type,
+                    entity_id,
+                    &reminder.owner_id,
+                    &reminder.message,
+                )
+                .await;
                 return true;
             }
             Err(err) => {
@@ -85,8 +102,25 @@ async fn deliver_to_matrix(
 
     match ctx.client.join_room_by_id(room_id).await {
         Ok(joined) => match joined.send(content).await {
-            Ok(_) => {
+            Ok(resp) => {
                 info!("Delivered reminder #{} after joining room", reminder.id);
+                let (entity_type, entity_id) = if reminder.source_kind.as_deref() == Some("todo")
+                    && reminder.source_id.is_some()
+                {
+                    ("todo", reminder.source_id.unwrap())
+                } else {
+                    ("reminder", reminder.id)
+                };
+                let _ = crate::bot::reaction_targets::record_target(
+                    &ctx.db.pool,
+                    resp.event_id.as_str(),
+                    reminder.room_id.as_str(),
+                    entity_type,
+                    entity_id,
+                    &reminder.owner_id,
+                    &reminder.message,
+                )
+                .await;
                 true
             }
             Err(err) => {
@@ -182,6 +216,7 @@ pub fn format_reminder_alert(
     if let Some(rec) = rec_label {
         html.push_str(&format!("<br/>• <b>周期:</b> {}", rec));
     }
+    html.push_str("<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>");
     html
 }
 

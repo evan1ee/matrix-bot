@@ -95,7 +95,7 @@ pub async fn handle_add(
     .await
     {
         Ok(item) => Some(format!(
-            "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}",
+            "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>",
             item.id,
             html_escape(&item.sender_name),
             html_escape(&item.text),

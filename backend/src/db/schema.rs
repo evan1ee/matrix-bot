@@ -29,6 +29,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::db::schema_reminders::create_tables(pool).await?;
     crate::db::schema_finance::create_tables(pool).await?;
     crate::db::schema_bills::create_tables(pool).await?;
+    crate::db::schema_reactions::create_tables(pool).await?;
 
     // One-shot data conversions, kept out of the DDL above because they are a
     // different job: this function describes the shape of the database, and
@@ -60,6 +61,7 @@ mod tests {
 
         let tables = table_names(&pool).await;
         for expected in [
+            "bot_message_targets",
             "finance_categories",
             "portfolio_audit_log",
             "portfolio_cash_balances",

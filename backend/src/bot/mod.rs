@@ -31,6 +31,8 @@ pub mod linking;
 pub mod media;
 pub mod notify;
 pub mod quote;
+pub mod reaction;
+pub mod reaction_targets;
 pub mod self_verify;
 pub mod stage;
 pub mod verification;

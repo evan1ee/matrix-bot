@@ -11,6 +11,7 @@ pub mod schema_footprints;
 pub mod schema_habits;
 pub mod schema_life;
 pub mod schema_portfolio;
+pub mod schema_reactions;
 pub mod schema_reminders;
 pub mod schema_rooms;
 pub mod schema_settings;
