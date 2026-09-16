@@ -62,7 +62,12 @@ pub async fn execute_tool(
                 let due_at = if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64())
                 {
                     Some(Utc::now() + Duration::minutes(mins))
-                } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
+                } else if let Some(due_str) = args
+                    .get("due_date")
+                    .or_else(|| args.get("due_at"))
+                    .or_else(|| args.get("due"))
+                    .and_then(|v| v.as_str())
+                {
                     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
@@ -103,7 +108,12 @@ pub async fn execute_tool(
             async {
                 let target_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
-                } else if let Some(search) = args.get("text_search").and_then(|v| v.as_str()) {
+                } else if let Some(search) = args
+                    .get("text")
+                    .or_else(|| args.get("text_search"))
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                {
                     let active_tasks =
                         TodoRepository::list_all_user(pool, owner_id, Some(false), 50, 0)
                             .await
@@ -119,7 +129,7 @@ pub async fn execute_tool(
                     }
                 } else {
                     return Err(
-                        "Either 'id' or 'text_search' must be provided to complete a task"
+                        "Either 'id' or 'text' must be provided to complete a task"
                             .to_string(),
                     );
                 };

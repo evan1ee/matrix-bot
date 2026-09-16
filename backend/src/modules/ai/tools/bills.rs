@@ -33,10 +33,14 @@ pub async fn execute_tool(
                     .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or("Field 'name' is required")?;
-                let amount_str = args
-                    .get("amount")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Field 'amount' is required")?;
+                let amount_minor = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
+                    (num * 100.0).round() as i64
+                } else if let Some(s) = args.get("amount").and_then(|v| v.as_str()) {
+                    let f: f64 = s.parse().map_err(|_| "Invalid amount format")?;
+                    (f * 100.0).round() as i64
+                } else {
+                    return Err("Field 'amount' is required".to_string());
+                };
                 let currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -61,11 +65,10 @@ pub async fn execute_tool(
                     .unwrap_or(false);
                 let notes = args
                     .get("notes")
+                    .or_else(|| args.get("note"))
+                    .or_else(|| args.get("description"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-
-                let amount_f: f64 = amount_str.parse().map_err(|_| "Invalid amount format")?;
-                let amount_minor = (amount_f * 100.0).round() as i64;
 
                 let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                 let today = Utc::now()

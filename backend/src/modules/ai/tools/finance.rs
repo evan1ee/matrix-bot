@@ -32,7 +32,11 @@ pub async fn execute_tool(
 
         "list_finance_transactions" => Some(
             async {
-                let dir = args.get("direction").and_then(|v| v.as_str());
+                let dir = args
+                    .get("direction")
+                    .or_else(|| args.get("entry_type"))
+                    .or_else(|| args.get("type"))
+                    .and_then(|v| v.as_str());
                 let limit = args
                     .get("limit")
                     .and_then(|v| v.as_i64())
@@ -155,14 +159,23 @@ pub async fn execute_tool(
                 };
                 let dir_str = args
                     .get("direction")
+                    .or_else(|| args.get("entry_type"))
+                    .or_else(|| args.get("type"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'direction' is required (expense or income)")?;
+                    .unwrap_or("expense");
                 let direction = Direction::parse(dir_str)
                     .ok_or("Invalid direction (must be expense or income)")?;
-                let note = args
-                    .get("note")
+                let category_name = args
+                    .get("category")
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'note' is required")?;
+                    .unwrap_or("General");
+                let note = args
+                    .get("description")
+                    .or_else(|| args.get("note"))
+                    .or_else(|| args.get("item"))
+                    .or_else(|| args.get("merchant"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(category_name);
 
                 let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                 let tz = settings.tz();
@@ -174,28 +187,27 @@ pub async fn execute_tool(
                 let exp = exponent_for(&currency);
                 let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let category_id =
-                    if let Some(cat_name) = args.get("category").and_then(|v| v.as_str()) {
-                        if let Some(existing) =
-                            FinanceRepository::find_category_by_name(pool, owner_id, cat_name)
-                                .await
-                                .map_err(|e| e.to_string())?
-                        {
-                            Some(existing.id)
-                        } else if let Some(new_cat) =
-                            FinanceRepository::create_category(pool, owner_id, cat_name)
-                                .await
-                                .map_err(|e| e.to_string())?
-                        {
-                            Some(new_cat.id)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                let category_id = if let Some(existing) =
+                    FinanceRepository::find_category_by_name(pool, owner_id, category_name)
+                        .await
+                        .map_err(|e| e.to_string())?
+                {
+                    Some(existing.id)
+                } else if let Some(new_cat) =
+                    FinanceRepository::create_category(pool, owner_id, category_name)
+                        .await
+                        .map_err(|e| e.to_string())?
+                {
+                    Some(new_cat.id)
+                } else {
+                    None
+                };
 
-                let occurred_at = if let Some(date_str) = args.get("date").and_then(|v| v.as_str())
+                let occurred_at = if let Some(date_str) = args
+                    .get("occurred_at")
+                    .or_else(|| args.get("date"))
+                    .or_else(|| args.get("datetime"))
+                    .and_then(|v| v.as_str())
                 {
                     if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
                         dt.with_timezone(&Utc)
@@ -347,7 +359,12 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     "entry_type": {
                         "type": "string",
                         "enum": ["income", "expense"],
-                        "description": "Type: 'expense' or 'income' (required)"
+                        "description": "Type: 'expense' or 'income' (defaults to 'expense')"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Alias for entry_type"
                     },
                     "amount": {
                         "type": "number",
@@ -355,26 +372,34 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "category": {
                         "type": "string",
-                        "description": "Category name, e.g. Food, Salary, Transport (required)"
+                        "description": "Category name, e.g. Food, Shopping, Leisure, Transport"
                     },
                     "description": {
                         "type": "string",
                         "description": "Optional description of the transaction"
                     },
+                    "note": {
+                        "type": "string",
+                        "description": "Alias for description"
+                    },
                     "currency": {
                         "type": "string",
-                        "description": "Optional currency code (e.g. USD, EUR, TWD)"
+                        "description": "Optional currency code (e.g. CNY, USD, EUR)"
                     },
                     "occurred_at": {
                         "type": "string",
                         "description": "Optional ISO-8601 timestamp or YYYY-MM-DD"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Alias for occurred_at"
                     },
                     "room": {
                         "type": "string",
                         "description": "Matrix room name or room ID"
                     }
                 },
-                "required": ["entry_type", "amount", "category"],
+                "required": ["amount"],
                 "additionalProperties": false
             }),
         ),
