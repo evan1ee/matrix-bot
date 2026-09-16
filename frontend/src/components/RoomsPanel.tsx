@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { fetchApi } from '../core/apiClient';
 import { formatDateTimeInZone, useSettings, useUpdateSettings } from '../core/settings';
+import { copyToClipboard } from '../core/clipboard';
 
 export interface JoinedRoomInfo {
   room_id: string;
@@ -46,10 +47,12 @@ export const RoomsPanel: React.FC = () => {
     },
   });
 
-  const handleCopy = (roomId: string) => {
-    navigator.clipboard.writeText(roomId);
-    setCopiedId(roomId);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (roomId: string) => {
+    const ok = await copyToClipboard(roomId);
+    if (ok) {
+      setCopiedId(roomId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
   };
 
   const handleSetDevRoom = async (roomId: string) => {

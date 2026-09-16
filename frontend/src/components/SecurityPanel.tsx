@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  Check,
   Copy,
   KeyRound,
   Link2,
@@ -28,6 +29,7 @@ import {
 } from '../core/security';
 import { addPasskey, describePasskeyError } from '../core/passkey';
 import { formatDateTimeInZone } from '../core/settings';
+import { copyToClipboard } from '../core/clipboard';
 import { useSettings } from '../core/settings';
 
 const Section: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({
@@ -164,6 +166,15 @@ export const SecurityPanel: React.FC = () => {
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
   const [isAddingPasskey, setIsAddingPasskey] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+
+  const handleCopy = async (text: string, target: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedTarget(target);
+      setTimeout(() => setCopiedTarget(null), 2000);
+    }
+  };
 
   const passkeys = usePasskeys();
   const links = useLinkedAccounts();
@@ -374,10 +385,20 @@ export const SecurityPanel: React.FC = () => {
             </code>
             <button
               type="button"
-              onClick={() => navigator.clipboard?.writeText(`!link ${linkCode}`)}
-              className="inline-flex items-center gap-1.5 self-start text-xs text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
+              onClick={() => handleCopy(`!link ${linkCode}`, 'link')}
+              className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
             >
-              <Copy size={12} /> Copy
+              {copiedTarget === 'link' ? (
+                <>
+                  <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={12} />
+                  <span>Copy</span>
+                </>
+              )}
             </button>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
               Expires in 5 minutes, and works once. Sending it in a shared room cancels it.
@@ -480,10 +501,20 @@ export const SecurityPanel: React.FC = () => {
             </ul>
             <button
               type="button"
-              onClick={() => navigator.clipboard?.writeText(freshCodes.join('\n'))}
-              className="inline-flex items-center gap-1.5 self-start text-xs text-neutral-600 underline underline-offset-4 dark:text-neutral-400"
+              onClick={() => handleCopy(freshCodes.join('\n'), 'recovery')}
+              className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
             >
-              <Copy size={12} /> Copy all
+              {copiedTarget === 'recovery' ? (
+                <>
+                  <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={12} />
+                  <span>Copy all</span>
+                </>
+              )}
             </button>
             <Button className="self-start" onClick={() => setFreshCodes(null)}>
               I have saved them

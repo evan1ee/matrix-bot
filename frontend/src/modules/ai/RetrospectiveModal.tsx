@@ -7,6 +7,7 @@ import {
   Smile, Bell, Copy, Check, X, RefreshCw, Sparkles
 } from 'lucide-react';
 import { MarkdownRenderer } from '../../components/MarkdownRenderer';
+import { copyToClipboard } from '../../core/clipboard';
 
 interface RetrospectiveModalProps {
   isOpen: boolean;
@@ -35,7 +36,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         onClose();
       }
     };
@@ -45,11 +46,13 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!retro) return;
-    navigator.clipboard.writeText(retro.formatted_markdown);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(retro.formatted_markdown);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const spentDec = retro ? (retro.total_spent_minor / 100).toFixed(2) : '0.00';

@@ -151,6 +151,12 @@ test.describe('linking a Matrix account', () => {
     await expect(dialog.getByText(/expires in 5 minutes.*works once/i)).toBeVisible();
     // The rule that will otherwise surprise them.
     await expect(dialog.getByText(/shared room cancels it/i)).toBeVisible();
+
+    // Verify copy button works and provides feedback
+    const copyButton = dialog.getByRole('button', { name: /^copy$/i });
+    await expect(copyButton).toBeVisible();
+    await copyButton.click();
+    await expect(dialog.getByText('Copied!')).toBeVisible();
   });
 
   test('lists linked accounts and unlinks one', async ({ app, api }) => {
@@ -275,6 +281,12 @@ test.describe('recovery', () => {
     await expect(dialog.getByText(/not shown again/i)).toBeVisible();
     await expect(dialog.getByText('CODE0-ABCDE')).toBeVisible();
     await expect(dialog.getByText('CODE9-ABCDE')).toBeVisible();
+
+    // Verify copy all button works and provides feedback
+    const copyAllButton = dialog.getByRole('button', { name: /copy all/i });
+    await expect(copyAllButton).toBeVisible();
+    await copyAllButton.click();
+    await expect(dialog.getByText('Copied!')).toBeVisible();
   });
 
   test('a pending recovery is an alarm, and can be cancelled', async ({ app, api }) => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, AlertTriangle, Copy, Check, Terminal } from 'lucide-react';
 import { CreatedWebhookResponse } from './types';
+import { copyToClipboard } from '../../core/clipboard';
 
 interface SecretModalProps {
   data: CreatedWebhookResponse;
@@ -20,10 +21,12 @@ export const SecretModal: React.FC<SecretModalProps> = ({ data, onClose }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const handleCopy = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedType(type);
-    setTimeout(() => setCopiedType(null), 2000);
+  const handleCopy = async (text: string, type: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedType(type);
+      setTimeout(() => setCopiedType(null), 2000);
+    }
   };
 
   return (
