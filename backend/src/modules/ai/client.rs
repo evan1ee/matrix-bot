@@ -105,6 +105,8 @@ impl AiClient {
         dotenvy::dotenv().ok();
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
+            .tcp_keepalive(Some(Duration::from_secs(30)))
+            .pool_idle_timeout(Some(Duration::from_secs(30)))
             .timeout(Duration::from_secs(120));
 
         if let Ok(proxy_url) = std::env::var("AI_PROXY")
@@ -151,34 +153,53 @@ impl AiClient {
             }
         }
 
-        debug!(
-            "Sending chat completion to {} with model {}",
-            url, request.model
-        );
+        let mut last_err = None;
+        for attempt in 1..=3 {
+            debug!(
+                "Sending chat completion (attempt {}/3) to {} with model {}",
+                attempt, url, request.model
+            );
 
-        let res = self
-            .http_client
-            .post(&url)
-            .headers(headers)
-            .json(request)
-            .send()
-            .await?;
-
-        let status = res.status();
-        if !status.is_success() {
-            let error_text = res
-                .text()
+            let res = match self
+                .http_client
+                .post(&url)
+                .headers(headers.clone())
+                .json(request)
+                .send()
                 .await
-                .unwrap_or_else(|_| "Unknown API error".to_string());
-            error!("AI provider error ({}): {}", status.as_u16(), error_text);
-            return Err(AiClientError::Api {
-                status: status.as_u16(),
-                message: error_text,
-            });
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    warn!(
+                        "AI request attempt {} failed with connection error: {}. Retrying...",
+                        attempt, err
+                    );
+                    last_err = Some(err);
+                    if attempt < 3 {
+                        tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
+                    }
+                    continue;
+                }
+            };
+
+            let status = res.status();
+            if !status.is_success() {
+                let error_text = res
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown API error".to_string());
+                error!("AI provider error ({}): {}", status.as_u16(), error_text);
+                return Err(AiClientError::Api {
+                    status: status.as_u16(),
+                    message: error_text,
+                });
+            }
+
+            let response: ChatCompletionResponse = res.json().await?;
+            return Ok(response);
         }
 
-        let response: ChatCompletionResponse = res.json().await?;
-        Ok(response)
+        Err(AiClientError::Http(last_err.unwrap()))
     }
 
     pub async fn verify_api_key(
