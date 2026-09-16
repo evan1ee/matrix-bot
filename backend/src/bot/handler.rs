@@ -410,29 +410,30 @@ pub fn register_handlers(
             match dispatch_res {
                 Ok(Some(reply_html)) => {
                     let plain_text = crate::utils::strip_html(&reply_html);
-                    if let Some(indicator) = stage_indicator {
+                    let sent_eid = if let Some(indicator) = stage_indicator {
+                        let ev_id = indicator.event_id().cloned();
                         indicator.finish_with_reply(&plain_text, &reply_html).await;
+                        ev_id
                     } else {
                         let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
                         match room.send(content).await {
-                            Ok(resp) => {
-                                crate::bot::reaction_targets::try_record_from_reply(
-                                    &db.pool,
-                                    resp.event_id.as_str(),
-                                    room.room_id().as_str(),
-                                    &cmd_ctx.owner_id,
-                                    &reply_html,
-                                )
-                                .await;
-                            }
+                            Ok(resp) => Some(resp.event_id),
                             Err(err) => {
-                                error!(
-                                    "Failed to send message to room {}: {:?}",
-                                    room.room_id(),
-                                    err
-                                );
+                                error!("Failed to send message to room {}: {:?}", room.room_id(), err);
+                                None
                             }
                         }
+                    };
+
+                    if let Some(eid) = sent_eid {
+                        crate::bot::reaction_targets::try_record_from_reply(
+                            &db.pool,
+                            eid.as_str(),
+                            room.room_id().as_str(),
+                            &cmd_ctx.owner_id,
+                            &reply_html,
+                        )
+                        .await;
                     }
                 }
                 Ok(None) => {

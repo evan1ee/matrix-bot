@@ -350,6 +350,9 @@ pub async fn run_ai_turn_with_stage(
                     for (tool_call_id, func_name, result_str) in execution_results {
                         tool_calls_executed.push(func_name.clone());
 
+                        let eid = stage_reporter.and_then(|r| r.event_id()).map(|e| e.as_str());
+                        crate::bot::reaction_targets::record_ai_tool_target(pool, eid, room_id, owner_id, &func_name, &result_str).await;
+
                         // Persist tool result message in SQLite
                         let _ = AiRepository::add_message(
                             pool,

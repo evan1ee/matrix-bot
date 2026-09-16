@@ -119,6 +119,153 @@ fn extract_title_between_quotes(s: &str) -> String {
     String::new()
 }
 
+/// Records a message target created during an AI tool execution (such as `set_reminder` or `add_todo`).
+pub async fn record_ai_tool_target(
+    pool: &SqlitePool,
+    event_id: Option<&str>,
+    room_id: &str,
+    owner_id: &str,
+    func_name: &str,
+    result_str: &str,
+) {
+    let eid = match event_id {
+        Some(id) if !id.is_empty() => id,
+        _ => return,
+    };
+    if func_name == "set_reminder" {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(result_str) {
+            if let (Some(id), Some(msg)) = (
+                val.get("id").and_then(|v| v.as_i64()),
+                val.get("message").and_then(|v| v.as_str()),
+            ) {
+                let _ = record_target(pool, eid, room_id, "reminder", id, owner_id, msg).await;
+            }
+        }
+    } else if func_name == "add_todo" {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(result_str) {
+            let title = val.get("title").or_else(|| val.get("text")).and_then(|v| v.as_str());
+            if let (Some(id), Some(t)) = (val.get("id").and_then(|v| v.as_i64()), title) {
+                let _ = record_target(pool, eid, room_id, "todo", id, owner_id, t).await;
+            }
+        }
+    }
+}
+
+/// Dynamically resolves an untracked target message in the room by inspecting its content
+/// and correlating with recent pending reminders or open todos for the reaction sender.
+pub async fn resolve_untracked_target(
+    room: &matrix_sdk::Room,
+    target_event_id: &str,
+    pool: &SqlitePool,
+    owner_id: &str,
+) -> Option<BotMessageTarget> {
+    use matrix_sdk::ruma::events::{
+        room::message::{MessageType, RoomMessageEvent},
+        AnyMessageLikeEvent, AnyTimelineEvent,
+    };
+    let eid = matrix_sdk::ruma::EventId::parse(target_event_id).ok()?;
+    let timeline_event = room.event(&eid).await.ok()?;
+    let any_event = timeline_event.event.deserialize().ok()?;
+
+    let body = match any_event {
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
+            RoomMessageEvent::Original(msg),
+        )) => match msg.content.msgtype {
+            MessageType::Text(t) => {
+                let f = t.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                format!("{}\n{}", t.body, f)
+            }
+            MessageType::Notice(n) => {
+                let f = n.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                format!("{}\n{}", n.body, f)
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    let lower = body.to_lowercase();
+    let room_id_str = room.room_id().as_str();
+
+    // 1. Reminder detection
+    if lower.contains("reminder") || lower.contains("提醒") {
+        if let Ok(reminders) = sqlx::query_as::<_, crate::modules::reminder::models::Reminder>(
+            "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at \
+             FROM reminders WHERE owner_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 10"
+        )
+        .bind(owner_id)
+        .fetch_all(pool)
+        .await {
+            for rem in &reminders {
+                if body.contains(&rem.message) || lower.contains(&rem.message.to_lowercase()) {
+                    let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
+                    return Some(BotMessageTarget {
+                        event_id: target_event_id.to_string(),
+                        room_id: room_id_str.to_string(),
+                        entity_type: "reminder".to_string(),
+                        entity_id: rem.id,
+                        owner_id: owner_id.to_string(),
+                        title: rem.message.clone(),
+                    });
+                }
+            }
+            let in_room: Vec<_> = reminders.into_iter().filter(|r| r.room_id == room_id_str).collect();
+            if in_room.len() == 1 {
+                let rem = &in_room[0];
+                let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
+                return Some(BotMessageTarget {
+                    event_id: target_event_id.to_string(),
+                    room_id: room_id_str.to_string(),
+                    entity_type: "reminder".to_string(),
+                    entity_id: rem.id,
+                    owner_id: owner_id.to_string(),
+                    title: rem.message.clone(),
+                });
+            }
+        }
+    }
+
+    // 2. Todo task detection
+    if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
+        if let Ok(todos) = sqlx::query_as::<_, crate::modules::todo::models::TodoItem>(
+            "SELECT id, room_id, owner_id, sender_name, text, priority, due_at, completed, created_at, remind_before_minutes \
+             FROM todos WHERE owner_id = ? AND completed = 0 ORDER BY id DESC LIMIT 10"
+        )
+        .bind(owner_id)
+        .fetch_all(pool)
+        .await {
+            for todo in &todos {
+                if body.contains(&todo.text) || lower.contains(&todo.text.to_lowercase()) {
+                    let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
+                    return Some(BotMessageTarget {
+                        event_id: target_event_id.to_string(),
+                        room_id: room_id_str.to_string(),
+                        entity_type: "todo".to_string(),
+                        entity_id: todo.id,
+                        owner_id: owner_id.to_string(),
+                        title: todo.text.clone(),
+                    });
+                }
+            }
+            let in_room: Vec<_> = todos.into_iter().filter(|t| t.room_id == room_id_str).collect();
+            if in_room.len() == 1 {
+                let todo = &in_room[0];
+                let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
+                return Some(BotMessageTarget {
+                    event_id: target_event_id.to_string(),
+                    room_id: room_id_str.to_string(),
+                    entity_type: "todo".to_string(),
+                    entity_id: todo.id,
+                    owner_id: owner_id.to_string(),
+                    title: todo.text.clone(),
+                });
+            }
+        }
+    }
+
+    None
+}
+
 /// Attempts to record a target if the reply message indicates an entity was created.
 pub async fn try_record_from_reply(
     pool: &SqlitePool,
@@ -216,5 +363,28 @@ mod tests {
         let deleted = delete_target_by_entity(&pool, "todo", 1).await.unwrap();
         assert_eq!(deleted, 1);
         assert!(get_target(&pool, "$event123").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_record_ai_tool_target() {
+        let pool = setup_pool().await;
+
+        // 1. AI creates reminder
+        let rem_json = r#"{"id":12,"message":"Have my hair cut","room_id":"!room:x"}"#;
+        record_ai_tool_target(&pool, Some("$rem_ev"), "!room:x", "@bob:x", "set_reminder", rem_json).await;
+
+        let rem_target = get_target(&pool, "$rem_ev").await.unwrap().unwrap();
+        assert_eq!(rem_target.entity_type, "reminder");
+        assert_eq!(rem_target.entity_id, 12);
+        assert_eq!(rem_target.title, "Have my hair cut");
+
+        // 2. AI creates todo
+        let todo_json = r#"{"id":42,"title":"Buy groceries","room_id":"!room:x"}"#;
+        record_ai_tool_target(&pool, Some("$todo_ev"), "!room:x", "@bob:x", "add_todo", todo_json).await;
+
+        let todo_target = get_target(&pool, "$todo_ev").await.unwrap().unwrap();
+        assert_eq!(todo_target.entity_type, "todo");
+        assert_eq!(todo_target.entity_id, 42);
+        assert_eq!(todo_target.title, "Buy groceries");
     }
 }

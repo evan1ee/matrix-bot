@@ -120,6 +120,11 @@ impl StageReporter {
         self.report_stage(label).await;
     }
 
+    /// Returns the target Matrix event ID if available.
+    pub fn event_id(&self) -> Option<&OwnedEventId> {
+        self.event_id.as_ref()
+    }
+
     /// Creates a throttled streaming buffer for in-place token replacement.
     pub fn throttler(&self) -> StreamThrottler {
         StreamThrottler::new(self.clone())
@@ -211,6 +216,11 @@ impl StageIndicator {
             event_id,
             room: room.clone(),
         }
+    }
+
+    /// Returns the target Matrix event ID if available.
+    pub fn event_id(&self) -> Option<&OwnedEventId> {
+        self.event_id.as_ref()
     }
 
     /// Produces a cloneable reporter handle for subroutines.

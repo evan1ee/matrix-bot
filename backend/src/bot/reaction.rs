@@ -86,16 +86,6 @@ pub fn register_reaction_handler(
                 None => return,
             };
 
-            let target_event_id = &ev.content.relates_to.event_id;
-            let target = match get_target(&db.pool, target_event_id.as_str()).await {
-                Ok(Some(t)) => t,
-                Ok(None) => return,
-                Err(err) => {
-                    error!("Error querying reaction target {}: {:?}", target_event_id, err);
-                    return;
-                }
-            };
-
             let sender_owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
                 &db.pool,
                 ev.sender.as_str(),
@@ -105,6 +95,35 @@ pub fn register_reaction_handler(
                 Ok(oid) => oid,
                 Err(err) => {
                     warn!("Failed resolving account for reaction sender {}: {:?}", ev.sender, err);
+                    return;
+                }
+            };
+
+            let target_event_id = &ev.content.relates_to.event_id;
+            let target = match get_target(&db.pool, target_event_id.as_str()).await {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    match crate::bot::reaction_targets::resolve_untracked_target(
+                        &room,
+                        target_event_id.as_str(),
+                        &db.pool,
+                        &sender_owner_id,
+                    )
+                    .await
+                    {
+                        Some(t) => t,
+                        None => {
+                            info!(
+                                "No reaction target found for event {} in room {}",
+                                target_event_id,
+                                room.room_id()
+                            );
+                            return;
+                        }
+                    }
+                }
+                Err(err) => {
+                    error!("Error querying reaction target {}: {:?}", target_event_id, err);
                     return;
                 }
             };
