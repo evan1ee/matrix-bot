@@ -10,12 +10,12 @@ use super::client::{AiClient, ResolvedAiConfig};
 pub use super::config_cmd::{
     format_error, handle_set_history, handle_set_model, handle_show_config,
 };
+pub use super::prompt::{format_response, render_bot_footer};
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 use super::repository::AiRepository;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
-use crate::utils::html::html_escape;
 
 #[cfg(not(test))]
 static AI_CLIENT: OnceLock<AiClient> = OnceLock::new();
@@ -127,7 +127,12 @@ pub async fn handle_ai_command(
     {
         Ok(result) => {
             clear_ai_error_state();
-            Some(format_response(&result.message, &result.model_used))
+            Some(format_response(
+                &result.message,
+                &result.model_used,
+                None,
+                &result.tool_calls_executed,
+            ))
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
@@ -471,12 +476,6 @@ async fn handle_reset(pool: &SqlitePool, broadcaster: Option<&EventBroadcaster>,
         }
     }
     "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
-}
-
-fn format_response(markdown_text: &str, model_name: &str) -> String {
-    let text = if markdown_text.trim().is_empty() { "Received empty response from AI model." } else { markdown_text };
-    let html = crate::modules::webhook::renderer::markdown_to_html(text);
-    format!("{}<br/><font color=\"gray\" size=\"-2\">🤖 <em>{}</em></font>", html, html_escape(model_name))
 }
 
 fn format_help() -> String {

@@ -113,15 +113,13 @@ pub async fn process_audio_event(
 
 fn format_voice_turn_response(
     ai_turn: &crate::modules::ai::handler::AiTurnResult,
-    transcription: &VoiceTranscriptionResult,
+    _transcription: &VoiceTranscriptionResult,
 ) -> String {
-    let html_rendered = crate::modules::webhook::renderer::markdown_to_html(&ai_turn.message);
-    format!(
-        "{}<br/><font color=\"gray\" size=\"-2\">🎙️ <em>Transcribed {:.1}s voice note via SenseVoice • \"{}\" • {}</em></font>",
-        html_rendered,
-        transcription.duration_secs,
-        html_escape(&transcription.text),
-        html_escape(&ai_turn.model_used)
+    crate::modules::ai::handler::format_response(
+        &ai_turn.message,
+        &ai_turn.model_used,
+        Some("SenseVoice"),
+        &ai_turn.tool_calls_executed,
     )
 }
 
@@ -146,8 +144,7 @@ mod tests {
 
         let html = format_voice_turn_response(&ai_turn, &transcription);
         assert!(html.contains("Review budget"));
-        assert!(html.contains("Transcribed 2.8s voice note via SenseVoice"));
-        assert!(html.contains("Remind me to review the budget tomorrow"));
-        assert!(html.contains("grok-4.6"));
+        assert!(html.contains("🤖"));
+        assert!(html.contains("grok-4.6 • SenseVoice • add_todo"));
     }
 }

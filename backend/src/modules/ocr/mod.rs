@@ -89,14 +89,13 @@ pub async fn process_image_event(
 
 fn format_ocr_turn_response(
     ai_turn: &crate::modules::ai::handler::AiTurnResult,
-    ocr_result: &OcrResult,
+    _ocr_result: &OcrResult,
 ) -> String {
-    let html_rendered = crate::modules::webhook::renderer::markdown_to_html(&ai_turn.message);
-    format!(
-        "{}<br/><font color=\"gray\" size=\"-2\">📷 <em>Extracted {} lines via PaddleOCR • {}</em></font>",
-        html_rendered,
-        ocr_result.blocks.len(),
-        html_escape(&ai_turn.model_used)
+    crate::modules::ai::handler::format_response(
+        &ai_turn.message,
+        &ai_turn.model_used,
+        Some("PaddleOCR"),
+        &ai_turn.tool_calls_executed,
     )
 }
 
@@ -129,7 +128,7 @@ mod tests {
 
         let html = format_ocr_turn_response(&ai_turn, &ocr_result);
         assert!(html.contains("Shake Shack"));
-        assert!(html.contains("Extracted 2 lines via PaddleOCR"));
-        assert!(html.contains("grok-4.6"));
+        assert!(html.contains("🤖"));
+        assert!(html.contains("grok-4.6 • PaddleOCR • add_expense"));
     }
 }
