@@ -23,6 +23,7 @@ pub mod reminder;
 pub mod settings;
 pub mod todo;
 pub mod webhook;
+pub mod ocr;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.
