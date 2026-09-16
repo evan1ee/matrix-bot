@@ -263,6 +263,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
 
         let reply = handle_save_command(&ctx, &pool, None, None).await;
@@ -280,6 +281,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
 
         let list_reply = handle_list_command(&list_ctx, &pool).await;
@@ -298,6 +300,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
         let fav_reply = handle_bookmark_subcommands(&fav_ctx, &pool, None, None).await;
         assert!(fav_reply.contains("Starred ⭐"));
@@ -314,6 +317,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
         let arch_reply = handle_bookmark_subcommands(&arch_ctx, &pool, None, None).await;
         assert!(arch_reply.contains("Archived 📦"));

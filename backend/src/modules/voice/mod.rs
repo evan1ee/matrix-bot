@@ -25,13 +25,14 @@ pub async fn process_audio_event(
     owner_id: &str,
     audio_bytes: &[u8],
     config: &VoiceConfig,
+    stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
-    if !config.enabled {
-        return "🎙️ <i>Voice transcription is currently disabled on this bot.</i>".to_string();
-    }
-
     if audio_bytes.is_empty() {
         return "❌ <b>Empty audio data received.</b>".to_string();
+    }
+
+    if let Some(reporter) = stage_reporter {
+        reporter.report_stage("🎧 正在转写语音...").await;
     }
 
     info!(
@@ -84,17 +85,22 @@ pub async fn process_audio_event(
         transcription.duration_secs, transcription.text, owner_id
     );
 
+    if let Some(reporter) = stage_reporter {
+        reporter.report_stage("🧠 正在理解与思考...").await;
+    }
+
     // 3. Build semantic AI prompt from transcribed text
     let ai_prompt = prompt::build_voice_prompt(&transcription.text, transcription.duration_secs);
 
     // 4. Run AI turn with full domain tool capabilities
-    match crate::modules::ai::handler::run_ai_turn(
+    match crate::modules::ai::handler::run_ai_turn_with_stage(
         &db.pool,
         broadcaster,
         owner_id,
         room.room_id().as_str(),
         None,
         &ai_prompt,
+        stage_reporter,
     )
     .await
     {

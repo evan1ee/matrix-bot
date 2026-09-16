@@ -107,7 +107,14 @@ pub fn register_handlers(
                     return;
                 }
 
-                let _ = room.typing_notice(true).await;
+                let mut typing_guard = crate::bot::stage::TypingGuard::start(room.clone());
+                let stage_indicator = crate::bot::stage::StageIndicator::start(
+                    &room,
+                    "🔍 Scanning image with OCR...",
+                    "🔍 <i>正在识别图片文字 (OCR)...</i>",
+                )
+                .await;
+
                 let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
                     &db.pool,
                     ev.sender.as_str(),
@@ -117,7 +124,13 @@ pub fn register_handlers(
                     Ok(owner_id) => owner_id,
                     Err(err) => {
                         error!("Could not resolve account for {}: {:?}", ev.sender, err);
-                        let _ = room.typing_notice(false).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Account resolution failed.",
+                                "❌ <i>Account resolution failed.</i>",
+                            )
+                            .await;
                         return;
                     }
                 };
@@ -134,11 +147,13 @@ pub fn register_handlers(
                             "Media attachment returned empty body in room {}",
                             room.room_id()
                         );
-                        let _ = room.typing_notice(false).await;
-                        let content = RoomMessageEventContent::text_plain(
-                            "❌ Could not download image attachment.",
-                        );
-                        let _ = room.send(content).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Could not download image attachment.",
+                                "❌ <i>Could not download image attachment.</i>",
+                            )
+                            .await;
                         return;
                     }
                     Err(err) => {
@@ -147,11 +162,13 @@ pub fn register_handlers(
                             room.room_id(),
                             err
                         );
-                        let _ = room.typing_notice(false).await;
-                        let content = RoomMessageEventContent::text_plain(
-                            "❌ Failed to download or decrypt image attachment.",
-                        );
-                        let _ = room.send(content).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Failed to download or decrypt image attachment.",
+                                "❌ <i>Failed to download or decrypt image attachment.</i>",
+                            )
+                            .await;
                         return;
                     }
                 };
@@ -161,6 +178,7 @@ pub fn register_handlers(
                         .unwrap_or_else(|_| "data/ocr_models".to_string()),
                 );
 
+                let reporter = stage_indicator.reporter();
                 let reply_html = crate::modules::ocr::process_image_event(
                     &db,
                     broadcaster.as_ref(),
@@ -169,20 +187,14 @@ pub fn register_handlers(
                     Some(&image_content.body),
                     &image_bytes,
                     &model_dir,
+                    Some(&reporter),
                 )
                 .await;
 
-                let _ = room.typing_notice(false).await;
+                typing_guard.stop().await;
 
                 let plain_text = crate::utils::strip_html(&reply_html);
-                let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                if let Err(err) = room.send(content).await {
-                    error!(
-                        "Failed to send image OCR reply to room {}: {:?}",
-                        room.room_id(),
-                        err
-                    );
-                }
+                stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
                 return;
             }
 
@@ -195,7 +207,14 @@ pub fn register_handlers(
                     return;
                 }
 
-                let _ = room.typing_notice(true).await;
+                let mut typing_guard = crate::bot::stage::TypingGuard::start(room.clone());
+                let stage_indicator = crate::bot::stage::StageIndicator::start(
+                    &room,
+                    "🎧 Transcribing voice...",
+                    "🎧 <i>正在转写语音...</i>",
+                )
+                .await;
+
                 let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
                     &db.pool,
                     ev.sender.as_str(),
@@ -205,7 +224,13 @@ pub fn register_handlers(
                     Ok(owner_id) => owner_id,
                     Err(err) => {
                         error!("Could not resolve account for {}: {:?}", ev.sender, err);
-                        let _ = room.typing_notice(false).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Account resolution failed.",
+                                "❌ <i>Account resolution failed.</i>",
+                            )
+                            .await;
                         return;
                     }
                 };
@@ -222,11 +247,13 @@ pub fn register_handlers(
                             "Audio media attachment returned empty body in room {}",
                             room.room_id()
                         );
-                        let _ = room.typing_notice(false).await;
-                        let content = RoomMessageEventContent::text_plain(
-                            "❌ Could not download audio attachment.",
-                        );
-                        let _ = room.send(content).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Could not download audio attachment.",
+                                "❌ <i>Could not download audio attachment.</i>",
+                            )
+                            .await;
                         return;
                     }
                     Err(err) => {
@@ -235,11 +262,13 @@ pub fn register_handlers(
                             room.room_id(),
                             err
                         );
-                        let _ = room.typing_notice(false).await;
-                        let content = RoomMessageEventContent::text_plain(
-                            "❌ Failed to download or decrypt audio attachment.",
-                        );
-                        let _ = room.send(content).await;
+                        typing_guard.stop().await;
+                        stage_indicator
+                            .cancel_with_error(
+                                "❌ Failed to download or decrypt audio attachment.",
+                                "❌ <i>Failed to download or decrypt audio attachment.</i>",
+                            )
+                            .await;
                         return;
                     }
                 };
@@ -256,6 +285,7 @@ pub fn register_handlers(
                         .unwrap_or_else(|_| "auto".to_string()),
                 };
 
+                let reporter = stage_indicator.reporter();
                 let reply_html = crate::modules::voice::process_audio_event(
                     &db,
                     broadcaster.as_ref(),
@@ -263,20 +293,14 @@ pub fn register_handlers(
                     &owner_id,
                     &audio_bytes,
                     &voice_config,
+                    Some(&reporter),
                 )
                 .await;
 
-                let _ = room.typing_notice(false).await;
+                typing_guard.stop().await;
 
                 let plain_text = crate::utils::strip_html(&reply_html);
-                let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                if let Err(err) = room.send(content).await {
-                    error!(
-                        "Failed to send voice reply to room {}: {:?}",
-                        room.room_id(),
-                        err
-                    );
-                }
+                stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
                 return;
             }
 
@@ -375,29 +399,79 @@ pub fn register_handlers(
                 }
             };
 
-            let cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
+            let is_ai = is_ai_prompt_command(&parsed);
+            let mut cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
 
-            if is_direct || cmd_ctx.is_mentioned {
-                let _ = room.typing_notice(true).await;
-            }
+            let typing_guard = if is_direct || cmd_ctx.is_mentioned {
+                Some(crate::bot::stage::TypingGuard::start(room.clone()))
+            } else {
+                None
+            };
+
+            let stage_indicator = if is_ai {
+                let ind = crate::bot::stage::StageIndicator::start(
+                    &room,
+                    "🧠 Thinking...",
+                    "🧠 <i>正在思考...</i>",
+                )
+                .await;
+                cmd_ctx.stage_reporter = Some(ind.reporter());
+                Some(ind)
+            } else {
+                None
+            };
 
             let reply_opt = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await;
 
-            if is_direct || cmd_ctx.is_mentioned {
-                let _ = room.typing_notice(false).await;
+            if let Some(mut guard) = typing_guard {
+                guard.stop().await;
             }
 
             if let Some(reply_html) = reply_opt {
                 let plain_text = crate::utils::strip_html(&reply_html);
-                let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                if let Err(err) = room.send(content).await {
-                    error!(
-                        "Failed to send message to room {}: {:?}",
-                        room.room_id(),
-                        err
-                    );
+                if let Some(indicator) = stage_indicator {
+                    indicator.finish_with_reply(&plain_text, &reply_html).await;
+                } else {
+                    let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
+                    if let Err(err) = room.send(content).await {
+                        error!(
+                            "Failed to send message to room {}: {:?}",
+                            room.room_id(),
+                            err
+                        );
+                    }
                 }
+            } else if let Some(indicator) = stage_indicator {
+                indicator
+                    .cancel_with_error(
+                        "❌ AI assistant encountered an error.",
+                        "❌ <i>AI assistant encountered an error.</i>",
+                    )
+                    .await;
             }
         }
     });
+}
+
+fn is_ai_prompt_command(parsed: &crate::modules::ParsedCommand) -> bool {
+    let cmd = parsed.command.to_ascii_lowercase();
+    if cmd == "ai" || cmd == "ask" {
+        let trimmed = parsed.raw_args.trim();
+        let first_word = trimmed.split_whitespace().next().unwrap_or("");
+        !matches!(
+            first_word.to_ascii_lowercase().as_str(),
+            "reset" | "clear" | "config" | "retro" | "retrospective" | "weekly"
+        )
+    } else if parsed.is_mentioned {
+        const BUILTIN_COMMANDS: &[&str] = &[
+            "ping", "help", "stat", "stats", "version", "uptime", "todo", "todos",
+            "remind", "reminder", "reminders", "finance", "expense", "income", "budget",
+            "portfolio", "invest", "stock", "crypto", "asset", "footprint", "footprints",
+            "trip", "trips", "habit", "habits", "life", "lifegrid", "bill", "bills",
+            "settings", "setting", "webhook", "webhooks", "link",
+        ];
+        !BUILTIN_COMMANDS.contains(&cmd.as_str())
+    } else {
+        false
+    }
 }

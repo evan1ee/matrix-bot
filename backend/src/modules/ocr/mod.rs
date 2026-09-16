@@ -25,9 +25,14 @@ pub async fn process_image_event(
     caption: Option<&str>,
     image_bytes: &[u8],
     model_dir: &Path,
+    stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
     if image_bytes.is_empty() {
         return "❌ <b>Empty image data received.</b>".to_string();
+    }
+
+    if let Some(reporter) = stage_reporter {
+        reporter.report_stage("🔍 正在识别图片文字 (OCR)...").await;
     }
 
     info!(
@@ -62,15 +67,20 @@ pub async fn process_image_event(
         owner_id
     );
 
+    if let Some(reporter) = stage_reporter {
+        reporter.report_stage("🧠 正在理解与思考...").await;
+    }
+
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
-    match crate::modules::ai::handler::run_ai_turn(
+    match crate::modules::ai::handler::run_ai_turn_with_stage(
         &db.pool,
         broadcaster,
         owner_id,
         room.room_id().as_str(),
         None,
         &ai_prompt,
+        stage_reporter,
     )
     .await
     {

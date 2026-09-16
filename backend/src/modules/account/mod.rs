@@ -431,6 +431,7 @@ mod tests {
             is_direct,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         }
     }
 

@@ -330,6 +330,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
 
         let help = handle_journal_command(&pool, None, &ctx).await.unwrap();

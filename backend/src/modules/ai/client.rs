@@ -286,6 +286,19 @@ impl Default for AiClient {
     }
 }
 
+#[cfg(not(test))]
+static AI_CLIENT: std::sync::OnceLock<AiClient> = std::sync::OnceLock::new();
+
+#[cfg(not(test))]
+pub fn get_ai_client() -> AiClient {
+    AI_CLIENT.get_or_init(AiClient::new).clone()
+}
+
+#[cfg(test)]
+pub fn get_ai_client() -> AiClient {
+    AiClient::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::models::ChatCompletionMessage;

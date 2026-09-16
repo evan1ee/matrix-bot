@@ -31,6 +31,7 @@ pub mod media;
 pub mod notify;
 pub mod quote;
 pub mod self_verify;
+pub mod stage;
 pub mod verification;
 
 pub struct MatrixBot {
