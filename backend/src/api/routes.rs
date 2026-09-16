@@ -4,9 +4,9 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, finance, footprints, habits, health, life, life_activity,
-    openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
+    account, ai, auth, bookmarks, finance, finance_analytics, footprints, habits, health, life,
+    life_activity, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
 
 /// The API route table.
@@ -176,6 +176,17 @@ fn routes_finance() -> Router<auth::ApiState> {
             put(finance::update_transaction).delete(finance::delete_transaction),
         )
         .route("/finance/summary", get(finance::summary))
+        .route("/finance/analytics", get(finance_analytics::get_analytics))
+        .route(
+            "/finance/share",
+            get(finance_analytics::get_share)
+                .post(finance_analytics::upsert_share)
+                .delete(finance_analytics::delete_share),
+        )
+        .route(
+            "/public/finance/:token",
+            get(finance_analytics::get_public_report),
+        )
         .route(
             "/finance/categories",
             get(finance::list_categories).post(finance::create_category),

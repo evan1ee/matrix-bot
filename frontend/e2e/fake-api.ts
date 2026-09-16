@@ -346,6 +346,14 @@ export class FakeApi {
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
+  financeShare: {
+    owner_id: string;
+    token: string;
+    is_enabled: boolean;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null = null;
   holdings: FakeHolding[] = [];
   cash: FakeCashBalance[] = [];
   alerts: any[] = [];
@@ -750,7 +758,7 @@ export class FakeApi {
         return json(route, status, { error, code: status });
       }
 
-      return this.handle(route, method, path, body as Record<string, any> | null);
+      return this.handle(route, method, path, body as Record<string, any> | null, url);
     });
   }
 
@@ -758,7 +766,8 @@ export class FakeApi {
     route: Route,
     method: string,
     path: string,
-    body: Record<string, any> | null
+    body: Record<string, any> | null,
+    url?: URL
   ) {
     // --- auth ---
     // The passkey ceremonies are answered with canned challenges. A real
@@ -1149,6 +1158,107 @@ export class FakeApi {
         else bucket.income_minor += tx.amount_minor;
       }
       return json(route, 200, [...byCurrency.values()]);
+    }
+
+    if (path === '/finance/analytics' && method === 'GET') {
+      const currency = url?.searchParams?.get('currency') || 'USD';
+      const months = Number(url?.searchParams?.get('months') || '6');
+      const filtered = this.transactions.filter((t) => !currency || t.currency === currency);
+      const totalIncome = filtered.filter((t) => t.direction === 'income').reduce((s, t) => s + t.amount_minor, 0);
+      const totalExpense = filtered.filter((t) => t.direction === 'expense').reduce((s, t) => s + t.amount_minor, 0);
+
+      const catMap = new Map<string, { amount_minor: number; tx_count: number }>();
+      for (const t of filtered.filter((tx) => tx.direction === 'expense')) {
+        const name = t.category_name || 'Uncategorised';
+        const cur = catMap.get(name) || { amount_minor: 0, tx_count: 0 };
+        cur.amount_minor += t.amount_minor;
+        cur.tx_count += 1;
+        catMap.set(name, cur);
+      }
+      const expense_categories = [...catMap.entries()].map(([category_name, v]) => ({
+        category_name,
+        amount_minor: v.amount_minor,
+        percentage: totalExpense > 0 ? (v.amount_minor / totalExpense) * 100 : 0,
+        tx_count: v.tx_count,
+        currency,
+        currency_exponent: 2,
+      }));
+
+      return json(route, 200, {
+        currency,
+        currency_exponent: 2,
+        months_requested: months,
+        total_income_minor: totalIncome,
+        total_expense_minor: totalExpense,
+        net_savings_minor: totalIncome - totalExpense,
+        monthly_cashflow: [
+          {
+            month: '2026-08',
+            income_minor: totalIncome,
+            expense_minor: totalExpense,
+            net_minor: totalIncome - totalExpense,
+            currency,
+            currency_exponent: 2,
+          },
+        ],
+        expense_categories,
+      });
+    }
+
+    if (path === '/finance/share' && method === 'GET') {
+      return json(route, 200, this.financeShare);
+    }
+    if (path === '/finance/share' && method === 'POST') {
+      this.financeShare = {
+        owner_id: 'alice',
+        token: this.financeShare?.token || 'fake_share_token_123',
+        is_enabled: body?.is_enabled ?? true,
+        title: body?.title ?? 'Public Fiscal Report',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      return json(route, 200, this.financeShare);
+    }
+    if (path === '/finance/share' && method === 'DELETE') {
+      if (this.financeShare) this.financeShare.is_enabled = false;
+      return json(route, 200, { success: true });
+    }
+
+    const pubMatch = path.match(/^\/public\/finance\/([^/]+)$/);
+    if (pubMatch && method === 'GET') {
+      const token = pubMatch[1];
+      if (!this.financeShare || this.financeShare.token !== token || !this.financeShare.is_enabled) {
+        return json(route, 404, { error: 'Report not found or link has expired', code: 404 });
+      }
+      return json(route, 200, {
+        title: this.financeShare.title || 'Public Fiscal Report',
+        currency: 'USD',
+        currency_exponent: 2,
+        total_income_minor: 10000,
+        total_expense_minor: 5000,
+        net_savings_minor: 5000,
+        monthly_cashflow: [
+          {
+            month: '2026-08',
+            income_minor: 10000,
+            expense_minor: 5000,
+            net_minor: 5000,
+            currency: 'USD',
+            currency_exponent: 2,
+          },
+        ],
+        expense_categories: [
+          {
+            category_name: 'Food',
+            amount_minor: 5000,
+            percentage: 100,
+            tx_count: 1,
+            currency: 'USD',
+            currency_exponent: 2,
+          },
+        ],
+        recent_transactions: [],
+      });
     }
 
     // --- reminders ---

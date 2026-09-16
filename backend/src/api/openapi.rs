@@ -3,9 +3,9 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, finance, health, portfolio, portfolio_alerts, portfolio_cash,
-    portfolio_history, portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos,
-    webhooks,
+    account, ai, auth, bookmarks, finance, finance_analytics, health, portfolio, portfolio_alerts,
+    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
+    settings, sse, todos, webhooks,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -69,6 +69,11 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         finance::list_categories,
         finance::create_category,
         finance::delete_category,
+        finance_analytics::get_analytics,
+        finance_analytics::get_share,
+        finance_analytics::upsert_share,
+        finance_analytics::delete_share,
+        finance_analytics::get_public_report,
         portfolio::list_holdings,
         portfolio::buy_holding,
         portfolio::sell_holding,
@@ -173,6 +178,16 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
+            crate::modules::finance::analytics::MonthlyCashflowBucket,
+            crate::modules::finance::analytics::ExpenseCategorySlice,
+            crate::modules::finance::analytics::FinanceAnalyticsReport,
+            crate::modules::finance::analytics::FinanceShare,
+            crate::modules::finance::analytics::PublicTransaction,
+            crate::modules::finance::analytics::PublicFinanceReport,
+            finance_analytics::AnalyticsQuery,
+            finance_analytics::PublicQuery,
+            finance_analytics::ShareRequest,
+            finance_analytics::StatusResponse,
             Holding,
             PortfolioCurrencySummary,
             CashBalance,

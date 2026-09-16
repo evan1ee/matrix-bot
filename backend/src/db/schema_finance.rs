@@ -74,5 +74,28 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Public sharing tokens for fiscal transparency portal
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS finance_shares (
+            owner_id TEXT PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE,
+            is_enabled BOOLEAN NOT NULL DEFAULT 1,
+            title TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_finance_shares_token ON finance_shares(token);",
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
+

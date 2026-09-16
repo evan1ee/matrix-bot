@@ -14,9 +14,12 @@ import {
   Pencil,
   Check,
   Sparkles,
+  BarChart2,
+  Receipt,
 } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
+import { PublicTransparencyView } from './components/PublicTransparencyView';
 import {
   CURRENCY_OPTIONS,
   formatDateInZone,
@@ -274,6 +277,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
   const [filter, setFilter] = useState<'all' | Direction>('all');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'transparency' | 'ledger'>('ledger');
 
   // The first render happens before the settings query resolves, and the
   // preference can change while this view is mounted; either way the form should
@@ -312,6 +316,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['transactions'] });
     queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+    queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
   };
 
   const createMutation = useMutation({
@@ -390,9 +395,43 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
 
   return (
     <div className="space-y-6">
-      {/* Per-currency summary — currencies are never added together. */}
-      {summary && summary.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="finance-summary">
+      {/* Top View Selector */}
+      <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+        <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-900 p-0.5 rounded-lg border border-neutral-200 dark:border-neutral-800 text-xs font-medium">
+          <button
+            type="button"
+            onClick={() => setViewMode('transparency')}
+            className={`px-3 py-1.5 rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+              viewMode === 'transparency'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs font-semibold'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+            }`}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            <span>Fiscal Transparency</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('ledger')}
+            className={`px-3 py-1.5 rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+              viewMode === 'ledger'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs font-semibold'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Ledger</span>
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'transparency' ? (
+        <PublicTransparencyView currency={currency} />
+      ) : (
+        <>
+          {/* Per-currency summary — currencies are never added together. */}
+          {summary && summary.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="finance-summary">
           {summary.map((s) => (
             <div
               key={s.currency}
@@ -709,6 +748,8 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };
@@ -727,9 +768,11 @@ export const financeModule: FrontendModule = {
     ) {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
     }
     if (event.type === 'CategoryCreated' || event.type === 'CategoryDeleted') {
       queryClient.invalidateQueries({ queryKey: ['finance-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
     }
   },
 };
