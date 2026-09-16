@@ -31,33 +31,16 @@ pub struct AiTurnResult {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
-    pool: &SqlitePool,
-    broadcaster: Option<&EventBroadcaster>,
+    pool: &SqlitePool, broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
-    room_id: &str,
-    owner_id: &str,
-    sender_name: &str,
-    command: &str,
-    raw_args: &str,
-    full_body: &str,
-    is_direct: bool,
-    is_mentioned: bool,
+    room_id: &str, owner_id: &str, sender_name: &str,
+    command: &str, raw_args: &str, full_body: &str,
+    is_direct: bool, is_mentioned: bool,
     quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
-        pool,
-        broadcaster,
-        client_handle,
-        room_id,
-        owner_id,
-        sender_name,
-        command,
-        raw_args,
-        full_body,
-        is_direct,
-        is_mentioned,
-        quoted,
-        None,
+        pool, broadcaster, client_handle, room_id, owner_id, sender_name,
+        command, raw_args, full_body, is_direct, is_mentioned, quoted, None,
     )
     .await
 }
@@ -295,138 +278,141 @@ pub async fn run_ai_turn_with_stage(
             stream: Some(false),
         };
 
-        match client.chat_completion(&resolved_config, &request).await {
-            Ok(response) => {
-                if let Some(choice) = response.choices.into_iter().next() {
-                    let msg = choice.message;
-                    if let Some(tool_calls) = msg.tool_calls.filter(|t| !t.is_empty()) {
-                        // Persist assistant tool-call message in SQLite only if it contains non-empty text
-                        let tool_desc = msg.content.as_deref().unwrap_or("").trim();
-                        if !tool_desc.is_empty() {
-                            let _ = AiRepository::add_message(
-                                pool,
-                                &conversation.id,
-                                "assistant",
-                                tool_desc,
-                                None,
-                                None,
-                            )
-                            .await;
+        match super::stream::execute_stream_or_complete(
+            &client,
+            &resolved_config,
+            &request,
+            stage_reporter,
+        )
+        .await
+        {
+            Ok((content, tool_calls)) => {
+                if !tool_calls.is_empty() {
+                    let tool_desc = content.trim();
+                    if !tool_desc.is_empty() {
+                        let _ = AiRepository::add_message(
+                            pool,
+                            &conversation.id,
+                            "assistant",
+                            tool_desc,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
+
+                    chat_messages.push(ChatCompletionMessage {
+                        role: "assistant".to_string(),
+                        content: if content.is_empty() { None } else { Some(content) },
+                        tool_calls: Some(tool_calls.clone()),
+                        tool_call_id: None,
+                        name: None,
+                    });
+
+                    if let Some(reporter) = stage_reporter {
+                        if let Some(first_tc) = tool_calls.first() {
+                            reporter.report_tool_call(&first_tc.function.name).await;
                         }
+                    }
+
+                    let tool_futures = tool_calls.iter().map(|tool_call| {
+                        let func_name = tool_call.function.name.clone();
+                        let tool_call_id = tool_call.id.clone();
+                        let args = tool_call.function.arguments.clone();
+                        async move {
+                            info!(
+                                "AI turn [{}/{}] executing tool: {} for owner {}",
+                                iteration, max_iterations, func_name, owner_id
+                            );
+                            let result_str = match ToolRegistry::execute_tool(
+                                pool,
+                                broadcaster,
+                                owner_id,
+                                room_id,
+                                &func_name,
+                                &args,
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => format!("Error executing tool: {}", err),
+                            };
+                            (tool_call_id, func_name, result_str)
+                        }
+                    });
+
+                    let execution_results = futures_util::future::join_all(tool_futures).await;
+
+                    if let Some(reporter) = stage_reporter {
+                        reporter.report_stage("🧠 正在组织回复...").await;
+                    }
+
+                    for (tool_call_id, func_name, result_str) in execution_results {
+                        tool_calls_executed.push(func_name.clone());
+
+                        // Persist tool result message in SQLite
+                        let _ = AiRepository::add_message(
+                            pool,
+                            &conversation.id,
+                            "tool",
+                            &result_str,
+                            Some(&tool_call_id),
+                            Some(&func_name),
+                        )
+                        .await;
 
                         chat_messages.push(ChatCompletionMessage {
+                            role: "tool".to_string(),
+                            content: Some(result_str),
+                            tool_calls: None,
+                            tool_call_id: Some(tool_call_id),
+                            name: Some(func_name),
+                        });
+                    }
+                    continue;
+                }
+
+                if !content.trim().is_empty() {
+                    let is_hallucinated_tool = tool_calls_executed.is_empty()
+                        && iteration == 1
+                        && (content.contains("record_finance_entry")
+                            || content.contains("add_expense")
+                            || content.contains("add_todo")
+                            || content.contains("create_reminder")
+                            || content.contains("Tool called:")
+                            || content.contains("Receipt recorded")
+                            || content.contains("Receipt logged"));
+
+                    if is_hallucinated_tool {
+                        warn!("AI simulated tool call in text without invoking function API; correcting model in next turn");
+                        chat_messages.push(ChatCompletionMessage {
                             role: "assistant".to_string(),
-                            content: msg.content.clone(),
-                            tool_calls: Some(tool_calls.clone()),
+                            content: Some(content),
+                            tool_calls: None,
                             tool_call_id: None,
                             name: None,
                         });
-
-                        if let Some(reporter) = stage_reporter {
-                            if let Some(first_tc) = tool_calls.first() {
-                                reporter.report_tool_call(&first_tc.function.name).await;
-                            }
-                        }
-
-                        let tool_futures = tool_calls.iter().map(|tool_call| {
-                            let func_name = tool_call.function.name.clone();
-                            let tool_call_id = tool_call.id.clone();
-                            let args = tool_call.function.arguments.clone();
-                            async move {
-                                info!(
-                                    "AI turn [{}/{}] executing tool: {} for owner {}",
-                                    iteration, max_iterations, func_name, owner_id
-                                );
-                                let result_str = match ToolRegistry::execute_tool(
-                                    pool,
-                                    broadcaster,
-                                    owner_id,
-                                    room_id,
-                                    &func_name,
-                                    &args,
-                                )
-                                .await
-                                {
-                                    Ok(res) => res,
-                                    Err(err) => format!("Error executing tool: {}", err),
-                                };
-                                (tool_call_id, func_name, result_str)
-                            }
+                        chat_messages.push(ChatCompletionMessage {
+                            role: "user".to_string(),
+                            content: Some(
+                                "SYSTEM: You wrote text describing or claiming that a tool was called, but you did NOT actually invoke any tool function via the function calling API! No records were saved to the database. You MUST execute the real tool call (such as `record_finance_entry` or `add_todo`) now via the function calling API so it can be saved.".to_string(),
+                            ),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
                         });
-
-                        let execution_results = futures_util::future::join_all(tool_futures).await;
-
-                        if let Some(reporter) = stage_reporter {
-                            reporter.report_stage("🧠 正在组织回复...").await;
-                        }
-
-                        for (tool_call_id, func_name, result_str) in execution_results {
-                            tool_calls_executed.push(func_name.clone());
-
-                            // Persist tool result message in SQLite
-                            let _ = AiRepository::add_message(
-                                pool,
-                                &conversation.id,
-                                "tool",
-                                &result_str,
-                                Some(&tool_call_id),
-                                Some(&func_name),
-                            )
-                            .await;
-
-                            chat_messages.push(ChatCompletionMessage {
-                                role: "tool".to_string(),
-                                content: Some(result_str),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call_id),
-                                name: Some(func_name),
-                            });
-                        }
                         continue;
                     }
 
-                    if let Some(text) = msg.content {
-                        let is_hallucinated_tool = tool_calls_executed.is_empty()
-                            && iteration == 1
-                            && (text.contains("record_finance_entry")
-                                || text.contains("add_expense")
-                                || text.contains("add_todo")
-                                || text.contains("create_reminder")
-                                || text.contains("Tool called:")
-                                || text.contains("Receipt recorded")
-                                || text.contains("Receipt logged"));
-
-                        if is_hallucinated_tool {
-                            warn!("AI simulated tool call in text without invoking function API; correcting model in next turn");
-                            chat_messages.push(ChatCompletionMessage {
-                                role: "assistant".to_string(),
-                                content: Some(text),
-                                tool_calls: None,
-                                tool_call_id: None,
-                                name: None,
-                            });
-                            chat_messages.push(ChatCompletionMessage {
-                                role: "user".to_string(),
-                                content: Some(
-                                    "SYSTEM: You wrote text describing or claiming that a tool was called, but you did NOT actually invoke any tool function via the function calling API! No records were saved to the database. You MUST execute the real tool call (such as `record_finance_entry` or `add_todo`) now via the function calling API so it can be saved.".to_string(),
-                                ),
-                                tool_calls: None,
-                                tool_call_id: None,
-                                name: None,
-                            });
-                            continue;
-                        }
-
-                        final_content = text;
-                        break;
-                    }
+                    final_content = content;
+                    break;
                 }
                 final_content = "Received empty response from AI model.".to_string();
                 break;
             }
             Err(err) => {
                 error!("AI completion failed: {}", err);
-                return Err(err.to_string());
+                return Err(err);
             }
         }
     }
@@ -439,13 +425,18 @@ pub async fn run_ai_turn_with_stage(
             max_tokens: Some(resolved_config.max_tokens),
             tools: None,
             tool_choice: None,
-            stream: Some(false),
+            stream: Some(stage_reporter.is_some()),
         };
-        if let Ok(resp) = client.chat_completion(&resolved_config, &final_req).await {
-            if let Some(t) = resp.choices.into_iter().next().and_then(|c| c.message.content) {
-                if !t.trim().is_empty() {
-                    final_content = t;
-                }
+        if let Ok((content, _)) = super::stream::execute_stream_or_complete(
+            &client,
+            &resolved_config,
+            &final_req,
+            stage_reporter,
+        )
+        .await
+        {
+            if !content.trim().is_empty() {
+                final_content = content;
             }
         }
     }

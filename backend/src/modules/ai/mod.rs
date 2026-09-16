@@ -13,6 +13,7 @@ pub mod prompt;
 pub mod repository;
 pub mod retrospective;
 pub mod search;
+pub mod stream;
 pub mod tools;
 
 use matrix_sdk::Client;

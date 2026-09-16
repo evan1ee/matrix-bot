@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::time::Duration;
 use thiserror::Error;
@@ -15,6 +16,12 @@ pub enum AiClientError {
     Json(#[from] serde_json::Error),
     #[error("Invalid configuration: {0}")]
     Config(String),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StreamTurnResult {
+    pub content: String,
+    pub tool_calls: Vec<super::models::ToolCall>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +209,130 @@ impl AiClient {
         Err(AiClientError::Http(last_err.unwrap()))
     }
 
+    pub async fn chat_completion_stream<F, Fut>(
+        &self,
+        config: &ResolvedAiConfig,
+        request: &ChatCompletionRequest,
+        mut on_delta: F,
+    ) -> Result<StreamTurnResult, AiClientError>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let url = format!("{}/chat/completions", config.api_base_url);
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            reqwest::header::ACCEPT,
+            HeaderValue::from_static("text/event-stream"),
+        );
+
+        if let Some(ref key) = config.api_key {
+            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", key)) {
+                headers.insert(AUTHORIZATION, val);
+            }
+        }
+
+        let mut stream_req = request.clone();
+        stream_req.stream = Some(true);
+
+        let res = self
+            .http_client
+            .post(&url)
+            .headers(headers)
+            .json(&stream_req)
+            .send()
+            .await?;
+
+        let status = res.status();
+        if !status.is_success() {
+            let error_text = res
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown API error".to_string());
+            error!("AI streaming error ({}): {}", status.as_u16(), error_text);
+            return Err(AiClientError::Api {
+                status: status.as_u16(),
+                message: error_text,
+            });
+        }
+
+        let mut stream = res.bytes_stream();
+        let mut buffer = String::new();
+        let mut full_content = String::new();
+        let mut tool_calls: Vec<super::models::ToolCall> = Vec::new();
+
+        while let Some(item) = stream.next().await {
+            let bytes = item?;
+            let chunk_str = String::from_utf8_lossy(&bytes);
+            buffer.push_str(&chunk_str);
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer.drain(..=newline_pos);
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+
+                if let Some(chunk) = parse_sse_chunk(&line) {
+                    for choice in chunk.choices {
+                        if let Some(ref text) = choice.delta.content {
+                            if !text.is_empty() {
+                                full_content.push_str(text);
+                                on_delta(text.clone()).await;
+                            }
+                        }
+                        if let Some(tc_chunks) = choice.delta.tool_calls {
+                            for tc in tc_chunks {
+                                let idx = tc.index;
+                                while tool_calls.len() <= idx {
+                                    tool_calls.push(super::models::ToolCall {
+                                        id: String::new(),
+                                        r#type: "function".to_string(),
+                                        function: super::models::FunctionCall {
+                                            name: String::new(),
+                                            arguments: String::new(),
+                                        },
+                                    });
+                                }
+                                if let Some(id) = tc.id {
+                                    tool_calls[idx].id.push_str(&id);
+                                }
+                                if let Some(func) = tc.function {
+                                    if let Some(name) = func.name {
+                                        tool_calls[idx].function.name.push_str(&name);
+                                    }
+                                    if let Some(args) = func.arguments {
+                                        tool_calls[idx].function.arguments.push_str(&args);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !buffer.trim().is_empty() {
+            if let Some(chunk) = parse_sse_chunk(buffer.trim()) {
+                for choice in chunk.choices {
+                    if let Some(ref text) = choice.delta.content {
+                        if !text.is_empty() {
+                            full_content.push_str(text);
+                            on_delta(text.clone()).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(StreamTurnResult {
+            content: full_content,
+            tool_calls,
+        })
+    }
+
     pub async fn verify_api_key(
         &self,
         base_url: &str,
@@ -301,6 +432,33 @@ impl AiClient {
     }
 }
 
+/// Parses a single Server-Sent Events line into a `ChatCompletionChunk`.
+pub fn parse_sse_chunk(line: &str) -> Option<super::models::ChatCompletionChunk> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str::<super::models::ChatCompletionChunk>(payload).ok()
+}
+
+/// Extracts delta text content from a single Server-Sent Events line.
+pub fn parse_sse_line(line: &str) -> Option<String> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload == "[DONE]" {
+        return None;
+    }
+
+    let chunk = serde_json::from_str::<super::models::ChatCompletionChunk>(payload).ok()?;
+    for choice in chunk.choices {
+        if let Some(content) = choice.delta.content {
+            if !content.is_empty() {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
 impl Default for AiClient {
     fn default() -> Self {
         Self::new()
@@ -324,6 +482,31 @@ pub fn get_ai_client() -> AiClient {
 mod tests {
     use super::super::models::ChatCompletionMessage;
     use super::*;
+
+    #[test]
+    fn test_parse_sse_line() {
+        let chunk_line = r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"content":"Hello world"},"finish_reason":null}]}"#;
+        assert_eq!(parse_sse_line(chunk_line), Some("Hello world".to_string()));
+
+        let empty_delta = r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":null}]}"#;
+        assert_eq!(parse_sse_line(empty_delta), None);
+
+        let done_line = "data: [DONE]";
+        assert_eq!(parse_sse_line(done_line), None);
+
+        let comment = ": keep-alive";
+        assert_eq!(parse_sse_line(comment), None);
+    }
+
+    #[test]
+    fn test_parse_sse_chunk_with_tool_calls() {
+        let chunk_line = r#"data: {"id":"chatcmpl-2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_99","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"tokyo\"}"}}]},"finish_reason":null}]}"#;
+        let chunk = parse_sse_chunk(chunk_line).unwrap();
+        assert_eq!(chunk.choices.len(), 1);
+        let tc = &chunk.choices[0].delta.tool_calls.as_ref().unwrap()[0];
+        assert_eq!(tc.id.as_deref(), Some("call_99"));
+        assert_eq!(tc.function.as_ref().unwrap().name.as_deref(), Some("search_web"));
+    }
 
     #[test]
     fn test_resolved_config_defaults() {

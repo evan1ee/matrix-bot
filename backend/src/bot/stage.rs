@@ -69,29 +69,41 @@ impl Drop for TypingGuard {
 /// to publish interim stage progress into the in-place status message.
 #[derive(Clone)]
 pub struct StageReporter {
-    room: Room,
+    room: Option<Room>,
     event_id: Option<OwnedEventId>,
 }
 
 impl std::fmt::Debug for StageReporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let room_id = self
+            .room
+            .as_ref()
+            .map(|r| r.room_id().as_str())
+            .unwrap_or("none");
         f.debug_struct("StageReporter")
-            .field("room_id", &self.room.room_id().as_str())
+            .field("room_id", &room_id)
             .field("event_id", &self.event_id)
             .finish()
     }
 }
 
 impl StageReporter {
+    pub fn noop() -> Self {
+        Self {
+            room: None,
+            event_id: None,
+        }
+    }
+
     pub async fn report(&self, plain_text: &str, html_text: &str) {
-        if let Some(ref target_id) = self.event_id {
+        if let (Some(room), Some(target_id)) = (&self.room, &self.event_id) {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_text)
                 .make_replacement(metadata, None);
-            if let Err(err) = self.room.send(content).await {
+            if let Err(err) = room.send(content).await {
                 debug!(
                     "Failed to update stage indicator in room {}: {:?}",
-                    self.room.room_id(),
+                    room.room_id(),
                     err
                 );
             }
@@ -106,6 +118,68 @@ impl StageReporter {
     pub async fn report_tool_call(&self, tool_name: &str) {
         let label = tool_to_stage_label(tool_name);
         self.report_stage(label).await;
+    }
+
+    /// Creates a throttled streaming buffer for in-place token replacement.
+    pub fn throttler(&self) -> StreamThrottler {
+        StreamThrottler::new(self.clone())
+    }
+}
+
+/// Buffers and throttles streaming token edits (`m.replace`) to a Matrix room.
+///
+/// Enforces a minimum interval (default 800ms) and character threshold between
+/// message edits, protecting against homeserver (Synapse) HTTP 429 rate limits
+/// while delivering a smooth typewriter animation in Element X.
+pub struct StreamThrottler {
+    reporter: StageReporter,
+    accumulated: String,
+    last_sent_at: std::time::Instant,
+    last_sent_len: usize,
+    min_interval: Duration,
+    min_chars: usize,
+}
+
+impl StreamThrottler {
+    pub fn new(reporter: StageReporter) -> Self {
+        Self {
+            reporter,
+            accumulated: String::new(),
+            last_sent_at: std::time::Instant::now(),
+            last_sent_len: 0,
+            min_interval: Duration::from_millis(800),
+            min_chars: 15,
+        }
+    }
+
+    pub fn with_interval(mut self, interval: Duration) -> Self {
+        self.min_interval = interval;
+        self
+    }
+
+    pub async fn push_delta(&mut self, delta: &str) {
+        self.accumulated.push_str(delta);
+        let new_chars = self.accumulated.len().saturating_sub(self.last_sent_len);
+
+        if self.last_sent_at.elapsed() >= self.min_interval && new_chars >= self.min_chars {
+            self.flush().await;
+        }
+    }
+
+    pub async fn flush(&mut self) {
+        if self.accumulated.is_empty() {
+            return;
+        }
+        self.last_sent_at = std::time::Instant::now();
+        self.last_sent_len = self.accumulated.len();
+
+        let plain = format!("{} ...", self.accumulated);
+        let html = format!("{} ▍", crate::utils::html::html_escape(&self.accumulated));
+        self.reporter.report(&plain, &html).await;
+    }
+
+    pub fn accumulated(&self) -> &str {
+        &self.accumulated
     }
 }
 
@@ -142,7 +216,7 @@ impl StageIndicator {
     /// Produces a cloneable reporter handle for subroutines.
     pub fn reporter(&self) -> StageReporter {
         StageReporter {
-            room: self.room.clone(),
+            room: Some(self.room.clone()),
             event_id: self.event_id.clone(),
         }
     }
@@ -238,5 +312,19 @@ mod tests {
             .make_replacement(metadata, None);
 
         assert!(content.relates_to.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_stream_throttler_accumulation() {
+        let reporter = StageReporter::noop();
+        let mut throttler = reporter.throttler().with_interval(Duration::from_millis(50));
+        assert_eq!(throttler.accumulated(), "");
+
+        throttler.push_delta("Hello").await;
+        throttler.push_delta(" world! This is a longer stream test.").await;
+        assert!(throttler.accumulated().contains("Hello world!"));
+
+        throttler.flush().await;
+        assert_eq!(throttler.accumulated(), "Hello world! This is a longer stream test.");
     }
 }
