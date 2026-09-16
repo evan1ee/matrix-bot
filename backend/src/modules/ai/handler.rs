@@ -201,7 +201,6 @@ pub async fn run_ai_turn(
     let settings =
         crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
             .await;
-    let tz = settings.tz();
     let max_history = settings.max_history_turns.clamp(1, 100);
 
     // Load recent messages for context
@@ -211,50 +210,7 @@ pub async fn run_ai_turn(
 
     let mut chat_messages = Vec::new();
 
-    let now_utc = chrono::Utc::now();
-    let now_local = now_utc.with_timezone(&tz);
-    let today_local = now_local.format("%Y-%m-%d").to_string();
-    let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
-    let now_utc_str = now_utc.to_rfc3339();
-
-    let default_room_id = crate::db::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id).await.unwrap_or_default();
-    let room_desc: Vec<_> = cached_rooms
-        .iter()
-        .map(|r| {
-            if r.is_direct {
-                format!("'{}' (user direct chat room, id: {})", r.name, r.room_id)
-            } else {
-                format!("'{}' (id: {})", r.name, r.room_id)
-            }
-        })
-        .collect();
-    let rooms_str = if room_desc.is_empty() { "None discovered yet".to_string() } else { room_desc.join(", ") };
-    let default_room_str = default_room_id.as_deref().unwrap_or(room_id);
-
-    let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
-        format!(
-            "You are the central Brain and intelligent Personal Operating System for matrix-bot. \
-             You have full bidirectional sensory and action access across all modules: tasks & to-dos, reminders, recurring bills & subscriptions, investment portfolio & cash balances, financial ledger & categories, daily habits & streaks, travel footprints, bookmarks & reading list, inbound webhooks, user settings, and daily logs / lifespan reflections. \
-             MULTIPLE ACTIONS & QUICK CAPTURE: When the user requests multiple actions in a single message (e.g. logging an expense, checking off a habit, setting a reminder, adding a task, or logging today's mood), call all relevant tools in sequence or parallel. \
-             Provide a consolidated, clear confirmation of every action taken with bullet points. \
-             TOOL ACCURACY & TRUTHFULNESS: If any tool returns an error or fails, NEVER say or imply that the action succeeded. Clearly state that the tool call failed and report the error reason to the user. Only confirm actions that completed successfully. \
-             SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. When performing a daily or weekly reflection / summary, retrieve all needed data (daily log, habits, tasks, finance, footprints, reminders, life profile) in parallel during the first tool round rather than chaining sequential retrieval rounds. \
-             CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
-             TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
-             ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
-             QUOTED REPLIES & CONTEXT: When the prompt contains [Context: Replying to quoted message from ...]: 1) FACT CHECKING: If asked to fact check or verify, critically evaluate the claims with objective facts, indicate accuracy/truthfulness, and clarify misconceptions; 2) EXPLANATION: If asked to explain or summarize, break down concepts clearly and articulately; 3) COMMENTARY: If asked for thoughts or commentary, provide balanced, insightful observations; 4) ACTION CREATION: If asked to add a todo, task, or reminder, extract the commitment from the quote and call the appropriate tool (`add_todo`, `create_reminder`). \
-             The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
-            now_local_str = now_local_str,
-            today_local = today_local,
-            now_utc = now_utc_str,
-            tz = settings.timezone,
-            curr = settings.currency,
-            rooms = rooms_str,
-            default_room = default_room_str,
-            owner_id = owner_id
-        )
-    });
+    let sys_prompt = super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),
@@ -390,6 +346,37 @@ pub async fn run_ai_turn(
                     }
 
                     if let Some(text) = msg.content {
+                        let is_hallucinated_tool = tool_calls_executed.is_empty()
+                            && iteration == 1
+                            && (text.contains("record_finance_entry")
+                                || text.contains("add_expense")
+                                || text.contains("add_todo")
+                                || text.contains("create_reminder")
+                                || text.contains("Tool called:")
+                                || text.contains("Receipt recorded")
+                                || text.contains("Receipt logged"));
+
+                        if is_hallucinated_tool {
+                            warn!("AI simulated tool call in text without invoking function API; correcting model in next turn");
+                            chat_messages.push(ChatCompletionMessage {
+                                role: "assistant".to_string(),
+                                content: Some(text),
+                                tool_calls: None,
+                                tool_call_id: None,
+                                name: None,
+                            });
+                            chat_messages.push(ChatCompletionMessage {
+                                role: "user".to_string(),
+                                content: Some(
+                                    "SYSTEM: You wrote text describing or claiming that a tool was called, but you did NOT actually invoke any tool function via the function calling API! No records were saved to the database. You MUST execute the real tool call (such as `record_finance_entry` or `add_todo`) now via the function calling API so it can be saved.".to_string(),
+                                ),
+                                tool_calls: None,
+                                tool_call_id: None,
+                                name: None,
+                            });
+                            continue;
+                        }
+
                         final_content = text;
                         break;
                     }
@@ -429,6 +416,14 @@ pub async fn run_ai_turn(
         } else {
             final_content = "Received empty response from AI model.".to_string();
         }
+    }
+
+    if tool_calls_executed.is_empty()
+        && (final_content.contains("Receipt recorded")
+            || final_content.contains("Receipt logged")
+            || final_content.contains("Tool called:"))
+    {
+        final_content = "⚠️ **Action Not Recorded**: The AI assistant generated a text summary but did not execute the database tool. Please retry sending the image or use the `!ai` command to log the expense.".to_string();
     }
 
     if let Err(e) = AiRepository::add_message(

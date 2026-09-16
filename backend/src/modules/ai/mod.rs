@@ -9,6 +9,7 @@ pub mod client;
 pub mod config_cmd;
 pub mod handler;
 pub mod models;
+pub mod prompt;
 pub mod repository;
 pub mod retrospective;
 pub mod search;
