@@ -1,9 +1,8 @@
 use futures_util::FutureExt;
 use matrix_sdk::{
     room::Room,
-    ruma::events::room::{
-        member::{MembershipState, StrippedRoomMemberEvent},
-        message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
+    ruma::events::room::message::{
+        MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
     },
     Client, RoomMemberships, RoomState,
 };
