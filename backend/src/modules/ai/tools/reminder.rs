@@ -110,11 +110,16 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
+                let sender_name = owner_id
+                    .strip_prefix('@')
+                    .and_then(|s| s.split(':').next())
+                    .unwrap_or(owner_id);
+
                 let rem = ReminderRepository::create(
                     pool,
                     &target_room,
                     owner_id,
-                    "AI Assistant",
+                    sender_name,
                     message,
                     trigger_at,
                     recurrence,

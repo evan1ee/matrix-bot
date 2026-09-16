@@ -151,6 +151,7 @@ mod tests {
         let html = format_voice_turn_response(&ai_turn, &transcription);
         assert!(html.contains("Review budget"));
         assert!(html.contains("🤖"));
-        assert!(html.contains("grok-4.6 • SenseVoice • add_todo"));
+        assert!(html.contains("grok-4.6 • SenseVoice"));
+        assert!(!html.contains("add_todo"));
     }
 }

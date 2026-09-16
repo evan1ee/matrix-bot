@@ -5,6 +5,7 @@ use tracing::{error, info, warn};
 
 use crate::modules::reminder::models::Reminder;
 use crate::modules::reminder::repository::{ReminderRepository, MAX_DELIVERY_ATTEMPTS};
+use crate::modules::settings::SettingsRepository;
 use crate::modules::ModuleContext;
 use crate::utils::{html_escape, strip_html};
 
@@ -158,6 +159,32 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
     }
 }
 
+/// Formats the reminder notification alert sent to Matrix when a reminder triggers.
+pub fn format_reminder_alert(
+    message: &str,
+    trigger_at: &DateTime<Utc>,
+    tz: &chrono_tz::Tz,
+    recurrence: &str,
+) -> String {
+    let local_time = trigger_at.with_timezone(tz).format("%Y-%m-%d %H:%M").to_string();
+    let mut html = format!(
+        "⏰ <b>提醒时间到了</b><br/>• <b>事项:</b> {}<br/>• <b>设定时间:</b> {}",
+        html_escape(message),
+        local_time
+    );
+    let rec_label = match recurrence {
+        "daily" => Some("每天重复"),
+        "weekly" => Some("每周重复"),
+        "monthly" => Some("每月重复"),
+        "yearly" => Some("每年重复"),
+        _ => None,
+    };
+    if let Some(rec) = rec_label {
+        html.push_str(&format!("<br/>• <b>周期:</b> {}", rec));
+    }
+    html
+}
+
 /// Starts the 5s tick loop, returning its handle so the caller controls its
 /// lifetime — see [`crate::modules::BackgroundWorkers`].
 pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<()> {
@@ -182,10 +209,15 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
                     reminder.id, reminder.sender_name, reminder.room_id
                 );
 
-                let alert_html = format!(
-                    "⏰ <b>REMINDER for {}!</b><br/>{}",
-                    html_escape(&reminder.sender_name),
-                    html_escape(&reminder.message)
+                let tz = SettingsRepository::get_or_default(&ctx.db.pool, &reminder.owner_id)
+                    .await
+                    .tz();
+
+                let alert_html = format_reminder_alert(
+                    &reminder.message,
+                    &reminder.trigger_at,
+                    &tz,
+                    &reminder.recurrence,
                 );
                 let plain_text = strip_html(&alert_html);
                 let alert_content = RoomMessageEventContent::text_html(&plain_text, &alert_html);
@@ -274,5 +306,24 @@ mod tests {
         assert_eq!(retry_delay(0), Duration::seconds(30));
         assert_eq!(retry_delay(1), Duration::seconds(60));
         assert_eq!(retry_delay(4), Duration::seconds(150));
+    }
+
+    #[test]
+    fn test_format_reminder_alert_non_recurring() {
+        let t = utc(2026, 9, 17, 12);
+        let tz = chrono_tz::Asia::Shanghai;
+        let html = format_reminder_alert("去跑步", &t, &tz, "none");
+        assert!(html.contains("⏰ <b>提醒时间到了</b>"));
+        assert!(html.contains("• <b>事项:</b> 去跑步"));
+        assert!(html.contains("• <b>设定时间:</b> 2026-09-17 20:00"));
+        assert!(!html.contains("周期"));
+    }
+
+    #[test]
+    fn test_format_reminder_alert_recurring() {
+        let t = utc(2026, 9, 17, 12);
+        let tz = chrono_tz::Asia::Shanghai;
+        let html = format_reminder_alert("去跑步", &t, &tz, "daily");
+        assert!(html.contains("• <b>周期:</b> 每天重复"));
     }
 }

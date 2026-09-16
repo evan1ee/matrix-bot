@@ -139,6 +139,7 @@ mod tests {
         let html = format_ocr_turn_response(&ai_turn, &ocr_result);
         assert!(html.contains("Shake Shack"));
         assert!(html.contains("🤖"));
-        assert!(html.contains("grok-4.6 • PaddleOCR • add_expense"));
+        assert!(html.contains("grok-4.6 • PaddleOCR"));
+        assert!(!html.contains("add_expense"));
     }
 }

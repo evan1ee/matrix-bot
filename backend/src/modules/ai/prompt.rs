@@ -82,23 +82,15 @@ pub async fn build_system_prompt(
 }
 
 /// Renders the unified bot footer:
-/// `🤖 {model_name} • {pipeline_feature} • {tool_name...}`
+/// `🤖 {model_name} • {pipeline_feature}`
 pub fn render_bot_footer(
     model_name: &str,
     pipeline_feature: Option<&str>,
-    tools_executed: &[String],
+    _tools_executed: &[String],
 ) -> String {
     let mut parts = vec![model_name.to_string()];
     if let Some(feat) = pipeline_feature {
         parts.push(feat.to_string());
-    }
-    for tool in tools_executed {
-        if tool == "set_reminder" || tool == "set reminder" || tool == "create_reminder" {
-            continue;
-        }
-        if !parts.contains(tool) {
-            parts.push(tool.clone());
-        }
     }
     let footer_text = parts.join(" • ");
     format!(
@@ -129,28 +121,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_render_bot_footer_excludes_set_reminder() {
-        let footer = render_bot_footer(
-            "grok-4.3",
-            Some("SenseVoice"),
-            &["set_reminder".to_string()],
-        );
-        assert!(footer.contains("grok-4.3"));
-        assert!(footer.contains("SenseVoice"));
-        assert!(!footer.contains("set_reminder"));
-        assert!(!footer.contains("set reminder"));
-    }
-
-    #[test]
-    fn test_render_bot_footer_keeps_other_tools() {
+    fn test_render_bot_footer_excludes_tool_names() {
         let footer = render_bot_footer(
             "grok-4.3",
             Some("PaddleOCR"),
-            &["record_finance_entry".to_string()],
+            &[
+                "record_finance_entry".to_string(),
+                "set_reminder".to_string(),
+            ],
         );
         assert!(footer.contains("grok-4.3"));
         assert!(footer.contains("PaddleOCR"));
-        assert!(footer.contains("record_finance_entry"));
+        assert!(!footer.contains("record_finance_entry"));
+        assert!(!footer.contains("set_reminder"));
+    }
+
+    #[test]
+    fn test_render_bot_footer_plain_model() {
+        let footer = render_bot_footer("grok-4.3", None, &[]);
+        assert_eq!(
+            footer,
+            "<br/><font color=\"gray\" size=\"-2\">🤖 <em>grok-4.3</em></font>"
+        );
     }
 }
 
