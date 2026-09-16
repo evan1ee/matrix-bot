@@ -28,7 +28,10 @@ pub async fn process_audio_event(
     stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
     if audio_bytes.is_empty() {
-        return "❌ <b>Empty audio data received.</b>".to_string();
+        return "⚠️ <b>语音处理失败</b><br/>\
+                • <b>原因:</b> 未接收到有效的音频数据<br/>\
+                • <b>建议:</b> 请尝试重新录制并发送语音，或直接输入文字。"
+            .to_string();
     }
 
     if let Some(reporter) = stage_reporter {
@@ -48,8 +51,9 @@ pub async fn process_audio_event(
         Err(err) => {
             warn!("Audio decoding failed for owner {}: {:?}", owner_id, err);
             return format!(
-                "⚠️ <b>Voice Decoding Error:</b> {}<br/>\
-                 <em>Please ensure the audio format is supported (Ogg Opus, WAV, MP3, AAC).</em>",
+                "⚠️ <b>语音转写失败</b><br/>\
+                 • <b>原因:</b> 音频解码失败或格式不兼容（{}）<br/>\
+                 • <b>建议:</b> 请检查麦克风录音权限或尝试重新发送，也可直接输入文字。",
                 html_escape(&err.to_string())
             );
         }
@@ -67,16 +71,18 @@ pub async fn process_audio_event(
         Err(err) => {
             warn!("Voice transcription failed for owner {}: {:?}", owner_id, err);
             return format!(
-                "⚠️ <b>Voice Recognition Error:</b> {}<br/>\
-                 <em>Please ensure SenseVoice models are properly installed.</em>",
+                "⚠️ <b>语音转写服务异常</b><br/>\
+                 • <b>原因:</b> 语音识别引擎暂时不可用（{}）<br/>\
+                 • <b>建议:</b> 请稍后重试，或直接输入文字。",
                 html_escape(&err.to_string())
             );
         }
     };
 
     if transcription.is_empty() {
-        return "🎙️ <b>No clear speech detected in voice message.</b><br/>\
-                <em>The audio may have been silent, background noise, or too quiet to recognize.</em>"
+        return "⚠️ <b>语音未能识别</b><br/>\
+                • <b>原因:</b> 未检测到清晰人声（声音过小或背景噪音较大）<br/>\
+                • <b>建议:</b> 请尝试靠近麦克风重新录制，或直接输入文字。"
             .to_string();
     }
 
@@ -108,8 +114,10 @@ pub async fn process_audio_event(
         Err(err) => {
             warn!("AI turn failed for transcribed voice: {}", err);
             format!(
-                "🎙️ <b>Voice Message:</b> \"{}\"<br/>\
-                 ⚠️ <em>Could not process with AI assistant: {}</em>",
+                "🎙️ <b>语音内容:</b> “{}”<br/><br/>\
+                 ⚠️ <b>AI 处理遇到问题</b><br/>\
+                 • <b>原因:</b> {}<br/>\
+                 • <b>建议:</b> 请稍后重试，或直接发送文字指令。",
                 html_escape(&transcription.text),
                 html_escape(&err)
             )

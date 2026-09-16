@@ -57,3 +57,7 @@ symphonia = { version = "0.5", default-features = false, features = ["ogg", "vor
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
 
+[profile.dev.package."*"]
+opt-level = 2
+overflow-checks = false
+

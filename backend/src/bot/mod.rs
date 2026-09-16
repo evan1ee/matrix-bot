@@ -26,6 +26,7 @@ use crate::modules::{ModuleContext, ModuleRegistry};
 pub mod client;
 pub mod dispatcher;
 pub mod handler;
+pub mod invite;
 pub mod linking;
 pub mod media;
 pub mod notify;

@@ -21,24 +21,34 @@ pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         return Err(VoiceError::AudioDecode("Empty audio byte buffer".to_string()));
     }
 
-    // Matrix voice notes (MSC3245) are typically OGG Opus (starts with magic "OggS")
-    if is_ogg_container(bytes) {
-        match decode_ogg_opus(bytes) {
-            Ok(samples) if !samples.is_empty() => {
-                debug!("Decoded {} 16kHz mono samples via Ogg Opus decoder", samples.len());
-                return Ok(samples);
-            }
-            Ok(_) => {
-                debug!("Ogg Opus decoder returned 0 samples, trying generic fallback");
-            }
-            Err(err) => {
-                debug!("Ogg Opus decode attempt returned: {:?}, attempting fallback", err);
+    let decode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Matrix voice notes (MSC3245) are typically OGG Opus (starts with magic "OggS")
+        if is_ogg_container(bytes) {
+            match decode_ogg_opus(bytes) {
+                Ok(samples) if !samples.is_empty() => {
+                    debug!("Decoded {} 16kHz mono samples via Ogg Opus decoder", samples.len());
+                    return Ok(samples);
+                }
+                Ok(_) => {
+                    debug!("Ogg Opus decoder returned 0 samples, trying generic fallback");
+                }
+                Err(err) => {
+                    debug!("Ogg Opus decode attempt returned: {:?}, attempting fallback", err);
+                }
             }
         }
-    }
 
-    // Generic audio format probe (WAV, MP3, AAC, FLAC, Vorbis)
-    decode_generic_audio(bytes)
+        // Generic audio format probe (WAV, MP3, AAC, FLAC, Vorbis)
+        decode_generic_audio(bytes)
+    }));
+
+    match decode_result {
+        Ok(res) => res,
+        Err(panic_err) => {
+            warn!("Audio decoder panicked on input: {:?}", panic_err);
+            Err(VoiceError::AudioDecode("Audio decoding failed due to an internal decoder error".to_string()))
+        }
+    }
 }
 
 fn is_ogg_container(bytes: &[u8]) -> bool {
@@ -47,48 +57,58 @@ fn is_ogg_container(bytes: &[u8]) -> bool {
 
 /// Demuxes an Ogg Opus stream and decodes directly to 16,000 Hz mono f32 samples.
 pub fn decode_ogg_opus(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
-    let cursor = Cursor::new(bytes);
-    let mut reader = PacketReader::new(cursor);
-    let mut decoder = OpusDecoder::new(TARGET_SAMPLE_RATE, 1)
-        .map_err(|e| VoiceError::AudioDecode(format!("Opus decoder init error: {:?}", e)))?;
+    let catch_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let cursor = Cursor::new(bytes);
+        let mut reader = PacketReader::new(cursor);
+        let mut decoder = OpusDecoder::new(TARGET_SAMPLE_RATE, 1)
+            .map_err(|e| VoiceError::AudioDecode(format!("Opus decoder init error: {:?}", e)))?;
 
-    let mut all_samples: Vec<f32> = Vec::new();
-    let mut packet_idx = 0;
+        let mut all_samples: Vec<f32> = Vec::new();
+        let mut packet_idx = 0;
 
-    // Up to 120ms frame at 16kHz = 1920 samples
-    let mut pcm_buf = vec![0.0f32; 1920];
+        // Up to 120ms frame at 16kHz = 1920 samples
+        let mut pcm_buf = vec![0.0f32; 1920];
 
-    loop {
-        match reader.read_packet() {
-            Ok(Some(packet)) => {
-                if packet_idx == 0 {
-                    if !packet.data.starts_with(b"OpusHead") {
-                        return Err(VoiceError::AudioDecode(
-                            "Ogg stream does not contain OpusHead header".to_string(),
-                        ));
-                    }
-                } else if packet_idx == 1 {
-                    // OpusTags comment header - skip
-                } else {
-                    match decoder.decode_float(&packet.data, &mut pcm_buf, false) {
-                        Ok(samples_decoded) => {
-                            all_samples.extend_from_slice(&pcm_buf[..samples_decoded]);
+        loop {
+            match reader.read_packet() {
+                Ok(Some(packet)) => {
+                    if packet_idx == 0 {
+                        if !packet.data.starts_with(b"OpusHead") {
+                            return Err(VoiceError::AudioDecode(
+                                "Ogg stream does not contain OpusHead header".to_string(),
+                            ));
                         }
-                        Err(err) => {
-                            warn!("Skipping damaged Opus audio packet: {:?}", err);
+                    } else if packet_idx == 1 {
+                        // OpusTags comment header - skip
+                    } else {
+                        match decoder.decode_float(&packet.data, &mut pcm_buf, false) {
+                            Ok(samples_decoded) => {
+                                all_samples.extend_from_slice(&pcm_buf[..samples_decoded]);
+                            }
+                            Err(err) => {
+                                warn!("Skipping damaged Opus audio packet: {:?}", err);
+                            }
                         }
                     }
+                    packet_idx += 1;
                 }
-                packet_idx += 1;
-            }
-            Ok(None) => break,
-            Err(err) => {
-                return Err(VoiceError::AudioDecode(format!("Ogg packet error: {:?}", err)));
+                Ok(None) => break,
+                Err(err) => {
+                    return Err(VoiceError::AudioDecode(format!("Ogg packet error: {:?}", err)));
+                }
             }
         }
-    }
 
-    Ok(all_samples)
+        Ok(all_samples)
+    }));
+
+    match catch_res {
+        Ok(res) => res,
+        Err(panic_err) => {
+            warn!("Opus decoding loop panicked: {:?}", panic_err);
+            Err(VoiceError::AudioDecode("Internal Opus packet decoding error".to_string()))
+        }
+    }
 }
 
 /// Fallback decoder supporting WAV, MP3, AAC, FLAC, and OGG Vorbis via Symphonia.

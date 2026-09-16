@@ -1,3 +1,4 @@
+use futures_util::FutureExt;
 use matrix_sdk::{
     room::Room,
     ruma::events::room::{
@@ -22,52 +23,7 @@ pub fn register_handlers(
     pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
 ) {
     // 1. Authorized invite event handler
-    let invite_db = db.clone();
-    let allowlist: Vec<String> = std::env::var("MATRIX_VERIFICATION_ALLOWLIST")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    client.add_event_handler(move |ev: StrippedRoomMemberEvent, room: Room| {
-        let db = invite_db.clone();
-        let allowlist = allowlist.clone();
-        async move {
-            if ev.content.membership == MembershipState::Invite {
-                let sender = ev.sender.as_str();
-                let is_allowlisted = allowlist.iter().any(|a| a == sender);
-                let is_linked =
-                    sqlx::query_scalar::<_, i64>("SELECT 1 FROM matrix_links WHERE mxid = ?")
-                        .bind(sender)
-                        .fetch_optional(&db.pool)
-                        .await
-                        .ok()
-                        .flatten()
-                        .is_some();
-
-                if is_allowlisted || is_linked {
-                    info!(
-                        "Authorized invitation from {} for room: {}",
-                        sender,
-                        room.room_id()
-                    );
-                    if let Err(err) = room.join().await {
-                        error!("Failed to join room {}: {:?}", room.room_id(), err);
-                    } else {
-                        info!("Successfully joined room: {}", room.room_id());
-                    }
-                } else {
-                    warn!(
-                        "Rejected unauthorized room invitation from {} for room: {}",
-                        sender,
-                        room.room_id()
-                    );
-                    let _ = room.leave().await;
-                }
-            }
-        }
-    });
+    crate::bot::invite::register_invite_handler(client, db.clone());
 
     // 2. Incoming message event handler
     let bot_user_id = match client.user_id() {
@@ -127,8 +83,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Account resolution failed.",
-                                "❌ <i>Account resolution failed.</i>",
+                                "⚠️ 账号验证失败：无法解析 Matrix 用户身份。请稍后重试或重新加入房间。",
+                                "⚠️ <b>账号验证失败</b><br/>• <b>原因:</b> 无法解析 Matrix 用户身份<br/>• <b>建议:</b> 请稍后重试或重新加入房间。",
                             )
                             .await;
                         return;
@@ -150,8 +106,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Could not download image attachment.",
-                                "❌ <i>Could not download image attachment.</i>",
+                                "⚠️ 图片获取失败：图片附件数据为空。请重新上传发送。",
+                                "⚠️ <b>图片处理失败</b><br/>• <b>原因:</b> 图片附件数据为空<br/>• <b>建议:</b> 请重新上传发送，或直接输入文字。",
                             )
                             .await;
                         return;
@@ -165,8 +121,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Failed to download or decrypt image attachment.",
-                                "❌ <i>Failed to download or decrypt image attachment.</i>",
+                                "⚠️ 图片下载失败：无法下载或解密图片附件。请检查网络后重新发送。",
+                                "⚠️ <b>图片下载失败</b><br/>• <b>原因:</b> 无法下载或解密图片附件<br/>• <b>建议:</b> 请检查网络连接后重新发送，或直接输入文字。",
                             )
                             .await;
                         return;
@@ -179,7 +135,7 @@ pub fn register_handlers(
                 );
 
                 let reporter = stage_indicator.reporter();
-                let reply_html = crate::modules::ocr::process_image_event(
+                let ocr_res = std::panic::AssertUnwindSafe(crate::modules::ocr::process_image_event(
                     &db,
                     broadcaster.as_ref(),
                     &room,
@@ -188,10 +144,19 @@ pub fn register_handlers(
                     &image_bytes,
                     &model_dir,
                     Some(&reporter),
-                )
+                ))
+                .catch_unwind()
                 .await;
 
                 typing_guard.stop().await;
+
+                let reply_html = match ocr_res {
+                    Ok(html) => html,
+                    Err(panic_err) => {
+                        error!("OCR image processing panicked: {:?}", panic_err);
+                        "⚠️ <b>图片处理异常</b><br/>• <b>原因:</b> 图片识别过程中发生系统异常<br/>• <b>建议:</b> 请尝试重新拍摄发送，或直接输入文字。".to_string()
+                    }
+                };
 
                 let plain_text = crate::utils::strip_html(&reply_html);
                 stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
@@ -227,8 +192,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Account resolution failed.",
-                                "❌ <i>Account resolution failed.</i>",
+                                "⚠️ 账号验证失败：无法解析 Matrix 用户身份。请稍后重试或重新加入房间。",
+                                "⚠️ <b>账号验证失败</b><br/>• <b>原因:</b> 无法解析 Matrix 用户身份<br/>• <b>建议:</b> 请稍后重试或重新加入房间。",
                             )
                             .await;
                         return;
@@ -250,8 +215,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Could not download audio attachment.",
-                                "❌ <i>Could not download audio attachment.</i>",
+                                "⚠️ 语音获取失败：音频附件数据为空。请重新录制发送。",
+                                "⚠️ <b>语音处理失败</b><br/>• <b>原因:</b> 音频附件数据为空<br/>• <b>建议:</b> 请重新录制并发送语音，或直接输入文字。",
                             )
                             .await;
                         return;
@@ -265,8 +230,8 @@ pub fn register_handlers(
                         typing_guard.stop().await;
                         stage_indicator
                             .cancel_with_error(
-                                "❌ Failed to download or decrypt audio attachment.",
-                                "❌ <i>Failed to download or decrypt audio attachment.</i>",
+                                "⚠️ 语音下载失败：无法下载或解密音频附件。请检查网络后重新发送。",
+                                "⚠️ <b>语音下载失败</b><br/>• <b>原因:</b> 无法下载或解密音频附件<br/>• <b>建议:</b> 请检查网络连接后重新发送，或直接输入文字。",
                             )
                             .await;
                         return;
@@ -286,7 +251,7 @@ pub fn register_handlers(
                 };
 
                 let reporter = stage_indicator.reporter();
-                let reply_html = crate::modules::voice::process_audio_event(
+                let voice_res = std::panic::AssertUnwindSafe(crate::modules::voice::process_audio_event(
                     &db,
                     broadcaster.as_ref(),
                     &room,
@@ -294,10 +259,19 @@ pub fn register_handlers(
                     &audio_bytes,
                     &voice_config,
                     Some(&reporter),
-                )
+                ))
+                .catch_unwind()
                 .await;
 
                 typing_guard.stop().await;
+
+                let reply_html = match voice_res {
+                    Ok(html) => html,
+                    Err(panic_err) => {
+                        error!("Voice audio processing panicked: {:?}", panic_err);
+                        "⚠️ <b>语音处理异常</b><br/>• <b>原因:</b> 音频解码或识别过程中发生系统异常<br/>• <b>建议:</b> 请尝试重新发送语音，或直接输入文字。".to_string()
+                    }
+                };
 
                 let plain_text = crate::utils::strip_html(&reply_html);
                 stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
@@ -421,33 +395,53 @@ pub fn register_handlers(
                 None
             };
 
-            let reply_opt = registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref()).await;
+            let dispatch_res = std::panic::AssertUnwindSafe(
+                registry.dispatch(&cmd_ctx, &db, broadcaster.as_ref())
+            )
+            .catch_unwind()
+            .await;
 
             if let Some(mut guard) = typing_guard {
                 guard.stop().await;
             }
 
-            if let Some(reply_html) = reply_opt {
-                let plain_text = crate::utils::strip_html(&reply_html);
-                if let Some(indicator) = stage_indicator {
-                    indicator.finish_with_reply(&plain_text, &reply_html).await;
-                } else {
-                    let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                    if let Err(err) = room.send(content).await {
-                        error!(
-                            "Failed to send message to room {}: {:?}",
-                            room.room_id(),
-                            err
-                        );
+            match dispatch_res {
+                Ok(Some(reply_html)) => {
+                    let plain_text = crate::utils::strip_html(&reply_html);
+                    if let Some(indicator) = stage_indicator {
+                        indicator.finish_with_reply(&plain_text, &reply_html).await;
+                    } else {
+                        let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
+                        if let Err(err) = room.send(content).await {
+                            error!(
+                                "Failed to send message to room {}: {:?}",
+                                room.room_id(),
+                                err
+                            );
+                        }
                     }
                 }
-            } else if let Some(indicator) = stage_indicator {
-                indicator
-                    .cancel_with_error(
-                        "❌ AI assistant encountered an error.",
-                        "❌ <i>AI assistant encountered an error.</i>",
-                    )
-                    .await;
+                Ok(None) => {
+                    if let Some(indicator) = stage_indicator {
+                        indicator
+                            .cancel_with_error(
+                                "⚠️ AI 处理失败：未能生成回复或处理超时。请尝试重新提问。",
+                                "⚠️ <b>AI 处理失败</b><br/>• <b>原因:</b> 未能生成有效回复或处理超时<br/>• <b>建议:</b> 请尝试重新提问，或换一种表达方式。",
+                            )
+                            .await;
+                    }
+                }
+                Err(panic_err) => {
+                    error!("Command dispatch panicked: {:?}", panic_err);
+                    let err_html = "⚠️ <b>指令处理遇到异常</b><br/>• <b>原因:</b> 系统处理请求时发生意外错误<br/>• <b>建议:</b> 请稍后重试，或检查输入内容。";
+                    let plain_text = crate::utils::strip_html(err_html);
+                    if let Some(indicator) = stage_indicator {
+                        indicator.finish_with_reply(&plain_text, err_html).await;
+                    } else {
+                        let content = RoomMessageEventContent::text_html(&plain_text, err_html);
+                        let _ = room.send(content).await;
+                    }
+                }
             }
         }
     });

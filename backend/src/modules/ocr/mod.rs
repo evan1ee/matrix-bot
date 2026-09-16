@@ -28,7 +28,10 @@ pub async fn process_image_event(
     stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
     if image_bytes.is_empty() {
-        return "❌ <b>Empty image data received.</b>".to_string();
+        return "⚠️ <b>图片处理失败</b><br/>\
+                • <b>原因:</b> 未接收到有效的图片数据<br/>\
+                • <b>建议:</b> 请尝试重新上传图片，或直接输入文字。"
+            .to_string();
     }
 
     if let Some(reporter) = stage_reporter {
@@ -47,16 +50,18 @@ pub async fn process_image_event(
         Err(err) => {
             warn!("OCR extraction failed for owner {}: {:?}", owner_id, err);
             return format!(
-                "⚠️ <b>OCR Processing Error:</b> {}<br/>\
-                 <em>Please ensure ONNX models are available or try again with a clearer image.</em>",
+                "⚠️ <b>文字识别失败</b><br/>\
+                 • <b>原因:</b> 图片文字识别遇到异常（{}）<br/>\
+                 • <b>建议:</b> 请尝试重新拍摄清晰平整的图片，或直接输入文字。",
                 html_escape(&err.to_string())
             );
         }
     };
 
     if ocr_result.is_empty() {
-        return "🔍 <b>No readable text detected in the image.</b><br/>\
-                If this was an expense receipt or task note, please ensure good lighting and that text is clearly focused."
+        return "⚠️ <b>未能识别出文字</b><br/>\
+                • <b>原因:</b> 图片中未检测到清晰文字（可能光照不足、模糊或角度过倾斜）<br/>\
+                • <b>建议:</b> 请在光线明亮处重新拍照，或直接输入文字描述。"
             .to_string();
     }
 
@@ -88,8 +93,10 @@ pub async fn process_image_event(
         Err(err) => {
             warn!("AI turn failed for OCR text: {}", err);
             format!(
-                "📄 <b>Extracted Text:</b><br/><pre>{}</pre><br/>\
-                 ⚠️ <em>Could not process with AI assistant: {}</em>",
+                "📄 <b>提取的文字内容:</b><br/><pre>{}</pre><br/>\
+                 ⚠️ <b>AI 处理遇到问题</b><br/>\
+                 • <b>原因:</b> {}<br/>\
+                 • <b>建议:</b> 请稍后重试，或直接发送文字指令。",
                 html_escape(&ocr_result.combined_text),
                 html_escape(&err)
             )
