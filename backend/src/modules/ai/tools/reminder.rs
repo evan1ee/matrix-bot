@@ -40,6 +40,9 @@ pub async fn execute_tool(
                     .unwrap_or("none");
                 let recurrence = RecurrencePattern::from_str_or_default(rec_str);
 
+                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let tz = settings.tz();
+
                 let trigger_at = if let Some(mins) = args
                     .get("in_minutes")
                     .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
@@ -52,20 +55,25 @@ pub async fn execute_tool(
                     .or_else(|| args.get("time"))
                     .and_then(|v| v.as_str())
                 {
-                    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-                    let tz = settings.tz();
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(trig_str) {
-                        dt.with_timezone(&Utc)
-                    } else if let Ok(naive_dt) =
-                        chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%dT%H:%M:%S")
+                    let clean = trig_str.trim();
+                    let clean_local = if clean.ends_with('Z') || clean.ends_with('z') {
+                        &clean[..clean.len() - 1]
+                    } else if clean.ends_with("+00:00") || clean.ends_with("-00:00") {
+                        &clean[..clean.len() - 6]
+                    } else {
+                        clean
+                    };
+
+                    if let Ok(naive_dt) =
+                        chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%dT%H:%M:%S")
                             .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%d %H:%M:%S")
+                                chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%d %H:%M:%S")
                             })
                             .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%dT%H:%M")
+                                chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%dT%H:%M")
                             })
                             .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%d %H:%M")
+                                chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%d %H:%M")
                             })
                     {
                         tz.from_local_datetime(&naive_dt)
@@ -74,8 +82,10 @@ pub async fn execute_tool(
                             .ok_or_else(|| {
                                 "Ambiguous or invalid local time for trigger_at".to_string()
                             })?
+                    } else if let Ok(dt) = DateTime::parse_from_rfc3339(clean) {
+                        dt.with_timezone(&Utc)
                     } else if let Ok(naive_date) =
-                        chrono::NaiveDate::parse_from_str(trig_str.trim(), "%Y-%m-%d")
+                        chrono::NaiveDate::parse_from_str(clean_local, "%Y-%m-%d")
                     {
                         naive_date
                             .and_hms_opt(9, 0, 0)
@@ -116,7 +126,19 @@ pub async fn execute_tool(
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::ReminderCreated(rem.clone()));
                 }
-                serde_json::to_string(&rem).map_err(|e| e.to_string())
+
+                let local_time = rem
+                    .trigger_at
+                    .with_timezone(&tz)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string();
+                let mut resp = serde_json::to_value(&rem).map_err(|e| e.to_string())?;
+                if let Some(obj) = resp.as_object_mut() {
+                    obj.insert("time".to_string(), json!(local_time));
+                    obj.insert("local_time".to_string(), json!(local_time));
+                    obj.insert("timezone".to_string(), json!(settings.timezone));
+                }
+                serde_json::to_string(&resp).map_err(|e| e.to_string())
             }
             .await,
         ),
@@ -193,7 +215,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "trigger_at": {
                         "type": "string",
-                        "description": "Absolute ISO-8601 timestamp when reminder triggers (e.g. 2026-03-30T18:00:00Z)"
+                        "description": "Trigger time in user's default timezone (e.g. '2026-09-17 20:00:00' or '2026-09-17 20:00'). Will be interpreted in user's default timezone."
                     },
                     "recurrence": {
                         "type": "string",
@@ -226,3 +248,60 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         ),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn test_set_reminder_with_local_time(pool: SqlitePool) {
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let res = execute_tool(
+            &pool,
+            None,
+            "test_user",
+            "!room:example.org",
+            "set_reminder",
+            &json!({
+                "text": "Go running",
+                "trigger_at": "2026-09-17 20:00:00"
+            }),
+        )
+        .await
+        .expect("tool execution result")
+        .expect("success");
+
+        let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(parsed["message"], "Go running");
+        assert_eq!(parsed["time"], "2026-09-17 20:00");
+        assert_eq!(parsed["local_time"], "2026-09-17 20:00");
+    }
+
+    #[sqlx::test]
+    async fn test_set_reminder_with_z_suffix(pool: SqlitePool) {
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        // When an LLM sends a local time formatted as ISO-8601 with Z (e.g. 2026-09-17T20:00:00Z)
+        let res = execute_tool(
+            &pool,
+            None,
+            "test_user",
+            "!room:example.org",
+            "set_reminder",
+            &json!({
+                "text": "Go running",
+                "trigger_at": "2026-09-17T20:00:00Z"
+            }),
+        )
+        .await
+        .expect("tool execution result")
+        .expect("success");
+
+        let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(parsed["message"], "Go running");
+        assert_eq!(parsed["time"], "2026-09-17 20:00");
+        assert_eq!(parsed["local_time"], "2026-09-17 20:00");
+    }
+}
+

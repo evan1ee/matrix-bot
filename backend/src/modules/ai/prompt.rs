@@ -58,15 +58,15 @@ pub async fn build_system_prompt(
          - Task in English: \
            ✅ **Task added**\n\n- **Task**: {{Task}}\n- **Due**: {{Due date or None}}\n- **Priority**: {{Priority}}\n \
          - Reminder in Chinese: \
-           ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间}}\n \
+           ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间（使用用户本地默认时区，格式如 YYYY-MM-DD HH:mm，严禁输出 UTC 或带 Z 格式）}}\n \
          - Reminder in English: \
-           ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time}}\n \
+           ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time in user's default timezone, e.g. YYYY-MM-DD HH:mm (never show UTC or Z)}}\n \
          MULTIPLE ACTIONS & QUICK CAPTURE: When the user requests multiple actions in a single message (e.g. logging an expense, checking off a habit, setting a reminder, adding a task, or logging today's mood), call all relevant tools in sequence or parallel. \
          MANDATORY TOOL INVOCATION: When performing an action (recording an expense, adding a task, setting a reminder, logging a habit), you MUST invoke the real tool function via the function calling API (e.g. `record_finance_entry`, `add_todo`, `create_reminder`). NEVER output plain text simulating or claiming a tool was called (e.g. 'Tool called: ...', 'Receipt recorded successfully', 'Expense added') unless you have actually received a successful tool execution response in this exact turn. If you do not call the tool, nothing is saved to the database. \
          TOOL ACCURACY & TRUTHFULNESS: If any tool returns an error or fails, NEVER say or imply that the action succeeded. Clearly state that the tool call failed and report the error reason to the user. Only confirm actions that completed successfully. \
          SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. When performing a daily or weekly reflection / summary, retrieve all needed data (daily log, habits, tasks, finance, footprints, reminders, life profile) in parallel during the first tool round rather than chaining sequential retrieval rounds. \
          CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
-         TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
+         TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For reminders trigger_at, supply trigger_at in the user's local time (e.g. 'YYYY-MM-DD HH:MM:SS') without 'Z' or pass in_minutes. Always format reminder confirmation times using the user's default timezone '{tz}' (e.g. 'YYYY-MM-DD HH:mm'). \
          ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
          QUOTED REPLIES & CONTEXT: When the prompt contains [Context: Replying to quoted message from ...]: 1) FACT CHECKING: If asked to fact check or verify, critically evaluate the claims with objective facts, indicate accuracy/truthfulness, and clarify misconceptions; 2) EXPLANATION: If asked to explain or summarize, break down concepts clearly and articulately; 3) COMMENTARY: If asked for thoughts or commentary, provide balanced, insightful observations; 4) ACTION CREATION: If asked to add a todo, task, or reminder, extract the commitment from the quote and call the appropriate tool (`add_todo`, `create_reminder`). \
          The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
@@ -93,6 +93,9 @@ pub fn render_bot_footer(
         parts.push(feat.to_string());
     }
     for tool in tools_executed {
+        if tool == "set_reminder" || tool == "set reminder" || tool == "create_reminder" {
+            continue;
+        }
         if !parts.contains(tool) {
             parts.push(tool.clone());
         }
@@ -120,3 +123,34 @@ pub fn format_response(
     let footer = render_bot_footer(model_name, pipeline_feature, tools_executed);
     format!("{}{}", html, footer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_bot_footer_excludes_set_reminder() {
+        let footer = render_bot_footer(
+            "grok-4.3",
+            Some("SenseVoice"),
+            &["set_reminder".to_string()],
+        );
+        assert!(footer.contains("grok-4.3"));
+        assert!(footer.contains("SenseVoice"));
+        assert!(!footer.contains("set_reminder"));
+        assert!(!footer.contains("set reminder"));
+    }
+
+    #[test]
+    fn test_render_bot_footer_keeps_other_tools() {
+        let footer = render_bot_footer(
+            "grok-4.3",
+            Some("PaddleOCR"),
+            &["record_finance_entry".to_string()],
+        );
+        assert!(footer.contains("grok-4.3"));
+        assert!(footer.contains("PaddleOCR"));
+        assert!(footer.contains("record_finance_entry"));
+    }
+}
+

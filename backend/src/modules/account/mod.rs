@@ -341,69 +341,20 @@ impl AccountModule {
     async fn handle_unlink_passkey(
         &self,
         ctx: &CommandContext,
-        db: &Database,
-        target: &str,
+        _db: &Database,
+        _target: &str,
     ) -> String {
         if !ctx.is_direct {
-            return "Send <code>!unlink passkey &lt;number&gt;</code> in a direct message."
-                .to_string();
+            return "Send passkey management commands in a direct message.".to_string();
         }
-        if target.is_empty() {
-            return "Specify which passkey to remove: <code>!unlink passkey &lt;number&gt;</code>.<br/>Send <code>!passkeys</code> to see your passkey numbers.".to_string();
-        }
-
-        let creds =
-            match crate::accounts::CredentialRepository::list_for_account(&db.pool, &ctx.owner_id)
-                .await
-            {
-                Ok(c) => c,
-                Err(err) => {
-                    tracing::error!("Could not list passkeys: {:?}", err);
-                    return "Could not load passkeys. Try again shortly.".to_string();
-                }
-            };
-
-        let matched = if let Ok(num) = target.parse::<usize>() {
-            if num >= 1 && num <= creds.len() {
-                Some(&creds[num - 1])
-            } else {
-                None
-            }
-        } else {
-            creds
-                .iter()
-                .find(|c| c.id == target || c.label.eq_ignore_ascii_case(target))
-        };
-
-        let Some(cred) = matched else {
-            return format!(
-                "Passkey '{}' not found.<br/>Send <code>!passkeys</code> to see your active passkeys with their numbers.",
-                escape(target)
-            );
-        };
-
-        match crate::accounts::CredentialRepository::delete(&db.pool, &ctx.owner_id, &cred.id).await {
-            Ok(crate::accounts::credentials::DeleteOutcome::Removed) => {
-                crate::accounts::SecurityEventRepository::record(
-                    &db.pool,
-                    &ctx.owner_id,
-                    crate::accounts::SecurityEventKind::PasskeyRemoved,
-                    Some(&cred.label),
-                )
-                .await;
-                format!("✅ Removed passkey <b>{}</b>. That device can no longer access your account.", escape(&cred.label))
-            }
-            Ok(crate::accounts::credentials::DeleteOutcome::WouldLockOut) => {
-                "Cannot remove your only passkey. Link another passkey first with <code>!passkey add</code>.".to_string()
-            }
-            Ok(crate::accounts::credentials::DeleteOutcome::NotFound) => {
-                "Passkey was not found.".to_string()
-            }
-            Err(err) => {
-                tracing::error!("Could not delete passkey {}: {:?}", cred.id, err);
-                "Could not delete passkey. Try again shortly.".to_string()
-            }
-        }
+        let web_url = self.web_url.trim_end_matches('/');
+        format!(
+            "🔒 <b>Passkey Removal Requires Verification</b><br/><br/>\
+             To protect your account against unauthorized removal, passkeys can only be removed from the web dashboard after confirming your identity with a recent passkey assertion.<br/><br/>\
+             Please visit your <b>Security Settings</b> on the web dashboard to manage or remove passkeys:<br/>\
+             <a href=\"{url}/account\">{url}/account</a>",
+            url = escape(web_url)
+        )
     }
 }
 
@@ -691,14 +642,21 @@ mod tests {
         assert!(reply.contains("MacBook"));
         assert!(reply.contains("iPhone"));
 
-        // Unlink passkey 1 by index
+        // Unlink passkey via Matrix DM is safely rejected, directing user to web settings
         let mut unlink_ctx = ctx("unlink", &account, true);
         unlink_ctx.raw_args = "passkey 1".into();
         let reply = module()
             .handle_command(&unlink_ctx, &db, None)
             .await
             .unwrap();
-        assert!(reply.contains("Removed passkey"));
+        assert!(reply.contains("Passkey Removal Requires Verification"));
+        assert!(reply.contains("/account"));
+
+        // Verify passkeys were NOT deleted from database
+        let creds_after = crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
+            .await
+            .unwrap();
+        assert_eq!(creds_after.len(), 2);
 
         // Unlink sessions
         let mut sessions_ctx = ctx("unlink", &account, true);

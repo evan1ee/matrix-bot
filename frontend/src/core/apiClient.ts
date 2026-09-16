@@ -4,6 +4,18 @@ const API_BASE = '/api/v1';
 /// identity and prompt for sign-in instead of retrying forever.
 export const AUTH_EXPIRED_EVENT = 'matrixbot:auth-expired';
 
+export class ApiHttpError extends Error {
+  status: number;
+  data: any;
+
+  constructor(message: string, status: number, data?: any) {
+    super(message);
+    this.name = 'ApiHttpError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
 /**
  * Calls the API with the session cookie attached.
  *
@@ -85,7 +97,7 @@ export async function fetchApi<T>(
   }
 
   if (!response.ok) {
-    throw new Error(data.error || `HTTP error! Status: ${response.status}`);
+    throw new ApiHttpError(data.error || `HTTP error! Status: ${response.status}`, response.status, data);
   }
 
   return data as T;

@@ -54,7 +54,7 @@ const AppContent: React.FC = () => {
     return params.get('enroll') || params.get('token');
   });
 
-  const { user, isSignedIn, isLoading } = useSession();
+  const { user, isSignedIn, isLoading, isError } = useSession();
   const refreshSession = useRefreshSession();
 
   const { events, isConnected } = useSystemEvents(isSignedIn);
@@ -90,10 +90,10 @@ const AppContent: React.FC = () => {
 
   // Signed out is a state, not an event: derive the prompt from the session
   // itself so it appears on a cold load as well as on an expiry, and so it
-  // closes on its own once a session exists.
+  // closes on its own once a session exists. Do not open during network errors / server restarts.
   useEffect(() => {
-    if (!isLoading) setIsAuthOpen(!isSignedIn);
-  }, [isLoading, isSignedIn]);
+    if (!isLoading && !isError) setIsAuthOpen(!isSignedIn);
+  }, [isLoading, isSignedIn, isError]);
 
   // The server rejected the session cookie on some *other* call. Re-read the
   // session so the rest of the UI stops showing data it can no longer refresh;

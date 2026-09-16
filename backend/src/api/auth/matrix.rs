@@ -163,21 +163,19 @@ pub async fn login_with_matrix(
         return Err(ApiError::bad_request("access_token exceeds 500 characters"));
     }
 
+    let configured_hs = resolved_homeserver(&state).await;
     let target_hs = match payload.homeserver {
         Some(hs) => {
             let trimmed = hs.trim().trim_end_matches('/');
-            if trimmed.is_empty() {
-                resolved_homeserver(&state).await
+            if trimmed.is_empty() || trimmed == configured_hs.trim_end_matches('/') {
+                configured_hs
             } else {
-                if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
-                    return Err(ApiError::bad_request(
-                        "homeserver must start with http:// or https://",
-                    ));
-                }
-                trimmed.to_string()
+                return Err(ApiError::bad_request(
+                    "Custom homeserver is not supported; login must use the configured homeserver",
+                ));
             }
         }
-        None => resolved_homeserver(&state).await,
+        None => configured_hs,
     };
 
     let whoami = verify_homeserver_whoami(&state.http_client, &target_hs, token).await?;
@@ -354,5 +352,26 @@ mod tests {
             panic!("expected bad request error");
         };
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_matrix_login_rejects_arbitrary_homeserver() {
+        let state = test_state().await;
+
+        let res = login_with_matrix(
+            State(state),
+            HeaderMap::new(),
+            Json(MatrixLoginRequest {
+                access_token: "valid_looking_token".to_string(),
+                homeserver: Some("https://evil-attacker-homeserver.com".to_string()),
+            }),
+        )
+        .await;
+
+        let Err(err) = res else {
+            panic!("expected bad request error for arbitrary homeserver");
+        };
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("Custom homeserver is not supported"));
     }
 }

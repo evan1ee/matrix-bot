@@ -168,7 +168,11 @@ pub async fn start_api_server(
     tokio::spawn(async move {
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
-                let serve_future = axum::serve(listener, app).with_graceful_shutdown(async move {
+                let serve_future = axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .with_graceful_shutdown(async move {
                     let _ = shutdown_rx.recv().await;
                     info!("Axum REST API server received shutdown signal.");
                 });

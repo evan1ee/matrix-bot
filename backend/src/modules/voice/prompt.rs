@@ -15,7 +15,7 @@ pub fn build_voice_prompt(transcribed_text: &str, duration_secs: f32) -> String 
         2. Tasks / To-Do Items: If the user mentions something they need to do or a task to track:\n\
            - Call `add_todo`.\n\
         3. Reminders / Deadlines: If the user asks for a reminder at a specific time or date:\n\
-           - Call `create_reminder` with the calculated trigger time.\n\
+           - Call `create_reminder` or `set_reminder` with the calculated trigger time in the user's local time (or in_minutes).\n\
         4. Habit Logging: If the user mentions completing a habit (e.g. read, workout):\n\
            - Call `log_habit`.\n\
         5. General Conversation / Question: If the user is asking a question or making an inquiry:\n\
@@ -33,9 +33,9 @@ pub fn build_voice_prompt(transcribed_text: &str, duration_secs: f32) -> String 
         - Task in English:\n\
           ✅ **Task added**\n\n- **Task**: {{Task}}\n- **Due**: {{Due date or None}}\n- **Priority**: {{Priority}}\n\
         - Reminder in Chinese:\n\
-          ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间}}\n\
+          ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间（使用用户本地默认时区，格式如 YYYY-MM-DD HH:mm，切勿输出 UTC 或带 Z）}}\n\
         - Reminder in English:\n\
-          ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time}}",
+          ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time in user's default timezone, e.g. YYYY-MM-DD HH:mm (never show UTC or Z)}}",
         duration_secs,
         transcribed_text.trim()
     )

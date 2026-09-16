@@ -49,9 +49,9 @@ pub fn build_ocr_prompt(caption: Option<&str>, ocr_text: &str) -> String {
         - Task in English:\n\
           ✅ **Task added**\n\n- **Task**: {{Task}}\n- **Due**: {{Due date or None}}\n- **Priority**: {{Priority}}\n\
         - Reminder in Chinese:\n\
-          ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间}}\n\
+          ✅ **提醒已设定**\n\n- **内容**: {{内容}}\n- **时间**: {{时间（使用用户本地默认时区，格式如 YYYY-MM-DD HH:mm，切勿输出 UTC 或带 Z）}}\n\
         - Reminder in English:\n\
-          ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time}}",
+          ✅ **Reminder set**\n\n- **Content**: {{Content}}\n- **Time**: {{Time in user's default timezone, e.g. YYYY-MM-DD HH:mm (never show UTC or Z)}}",
         ocr_text.trim(),
         caption_section
     )
