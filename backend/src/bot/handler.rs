@@ -122,14 +122,14 @@ pub fn register_handlers(
                     }
                 };
 
-                let image_bytes = match room
-                    .client()
-                    .media()
-                    .get_file(image_content.clone(), true)
-                    .await
+                let image_bytes = match crate::bot::media::download_media_file(
+                    &room.client(),
+                    &image_content.source,
+                )
+                .await
                 {
-                    Ok(Some(bytes)) => bytes,
-                    Ok(None) => {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(_) => {
                         warn!(
                             "Media attachment returned empty body in room {}",
                             room.room_id()
@@ -210,14 +210,14 @@ pub fn register_handlers(
                     }
                 };
 
-                let audio_bytes = match room
-                    .client()
-                    .media()
-                    .get_file(audio_content.clone(), true)
-                    .await
+                let audio_bytes = match crate::bot::media::download_media_file(
+                    &room.client(),
+                    &audio_content.source,
+                )
+                .await
                 {
-                    Ok(Some(bytes)) => bytes,
-                    Ok(None) => {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(_) => {
                         warn!(
                             "Audio media attachment returned empty body in room {}",
                             room.room_id()

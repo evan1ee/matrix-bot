@@ -77,24 +77,13 @@ pub async fn handle_ai_command(
         }
         if let Some(rest) = trimmed.strip_prefix("model") {
             let model_arg = rest.trim();
-            if model_arg.is_empty() {
-                return Some(handle_show_config(pool, owner_id).await);
-            }
-            if model_arg.len() > 500 {
-                return Some(format_error(
-                    "Model name exceeds maximum length of 500 characters.",
-                ));
-            }
+            if model_arg.is_empty() { return Some(handle_show_config(pool, owner_id).await); }
+            if model_arg.len() > 500 { return Some(format_error("Model name exceeds maximum length of 500 characters.")); }
             return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
         }
-        if let Some(rest) = trimmed
-            .strip_prefix("history")
-            .or_else(|| trimmed.strip_prefix("turns"))
-        {
+        if let Some(rest) = trimmed.strip_prefix("history").or_else(|| trimmed.strip_prefix("turns")) {
             let num_arg = rest.trim();
-            if num_arg.is_empty() {
-                return Some(handle_show_config(pool, owner_id).await);
-            }
+            if num_arg.is_empty() { return Some(handle_show_config(pool, owner_id).await); }
             return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
         }
         trimmed
@@ -229,25 +218,18 @@ pub async fn run_ai_turn(
     let now_utc_str = now_utc.to_rfc3339();
 
     let default_room_id = crate::db::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id)
-        .await
-        .unwrap_or_default();
-    let mut room_desc = Vec::new();
-    for r in &cached_rooms {
-        if r.is_direct {
-            room_desc.push(format!(
-                "'{}' (user direct chat room, id: {})",
-                r.name, r.room_id
-            ));
-        } else {
-            room_desc.push(format!("'{}' (id: {})", r.name, r.room_id));
-        }
-    }
-    let rooms_str = if room_desc.is_empty() {
-        "None discovered yet".to_string()
-    } else {
-        room_desc.join(", ")
-    };
+    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id).await.unwrap_or_default();
+    let room_desc: Vec<_> = cached_rooms
+        .iter()
+        .map(|r| {
+            if r.is_direct {
+                format!("'{}' (user direct chat room, id: {})", r.name, r.room_id)
+            } else {
+                format!("'{}' (id: {})", r.name, r.room_id)
+            }
+        })
+        .collect();
+    let rooms_str = if room_desc.is_empty() { "None discovered yet".to_string() } else { room_desc.join(", ") };
     let default_room_str = default_room_id.as_deref().unwrap_or(room_id);
 
     let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
@@ -310,7 +292,7 @@ pub async fn run_ai_turn(
     }
 
     let mut iteration = 0;
-    let max_iterations = 3;
+    let max_iterations = 5;
     let mut final_content = String::new();
     let mut tool_calls_executed = Vec::new();
 
@@ -421,6 +403,33 @@ pub async fn run_ai_turn(
         }
     }
 
+    if final_content.trim().is_empty() && !tool_calls_executed.is_empty() {
+        let final_req = ChatCompletionRequest {
+            model: resolved_config.model_name.clone(),
+            messages: chat_messages.clone(),
+            temperature: Some(resolved_config.temperature),
+            max_tokens: Some(resolved_config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            stream: Some(false),
+        };
+        if let Ok(resp) = client.chat_completion(&resolved_config, &final_req).await {
+            if let Some(t) = resp.choices.into_iter().next().and_then(|c| c.message.content) {
+                if !t.trim().is_empty() {
+                    final_content = t;
+                }
+            }
+        }
+    }
+
+    if final_content.trim().is_empty() {
+        if !tool_calls_executed.is_empty() {
+            final_content = format!("Completed actions: {}", tool_calls_executed.join(", "));
+        } else {
+            final_content = "Received empty response from AI model.".to_string();
+        }
+    }
+
     if let Err(e) = AiRepository::add_message(
         pool,
         &conversation.id,
@@ -457,35 +466,21 @@ pub async fn run_ai_turn(
     })
 }
 
-async fn handle_reset(
-    pool: &SqlitePool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    room_id: &str,
-) -> String {
-    if let Ok(conv) =
-        AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS).await
-    {
+async fn handle_reset(pool: &SqlitePool, broadcaster: Option<&EventBroadcaster>, owner_id: &str, room_id: &str) -> String {
+    if let Ok(conv) = AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS).await {
         if let Ok(true) = AiRepository::delete_conversation(pool, &conv.id, owner_id).await {
             if let Some(b) = broadcaster {
-                b.send(SystemEvent::AiConversationDeleted {
-                    id: conv.id,
-                    owner_id: owner_id.to_string(),
-                });
+                b.send(SystemEvent::AiConversationDeleted { id: conv.id, owner_id: owner_id.to_string() });
             }
         }
     }
-
     "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
 }
 
 fn format_response(markdown_text: &str, model_name: &str) -> String {
-    let html_rendered = crate::modules::webhook::renderer::markdown_to_html(markdown_text);
-    format!(
-        "{}<br/><font color=\"gray\" size=\"-2\">🤖 <em>{}</em></font>",
-        html_rendered,
-        html_escape(model_name)
-    )
+    let text = if markdown_text.trim().is_empty() { "Received empty response from AI model." } else { markdown_text };
+    let html = crate::modules::webhook::renderer::markdown_to_html(text);
+    format!("{}<br/><font color=\"gray\" size=\"-2\">🤖 <em>{}</em></font>", html, html_escape(model_name))
 }
 
 fn format_help() -> String {
@@ -495,8 +490,7 @@ fn format_help() -> String {
      • <code>!ai reset</code> — Clear conversational memory in this room<br/>\
      • <code>!ai model &lt;name&gt;</code> — Switch active model<br/>\
      • <code>!ai history &lt;1-100&gt;</code> — Set max context history messages<br/>\
-     • <code>!ai config</code> — View active AI endpoint & model"
-        .to_string()
+     • <code>!ai config</code> — View active AI endpoint & model".to_string()
 }
 
 #[cfg(test)]

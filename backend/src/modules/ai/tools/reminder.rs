@@ -30,19 +30,28 @@ pub async fn execute_tool(
         "set_reminder" => Some(
             async {
                 let message = args
-                    .get("message")
+                    .get("text")
+                    .or_else(|| args.get("message"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'message' is required")?;
+                    .ok_or("Field 'text' or 'message' is required")?;
                 let rec_str = args
                     .get("recurrence")
                     .and_then(|v| v.as_str())
                     .unwrap_or("none");
                 let recurrence = RecurrencePattern::from_str_or_default(rec_str);
 
-                let trigger_at = if let Some(mins) = args.get("in_minutes").and_then(|v| v.as_i64())
+                let trigger_at = if let Some(mins) = args
+                    .get("in_minutes")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
                 {
                     Utc::now() + Duration::minutes(mins)
-                } else if let Some(trig_str) = args.get("trigger_at").and_then(|v| v.as_str()) {
+                } else if let Some(trig_str) = args
+                    .get("trigger_at")
+                    .or_else(|| args.get("datetime"))
+                    .or_else(|| args.get("date"))
+                    .or_else(|| args.get("time"))
+                    .and_then(|v| v.as_str())
+                {
                     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                     let tz = settings.tz();
                     if let Ok(dt) = DateTime::parse_from_rfc3339(trig_str) {
@@ -52,6 +61,12 @@ pub async fn execute_tool(
                             .or_else(|_| {
                                 chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%d %H:%M:%S")
                             })
+                            .or_else(|_| {
+                                chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%dT%H:%M")
+                            })
+                            .or_else(|_| {
+                                chrono::NaiveDateTime::parse_from_str(trig_str, "%Y-%m-%d %H:%M")
+                            })
                     {
                         tz.from_local_datetime(&naive_dt)
                             .single()
@@ -59,6 +74,14 @@ pub async fn execute_tool(
                             .ok_or_else(|| {
                                 "Ambiguous or invalid local time for trigger_at".to_string()
                             })?
+                    } else if let Ok(naive_date) =
+                        chrono::NaiveDate::parse_from_str(trig_str.trim(), "%Y-%m-%d")
+                    {
+                        naive_date
+                            .and_hms_opt(9, 0, 0)
+                            .and_then(|dt| tz.from_local_datetime(&dt).single())
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok_or_else(|| "Invalid local date for reminder".to_string())?
                     } else {
                         return Err(format!("Invalid trigger_at timestamp: {}", trig_str));
                     }
@@ -159,6 +182,10 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     "text": {
                         "type": "string",
                         "description": "Reminder text or message (required)"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional alias for text"
                     },
                     "in_minutes": {
                         "type": "integer",
