@@ -24,6 +24,19 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+COPY backend/Cargo.toml ./backend/Cargo.toml
+
+# Pre-build dependency layer with dummy source files to cache crates across source edits
+RUN mkdir -p backend/src && \
+    echo "pub fn dummy() {}" > backend/src/lib.rs && \
+    echo "fn main() {}" > backend/src/main.rs && \
+    mkdir -p backend/src/bin && \
+    echo "fn main() {}" > backend/src/bin/generate_openapi.rs && \
+    mkdir -p backend/web/dist && \
+    touch backend/web/dist/index.html && \
+    cargo build --release --bin matrix-bot && \
+    rm -rf backend/src target/release/deps/matrix_bot* target/release/matrix-bot*
+
 COPY backend ./backend
 
 # The SPA is served off the filesystem at runtime, not embedded, so the web
@@ -42,6 +55,9 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=build /src/target/release/matrix-bot /usr/local/bin/matrix-bot
+COPY --from=build /src/target/release/libsherpa-onnx-c-api.so /usr/local/lib/
+COPY --from=build /src/target/release/libonnxruntime.so       /usr/local/lib/
+RUN ldconfig
 COPY --from=web   /src/backend/web/dist          /app/web/dist
 COPY docker-entrypoint.sh                        /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
