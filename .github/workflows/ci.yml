@@ -21,12 +21,15 @@ jobs:
         with:
           prefix-key: "v2-rust"
 
-      # Swatinem/rust-cache strips or prunes dynamic libraries (.so) during cache
-      # pruning, leaving an empty `target/sherpa-onnx-prebuilt/.../lib` folder.
-      # sherpa-onnx-sys detects that directory exists, skips downloading the archive,
-      # and panics because no .so files are present. Removing it forces a clean download.
+      # Swatinem/rust-cache prunes dynamic libraries (.so) during cache pruning.
+      # If we only delete target/sherpa-onnx-prebuilt, Cargo still believes
+      # sherpa-onnx-sys has already been built from the restored cache and skips
+      # running build.rs, which results in linker errors ("unable to find library -lsherpa-onnx-c-api").
+      # Cleaning sherpa-onnx-sys forces Cargo to re-run its build script and fetch the .so files.
       - name: Clean sherpa-onnx prebuilt cache
-        run: rm -rf target/sherpa-onnx-prebuilt
+        run: |
+          cargo clean -p sherpa-onnx-sys -p sherpa-onnx || true
+          rm -rf target/sherpa-onnx-prebuilt
 
       - name: Format check
         run: cargo fmt --all -- --check
