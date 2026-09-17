@@ -1,8 +1,14 @@
 //! Endpoint for redeeming account recovery codes to regain access.
 
-use axum::{extract::State, http::HeaderMap, response::Response, Json};
+use axum::{
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    response::Response,
+    Json,
+};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+use std::net::SocketAddr;
 use utoipa::ToSchema;
 
 use crate::accounts::{
@@ -19,20 +25,53 @@ pub struct RedeemRecoveryRequest {
     pub code: String,
 }
 
+fn is_trusted_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+        std::net::IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
+    }
+}
+
 /// Helper to extract client IP for rate-limiting.
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            headers
+///
+/// By default, rate-limiting keys on the peer socket address from `connect_info`.
+/// Forwarded headers (`X-Forwarded-For`, `X-Real-IP`) are ONLY trusted if
+/// `TRUST_FORWARDED_FOR` is enabled AND the connecting peer is a private/loopback reverse proxy.
+fn extract_client_ip(
+    connect_info: Option<&ConnectInfo<SocketAddr>>,
+    headers: &HeaderMap,
+) -> String {
+    if let Some(ConnectInfo(addr)) = connect_info {
+        let peer_ip = addr.ip();
+        let trust_forwarded = std::env::var("TRUST_FORWARDED_FOR")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        if trust_forwarded && is_trusted_private_ip(peer_ip) {
+            if let Some(forwarded) = headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim())
+            {
+                if let Ok(parsed) = forwarded.parse::<std::net::IpAddr>() {
+                    return parsed.to_string();
+                }
+            }
+            if let Some(real_ip) = headers
                 .get("x-real-ip")
                 .and_then(|v| v.to_str().ok())
-                .map(|s| s.trim().to_string())
-        })
-        .unwrap_or_else(|| "127.0.0.1".to_string())
+                .map(|s| s.trim())
+            {
+                if let Ok(parsed) = real_ip.parse::<std::net::IpAddr>() {
+                    return parsed.to_string();
+                }
+            }
+        }
+        return peer_ip.to_string();
+    }
+
+    "127.0.0.1".to_string()
 }
 
 #[utoipa::path(
@@ -48,10 +87,11 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
 )]
 pub async fn redeem_recovery(
     State(state): State<ApiState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
     headers: HeaderMap,
     Json(payload): Json<RedeemRecoveryRequest>,
 ) -> Result<Response, ApiError> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = extract_client_ip(connect_info.as_ref(), &headers);
     if !check_recovery_limit(&client_ip) {
         return Err(ApiError::too_many_requests(
             "Too many recovery attempts. Please wait 15 minutes before trying again.",
@@ -138,6 +178,7 @@ mod tests {
     use crate::accounts::AccountRepository;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use axum::http::StatusCode;
     use sqlx::SqlitePool;
 
     #[tokio::test]
@@ -165,6 +206,7 @@ mod tests {
         // 1. Valid code succeeds
         let res = redeem_recovery(
             State(state.clone()),
+            None,
             HeaderMap::new(),
             Json(RedeemRecoveryRequest {
                 code: valid_code.clone(),
@@ -176,6 +218,7 @@ mod tests {
         // 2. Code is single-use, second redemption fails
         let res_retry = redeem_recovery(
             State(state.clone()),
+            None,
             HeaderMap::new(),
             Json(RedeemRecoveryRequest {
                 code: valid_code.clone(),
@@ -187,6 +230,7 @@ mod tests {
         // 3. Invalid code fails
         let res_bad = redeem_recovery(
             State(state.clone()),
+            None,
             HeaderMap::new(),
             Json(RedeemRecoveryRequest {
                 code: "invalid-code-here".to_string(),
@@ -194,5 +238,59 @@ mod tests {
         )
         .await;
         assert!(res_bad.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_recovery_rate_limit_cannot_be_bypassed_with_spoofed_headers() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+
+        let peer_addr: SocketAddr = "198.51.100.99:54321".parse().unwrap();
+
+        // Send 5 invalid attempts with rotating X-Forwarded-For headers
+        for i in 1..=5 {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-forwarded-for", format!("10.0.0.{}", i).parse().unwrap());
+            let res = redeem_recovery(
+                State(state.clone()),
+                Some(ConnectInfo(peer_addr)),
+                headers,
+                Json(RedeemRecoveryRequest {
+                    code: format!("wrong-code-{}", i),
+                }),
+            )
+            .await;
+            // First 5 attempts fail with unauthorized/not found (401)
+            let Err(err) = res else {
+                panic!("expected failure")
+            };
+            assert_ne!(err.status, StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        // 6th attempt with yet another spoofed X-Forwarded-For must be blocked by rate limiter (429)
+        // because the rate limiter keys on the peer socket address (198.51.100.99), not the spoofed header!
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "10.0.0.99".parse().unwrap());
+        let res_limited = redeem_recovery(
+            State(state.clone()),
+            Some(ConnectInfo(peer_addr)),
+            headers,
+            Json(RedeemRecoveryRequest {
+                code: "wrong-code-6".to_string(),
+            }),
+        )
+        .await;
+
+        let Err(err) = res_limited else {
+            panic!("expected rate limit error")
+        };
+        assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
     }
 }

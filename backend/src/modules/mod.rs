@@ -17,11 +17,13 @@ pub mod footprints;
 pub mod habits;
 pub mod journal;
 pub mod life;
+pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
 pub mod settings;
 pub mod todo;
+pub mod voice;
 pub mod webhook;
 
 /// A message the parser recognised as a command, before its sender has been
@@ -70,6 +72,7 @@ impl ParsedCommand {
             is_direct,
             is_mentioned: self.is_mentioned,
             quoted: self.quoted,
+            stage_reporter: None,
         }
     }
 }
@@ -110,6 +113,8 @@ pub struct CommandContext {
     pub is_mentioned: bool,
     /// Optional quoted message context if the message is a reply or quote.
     pub quoted: Option<crate::bot::quote::QuotedMessage>,
+    /// Optional in-place stage reporter for tracking multi-phase progress in Matrix.
+    pub stage_reporter: Option<crate::bot::stage::StageReporter>,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -359,6 +364,7 @@ mod tests {
                 is_direct: true,
                 is_mentioned: false,
                 quoted: None,
+                stage_reporter: None,
             };
             assert!(
                 registry.dispatch(&ctx, &db, None).await.is_some(),
@@ -410,6 +416,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         }
     }
 

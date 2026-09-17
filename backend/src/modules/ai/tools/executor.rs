@@ -2,12 +2,16 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
-use super::executor_bookmarks_webhooks;
-use super::executor_finance;
-use super::executor_life_habits;
-use super::executor_portfolio;
-use super::executor_reminder;
-use super::executor_todo;
+use super::bills;
+use super::bookmarks;
+use super::finance;
+use super::habits;
+use super::life;
+use super::portfolio;
+use super::reminder;
+use super::settings;
+use super::todo;
+use super::webhooks;
 use crate::events::EventBroadcaster;
 
 pub async fn execute(
@@ -46,71 +50,63 @@ pub async fn execute(
 
     // 1. Try portfolio tools
     if let Some(res) =
-        executor_portfolio::execute_portfolio_tool(pool, broadcaster, owner_id, name, &parsed_args)
-            .await
+        portfolio::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
     {
         return res;
     }
 
     // 2. Try finance tools
-    if let Some(res) = executor_finance::execute_finance_tool(
-        pool,
-        broadcaster,
-        owner_id,
-        room_id,
-        name,
-        &parsed_args,
-    )
-    .await
+    if let Some(res) =
+        finance::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
     {
         return res;
     }
 
     // 3. Try reminder tools
-    if let Some(res) = executor_reminder::execute_reminder_tool(
-        pool,
-        broadcaster,
-        owner_id,
-        room_id,
-        name,
-        &parsed_args,
-    )
-    .await
-    {
-        return res;
-    }
-
-    // 4. Try todo / bills / settings tools
     if let Some(res) =
-        executor_todo::execute_todo_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args)
-            .await
+        reminder::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
     {
         return res;
     }
 
-    // 4. Try life, habits, bills, footprints, and retrospective tools
-    if let Some(res) = executor_life_habits::execute_life_habits_tool(
-        pool,
-        broadcaster,
-        owner_id,
-        room_id,
-        name,
-        &parsed_args,
-    )
-    .await
+    // 4. Try todo tools
+    if let Some(res) =
+        todo::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
     {
         return res;
     }
 
-    // 5. Try bookmarks and webhooks tools
-    if let Some(res) = executor_bookmarks_webhooks::execute_bookmarks_webhooks_tool(
-        pool,
-        broadcaster,
-        owner_id,
-        name,
-        &parsed_args,
-    )
-    .await
+    // 5. Try recurring bills tools
+    if let Some(res) =
+        bills::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    {
+        return res;
+    }
+
+    // 6. Try habits tools
+    if let Some(res) = habits::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+        return res;
+    }
+
+    // 7. Try life, daily log, retrospective, and footprint tools
+    if let Some(res) = life::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+        return res;
+    }
+
+    // 8. Try bookmark tools
+    if let Some(res) =
+        bookmarks::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
+    {
+        return res;
+    }
+
+    // 9. Try webhook tools
+    if let Some(res) = webhooks::execute_tool(pool, owner_id, name, &parsed_args).await {
+        return res;
+    }
+
+    // 10. Try settings tools
+    if let Some(res) = settings::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
     {
         return res;
     }

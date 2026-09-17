@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchApi } from './apiClient';
+import { ApiHttpError, fetchApi } from './apiClient';
 
 export const SESSION_QUERY_KEY = ['session'];
 
@@ -25,20 +25,32 @@ export function useSession() {
     queryFn: async () => {
       try {
         return await fetchApi<SessionUser>('/auth/me', { suppressAuthEvent: true });
-      } catch {
+      } catch (err) {
         // A 401 here is the ordinary signed-out state, not an error worth
         // retrying or surfacing.
-        return null;
+        if (err instanceof ApiHttpError && err.status === 401) {
+          return null;
+        }
+        // Temporary network drop or server restarting should not be treated
+        // as signed-out so existing session state is not prematurely wiped out.
+        throw err;
       }
     },
     staleTime: 60 * 1000,
-    retry: false,
+    retry: (failureCount, error) => {
+      // Never retry on explicit 401 Unauthorized.
+      if (error instanceof ApiHttpError && error.status === 401) {
+        return false;
+      }
+      return failureCount < 5;
+    },
   });
 
   return {
     user: query.data ?? null,
     isSignedIn: !!query.data,
     isLoading: query.isLoading,
+    isError: query.isError,
   };
 }
 

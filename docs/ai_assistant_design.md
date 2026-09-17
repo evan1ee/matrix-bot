@@ -71,7 +71,7 @@ The **AI Assistant Subsystem** introduces conversational intelligence to `matrix
 |---|---|---|
 | **`AiModule`** | `backend/src/modules/ai/mod.rs` | Implements `BotModule` trait, registers commands (`!ai`), and routes direct messages. |
 | **`AiClient`** | `backend/src/modules/ai/client.rs` | Asynchronous HTTP client communicating with `/v1/chat/completions` with streaming (SSE) and non-streaming modes. |
-| **`ToolRegistry`** | `backend/src/modules/ai/tools.rs` | JSON schema definitions and execution dispatchers for read-only tools (`get_my_tasks`, `get_my_reminders`, etc.). |
+| **`ToolRegistry`** | `backend/src/modules/ai/tools/` | JSON schema definitions and domain-grouped execution dispatchers (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio.rs`, etc.). |
 | **`AiRepository`** | `backend/src/modules/ai/repository.rs` | Persistence for conversation sessions, message turns, and per-user configuration overrides. |
 | **`AiHandler`** | `backend/src/modules/ai/handler.rs` | Matrix mention/command parsing, context assembly, typing indicator lifecycle, and response formatting. |
 | **`AiApi`** | `backend/src/api/ai.rs` | REST & SSE endpoints for Web UI chat streaming, conversation management, and user model configuration. |

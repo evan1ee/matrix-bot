@@ -74,8 +74,23 @@ pub fn validate_ai_base_url(url_str: &str) -> Result<(), &'static str> {
             || host_lower.ends_with(".local")
             || host_lower == "localhost"
             || host_lower.ends_with(".localhost")
+            || host_lower == "localtest.me"
+            || host_lower.ends_with(".localtest.me")
+            || host_lower == "lvh.me"
+            || host_lower.ends_with(".lvh.me")
         {
             return Err("API base URL cannot target internal or local domain names");
+        }
+
+        if host_lower.ends_with(".nip.io") || host_lower.ends_with(".sslip.io") {
+            let prefix = host_lower
+                .trim_end_matches(".nip.io")
+                .trim_end_matches(".sslip.io");
+            if let Ok(ip) = prefix.parse::<std::net::IpAddr>() {
+                if is_disallowed_ip(ip) {
+                    return Err("API base URL cannot target private or loopback IP addresses");
+                }
+            }
         }
 
         let ip = match parsed.host() {
@@ -85,31 +100,58 @@ pub fn validate_ai_base_url(url_str: &str) -> Result<(), &'static str> {
         };
 
         if let Some(ip) = ip {
-            let is_disallowed = match ip {
-                std::net::IpAddr::V4(v4) => {
-                    v4.is_loopback()
-                        || v4.is_private()
-                        || v4.is_link_local()
-                        || v4.is_broadcast()
-                        || v4.is_documentation()
-                        || v4.octets()[0] == 0
-                        || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
-                }
-                std::net::IpAddr::V6(v6) => {
-                    v6.is_loopback()
-                        || v6.is_unspecified()
-                        || (v6.segments()[0] & 0xffc0) == 0xfe80
-                        || (v6.segments()[0] & 0xfe00) == 0xfc00
-                }
-            };
-
-            if is_disallowed {
+            if is_disallowed_ip(ip) {
                 return Err("API base URL cannot target private or loopback IP addresses");
+            }
+        } else if let Some(url::Host::Domain(domain)) = parsed.host() {
+            // Resolve domain to IP addresses to prevent SSRF via DNS rebinding / internal aliases
+            use std::net::ToSocketAddrs;
+            let port = parsed.port_or_known_default().unwrap_or(80);
+            if let Ok(addrs) = (domain, port).to_socket_addrs() {
+                for addr in addrs {
+                    let is_disallowed = match addr.ip() {
+                        std::net::IpAddr::V4(v4) => {
+                            v4.is_loopback()
+                                || v4.is_private()
+                                || v4.is_link_local()
+                                || v4.is_broadcast()
+                                || v4.octets()[0] == 0
+                        }
+                        std::net::IpAddr::V6(v6) => {
+                            v6.is_loopback()
+                                || v6.is_unspecified()
+                                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                        }
+                    };
+                    if is_disallowed {
+                        return Err("API base URL resolves to a private or loopback IP address");
+                    }
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn is_disallowed_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.octets()[0] == 0
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
 }
 
 impl VerifyAiKeyInput {
@@ -267,6 +309,23 @@ pub struct ToolDefinition {
     pub function: FunctionDefinition,
 }
 
+impl ToolDefinition {
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: name.into(),
+                description: description.into(),
+                parameters,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDefinition {
     pub name: String,
@@ -390,6 +449,25 @@ mod tests {
         };
         assert_eq!(
             ssrf_internal.validate().unwrap_err(),
+            "API base URL cannot target internal or local domain names"
+        );
+
+        // Test domain resolving to loopback (e.g. 127.0.0.1.nip.io or localtest.me)
+        let ssrf_dns = UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1.nip.io:8000/v1".to_string()),
+            ..Default::default()
+        };
+        assert!(ssrf_dns
+            .validate()
+            .unwrap_err()
+            .contains("private or loopback IP address"));
+
+        let ssrf_localtest = UpdateAiConfigInput {
+            api_base_url: Some("http://localtest.me:8000/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_localtest.validate().unwrap_err(),
             "API base URL cannot target internal or local domain names"
         );
     }

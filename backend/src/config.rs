@@ -58,6 +58,16 @@ pub struct Config {
     /// Defaults to the WebAuthn origin, which is by definition where the SPA
     /// is served from — so it is right without being configured twice.
     pub web_url: String,
+    /// Whether local PaddleOCR image text recognition is enabled.
+    pub ocr_enabled: bool,
+    /// Path to directory containing the PaddleOCR ONNX models.
+    pub ocr_model_dir: std::path::PathBuf,
+    /// Whether local sherpa-onnx SenseVoice speech transcription is enabled.
+    pub voice_enabled: bool,
+    /// Path to directory containing the SenseVoice ONNX model and tokens.
+    pub voice_model_dir: std::path::PathBuf,
+    /// Default speech recognition language (e.g. "auto", "zh", "en", "ja", "ko", "yue").
+    pub voice_language: String,
 }
 
 impl Config {
@@ -115,6 +125,24 @@ impl Config {
 
         let web_url = env::var("WEB_URL").unwrap_or_else(|_| webauthn_origin.clone());
 
+        let ocr_enabled = env::var("OCR_ENABLED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(true);
+
+        let ocr_model_dir = env::var("OCR_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("data/ocr_models"));
+
+        let voice_enabled = env::var("VOICE_ENABLED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(true);
+
+        let voice_model_dir = env::var("VOICE_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("data/voice_models"));
+
+        let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
+
         Ok(Self {
             homeserver,
             username,
@@ -131,6 +159,11 @@ impl Config {
             webauthn_origin,
             cookie_secure,
             web_url,
+            ocr_enabled,
+            ocr_model_dir,
+            voice_enabled,
+            voice_model_dir,
+            voice_language,
         })
     }
 
@@ -201,6 +234,11 @@ mod tests {
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            ocr_enabled: true,
+            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            voice_enabled: true,
+            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
+            voice_language: "auto".to_string(),
         };
         assert!(valid_cfg.validate().is_ok());
 
@@ -232,6 +270,11 @@ mod tests {
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            ocr_enabled: true,
+            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            voice_enabled: true,
+            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
+            voice_language: "auto".to_string(),
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {

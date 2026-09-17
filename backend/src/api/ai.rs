@@ -41,12 +41,9 @@ pub async fn chat(
     }
 
     let owner_id = &user.account_id;
-    let room_id = crate::api::rooms::resolve_target_room(
-        &state.db.pool,
-        owner_id,
-        payload.room_id.as_deref(),
-    )
-    .await;
+    let room_id =
+        crate::db::rooms::resolve_target_room(&state.db.pool, owner_id, payload.room_id.as_deref())
+            .await;
 
     let turn_result = tokio::time::timeout(
         std::time::Duration::from_secs(180),

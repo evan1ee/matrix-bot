@@ -312,3 +312,56 @@ test('editing an entry preserves a currency outside the picker', async ({ app, a
   expect(saved.currency).toBe('JPY');
   expect(saved.amount_minor).toBe(500);
 });
+
+test('renders column and pie charts in fiscal transparency view', async ({ app, api }) => {
+  api.seedTransaction({
+    direction: 'income',
+    amount_minor: 500000,
+    currency: 'USD',
+    currency_exponent: 2,
+    note: 'Consulting Fee',
+  });
+  api.seedTransaction({
+    direction: 'expense',
+    amount_minor: 15000,
+    currency: 'USD',
+    currency_exponent: 2,
+    category_name: 'Hosting',
+    note: 'Server Cloud',
+  });
+
+  await gotoApp(app, TAB.finance);
+
+  // Switch to Fiscal Transparency tab
+  await app.getByRole('button', { name: 'Fiscal Transparency' }).click();
+
+  // Stat Strip KPIs
+  await expect(app.getByTestId('transparency-stat-strip')).toBeVisible();
+
+  // Monthly Cashflow Column Chart
+  await expect(app.getByRole('img', { name: 'Monthly income vs expense column chart' })).toBeVisible();
+
+  // Expense Category Pie/Donut Chart
+  await expect(app.getByRole('img', { name: 'Expense breakdown donut chart' })).toBeVisible();
+  await expect(app.getByText('Expense Allocation by Category')).toBeVisible();
+});
+
+test('renders unauthenticated public transparency report via token', async ({ anonApp, api }) => {
+  api.financeShare = {
+    owner_id: 'alice',
+    token: 'public_audit_token_xyz',
+    is_enabled: true,
+    title: 'Public Community Budget',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  await anonApp.goto('/?public_finance=public_audit_token_xyz');
+
+  // Should render without sign-in modal
+  await expect(anonApp.getByText('Public Community Budget')).toBeVisible();
+  await expect(anonApp.getByText('Public Read-Only')).toBeVisible();
+  await expect(anonApp.getByRole('img', { name: 'Monthly income vs expense column chart' })).toBeVisible();
+  await expect(anonApp.getByRole('img', { name: 'Expense breakdown donut chart' })).toBeVisible();
+});
+

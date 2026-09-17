@@ -88,17 +88,15 @@ pub fn grok_search_tools() -> Vec<serde_json::Value> {
     vec![web_search_tool_definition()]
 }
 
-/// Returns the configured Tavily API key from environment, checking both
-/// `TAVILY_AI_API_KEY` and `TAVILY_API_KEY`.
+/// Returns the configured Tavily API key from environment, checking `TAVILY_API_KEY`.
 pub fn get_tavily_api_key() -> Option<String> {
-    std::env::var("TAVILY_AI_API_KEY")
-        .or_else(|_| std::env::var("TAVILY_API_KEY"))
+    std::env::var("TAVILY_API_KEY")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|k| !k.is_empty())
 }
 
-/// Executes a live web search, using Tavily if `TAVILY_AI_API_KEY` or `TAVILY_API_KEY` is set,
+/// Executes a live web search, using Tavily if `TAVILY_API_KEY` is set,
 /// otherwise falling back to DuckDuckGo HTML scraping.
 pub async fn execute_web_search(query: &str) -> Result<String, String> {
     let query_trimmed = query.trim();
@@ -115,7 +113,7 @@ pub async fn execute_web_search(query: &str) -> Result<String, String> {
     }
 
     tracing::info!(
-        "No Tavily API key set (checked TAVILY_AI_API_KEY and TAVILY_API_KEY); using DuckDuckGo fallback for: '{}'",
+        "No Tavily API key set (checked TAVILY_API_KEY); using DuckDuckGo fallback for: '{}'",
         query_trimmed
     );
     execute_duckduckgo_search(query_trimmed).await
@@ -476,17 +474,12 @@ mod tests {
 
     #[test]
     fn test_get_tavily_api_key() {
-        std::env::remove_var("TAVILY_AI_API_KEY");
         std::env::remove_var("TAVILY_API_KEY");
         assert_eq!(get_tavily_api_key(), None);
 
         std::env::set_var("TAVILY_API_KEY", "key_plain");
         assert_eq!(get_tavily_api_key(), Some("key_plain".to_string()));
 
-        std::env::set_var("TAVILY_AI_API_KEY", "key_ai");
-        assert_eq!(get_tavily_api_key(), Some("key_ai".to_string()));
-
-        std::env::remove_var("TAVILY_AI_API_KEY");
         std::env::remove_var("TAVILY_API_KEY");
     }
 

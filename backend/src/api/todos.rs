@@ -206,7 +206,7 @@ pub async fn create_todo(
         .map(TodoPriority::from_str_or_default)
         .unwrap_or(TodoPriority::Medium);
 
-    let room_id = crate::api::rooms::resolve_target_room(
+    let room_id = crate::db::rooms::resolve_target_room(
         &state.db.pool,
         &user.owner_id(),
         payload.room_id.as_deref(),
@@ -215,8 +215,7 @@ pub async fn create_todo(
 
     let remind_room = if let Some(rr) = payload.remind_room_id.as_deref() {
         Some(
-            crate::api::rooms::resolve_target_room(&state.db.pool, &user.owner_id(), Some(rr))
-                .await,
+            crate::db::rooms::resolve_target_room(&state.db.pool, &user.owner_id(), Some(rr)).await,
         )
     } else {
         None

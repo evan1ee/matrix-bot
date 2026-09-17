@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { KeyRound, Loader2, ShieldCheck, X } from 'lucide-react';
 import {
   describePasskeyError,
+  enrollPasskey,
   isPasskeySupported,
   registerPasskey,
   signInWithPasskey,
@@ -14,9 +15,10 @@ interface AuthModalProps {
   onClose: () => void;
   onSuccess: () => void;
   user: SessionUser | null;
+  enrollToken?: string | null;
 }
 
-type Mode = 'signin' | 'register' | 'recovery';
+type Mode = 'signin' | 'register' | 'recovery' | 'enroll';
 
 /**
  * Sign-in, registration, and sign-out.
@@ -26,7 +28,13 @@ type Mode = 'signin' | 'register' | 'recovery';
  * it belongs to. Registration asks only for a display name, which is cosmetic —
  * it never decides who owns anything.
  */
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, user }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({
+  isOpen,
+  onClose,
+  onSuccess,
+  user,
+  enrollToken,
+}) => {
   const [mode, setMode] = useState<Mode>('signin');
   const [displayName, setDisplayName] = useState('');
   const [invite, setInvite] = useState('');
@@ -34,19 +42,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reopening always starts at sign-in. Without this the dialog remembers the
-  // mode it was last left in, so signing out from a session that began with
-  // registration reopens on the registration form — asking someone who already
-  // has an account to make another one.
+  // Reopening always starts at sign-in or enroll if a token is present.
   useEffect(() => {
     if (isOpen) {
-      setMode('signin');
+      setMode(enrollToken ? 'enroll' : 'signin');
       setError(null);
       setDisplayName('');
       setInvite('');
       setRecoveryCode('');
     }
-  }, [isOpen]);
+  }, [isOpen, enrollToken]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -102,6 +107,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     });
   };
 
+  const handleEnroll = () => {
+    if (!enrollToken) return;
+    return run(async () => {
+      await enrollPasskey(enrollToken);
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('enroll');
+        url.searchParams.delete('token');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+      }
+    });
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -121,7 +139,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 ? 'Sign in'
                 : mode === 'register'
                   ? 'Create an account'
-                  : 'Recover account'}
+                  : mode === 'enroll'
+                    ? 'Link Matrix Passkey'
+                    : 'Recover account'}
           </h2>
           <button
             type="button"
@@ -173,6 +193,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             >
               {busy && <Loader2 size={16} className="animate-spin" />}
               Sign out
+            </button>
+          </div>
+        ) : mode === 'enroll' ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Link this device to your Matrix account using biometric authentication (Face ID, Touch ID, or Windows Hello).
+            </p>
+
+            <button
+              type="button"
+              onClick={handleEnroll}
+              disabled={busy || !supported}
+              className="flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2.5 font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+              Activate passkey for this device
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('signin');
+                setError(null);
+              }}
+              className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            >
+              Back to sign in
             </button>
           </div>
         ) : mode === 'signin' ? (

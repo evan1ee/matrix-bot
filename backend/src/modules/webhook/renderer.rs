@@ -143,14 +143,27 @@ pub fn sanitize_html(input: &str) -> String {
             );
 
             let lower_tag = trimmed_tag.to_lowercase();
-            let has_event_handler = lower_tag.contains("javascript:")
-                || lower_tag.contains("data:")
-                || lower_tag.contains("onload")
-                || lower_tag.contains("onerror")
-                || lower_tag.contains("onclick")
-                || lower_tag.contains("onmouse");
+            let stripped_whitespace: String =
+                lower_tag.chars().filter(|c| !c.is_whitespace()).collect();
+            let has_dangerous_attr = stripped_whitespace.contains("javascript:")
+                || stripped_whitespace.contains("data:")
+                || stripped_whitespace.contains("vbscript:")
+                || lower_tag.contains("autofocus")
+                || lower_tag.contains("formaction")
+                || lower_tag
+                    .split(|c: char| c.is_whitespace() || c == '/' || c == '>' || c == '<')
+                    .any(|part| {
+                        let token = part.trim_start();
+                        token.starts_with("on")
+                            && token.len() > 2
+                            && token
+                                .chars()
+                                .nth(2)
+                                .map(|c| c.is_ascii_alphabetic())
+                                .unwrap_or(false)
+                    });
 
-            if is_allowed && !has_event_handler {
+            if is_allowed && !has_dangerous_attr {
                 out.push('<');
                 out.push_str(trimmed_tag);
                 out.push('>');
@@ -256,5 +269,14 @@ mod tests {
         assert!(sanitized.contains("&lt;a href=&quot;javascript:evil()&quot;&gt;"));
         assert!(!sanitized.contains("<img"));
         assert!(sanitized.contains("&lt;img"));
+
+        // Test newly secured event handlers and dangerous attributes:
+        let bypass_input = "<a href=\"#\" autofocus onfocus=\"alert(1)\">Click</a> <font onanimationstart=\"steal()\">text</font> <span ontoggle=\"leak()\">badge</span>";
+        let bypass_sanitized = sanitize_html(bypass_input);
+        assert!(!bypass_sanitized.contains("<a href=\"#\" autofocus onfocus=\"alert(1)\">"));
+        assert!(bypass_sanitized
+            .contains("&lt;a href=&quot;#&quot; autofocus onfocus=&quot;alert(1)&quot;&gt;"));
+        assert!(!bypass_sanitized.contains("<font onanimationstart"));
+        assert!(!bypass_sanitized.contains("<span ontoggle"));
     }
 }

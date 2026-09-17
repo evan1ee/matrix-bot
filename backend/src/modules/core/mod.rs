@@ -100,6 +100,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         };
 
         let dummy_db = Database {

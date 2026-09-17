@@ -7,6 +7,7 @@ use crate::modules::{BotModule, CommandContext, CommandHelp};
 pub mod due_reminder;
 pub mod handler;
 pub mod models;
+pub mod mutate;
 pub mod repository;
 pub mod view;
 
@@ -117,6 +118,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         }
     }
 

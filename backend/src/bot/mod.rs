@@ -26,10 +26,15 @@ use crate::modules::{ModuleContext, ModuleRegistry};
 pub mod client;
 pub mod dispatcher;
 pub mod handler;
+pub mod invite;
 pub mod linking;
+pub mod media;
 pub mod notify;
 pub mod quote;
+pub mod reaction;
+pub mod reaction_targets;
 pub mod self_verify;
+pub mod stage;
 pub mod verification;
 
 pub struct MatrixBot {

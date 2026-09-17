@@ -6,3 +6,8 @@ default-members = [
     "backend",
 ]
 resolver = "2"
+
+[profile.dev.package."*"]
+opt-level = 2
+overflow-checks = false
+

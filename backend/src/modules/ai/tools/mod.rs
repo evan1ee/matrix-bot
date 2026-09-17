@@ -1,13 +1,15 @@
+pub mod bills;
+pub mod bookmarks;
 pub mod definitions;
-pub mod definitions_extended;
-pub mod definitions_life;
 pub mod executor;
-pub mod executor_bookmarks_webhooks;
-pub mod executor_finance;
-pub mod executor_life_habits;
-pub mod executor_portfolio;
-pub mod executor_reminder;
-pub mod executor_todo;
+pub mod finance;
+pub mod habits;
+pub mod life;
+pub mod portfolio;
+pub mod reminder;
+pub mod settings;
+pub mod todo;
+pub mod webhooks;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -36,6 +38,7 @@ impl ToolRegistry {
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::modules::finance::repository::FinanceRepository;
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
@@ -369,6 +372,39 @@ mod tests {
         .unwrap();
         assert!(spending_res.contains("Food"));
         assert!(spending_res.contains("Transit"));
+    }
+
+    #[tokio::test]
+    async fn test_record_finance_entry_with_llm_json_schema() {
+        let (db, owner) = setup_db().await;
+
+        // LLM calls record_finance_entry with number amount, entry_type, description, occurred_at
+        let res = ToolRegistry::execute_tool(
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "record_finance_entry",
+            r#"{"category":"Food","description":"纽仕兰4.0全脂纯牛奶 250ml*24盒","entry_type":"expense","amount":87.70,"currency":"CNY","occurred_at":"2026-09-09"}"#,
+        )
+        .await
+        .unwrap();
+
+        assert!(res.contains("纽仕兰4.0全脂纯牛奶"));
+        assert!(res.contains("8770"));
+        assert!(res.contains("CNY"));
+
+        // Verify transaction is recorded in SQLite
+        let txs = FinanceRepository::list(&db.pool, &owner, None, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].amount_minor, 8770);
+        assert_eq!(txs[0].currency, "CNY");
+        assert_eq!(
+            txs[0].note.as_deref(),
+            Some("纽仕兰4.0全脂纯牛奶 250ml*24盒")
+        );
     }
 
     #[tokio::test]

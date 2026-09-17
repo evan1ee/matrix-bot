@@ -9,9 +9,11 @@ pub mod client;
 pub mod config_cmd;
 pub mod handler;
 pub mod models;
+pub mod prompt;
 pub mod repository;
 pub mod retrospective;
 pub mod search;
+pub mod stream;
 pub mod tools;
 
 use matrix_sdk::Client;
@@ -76,7 +78,7 @@ impl BotModule for AiModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_ai_command(
+        handler::handle_ai_command_with_stage(
             &db.pool,
             broadcaster,
             Some(&self.client_handle),
@@ -89,6 +91,7 @@ impl BotModule for AiModule {
             ctx.is_direct,
             ctx.is_mentioned,
             ctx.quoted.as_ref(),
+            ctx.stage_reporter.as_ref(),
         )
         .await
     }

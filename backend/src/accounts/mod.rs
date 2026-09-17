@@ -32,7 +32,7 @@ pub mod repository;
 pub mod security_events;
 pub mod session;
 
-pub use credentials::CredentialRepository;
+pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
 pub use merge::{MergePreview, MergeRepository};
 pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};

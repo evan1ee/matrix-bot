@@ -96,6 +96,59 @@ impl CommandParser {
             quoted,
         })
     }
+
+    pub fn is_ai_prompt_command(parsed: &ParsedCommand) -> bool {
+        let cmd = parsed.command.to_ascii_lowercase();
+        if cmd == "ai" || cmd == "ask" {
+            let trimmed = parsed.raw_args.trim();
+            let first_word = trimmed.split_whitespace().next().unwrap_or("");
+            !matches!(
+                first_word.to_ascii_lowercase().as_str(),
+                "reset" | "clear" | "config" | "retro" | "retrospective" | "weekly"
+            )
+        } else if parsed.is_mentioned {
+            const BUILTIN_COMMANDS: &[&str] = &[
+                "ping",
+                "help",
+                "stat",
+                "stats",
+                "version",
+                "uptime",
+                "todo",
+                "todos",
+                "remind",
+                "reminder",
+                "reminders",
+                "finance",
+                "expense",
+                "income",
+                "budget",
+                "portfolio",
+                "invest",
+                "stock",
+                "crypto",
+                "asset",
+                "footprint",
+                "footprints",
+                "trip",
+                "trips",
+                "habit",
+                "habits",
+                "life",
+                "lifegrid",
+                "bill",
+                "bills",
+                "settings",
+                "setting",
+                "webhook",
+                "webhooks",
+                "link",
+            ];
+            !BUILTIN_COMMANDS.contains(&cmd.as_str())
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]

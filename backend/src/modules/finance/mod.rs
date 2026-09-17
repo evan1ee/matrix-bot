@@ -4,6 +4,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod analytics;
 pub mod handler;
 pub mod models;
 pub mod money;
@@ -109,6 +110,7 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         }
     }
 

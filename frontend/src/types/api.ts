@@ -122,6 +122,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/passkeys/add/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["add_passkey_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/passkeys/{id}": {
         parameters: {
             query?: never;
@@ -502,6 +518,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/passkey/enroll/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enroll_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/passkey/login/finish": {
         parameters: {
             query?: never;
@@ -670,6 +702,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_analytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/categories": {
         parameters: {
             query?: never;
@@ -697,6 +745,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["delete_category"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_share"];
+        put?: never;
+        post: operations["upsert_share"];
+        delete: operations["delete_share"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1087,6 +1151,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/finance/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_public_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recurring-bills": {
         parameters: {
             query?: never;
@@ -1311,6 +1391,15 @@ export interface components {
         };
         /** @enum {string} */
         AlertCondition: "above" | "below";
+        AnalyticsQuery: {
+            /** @description ISO 4217 code (e.g. "USD", "EUR"). If omitted, uses user's primary currency. */
+            currency?: string | null;
+            /**
+             * Format: int64
+             * @description Number of trailing months to aggregate (default 6, max 36).
+             */
+            months?: number | null;
+        };
         ApiErrorResponse: {
             /** Format: int32 */
             code: number;
@@ -1567,6 +1656,47 @@ export interface components {
             count: number;
             domain: string;
         };
+        EnrollStartRequest: {
+            /** @description Single-use enrollment token generated from Matrix chat `!passkey add`. */
+            token: string;
+        };
+        ExpenseCategorySlice: {
+            /** Format: int64 */
+            amount_minor: number;
+            category_name: string;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: double */
+            percentage: number;
+            /** Format: int64 */
+            tx_count: number;
+        };
+        FinanceAnalyticsReport: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            expense_categories: components["schemas"]["ExpenseCategorySlice"][];
+            monthly_cashflow: components["schemas"]["MonthlyCashflowBucket"][];
+            /** Format: int64 */
+            months_requested: number;
+            /** Format: int64 */
+            net_savings_minor: number;
+            /** Format: int64 */
+            total_expense_minor: number;
+            /** Format: int64 */
+            total_income_minor: number;
+        };
+        FinanceShare: {
+            /** Format: date-time */
+            created_at?: string | null;
+            is_enabled: boolean;
+            owner_id: string;
+            title?: string | null;
+            token: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
         HealthResponse: {
             db_status: string;
             service: string;
@@ -1718,6 +1848,18 @@ export interface components {
             /** Format: int64 */
             webhooks: number;
         };
+        MonthlyCashflowBucket: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            expense_minor: number;
+            /** Format: int64 */
+            income_minor: number;
+            month: string;
+            /** Format: int64 */
+            net_minor: number;
+        };
         PasskeySummary: {
             /** Format: date-time */
             created_at?: string | null;
@@ -1827,6 +1969,42 @@ export interface components {
             target_price_minor: number;
             /** Format: date-time */
             triggered_at?: string | null;
+        };
+        PublicFinanceReport: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            expense_categories: components["schemas"]["ExpenseCategorySlice"][];
+            monthly_cashflow: components["schemas"]["MonthlyCashflowBucket"][];
+            /** Format: int64 */
+            net_savings_minor: number;
+            recent_transactions: components["schemas"]["PublicTransaction"][];
+            title: string;
+            /** Format: int64 */
+            total_expense_minor: number;
+            /** Format: int64 */
+            total_income_minor: number;
+        };
+        PublicQuery: {
+            /**
+             * Format: int64
+             * @description Number of trailing months to aggregate (default 6, max 36).
+             */
+            months?: number | null;
+        };
+        PublicTransaction: {
+            /** Format: int64 */
+            amount_minor: number;
+            category_name?: string | null;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            direction: string;
+            /** Format: int64 */
+            id: number;
+            note?: string | null;
+            /** Format: date-time */
+            occurred_at: string;
         };
         RecoveryCodesResponse: {
             /** @description Shown exactly once. The server keeps only hashes. */
@@ -1991,6 +2169,13 @@ export interface components {
         };
         SetPriceRequest: {
             price: string;
+        };
+        ShareRequest: {
+            is_enabled: boolean;
+            title?: string | null;
+        };
+        StatusResponse: {
+            success: boolean;
         };
         SummaryQuery: {
             /**
@@ -2531,6 +2716,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PasskeySummary"][];
+                };
+            };
+        };
+    };
+    add_passkey_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
                 };
             };
         };
@@ -3138,6 +3342,39 @@ export interface operations {
             };
         };
     };
+    enroll_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Challenge to pass to navigator.credentials.create */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+            /** @description Invalid or expired enrollment token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     login_finish: {
         parameters: {
             query?: never;
@@ -3472,6 +3709,45 @@ export interface operations {
             };
         };
     };
+    get_analytics: {
+        parameters: {
+            query?: {
+                /** @description ISO 4217 code (e.g. "USD", "EUR"). If omitted, uses user's primary currency. */
+                currency?: string | null;
+                /** @description Number of trailing months to aggregate (default 6, max 36). */
+                months?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aggregated monthly cashflow and expense breakdown */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinanceAnalyticsReport"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_categories: {
         parameters: {
             query?: never;
@@ -3581,6 +3857,91 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
+            };
+        };
+    };
+    get_share: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current public sharing configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinanceShare"] | null;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upsert_share: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Configured public share */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinanceShare"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_share: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public share disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -4650,6 +5011,39 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
+            };
+        };
+    };
+    get_public_report: {
+        parameters: {
+            query?: {
+                /** @description Number of trailing months to aggregate (default 6, max 36). */
+                months?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description Secure sharing token */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public fiscal transparency report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicFinanceReport"];
+                };
+            };
+            /** @description Report not found or link disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

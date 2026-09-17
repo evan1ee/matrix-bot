@@ -5,6 +5,7 @@ use tracing::{error, info, warn};
 
 use crate::modules::reminder::models::Reminder;
 use crate::modules::reminder::repository::{ReminderRepository, MAX_DELIVERY_ATTEMPTS};
+use crate::modules::settings::SettingsRepository;
 use crate::modules::ModuleContext;
 use crate::utils::{html_escape, strip_html};
 
@@ -61,11 +62,28 @@ async fn deliver_to_matrix(
 
     if let Some(room) = ctx.client.get_room(room_id) {
         match room.send(content.clone()).await {
-            Ok(_) => {
+            Ok(resp) => {
                 info!(
                     "Delivered reminder #{} to Matrix room {}",
                     reminder.id, reminder.room_id
                 );
+                let (entity_type, entity_id) = if reminder.source_kind.as_deref() == Some("todo")
+                    && reminder.source_id.is_some()
+                {
+                    ("todo", reminder.source_id.unwrap())
+                } else {
+                    ("reminder", reminder.id)
+                };
+                let _ = crate::bot::reaction_targets::record_target(
+                    &ctx.db.pool,
+                    resp.event_id.as_str(),
+                    reminder.room_id.as_str(),
+                    entity_type,
+                    entity_id,
+                    &reminder.owner_id,
+                    &reminder.message,
+                )
+                .await;
                 return true;
             }
             Err(err) => {
@@ -84,8 +102,25 @@ async fn deliver_to_matrix(
 
     match ctx.client.join_room_by_id(room_id).await {
         Ok(joined) => match joined.send(content).await {
-            Ok(_) => {
+            Ok(resp) => {
                 info!("Delivered reminder #{} after joining room", reminder.id);
+                let (entity_type, entity_id) = if reminder.source_kind.as_deref() == Some("todo")
+                    && reminder.source_id.is_some()
+                {
+                    ("todo", reminder.source_id.unwrap())
+                } else {
+                    ("reminder", reminder.id)
+                };
+                let _ = crate::bot::reaction_targets::record_target(
+                    &ctx.db.pool,
+                    resp.event_id.as_str(),
+                    reminder.room_id.as_str(),
+                    entity_type,
+                    entity_id,
+                    &reminder.owner_id,
+                    &reminder.message,
+                )
+                .await;
                 true
             }
             Err(err) => {
@@ -158,6 +193,36 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
     }
 }
 
+/// Formats the reminder notification alert sent to Matrix when a reminder triggers.
+pub fn format_reminder_alert(
+    message: &str,
+    trigger_at: &DateTime<Utc>,
+    tz: &chrono_tz::Tz,
+    recurrence: &str,
+) -> String {
+    let local_time = trigger_at
+        .with_timezone(tz)
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    let mut html = format!(
+        "⏰ <b>提醒时间到了</b><br/>• <b>事项:</b> {}<br/>• <b>设定时间:</b> {}",
+        html_escape(message),
+        local_time
+    );
+    let rec_label = match recurrence {
+        "daily" => Some("每天重复"),
+        "weekly" => Some("每周重复"),
+        "monthly" => Some("每月重复"),
+        "yearly" => Some("每年重复"),
+        _ => None,
+    };
+    if let Some(rec) = rec_label {
+        html.push_str(&format!("<br/>• <b>周期:</b> {}", rec));
+    }
+    html.push_str("<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>");
+    html
+}
+
 /// Starts the 5s tick loop, returning its handle so the caller controls its
 /// lifetime — see [`crate::modules::BackgroundWorkers`].
 pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<()> {
@@ -182,10 +247,15 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
                     reminder.id, reminder.sender_name, reminder.room_id
                 );
 
-                let alert_html = format!(
-                    "⏰ <b>REMINDER for {}!</b><br/>{}",
-                    html_escape(&reminder.sender_name),
-                    html_escape(&reminder.message)
+                let tz = SettingsRepository::get_or_default(&ctx.db.pool, &reminder.owner_id)
+                    .await
+                    .tz();
+
+                let alert_html = format_reminder_alert(
+                    &reminder.message,
+                    &reminder.trigger_at,
+                    &tz,
+                    &reminder.recurrence,
                 );
                 let plain_text = strip_html(&alert_html);
                 let alert_content = RoomMessageEventContent::text_html(&plain_text, &alert_html);
@@ -274,5 +344,24 @@ mod tests {
         assert_eq!(retry_delay(0), Duration::seconds(30));
         assert_eq!(retry_delay(1), Duration::seconds(60));
         assert_eq!(retry_delay(4), Duration::seconds(150));
+    }
+
+    #[test]
+    fn test_format_reminder_alert_non_recurring() {
+        let t = utc(2026, 9, 17, 12);
+        let tz = chrono_tz::Asia::Shanghai;
+        let html = format_reminder_alert("去跑步", &t, &tz, "none");
+        assert!(html.contains("⏰ <b>提醒时间到了</b>"));
+        assert!(html.contains("• <b>事项:</b> 去跑步"));
+        assert!(html.contains("• <b>设定时间:</b> 2026-09-17 20:00"));
+        assert!(!html.contains("周期"));
+    }
+
+    #[test]
+    fn test_format_reminder_alert_recurring() {
+        let t = utc(2026, 9, 17, 12);
+        let tz = chrono_tz::Asia::Shanghai;
+        let html = format_reminder_alert("去跑步", &t, &tz, "daily");
+        assert!(html.contains("• <b>周期:</b> 每天重复"));
     }
 }

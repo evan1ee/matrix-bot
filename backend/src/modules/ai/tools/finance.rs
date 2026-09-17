@@ -3,12 +3,13 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::models::Direction;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
-pub async fn execute_finance_tool(
+pub async fn execute_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -31,7 +32,11 @@ pub async fn execute_finance_tool(
 
         "list_finance_transactions" => Some(
             async {
-                let dir = args.get("direction").and_then(|v| v.as_str());
+                let dir = args
+                    .get("direction")
+                    .or_else(|| args.get("entry_type"))
+                    .or_else(|| args.get("type"))
+                    .and_then(|v| v.as_str());
                 let limit = args
                     .get("limit")
                     .and_then(|v| v.as_i64())
@@ -101,19 +106,23 @@ pub async fn execute_finance_tool(
                 match matched {
                     Some(s) => {
                         let total_expense = s.expense_minor;
-                        let categories: Vec<_> = s.categories.into_iter().map(|c| {
-                        let pct = if total_expense > 0 {
-                            (c.expense_minor as f64 / total_expense as f64) * 100.0
-                        } else {
-                            0.0
-                        };
-                        json!({
-                            "category": c.category.unwrap_or_else(|| "Uncategorized".to_string()),
-                            "expense_minor": c.expense_minor,
-                            "income_minor": c.income_minor,
-                            "expense_percentage": format!("{:.1}%", pct),
-                        })
-                    }).collect();
+                        let categories: Vec<_> = s
+                            .categories
+                            .into_iter()
+                            .map(|c| {
+                                let pct = if total_expense > 0 {
+                                    (c.expense_minor as f64 / total_expense as f64) * 100.0
+                                } else {
+                                    0.0
+                                };
+                                json!({
+                                    "category": c.category.unwrap_or_else(|| "Uncategorized".to_string()),
+                                    "expense_minor": c.expense_minor,
+                                    "income_minor": c.income_minor,
+                                    "expense_percentage": format!("{:.1}%", pct),
+                                })
+                            })
+                            .collect();
 
                         Ok(json!({
                             "currency": s.currency,
@@ -139,7 +148,7 @@ pub async fn execute_finance_tool(
             .await,
         ),
 
-        "record_finance_entry" => Some(
+        "record_finance_entry" | "add_expense" => Some(
             async {
                 let amount_str = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
                     format!("{:.2}", num)
@@ -150,14 +159,23 @@ pub async fn execute_finance_tool(
                 };
                 let dir_str = args
                     .get("direction")
+                    .or_else(|| args.get("entry_type"))
+                    .or_else(|| args.get("type"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'direction' is required (expense or income)")?;
+                    .unwrap_or("expense");
                 let direction = Direction::parse(dir_str)
                     .ok_or("Invalid direction (must be expense or income)")?;
-                let note = args
-                    .get("note")
+                let category_name = args
+                    .get("category")
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'note' is required")?;
+                    .unwrap_or("General");
+                let note = args
+                    .get("description")
+                    .or_else(|| args.get("note"))
+                    .or_else(|| args.get("item"))
+                    .or_else(|| args.get("merchant"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(category_name);
 
                 let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                 let tz = settings.tz();
@@ -169,28 +187,27 @@ pub async fn execute_finance_tool(
                 let exp = exponent_for(&currency);
                 let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let category_id =
-                    if let Some(cat_name) = args.get("category").and_then(|v| v.as_str()) {
-                        if let Some(existing) =
-                            FinanceRepository::find_category_by_name(pool, owner_id, cat_name)
-                                .await
-                                .map_err(|e| e.to_string())?
-                        {
-                            Some(existing.id)
-                        } else if let Some(new_cat) =
-                            FinanceRepository::create_category(pool, owner_id, cat_name)
-                                .await
-                                .map_err(|e| e.to_string())?
-                        {
-                            Some(new_cat.id)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                let category_id = if let Some(existing) =
+                    FinanceRepository::find_category_by_name(pool, owner_id, category_name)
+                        .await
+                        .map_err(|e| e.to_string())?
+                {
+                    Some(existing.id)
+                } else if let Some(new_cat) =
+                    FinanceRepository::create_category(pool, owner_id, category_name)
+                        .await
+                        .map_err(|e| e.to_string())?
+                {
+                    Some(new_cat.id)
+                } else {
+                    None
+                };
 
-                let occurred_at = if let Some(date_str) = args.get("date").and_then(|v| v.as_str())
+                let occurred_at = if let Some(date_str) = args
+                    .get("occurred_at")
+                    .or_else(|| args.get("date"))
+                    .or_else(|| args.get("datetime"))
+                    .and_then(|v| v.as_str())
                 {
                     if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
                         dt.with_timezone(&Utc)
@@ -210,9 +227,9 @@ pub async fn execute_finance_tool(
                 };
 
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -276,4 +293,130 @@ pub async fn execute_finance_tool(
 
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_financial_summary",
+            "Fetch financial summaries including expense and income totals broken down by category and currency. Currencies are separate and must never be summed together without exchange rates.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "list_finance_transactions",
+            "List recent financial transactions with optional filters for type (income/expense) or category.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of transactions to return (default 20, max 100)"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Offset for pagination"
+                    },
+                    "entry_type": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Optional filter by transaction type"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional filter by category name"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "get_spending_by_category",
+            "Get a breakdown of expenses grouped by category for a given month (defaults to current month).",
+            json!({
+                "type": "object",
+                "properties": {
+                    "month": {
+                        "type": "string",
+                        "description": "Optional month in YYYY-MM format. Defaults to current month."
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "record_finance_entry",
+            "Record a new financial expense or income transaction with amount, category, currency, and optional description.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "entry_type": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Type: 'expense' or 'income' (defaults to 'expense')"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["income", "expense"],
+                        "description": "Alias for entry_type"
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Decimal monetary amount (required, e.g. 42.50)"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Category name, e.g. Food, Shopping, Leisure, Transport"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of the transaction"
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Alias for description"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "Optional currency code (e.g. CNY, USD, EUR)"
+                    },
+                    "occurred_at": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 timestamp or YYYY-MM-DD"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Alias for occurred_at"
+                    },
+                    "room": {
+                        "type": "string",
+                        "description": "Matrix room name or room ID"
+                    }
+                },
+                "required": ["amount"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_finance_entry",
+            "Delete an expense or income transaction by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the financial transaction to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

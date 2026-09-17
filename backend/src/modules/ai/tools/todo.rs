@@ -3,10 +3,11 @@ use chrono_tz::Tz;
 use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::recurring_bills::repository::RecurringBillRepository;
+use crate::modules::ai::models::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
+use serde_json::json;
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(due_str) {
@@ -27,7 +28,7 @@ fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
     }
 }
 
-pub async fn execute_todo_tool(
+pub async fn execute_tool(
     pool: &SqlitePool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -47,24 +48,6 @@ pub async fn execute_todo_tool(
             .await,
         ),
 
-        "get_my_recurring_bills" => Some(
-            async {
-                let items = RecurringBillRepository::list_by_owner(pool, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                serde_json::to_string(&items).map_err(|e| e.to_string())
-            }
-            .await,
-        ),
-
-        "get_my_settings" => Some(
-            async {
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-                serde_json::to_string(&settings).map_err(|e| e.to_string())
-            }
-            .await,
-        ),
-
         "add_todo" => Some(
             async {
                 let text = args
@@ -79,7 +62,12 @@ pub async fn execute_todo_tool(
                 let due_at = if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64())
                 {
                     Some(Utc::now() + Duration::minutes(mins))
-                } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
+                } else if let Some(due_str) = args
+                    .get("due_date")
+                    .or_else(|| args.get("due_at"))
+                    .or_else(|| args.get("due"))
+                    .and_then(|v| v.as_str())
+                {
                     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
@@ -88,9 +76,9 @@ pub async fn execute_todo_tool(
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::api::rooms::resolve_target_room(pool, owner_id, None).await
+                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -120,7 +108,12 @@ pub async fn execute_todo_tool(
             async {
                 let target_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
-                } else if let Some(search) = args.get("text_search").and_then(|v| v.as_str()) {
+                } else if let Some(search) = args
+                    .get("text")
+                    .or_else(|| args.get("text_search"))
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                {
                     let active_tasks =
                         TodoRepository::list_all_user(pool, owner_id, Some(false), 50, 0)
                             .await
@@ -136,8 +129,7 @@ pub async fn execute_todo_tool(
                     }
                 } else {
                     return Err(
-                        "Either 'id' or 'text_search' must be provided to complete a task"
-                            .to_string(),
+                        "Either 'id' or 'text' must be provided to complete a task".to_string()
                     );
                 };
 
@@ -248,145 +240,120 @@ pub async fn execute_todo_tool(
             .await,
         ),
 
-        "create_recurring_bill" => Some(
-            async {
-                let name_val = args
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Field 'name' is required")?;
-                let amount_str = args
-                    .get("amount")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Field 'amount' is required")?;
-                let currency = args
-                    .get("currency")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("USD")
-                    .to_uppercase();
-                let category = args
-                    .get("category")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("subscriptions");
-                let frequency = args
-                    .get("frequency")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("monthly");
-                let due_day = args
-                    .get("due_day")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(1)
-                    .clamp(1, 31) as i32;
-                let auto_pay = args
-                    .get("auto_pay")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let notes = args
-                    .get("notes")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let amount_f: f64 = amount_str.parse().map_err(|_| "Invalid amount format")?;
-                let amount_minor = (amount_f * 100.0).round() as i64;
-
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-                let today = Utc::now()
-                    .with_timezone(&settings.tz())
-                    .format("%Y-%m-%d")
-                    .to_string();
-                let payload = crate::modules::recurring_bills::models::CreateBillPayload {
-                    name: name_val.to_string(),
-                    category: category.to_string(),
-                    amount_minor,
-                    currency,
-                    currency_exponent: Some(2),
-                    frequency: Some(frequency.to_string()),
-                    due_day: Some(due_day),
-                    next_due_at: today,
-                    total_installments: None,
-                    auto_pay: Some(auto_pay),
-                    notes,
-                    remind_before_minutes: None,
-                    remind_room_id: None,
-                };
-
-                let bill = RecurringBillRepository::create(
-                    pool,
-                    room_id,
-                    owner_id,
-                    "AI Assistant",
-                    payload,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::RecurringBillCreated(bill.clone()));
-                }
-
-                serde_json::to_string(&bill).map_err(|e| e.to_string())
-            }
-            .await,
-        ),
-
-        "delete_recurring_bill" => Some(
-            async {
-                let id = args
-                    .get("id")
-                    .and_then(|v| v.as_i64())
-                    .ok_or("Field 'id' is required")?;
-                let ok = RecurringBillRepository::delete(pool, id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!(
-                        "Recurring bill #{} not found or not owned by user",
-                        id
-                    ));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::RecurringBillDeleted {
-                        id,
-                        owner_id: owner_id.to_string(),
-                    });
-                }
-
-                serde_json::to_string(&serde_json::json!({
-                    "id": id,
-                    "deleted": true
-                }))
-                .map_err(|e| e.to_string())
-            }
-            .await,
-        ),
-
-        "update_my_settings" => Some(
-            async {
-                let mut settings = SettingsRepository::get_or_default(pool, owner_id).await;
-                if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
-                    settings.timezone = tz.to_string();
-                }
-                if let Some(curr) = args.get("currency").and_then(|v| v.as_str()) {
-                    settings.currency = curr.to_uppercase();
-                }
-
-                let saved = SettingsRepository::upsert(pool, owner_id, &settings)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::SettingsUpdated {
-                        owner_id: owner_id.to_string(),
-                        settings: saved.clone(),
-                    });
-                }
-
-                serde_json::to_string(&saved).map_err(|e| e.to_string())
-            }
-            .await,
-        ),
-
         _ => None,
     }
+}
+
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::function(
+            "get_my_tasks",
+            "Fetch tasks and to-dos owned by the user, including status, priority, and due dates.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "completed": {
+                        "type": "boolean",
+                        "description": "Optional filter: true for completed tasks, false for active tasks"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "add_todo",
+            "Add a new task/to-do for the user. Supports priority and due dates.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The task or todo description (required)"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "urgent"],
+                        "description": "Task priority level"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "Due date/time in ISO-8601 (e.g. 2026-03-30T18:00:00Z) or YYYY-MM-DD"
+                    },
+                    "remind_before_minutes": {
+                        "type": "integer",
+                        "description": "Minutes before due_date to alert (e.g. 15, 60)"
+                    },
+                    "room": {
+                        "type": "string",
+                        "description": "Matrix room name or room ID to associate with the task"
+                    }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "complete_todo",
+            "Mark a task/to-do as completed by its ID or exact text match.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to mark as completed"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Exact or partial text match of the todo to complete"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "update_todo",
+            "Update an existing task's description, priority, or due date.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to update (required)"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "New description text"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "urgent"],
+                        "description": "New priority level"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "New due date in ISO 8601 format"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolDefinition::function(
+            "delete_todo",
+            "Permanently delete a task/to-do by its numeric ID.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the todo to delete (required)"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        ),
+    ]
 }

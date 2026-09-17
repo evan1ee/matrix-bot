@@ -28,6 +28,55 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 
 ---
 
+## 🏛️ System Architecture
+
+The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent SQLite storage:
+
+```
+                                      Matrix
+                                        │
+                      ┌─────────────────┴─────────────────┐
+                      │                                   │
+                  Command                         Natural Language
+             (!todo, !finance)                  (@bot ..., direct DM)
+                      │                                   │
+                      │                                  LLM
+                      │                             (xAI / OpenAI)
+                      │                                   │
+                      │                              Tool Calling ────► Live Web Search
+                      │                            (add_todo, etc.)     (Tavily / DDG)
+                      │                                   │
+                      └─────────────────┬─────────────────┘
+                                        │
+                                        ▼
+                                   Domain Layer
+                     (Todo, Finance, Portfolio, Habits, etc.)
+                                        │
+                      ┌─────────────────┴─────────────────┐
+                      ▼                                   ▼
+             SQLite Persistence                    SSE Broadcaster
+             (SQLx WAL Engine)                   (Real-Time Web/iOS)
+```
+
+### Core Architecture Highlights
+
+1. **Dual Ingress (Matrix & REST/SSE)**:
+   - **Matrix Chat**: Inbound events arrive over Matrix rooms and are classified as either explicit commands or natural language queries.
+   - **REST API & SSE**: An embedded Axum web server provides REST endpoints (`/api/v1/*`) and real-time SSE event streaming (`/api/v1/events`) for the React Web UI and native iOS client (Element X).
+
+2. **Deterministic Commands vs. Natural Language**:
+   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/bot/dispatcher.rs`](backend/src/bot/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
+   - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool schemas are colocated directly within their domain tool files.
+
+3. **Unified Domain Layer**:
+   - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
+
+4. **Persistence & Real-Time Sync**:
+   - All state modifications persist directly to SQLite using runtime SQLx query binding with write-ahead logging (WAL). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
+   - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
+
+---
+
 ## 🔐 Authentication & Multi-Client Architecture
 
 The backend supports multiple client surfaces with strict ownership isolation:
@@ -36,11 +85,15 @@ The backend supports multiple client surfaces with strict ownership isolation:
 - **Native iOS & Element X**: **1-Step Matrix Session Exchange** (`POST /api/v1/auth/matrix/login`). The native client exchanges its existing homeserver access token for an opaque backend session token, transmitted via standard `Authorization: Bearer <session_token>` headers.
 - **Matrix Chat**: Bot commands are authenticated via cryptographic Matrix room event signatures, resolved to account owners through linked identities.
 
-**Local accounts own the data.** A Matrix account is something you *attach* to a
-local account, not an identity in its own right. Every todo, reminder,
-transaction, bill, habit, bookmark, and holding belongs to an account; the same person signing in
-on the web, using the native iOS app, and messaging the bot in Matrix is one owner with one unified dataset.
+**Matrix account is the primary identity.** Every todo, reminder,
+transaction, bill, habit, bookmark, and holding belongs to an account. Whether messaging the bot in Matrix, browsing on the web, or using the native iOS app, you are one owner with one unified dataset.
 
+- **Matrix-Driven Passkey Enrollment (`!passkey add` or `!web`)** — send `!passkey add` (or `!web`) to the bot in a direct message. The bot generates a single-use 15-minute enrollment link that opens the web UI and registers a WebAuthn passkey directly to your existing Matrix account without creating orphan accounts.
+- **Multiple Passkeys** — attach multiple passkeys (e.g. MacBook Touch ID, Windows Hello, iPhone Face ID, YubiKey) to a single account. Additional passkeys can be added anytime from chat via `!passkey add` or via the **+ Add a passkey** button in the Web UI Security Panel.
+- **Chat Management & Revocation (`!passkeys` & `!unlink`)**:
+  - `!passkeys` (or `!passkey list`) — lists all registered passkeys with index numbers, labels, and creation dates.
+  - `!unlink passkey <n>` — deletes the specified passkey directly from chat. Because your Matrix identity is the primary identity, removing the last passkey is safely permitted without locking you out of your account.
+  - `!unlink sessions` — revokes all active web sessions across all devices directly from chat.
 - **Web Sign-in** — one button. Credentials are discoverable, so the browser offers
   the passkey and the credential itself identifies the account. There is no
   username or password field.
@@ -53,10 +106,7 @@ on the web, using the native iOS app, and messaging the bot in Matrix is one own
   cancels it.
 - **Merging** — linking a Matrix account that already has history reports what
   it holds and asks before moving anything.
-- **Step-up** — linking, unlinking, managing passkeys, signing out other devices
-  and generating recovery codes all need a passkey assertion from the last five
-  minutes. Matrix commands cannot reach any of them, because Matrix has no way
-  to prompt for a passkey.
+- **Step-up** — sensitive actions in the web UI (managing passkeys, unlinking identities, signing out other devices, generating recovery codes) require a recent passkey assertion within the last 5 minutes.
 - **Recovery** — ten single-use codes, plus `!recover` from a linked Matrix
   account. The latter is announced immediately, waits 24 hours, can be cancelled
   from any signed-in device, and then grants a session that may register a
@@ -221,7 +271,7 @@ AI_MODEL=grok-4.6
 AI_PROXY=http://127.0.0.1:7897
 
 # Live Web Search (Tavily API with DuckDuckGo fallback)
-TAVILY_AI_API_KEY=tvly-...
+TAVILY_API_KEY=tvly-...
 ```
 
 ⚠️ **`WEBAUTHN_RP_ID` is baked into every passkey at creation.** Changing it

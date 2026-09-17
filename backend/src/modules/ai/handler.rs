@@ -1,34 +1,21 @@
 use sqlx::SqlitePool;
 use std::sync::Arc;
-#[cfg(not(test))]
-use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
-use super::client::{AiClient, ResolvedAiConfig};
+pub use super::client::get_ai_client;
+use super::client::ResolvedAiConfig;
 pub use super::config_cmd::{
-    format_error, handle_set_history, handle_set_model, handle_show_config,
+    format_error, format_help, handle_ai_subcommand, handle_reset, handle_set_history,
+    handle_set_model, handle_show_config,
 };
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
+pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
-use crate::utils::html::html_escape;
-
-#[cfg(not(test))]
-static AI_CLIENT: OnceLock<AiClient> = OnceLock::new();
-
-#[cfg(not(test))]
-pub fn get_ai_client() -> AiClient {
-    AI_CLIENT.get_or_init(AiClient::new).clone()
-}
-
-#[cfg(test)]
-pub fn get_ai_client() -> AiClient {
-    AiClient::new()
-}
 
 pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
@@ -49,7 +36,7 @@ pub async fn handle_ai_command(
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
     room_id: &str,
     owner_id: &str,
-    _sender_name: &str,
+    sender_name: &str,
     command: &str,
     raw_args: &str,
     full_body: &str,
@@ -57,45 +44,50 @@ pub async fn handle_ai_command(
     is_mentioned: bool,
     quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
+    handle_ai_command_with_stage(
+        pool,
+        broadcaster,
+        client_handle,
+        room_id,
+        owner_id,
+        sender_name,
+        command,
+        raw_args,
+        full_body,
+        is_direct,
+        is_mentioned,
+        quoted,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_ai_command_with_stage(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
+    room_id: &str,
+    owner_id: &str,
+    _sender_name: &str,
+    command: &str,
+    raw_args: &str,
+    full_body: &str,
+    is_direct: bool,
+    is_mentioned: bool,
+    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
         let trimmed = raw_args.trim();
         if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
-        if trimmed.eq_ignore_ascii_case("retro")
-            || trimmed.eq_ignore_ascii_case("retrospective")
-            || trimmed.eq_ignore_ascii_case("weekly")
+        if let Some(sub_reply) =
+            handle_ai_subcommand(pool, broadcaster, owner_id, room_id, trimmed).await
         {
-            return Some(super::retrospective::handle_retrospective_command(pool, owner_id).await);
-        }
-        if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
-            return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
-        }
-        if trimmed.eq_ignore_ascii_case("config") {
-            return Some(handle_show_config(pool, owner_id).await);
-        }
-        if let Some(rest) = trimmed.strip_prefix("model") {
-            let model_arg = rest.trim();
-            if model_arg.is_empty() {
-                return Some(handle_show_config(pool, owner_id).await);
-            }
-            if model_arg.len() > 500 {
-                return Some(format_error(
-                    "Model name exceeds maximum length of 500 characters.",
-                ));
-            }
-            return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
-        }
-        if let Some(rest) = trimmed
-            .strip_prefix("history")
-            .or_else(|| trimmed.strip_prefix("turns"))
-        {
-            let num_arg = rest.trim();
-            if num_arg.is_empty() {
-                return Some(handle_show_config(pool, owner_id).await);
-            }
-            return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
+            return Some(sub_reply);
         }
         trimmed
     } else if is_direct || is_mentioned {
@@ -126,19 +118,25 @@ pub async fn handle_ai_command(
         )));
     }
 
-    match run_ai_turn(
+    match run_ai_turn_with_stage(
         pool,
         broadcaster,
         owner_id,
         room_id,
         None,
         &effective_prompt,
+        stage_reporter,
     )
     .await
     {
         Ok(result) => {
             clear_ai_error_state();
-            Some(format_response(&result.message, &result.model_used))
+            Some(format_response(
+                &result.message,
+                &result.model_used,
+                None,
+                &result.tool_calls_executed,
+            ))
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
@@ -155,6 +153,27 @@ pub async fn run_ai_turn(
     room_id: &str,
     conversation_id_override: Option<&str>,
     prompt: &str,
+) -> Result<AiTurnResult, String> {
+    run_ai_turn_with_stage(
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        conversation_id_override,
+        prompt,
+        None,
+    )
+    .await
+}
+
+pub async fn run_ai_turn_with_stage(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    room_id: &str,
+    conversation_id_override: Option<&str>,
+    prompt: &str,
+    stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> Result<AiTurnResult, String> {
     let prompt_trimmed = prompt.trim();
     if prompt_trimmed.is_empty() {
@@ -212,7 +231,6 @@ pub async fn run_ai_turn(
     let settings =
         crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
             .await;
-    let tz = settings.tz();
     let max_history = settings.max_history_turns.clamp(1, 100);
 
     // Load recent messages for context
@@ -222,56 +240,8 @@ pub async fn run_ai_turn(
 
     let mut chat_messages = Vec::new();
 
-    let now_utc = chrono::Utc::now();
-    let now_local = now_utc.with_timezone(&tz);
-    let today_local = now_local.format("%Y-%m-%d").to_string();
-    let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
-    let now_utc_str = now_utc.to_rfc3339();
-
-    let default_room_id = crate::api::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::api::rooms::get_cached_rooms(pool, owner_id)
-        .await
-        .unwrap_or_default();
-    let mut room_desc = Vec::new();
-    for r in &cached_rooms {
-        if r.is_direct {
-            room_desc.push(format!(
-                "'{}' (user direct chat room, id: {})",
-                r.name, r.room_id
-            ));
-        } else {
-            room_desc.push(format!("'{}' (id: {})", r.name, r.room_id));
-        }
-    }
-    let rooms_str = if room_desc.is_empty() {
-        "None discovered yet".to_string()
-    } else {
-        room_desc.join(", ")
-    };
-    let default_room_str = default_room_id.as_deref().unwrap_or(room_id);
-
-    let sys_prompt = resolved_config.system_prompt.clone().unwrap_or_else(|| {
-        format!(
-            "You are the central Brain and intelligent Personal Operating System for matrix-bot. \
-             You have full bidirectional sensory and action access across all modules: tasks & to-dos, reminders, recurring bills & subscriptions, investment portfolio & cash balances, financial ledger & categories, daily habits & streaks, travel footprints, bookmarks & reading list, inbound webhooks, user settings, and daily logs / lifespan reflections. \
-             MULTIPLE ACTIONS & QUICK CAPTURE: When the user requests multiple actions in a single message (e.g. logging an expense, checking off a habit, setting a reminder, adding a task, or logging today's mood), call all relevant tools in sequence or parallel. \
-             Provide a consolidated, clear confirmation of every action taken with bullet points. \
-             SYNTHESIS & BRAIN CORRELATION: Proactively synthesize context across modules when asked open-ended questions like 'How was my day?', 'What should I focus on today?', or 'Give me a life audit'. When performing a daily or weekly reflection / summary, retrieve all needed data (daily log, habits, tasks, finance, footprints, reminders, life profile) in parallel during the first tool round rather than chaining sequential retrieval rounds. \
-             CURRENCY RULES: Currencies must NEVER be added or subtracted together without exchange rates. Always report spending, income, and cashflow separately per currency (e.g. 'CNY 45.00, USD 16.50', never 'CNY 61.50'). \
-             TEMPORAL CONTEXT: The user's configured timezone is '{tz}' (current local time: '{now_local_str}', today is '{today_local}'). Current UTC time is '{now_utc}'. The user's default currency is '{curr}'. When interpreting or setting relative dates/times ('today', 'yesterday', 'tomorrow at 8:00 AM', 'tonight at 9:00 PM', due dates, reflection dates, footprint dates, transaction dates), ALWAYS anchor calculations to the user's local date ('{today_local}') and timezone '{tz}'. For tool calls requiring UTC timestamps (e.g. reminders trigger_at), calculate relative to the user's local time and supply trigger_at in UTC ISO 8601 or pass in_minutes. \
-             ROOM CONTEXT: Available Matrix rooms: [{rooms}]. User default direct room: '{default_room}'. When scheduling reminders, creating tasks, or logging entries, default to the user's personal direct room unless the user explicitly names another room. NEVER use 'web_chat'. \
-             QUOTED REPLIES & CONTEXT: When the prompt contains [Context: Replying to quoted message from ...]: 1) FACT CHECKING: If asked to fact check or verify, critically evaluate the claims with objective facts, indicate accuracy/truthfulness, and clarify misconceptions; 2) EXPLANATION: If asked to explain or summarize, break down concepts clearly and articulately; 3) COMMENTARY: If asked for thoughts or commentary, provide balanced, insightful observations; 4) ACTION CREATION: If asked to add a todo, task, or reminder, extract the commitment from the quote and call the appropriate tool (`add_todo`, `create_reminder`). \
-             The current user's ID is '{owner_id}'. Keep answers concise, clear, and nicely formatted with Markdown.",
-            now_local_str = now_local_str,
-            today_local = today_local,
-            now_utc = now_utc_str,
-            tz = settings.timezone,
-            curr = settings.currency,
-            rooms = rooms_str,
-            default_room = default_room_str,
-            owner_id = owner_id
-        )
-    });
+    let sys_prompt =
+        super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),
@@ -310,7 +280,7 @@ pub async fn run_ai_turn(
     }
 
     let mut iteration = 0;
-    let max_iterations = 3;
+    let max_iterations = 5;
     let mut final_content = String::new();
     let mut tool_calls_executed = Vec::new();
 
@@ -326,99 +296,200 @@ pub async fn run_ai_turn(
             stream: Some(false),
         };
 
-        match client.chat_completion(&resolved_config, &request).await {
-            Ok(response) => {
-                if let Some(choice) = response.choices.into_iter().next() {
-                    let msg = choice.message;
-                    if let Some(tool_calls) = msg.tool_calls.filter(|t| !t.is_empty()) {
-                        // Persist assistant tool-call message in SQLite only if it contains non-empty text
-                        let tool_desc = msg.content.as_deref().unwrap_or("").trim();
-                        if !tool_desc.is_empty() {
-                            let _ = AiRepository::add_message(
-                                pool,
-                                &conversation.id,
-                                "assistant",
-                                tool_desc,
-                                None,
-                                None,
-                            )
-                            .await;
+        match super::stream::execute_stream_or_complete(
+            &client,
+            &resolved_config,
+            &request,
+            stage_reporter,
+        )
+        .await
+        {
+            Ok((content, tool_calls)) => {
+                if !tool_calls.is_empty() {
+                    let tool_desc = content.trim();
+                    if !tool_desc.is_empty() {
+                        let _ = AiRepository::add_message(
+                            pool,
+                            &conversation.id,
+                            "assistant",
+                            tool_desc,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
+
+                    chat_messages.push(ChatCompletionMessage {
+                        role: "assistant".to_string(),
+                        content: if content.is_empty() {
+                            None
+                        } else {
+                            Some(content)
+                        },
+                        tool_calls: Some(tool_calls.clone()),
+                        tool_call_id: None,
+                        name: None,
+                    });
+
+                    if let Some(reporter) = stage_reporter {
+                        if let Some(first_tc) = tool_calls.first() {
+                            reporter.report_tool_call(&first_tc.function.name).await;
                         }
+                    }
+
+                    let tool_futures = tool_calls.iter().map(|tool_call| {
+                        let func_name = tool_call.function.name.clone();
+                        let tool_call_id = tool_call.id.clone();
+                        let args = tool_call.function.arguments.clone();
+                        async move {
+                            info!(
+                                "AI turn [{}/{}] executing tool: {} for owner {}",
+                                iteration, max_iterations, func_name, owner_id
+                            );
+                            let result_str = match ToolRegistry::execute_tool(
+                                pool,
+                                broadcaster,
+                                owner_id,
+                                room_id,
+                                &func_name,
+                                &args,
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => format!("Error executing tool: {}", err),
+                            };
+                            (tool_call_id, func_name, result_str)
+                        }
+                    });
+
+                    let execution_results = futures_util::future::join_all(tool_futures).await;
+
+                    if let Some(reporter) = stage_reporter {
+                        reporter.report_stage("🧠 正在组织回复...").await;
+                    }
+
+                    for (tool_call_id, func_name, result_str) in execution_results {
+                        tool_calls_executed.push(func_name.clone());
+
+                        let eid = stage_reporter
+                            .and_then(|r| r.event_id())
+                            .map(|e| e.as_str());
+                        crate::bot::reaction_targets::record_ai_tool_target(
+                            pool,
+                            eid,
+                            room_id,
+                            owner_id,
+                            &func_name,
+                            &result_str,
+                        )
+                        .await;
+
+                        // Persist tool result message in SQLite
+                        let _ = AiRepository::add_message(
+                            pool,
+                            &conversation.id,
+                            "tool",
+                            &result_str,
+                            Some(&tool_call_id),
+                            Some(&func_name),
+                        )
+                        .await;
 
                         chat_messages.push(ChatCompletionMessage {
+                            role: "tool".to_string(),
+                            content: Some(result_str),
+                            tool_calls: None,
+                            tool_call_id: Some(tool_call_id),
+                            name: Some(func_name),
+                        });
+                    }
+                    continue;
+                }
+
+                if !content.trim().is_empty() {
+                    let is_hallucinated_tool = tool_calls_executed.is_empty()
+                        && iteration == 1
+                        && (content.contains("record_finance_entry")
+                            || content.contains("add_expense")
+                            || content.contains("add_todo")
+                            || content.contains("create_reminder")
+                            || content.contains("Tool called:")
+                            || content.contains("Receipt recorded")
+                            || content.contains("Receipt logged"));
+
+                    if is_hallucinated_tool {
+                        warn!("AI simulated tool call in text without invoking function API; correcting model in next turn");
+                        chat_messages.push(ChatCompletionMessage {
                             role: "assistant".to_string(),
-                            content: msg.content.clone(),
-                            tool_calls: Some(tool_calls.clone()),
+                            content: Some(content),
+                            tool_calls: None,
                             tool_call_id: None,
                             name: None,
                         });
-
-                        let tool_futures = tool_calls.iter().map(|tool_call| {
-                            let func_name = tool_call.function.name.clone();
-                            let tool_call_id = tool_call.id.clone();
-                            let args = tool_call.function.arguments.clone();
-                            async move {
-                                info!(
-                                    "AI turn [{}/{}] executing tool: {} for owner {}",
-                                    iteration, max_iterations, func_name, owner_id
-                                );
-                                let result_str = match ToolRegistry::execute_tool(
-                                    pool,
-                                    broadcaster,
-                                    owner_id,
-                                    room_id,
-                                    &func_name,
-                                    &args,
-                                )
-                                .await
-                                {
-                                    Ok(res) => res,
-                                    Err(err) => format!("Error executing tool: {}", err),
-                                };
-                                (tool_call_id, func_name, result_str)
-                            }
+                        chat_messages.push(ChatCompletionMessage {
+                            role: "user".to_string(),
+                            content: Some(
+                                "SYSTEM: You wrote text describing or claiming that a tool was called, but you did NOT actually invoke any tool function via the function calling API! No records were saved to the database. You MUST execute the real tool call (such as `record_finance_entry` or `add_todo`) now via the function calling API so it can be saved.".to_string(),
+                            ),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
                         });
-
-                        let execution_results = futures_util::future::join_all(tool_futures).await;
-
-                        for (tool_call_id, func_name, result_str) in execution_results {
-                            tool_calls_executed.push(func_name.clone());
-
-                            // Persist tool result message in SQLite
-                            let _ = AiRepository::add_message(
-                                pool,
-                                &conversation.id,
-                                "tool",
-                                &result_str,
-                                Some(&tool_call_id),
-                                Some(&func_name),
-                            )
-                            .await;
-
-                            chat_messages.push(ChatCompletionMessage {
-                                role: "tool".to_string(),
-                                content: Some(result_str),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call_id),
-                                name: Some(func_name),
-                            });
-                        }
                         continue;
                     }
 
-                    if let Some(text) = msg.content {
-                        final_content = text;
-                        break;
-                    }
+                    final_content = content;
+                    break;
                 }
                 final_content = "Received empty response from AI model.".to_string();
                 break;
             }
             Err(err) => {
                 error!("AI completion failed: {}", err);
-                return Err(err.to_string());
+                return Err(err);
             }
         }
+    }
+
+    if final_content.trim().is_empty() && !tool_calls_executed.is_empty() {
+        let final_req = ChatCompletionRequest {
+            model: resolved_config.model_name.clone(),
+            messages: chat_messages.clone(),
+            temperature: Some(resolved_config.temperature),
+            max_tokens: Some(resolved_config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            stream: Some(stage_reporter.is_some()),
+        };
+        if let Ok((content, _)) = super::stream::execute_stream_or_complete(
+            &client,
+            &resolved_config,
+            &final_req,
+            stage_reporter,
+        )
+        .await
+        {
+            if !content.trim().is_empty() {
+                final_content = content;
+            }
+        }
+    }
+
+    if final_content.trim().is_empty() {
+        if !tool_calls_executed.is_empty() {
+            final_content = format!("Completed actions: {}", tool_calls_executed.join(", "));
+        } else {
+            final_content = "Received empty response from AI model.".to_string();
+        }
+    }
+
+    if tool_calls_executed.is_empty()
+        && (final_content.contains("Receipt recorded")
+            || final_content.contains("Receipt logged")
+            || final_content.contains("Tool called:"))
+    {
+        final_content = "⚠️ **Action Not Recorded**: The AI assistant generated a text summary but did not execute the database tool. Please retry sending the image or use the `!ai` command to log the expense.".to_string();
     }
 
     if let Err(e) = AiRepository::add_message(
@@ -455,48 +526,6 @@ pub async fn run_ai_turn(
         model_used: resolved_config.model_name,
         tool_calls_executed,
     })
-}
-
-async fn handle_reset(
-    pool: &SqlitePool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    room_id: &str,
-) -> String {
-    if let Ok(conv) =
-        AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS).await
-    {
-        if let Ok(true) = AiRepository::delete_conversation(pool, &conv.id, owner_id).await {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::AiConversationDeleted {
-                    id: conv.id,
-                    owner_id: owner_id.to_string(),
-                });
-            }
-        }
-    }
-
-    "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
-}
-
-fn format_response(markdown_text: &str, model_name: &str) -> String {
-    let html_rendered = crate::modules::webhook::renderer::markdown_to_html(markdown_text);
-    format!(
-        "{}<br/><font color=\"gray\" size=\"-2\">🤖 <em>{}</em></font>",
-        html_rendered,
-        html_escape(model_name)
-    )
-}
-
-fn format_help() -> String {
-    "🤖 <b>AI Assistant Commands:</b><br/>\
-     • <code>!ai &lt;prompt&gt;</code> — Chat with AI assistant (supports multi-action capture)<br/>\
-     • <code>!ai retro</code> — Generate weekly executive retrospective<br/>\
-     • <code>!ai reset</code> — Clear conversational memory in this room<br/>\
-     • <code>!ai model &lt;name&gt;</code> — Switch active model<br/>\
-     • <code>!ai history &lt;1-100&gt;</code> — Set max context history messages<br/>\
-     • <code>!ai config</code> — View active AI endpoint & model"
-        .to_string()
 }
 
 #[cfg(test)]

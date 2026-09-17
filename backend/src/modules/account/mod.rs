@@ -32,9 +32,6 @@ use crate::utils::html::html_escape as escape;
 /// new sensitive command has one obvious place to be added.
 const WEB_ONLY: &[(&str, &str)] = &[
     ("export", "Exporting financial data"),
-    ("unlink", "Unlinking a Matrix account"),
-    ("passkey", "Managing passkeys"),
-    ("passkeys", "Managing passkeys"),
     ("sessions", "Managing signed-in devices"),
     ("recoverycodes", "Generating recovery codes"),
 ];
@@ -72,6 +69,24 @@ impl BotModule for AccountModule {
                     .to_string(),
             },
             CommandHelp {
+                name: "passkey".to_string(),
+                usage: "!passkey [add|list]".to_string(),
+                description: "Link a passkey (Face ID, Touch ID, Windows Hello) to your Matrix \
+                              account, or list your active passkeys."
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "passkeys".to_string(),
+                usage: "!passkeys".to_string(),
+                description: "List all passkeys linked to your Matrix account.".to_string(),
+            },
+            CommandHelp {
+                name: "unlink".to_string(),
+                usage: "!unlink [passkey <num>|sessions]".to_string(),
+                description: "Revoke a linked passkey or sign out all web browser sessions."
+                    .to_string(),
+            },
+            CommandHelp {
                 name: "recover".to_string(),
                 usage: "!recover".to_string(),
                 description: format!(
@@ -100,11 +115,12 @@ impl BotModule for AccountModule {
             ));
         }
 
-        if command == "recover" {
-            return Some(self.handle_recover(ctx, db).await);
+        match command.as_str() {
+            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, db).await),
+            "unlink" => Some(self.handle_unlink(ctx, db).await),
+            "recover" => Some(self.handle_recover(ctx, db).await),
+            _ => None,
         }
-
-        None
     }
 }
 
@@ -167,6 +183,177 @@ impl AccountModule {
              financial data for a further 72 hours.",
             escape(&code),
             escape(&valid_after.format("%Y-%m-%d %H:%M UTC").to_string()),
+        )
+    }
+
+    async fn handle_passkey(&self, ctx: &CommandContext, db: &Database) -> String {
+        let trimmed = ctx.raw_args.trim();
+        let subcmd = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+
+        if subcmd == "add"
+            || subcmd == "link"
+            || subcmd == "enroll"
+            || ctx.command.eq_ignore_ascii_case("web")
+        {
+            if !ctx.is_direct {
+                return "Send <code>!passkey add</code> in a direct message — the link contains a single-use token that must not be shown in a shared room.".to_string();
+            }
+
+            match crate::accounts::EnrollmentRepository::issue(&db.pool, &ctx.owner_id, 10).await {
+                Ok(token) => {
+                    let enroll_url =
+                        format!("{}/?enroll={}", self.web_url.trim_end_matches('/'), token);
+                    format!(
+                        "<b>Link a Passkey to your Matrix Account</b> (<code>{}</code>)<br/><br/>\
+                         Open this link on your device (iPhone, Mac, Android, Windows) to register Face ID, Touch ID, or Windows Hello:<br/>\
+                         <a href=\"{}\">{}</a><br/><br/>\
+                         <i>Expires in 10 minutes and can be used once. Repeat on multiple devices to attach multiple passkeys.</i>",
+                        escape(&ctx.sender_mxid),
+                        escape(&enroll_url),
+                        escape(&enroll_url),
+                    )
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Failed issuing passkey enrollment token for {}: {:?}",
+                        ctx.owner_id,
+                        err
+                    );
+                    "Could not generate passkey enrollment link. Try again shortly.".to_string()
+                }
+            }
+        } else if subcmd == "rm" || subcmd == "delete" || subcmd == "remove" {
+            let target = trimmed.split_whitespace().nth(1).unwrap_or("");
+            self.handle_unlink_passkey(ctx, db, target).await
+        } else {
+            match crate::accounts::CredentialRepository::list_for_account(&db.pool, &ctx.owner_id)
+                .await
+            {
+                Ok(creds) => {
+                    if creds.is_empty() {
+                        format!(
+                            "You have no passkeys linked to <code>{}</code> yet.<br/><br/>\
+                             Send <code>!passkey add</code> in a direct message to link this device using Face ID, Touch ID, or Windows Hello.",
+                            escape(&ctx.sender_mxid)
+                        )
+                    } else {
+                        let mut lines = Vec::new();
+                        lines.push(format!(
+                            "<b>Linked Passkeys for <code>{}</code>:</b><br/>",
+                            escape(&ctx.sender_mxid)
+                        ));
+                        for (idx, cred) in creds.iter().enumerate() {
+                            let created_str = cred
+                                .created_at
+                                .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            lines.push(format!(
+                                "{}. <b>{}</b> (added {})<br/>",
+                                idx + 1,
+                                escape(&cred.label),
+                                escape(&created_str)
+                            ));
+                        }
+                        lines.push("<br/>• To remove a passkey: <code>!unlink passkey &lt;number&gt;</code><br/>• To link another device: <code>!passkey add</code>".to_string());
+                        lines.join("")
+                    }
+                }
+                Err(err) => {
+                    tracing::error!("Could not list passkeys for {}: {:?}", ctx.owner_id, err);
+                    "Could not load passkeys. Try again shortly.".to_string()
+                }
+            }
+        }
+    }
+
+    async fn handle_unlink(&self, ctx: &CommandContext, db: &Database) -> String {
+        let trimmed = ctx.raw_args.trim();
+        let mut parts = trimmed.split_whitespace();
+        let target_type = parts.next().unwrap_or("").to_lowercase();
+
+        match target_type.as_str() {
+            "passkey" | "pk" => {
+                let target = parts.next().unwrap_or("");
+                self.handle_unlink_passkey(ctx, db, target).await
+            }
+            "sessions" | "session" => {
+                if !ctx.is_direct {
+                    return "Send <code>!unlink sessions</code> in a direct message.".to_string();
+                }
+                match crate::accounts::SessionRepository::revoke_all_for_account(&db.pool, &ctx.owner_id, None).await {
+                    Ok(count) => {
+                        crate::accounts::SecurityEventRepository::record(
+                            &db.pool,
+                            &ctx.owner_id,
+                            crate::accounts::SecurityEventKind::SessionsRevoked,
+                            Some(&format!("revoked {} session(s) via Matrix command", count)),
+                        )
+                        .await;
+                        format!("✅ Revoked {} active web browser session(s) for your account.", count)
+                    }
+                    Err(err) => {
+                        tracing::error!("Could not revoke sessions for {}: {:?}", ctx.owner_id, err);
+                        "Could not revoke web sessions. Try again shortly.".to_string()
+                    }
+                }
+            }
+            "matrix" => {
+                let target_mxid = parts.next().unwrap_or("");
+                if target_mxid.is_empty() {
+                    return "Usage: <code>!unlink matrix &lt;@user:server.org&gt;</code>".to_string();
+                }
+                if target_mxid == ctx.sender_mxid {
+                    return "Cannot unlink your currently active Matrix identity. To unlink a secondary Matrix account, specify its MXID.".to_string();
+                }
+                match crate::accounts::LinkRepository::unlink(&db.pool, &ctx.owner_id, target_mxid).await {
+                    Ok(true) => {
+                        crate::accounts::SecurityEventRepository::record(
+                            &db.pool,
+                            &ctx.owner_id,
+                            crate::accounts::SecurityEventKind::MatrixUnlinked,
+                            Some(target_mxid),
+                        )
+                        .await;
+                        format!("✅ Unlinked Matrix identity <code>{}</code>.", escape(target_mxid))
+                    }
+                    Ok(false) => format!("Matrix account <code>{}</code> is not linked to your account.", escape(target_mxid)),
+                    Err(err) => {
+                        tracing::error!("Could not unlink Matrix {}: {:?}", target_mxid, err);
+                        "Could not unlink Matrix account. Try again shortly.".to_string()
+                    }
+                }
+            }
+            _ => {
+                "<b>Account Unlink Commands:</b><br/>\
+                 • <code>!unlink passkey &lt;number&gt;</code> — Remove a linked passkey (see <code>!passkeys</code>)<br/>\
+                 • <code>!unlink sessions</code> — Sign out all active web browser sessions<br/>\
+                 • <code>!passkeys</code> — List all your linked passkeys<br/>\
+                 • <code>!passkey add</code> — Link a new passkey to this Matrix account"
+                    .to_string()
+            }
+        }
+    }
+
+    async fn handle_unlink_passkey(
+        &self,
+        ctx: &CommandContext,
+        _db: &Database,
+        _target: &str,
+    ) -> String {
+        if !ctx.is_direct {
+            return "Send passkey management commands in a direct message.".to_string();
+        }
+        let web_url = self.web_url.trim_end_matches('/');
+        format!(
+            "🔒 <b>Passkey Removal Requires Verification</b><br/><br/>\
+             To protect your account against unauthorized removal, passkeys can only be removed from the web dashboard after confirming your identity with a recent passkey assertion.<br/><br/>\
+             Please visit your <b>Security Settings</b> on the web dashboard to manage or remove passkeys:<br/>\
+             <a href=\"{url}/account\">{url}/account</a>",
+            url = escape(web_url)
         )
     }
 }
@@ -244,6 +431,7 @@ mod tests {
             is_direct,
             is_mentioned: false,
             quoted: None,
+            stage_reporter: None,
         }
     }
 
@@ -399,5 +587,86 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_completed");
+    }
+
+    #[tokio::test]
+    async fn test_passkey_add_generates_enroll_link_in_dm() {
+        let db = db().await;
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        // In public room: refused
+        let mut public_ctx = ctx("passkey", &account, false);
+        public_ctx.raw_args = "add".into();
+        let reply = module()
+            .handle_command(&public_ctx, &db, None)
+            .await
+            .unwrap();
+        assert!(reply.contains("direct message"));
+
+        // In DM: generates ?enroll= token link
+        let mut dm_ctx = ctx("passkey", &account, true);
+        dm_ctx.raw_args = "add".into();
+        let reply = module().handle_command(&dm_ctx, &db, None).await.unwrap();
+        assert!(reply.contains("?enroll="));
+        assert!(reply.contains("bot.mbm.one"));
+    }
+
+    #[tokio::test]
+    async fn test_passkeys_list_and_unlink_flow() {
+        let db = db().await;
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        // Initially no passkeys
+        let list_ctx = ctx("passkeys", &account, true);
+        let reply = module().handle_command(&list_ctx, &db, None).await.unwrap();
+        assert!(reply.contains("no passkeys linked"));
+
+        // Insert two passkeys and a matrix link
+        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
+            .bind(&account)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ('pk1', ?, '{}', 'MacBook'), ('pk2', ?, '{}', 'iPhone')")
+            .bind(&account)
+            .bind(&account)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        // List passkeys
+        let reply = module().handle_command(&list_ctx, &db, None).await.unwrap();
+        assert!(reply.contains("MacBook"));
+        assert!(reply.contains("iPhone"));
+
+        // Unlink passkey via Matrix DM is safely rejected, directing user to web settings
+        let mut unlink_ctx = ctx("unlink", &account, true);
+        unlink_ctx.raw_args = "passkey 1".into();
+        let reply = module()
+            .handle_command(&unlink_ctx, &db, None)
+            .await
+            .unwrap();
+        assert!(reply.contains("Passkey Removal Requires Verification"));
+        assert!(reply.contains("/account"));
+
+        // Verify passkeys were NOT deleted from database
+        let creds_after =
+            crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
+                .await
+                .unwrap();
+        assert_eq!(creds_after.len(), 2);
+
+        // Unlink sessions
+        let mut sessions_ctx = ctx("unlink", &account, true);
+        sessions_ctx.raw_args = "sessions".into();
+        let reply = module()
+            .handle_command(&sessions_ctx, &db, None)
+            .await
+            .unwrap();
+        assert!(reply.contains("Revoked 0 active web browser session(s)"));
     }
 }

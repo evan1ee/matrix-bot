@@ -116,9 +116,31 @@ test.describe('passkeys', () => {
     await expect(dialog.getByText('YubiKey')).toHaveCount(0);
     await expect(dialog.getByText('MacBook Touch ID')).toBeVisible();
   });
+
+  test('adds a new passkey via the Add a passkey button', async ({ app, api }) => {
+    await addVirtualAuthenticator(app);
+    api.passkeys = [
+      { id: 'cred_1', label: 'Primary Touch ID', created_at: '2026-01-01T10:00:00Z', last_used_at: null },
+    ];
+
+    const dialog = await openSecurity(app);
+    await dialog.getByRole('button', { name: /add a passkey/i }).click();
+
+    // Verify ceremony endpoints were invoked
+    await expect(async () => {
+      expect(api.requests.some((r) => r.url === '/account/passkeys/add/start')).toBe(true);
+      expect(api.requests.some((r) => r.url === '/auth/passkey/register/finish')).toBe(true);
+    }).toPass();
+  });
 });
 
 test.describe('linking a Matrix account', () => {
+  test('marks the primary Matrix account with primary identity badge', async ({ app, api }) => {
+    api.linkedMxids = ['@evan:mbm.one', '@secondary:matrix.org'];
+    const dialog = await openSecurity(app);
+    await expect(dialog.getByText('primary identity', { exact: true })).toBeVisible();
+  });
+
   test('shows the exact line to send, and that it is single-use', async ({ app }) => {
     const dialog = await openSecurity(app);
     await dialog.getByRole('button', { name: /link a matrix account/i }).click();
@@ -129,6 +151,12 @@ test.describe('linking a Matrix account', () => {
     await expect(dialog.getByText(/expires in 5 minutes.*works once/i)).toBeVisible();
     // The rule that will otherwise surprise them.
     await expect(dialog.getByText(/shared room cancels it/i)).toBeVisible();
+
+    // Verify copy button works and provides feedback
+    const copyButton = dialog.getByRole('button', { name: /^copy$/i });
+    await expect(copyButton).toBeVisible();
+    await copyButton.click();
+    await expect(dialog.getByText('Copied!')).toBeVisible();
   });
 
   test('lists linked accounts and unlinks one', async ({ app, api }) => {
@@ -253,6 +281,12 @@ test.describe('recovery', () => {
     await expect(dialog.getByText(/not shown again/i)).toBeVisible();
     await expect(dialog.getByText('CODE0-ABCDE')).toBeVisible();
     await expect(dialog.getByText('CODE9-ABCDE')).toBeVisible();
+
+    // Verify copy all button works and provides feedback
+    const copyAllButton = dialog.getByRole('button', { name: /copy all/i });
+    await expect(copyAllButton).toBeVisible();
+    await copyAllButton.click();
+    await expect(dialog.getByText('Copied!')).toBeVisible();
   });
 
   test('a pending recovery is an alarm, and can be cancelled', async ({ app, api }) => {

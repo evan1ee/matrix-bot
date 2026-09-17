@@ -20,6 +20,7 @@ import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { PublicTransparencyView } from './modules/finance/components/PublicTransparencyView';
 import { AUTH_EXPIRED_EVENT } from './core/apiClient';
 import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
@@ -48,8 +49,18 @@ const AppContent: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
+  const [enrollToken, setEnrollToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('enroll') || params.get('token');
+  });
+  const [publicFinanceToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('public_finance');
+  });
 
-  const { user, isSignedIn, isLoading } = useSession();
+  const { user, isSignedIn, isLoading, isError } = useSession();
   const refreshSession = useRefreshSession();
 
   const { events, isConnected } = useSystemEvents(isSignedIn);
@@ -57,6 +68,12 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (enrollToken) {
+      setIsAuthOpen(true);
+    }
+  }, [enrollToken]);
 
   // Support decoupled module navigation events
   useEffect(() => {
@@ -79,10 +96,10 @@ const AppContent: React.FC = () => {
 
   // Signed out is a state, not an event: derive the prompt from the session
   // itself so it appears on a cold load as well as on an expiry, and so it
-  // closes on its own once a session exists.
+  // closes on its own once a session exists. Do not open during network errors / server restarts.
   useEffect(() => {
-    if (!isLoading) setIsAuthOpen(!isSignedIn);
-  }, [isLoading, isSignedIn]);
+    if (!isLoading && !isError && !publicFinanceToken) setIsAuthOpen(!isSignedIn);
+  }, [isLoading, isSignedIn, isError, publicFinanceToken]);
 
   // The server rejected the session cookie on some *other* call. Re-read the
   // session so the rest of the UI stops showing data it can no longer refresh;
@@ -110,6 +127,29 @@ const AppContent: React.FC = () => {
     setFocusModuleId(id);
   };
 
+  if (publicFinanceToken) {
+    return (
+      <div className="min-h-screen bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans px-6 md:px-12 py-8 max-w-5xl mx-auto space-y-6">
+        <header className="flex items-center justify-between pb-4 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 font-sans">
+              Matrix Bot
+            </span>
+            <span className="text-xs text-neutral-400 font-mono">/</span>
+            <span className="text-xs font-mono text-neutral-500">Public Fiscal Transparency</span>
+          </div>
+          <a
+            href="/"
+            className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+          >
+            Go to App →
+          </a>
+        </header>
+        <PublicTransparencyView publicToken={publicFinanceToken} />
+      </div>
+    );
+  }
+
   return (
     <>
       <AppShell
@@ -128,9 +168,16 @@ const AppContent: React.FC = () => {
 
       <AuthModal
         isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onSuccess={refreshSession}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setEnrollToken(null);
+        }}
+        onSuccess={() => {
+          setEnrollToken(null);
+          refreshSession();
+        }}
         user={user}
+        enrollToken={enrollToken}
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

@@ -112,3 +112,77 @@ pub async fn handle_set_model(
         }
     }
 }
+
+pub async fn handle_reset(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    room_id: &str,
+) -> String {
+    if let Ok(conv) = AiRepository::get_or_create_conversation(pool, owner_id, room_id, 1800).await
+    {
+        if let Ok(true) = AiRepository::delete_conversation(pool, &conv.id, owner_id).await {
+            if let Some(b) = broadcaster {
+                b.send(SystemEvent::AiConversationDeleted {
+                    id: conv.id,
+                    owner_id: owner_id.to_string(),
+                });
+            }
+        }
+    }
+    "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
+}
+
+pub fn format_help() -> String {
+    "🤖 <b>AI Assistant Commands:</b><br/>\
+     • <code>!ai &lt;prompt&gt;</code> — Chat with AI assistant (supports multi-action capture)<br/>\
+     • <code>!ai retro</code> — Generate weekly executive retrospective<br/>\
+     • <code>!ai reset</code> — Clear conversational memory in this room<br/>\
+     • <code>!ai model &lt;name&gt;</code> — Switch active model<br/>\
+     • <code>!ai history &lt;1-100&gt;</code> — Set max context history messages<br/>\
+     • <code>!ai config</code> — View active AI endpoint & model".to_string()
+}
+
+pub async fn handle_ai_subcommand(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    room_id: &str,
+    trimmed: &str,
+) -> Option<String> {
+    if trimmed.eq_ignore_ascii_case("retro")
+        || trimmed.eq_ignore_ascii_case("retrospective")
+        || trimmed.eq_ignore_ascii_case("weekly")
+    {
+        return Some(super::retrospective::handle_retrospective_command(pool, owner_id).await);
+    }
+    if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
+        return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
+    }
+    if trimmed.eq_ignore_ascii_case("config") {
+        return Some(handle_show_config(pool, owner_id).await);
+    }
+    if let Some(rest) = trimmed.strip_prefix("model") {
+        let model_arg = rest.trim();
+        if model_arg.is_empty() {
+            return Some(handle_show_config(pool, owner_id).await);
+        }
+        if model_arg.len() > 500 {
+            return Some(format_error(
+                "Model name exceeds maximum length of 500 characters.",
+            ));
+        }
+        return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("history")
+        .or_else(|| trimmed.strip_prefix("turns"))
+    {
+        let num_arg = rest.trim();
+        if num_arg.is_empty() {
+            return Some(handle_show_config(pool, owner_id).await);
+        }
+        return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
+    }
+    None
+}

@@ -179,7 +179,19 @@ impl CredentialRepository {
         credential_id: &str,
     ) -> Result<DeleteOutcome, sqlx::Error> {
         if Self::count_for_account(pool, account_id).await? <= 1 {
-            return Ok(DeleteOutcome::WouldLockOut);
+            // If the account has a linked Matrix identity, removing the last passkey
+            // does NOT lock the user out: the Matrix account is the primary identity.
+            let has_matrix_link = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM matrix_links WHERE account_id = ?",
+            )
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?
+                > 0;
+
+            if !has_matrix_link {
+                return Ok(DeleteOutcome::WouldLockOut);
+            }
         }
 
         let affected =
@@ -195,6 +207,60 @@ impl CredentialRepository {
         } else {
             DeleteOutcome::NotFound
         })
+    }
+}
+
+pub struct EnrollmentRepository;
+
+impl EnrollmentRepository {
+    /// Issues a single-use token to enroll a passkey for `account_id`.
+    pub async fn issue(
+        pool: &SqlitePool,
+        account_id: &str,
+        ttl_minutes: i64,
+    ) -> Result<String, sqlx::Error> {
+        let token = format!(
+            "pk_{}",
+            sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(20)))")
+                .fetch_one(pool)
+                .await?
+        );
+        let now = Utc::now();
+        let expires_at = now + chrono::Duration::minutes(ttl_minutes);
+
+        sqlx::query(
+            "INSERT INTO passkey_enrollment_tokens (token, account_id, created_at, expires_at) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(&token)
+        .bind(account_id)
+        .bind(now)
+        .bind(expires_at)
+        .execute(pool)
+        .await?;
+
+        Ok(token)
+    }
+
+    /// Validates an enrollment token, marks it consumed, and returns the target account_id.
+    pub async fn validate_and_consume(
+        pool: &SqlitePool,
+        token: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let now = Utc::now();
+        let account_id = sqlx::query_scalar::<_, String>(
+            "UPDATE passkey_enrollment_tokens \
+             SET consumed_at = ? \
+             WHERE token = ? AND consumed_at IS NULL AND expires_at > ? \
+             RETURNING account_id",
+        )
+        .bind(now)
+        .bind(token)
+        .bind(now)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(account_id)
     }
 }
 
@@ -332,5 +398,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_enrollment_token_issue_and_consumption() {
+        let pool = db().await;
+        let token = EnrollmentRepository::issue(&pool, "acct_matrix", 10)
+            .await
+            .unwrap();
+        assert!(!token.is_empty());
+
+        // First consumption succeeds
+        let consumed = EnrollmentRepository::validate_and_consume(&pool, &token)
+            .await
+            .unwrap();
+        assert_eq!(consumed.as_deref(), Some("acct_matrix"));
+
+        // Second consumption fails (single-use)
+        let second = EnrollmentRepository::validate_and_consume(&pool, &token)
+            .await
+            .unwrap();
+        assert_eq!(second, None);
+    }
+
+    #[tokio::test]
+    async fn test_last_passkey_can_be_deleted_if_matrix_linked() {
+        let pool = db().await;
+        add_raw(&pool, "cred_only", "acct_primary").await;
+
+        // Insert matrix link
+        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', 'acct_primary')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Deleting the only passkey succeeds because Matrix is primary identity
+        let outcome = CredentialRepository::delete(&pool, "acct_primary", "cred_only")
+            .await
+            .unwrap();
+        assert_eq!(outcome, DeleteOutcome::Removed);
+        assert_eq!(
+            CredentialRepository::count_for_account(&pool, "acct_primary")
+                .await
+                .unwrap(),
+            0
+        );
     }
 }
