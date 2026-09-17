@@ -32,10 +32,6 @@ jobs:
             artifact_name: matrix-bot-linux-arm64
             archive_format: tar.gz
             allow_failure: true
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact_name: matrix-bot-macos-x86_64
-            archive_format: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact_name: matrix-bot-macos-arm64

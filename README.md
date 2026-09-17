@@ -297,7 +297,6 @@ Download the prebuilt archive for your platform from the [GitHub Releases](https
 - **Linux (x86_64)**: `matrix-bot-linux-x86_64.tar.gz`
 - **Linux (ARM64 / Raspberry Pi)**: `matrix-bot-linux-arm64.tar.gz`
 - **macOS (Apple Silicon M1-M4)**: `matrix-bot-macos-arm64.tar.gz`
-- **macOS (Intel)**: `matrix-bot-macos-x86_64.tar.gz`
 - **Windows (x64)**: `matrix-bot-windows-x86_64.zip`
 
 #### 2. Run
