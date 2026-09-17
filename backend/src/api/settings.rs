@@ -22,6 +22,12 @@ pub struct UpdateSettingsRequest {
     /// Optional max conversation history turns for AI (1-100).
     #[serde(default)]
     pub max_history_turns: Option<i64>,
+    /// Optional toggle for morning briefing.
+    #[serde(default)]
+    pub briefing_enabled: Option<bool>,
+    /// Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
+    #[serde(default)]
+    pub briefing_time: Option<String>,
 }
 
 #[utoipa::path(
@@ -90,6 +96,15 @@ pub async fn update_settings(
         current.max_history_turns
     };
 
+    let briefing_enabled = payload.briefing_enabled.unwrap_or(current.briefing_enabled);
+    let briefing_time = if let Some(ref bt) = payload.briefing_time {
+        crate::modules::settings::models::parse_briefing_time(bt)
+            .map_err(|e| ApiError::bad_request(e))?;
+        bt.trim().to_string()
+    } else {
+        current.briefing_time
+    };
+
     let settings = SettingsRepository::upsert(
         &state.db.pool,
         &user.owner_id(),
@@ -98,6 +113,8 @@ pub async fn update_settings(
             currency,
             dev_room_id,
             max_history_turns,
+            briefing_enabled,
+            briefing_time,
         },
     )
     .await
@@ -137,6 +154,8 @@ mod tests {
             currency: currency.to_string(),
             dev_room_id: None,
             max_history_turns: None,
+            briefing_enabled: None,
+            briefing_time: None,
         }
     }
 
@@ -272,5 +291,29 @@ mod tests {
             local.timezone, "UTC",
             "a local account must not inherit the MXID's settings"
         );
+    }
+
+    #[tokio::test]
+    async fn test_update_briefing_settings_and_validation() {
+        let state = state().await;
+        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+
+        // Valid update
+        let mut req = body("Asia/Shanghai", "CNY");
+        req.briefing_enabled = Some(true);
+        req.briefing_time = Some("08:15".to_string());
+        let saved = update_settings(State(state.clone()), user.clone(), Json(req))
+            .await
+            .unwrap();
+        assert!(saved.briefing_enabled);
+        assert_eq!(saved.briefing_time, "08:15");
+
+        // Invalid time format
+        let mut bad_req = body("Asia/Shanghai", "CNY");
+        bad_req.briefing_time = Some("25:99".to_string());
+        let err = update_settings(State(state), user, Json(bad_req))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 }

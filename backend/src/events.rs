@@ -151,15 +151,20 @@ pub enum SystemEvent {
         id: i64,
         owner_id: String,
     },
+    MorningBriefingSent {
+        owner_id: String,
+        delivered_at: String,
+        summary: String,
+    },
 }
 
 impl SystemEvent {
-    /// The owner of the row this event concerns.
+    /// The owner who is allowed to receive this event over SSE.
     ///
-    /// The SSE stream delivers an event only to that owner, so this must agree
-    /// exactly with the `owner_id` ownership key the REST handlers use. The
-    /// variants carrying a full row read it from the payload; the deletion
-    /// variants carry it explicitly because the row is already gone.
+    /// Every event must have an owner: the channel is process-wide and the SSE
+    /// handler delivers an event only to the client whose session matches this
+    /// value, so an event with no owner would either leak to everyone or never
+    /// be delivered.
     pub fn owner_id(&self) -> &str {
         match self {
             SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.owner_id,
@@ -208,6 +213,7 @@ impl SystemEvent {
             SystemEvent::LifeDayLogged(l) => &l.owner_id,
             SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => &b.owner_id,
             SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
+            SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id,
         }
     }
 }

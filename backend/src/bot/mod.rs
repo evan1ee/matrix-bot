@@ -93,6 +93,7 @@ impl MatrixBot {
         registry.register(crate::modules::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
+        registry.register(crate::modules::briefing::BriefingModule::new());
         registry.register(WebhookModule::new());
         registry.register(crate::modules::mcp::McpModule::new());
         registry.register(crate::modules::ai::AiModule::new(

@@ -1656,6 +1656,41 @@
         ]
       }
     },
+    "/api/v1/briefing/trigger": {
+      "post": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "trigger_briefing",
+        "responses": {
+          "200": {
+            "description": "Generated morning briefing snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingPayload"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "tags": [
@@ -4924,6 +4959,70 @@
           }
         }
       },
+      "BriefingPayload": {
+        "type": "object",
+        "description": "Formatted briefing payload ready for Matrix delivery and REST preview.",
+        "required": [
+          "owner_id",
+          "html_content",
+          "plain_text",
+          "summary",
+          "tickers"
+        ],
+        "properties": {
+          "html_content": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "plain_text": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/BriefingSummary"
+          },
+          "tickers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TickerPerformance"
+            }
+          }
+        }
+      },
+      "BriefingSummary": {
+        "type": "object",
+        "description": "Key statistics summarizing a generated morning briefing.",
+        "required": [
+          "pending_tasks_count",
+          "habits_completed_count",
+          "habits_total_count",
+          "upcoming_bills_count",
+          "holdings_count"
+        ],
+        "properties": {
+          "habits_completed_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "habits_total_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "holdings_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_tasks_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "upcoming_bills_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "BuyHoldingRequest": {
         "type": "object",
         "description": "Amounts and quantities arrive as decimal strings, never as JSON numbers —\nthe same reason `finance::TransactionRequest` does: a JSON number is an\nIEEE-754 double by the time most clients have parsed it.",
@@ -7004,6 +7103,42 @@
           }
         }
       },
+      "TickerPerformance": {
+        "type": "object",
+        "description": "Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.",
+        "required": [
+          "symbol",
+          "currency",
+          "current_price"
+        ],
+        "properties": {
+          "change_1d_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "change_1m_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "change_1w_pct": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "current_price": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
       "TickerSearchResult": {
         "type": "object",
         "required": [
@@ -7460,6 +7595,16 @@
           "currency"
         ],
         "properties": {
+          "briefing_enabled": {
+            "type": "boolean",
+            "description": "Optional toggle for morning briefing.",
+            "nullable": true
+          },
+          "briefing_time": {
+            "type": "string",
+            "description": "Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).",
+            "nullable": true
+          },
           "currency": {
             "type": "string",
             "description": "ISO 4217 code, e.g. `CNY`."
@@ -7581,6 +7726,14 @@
           "currency"
         ],
         "properties": {
+          "briefing_enabled": {
+            "type": "boolean",
+            "description": "Whether automated morning briefing is enabled."
+          },
+          "briefing_time": {
+            "type": "string",
+            "description": "Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00)."
+          },
           "currency": {
             "type": "string",
             "description": "ISO 4217 code, e.g. `CNY`. Validated on write."

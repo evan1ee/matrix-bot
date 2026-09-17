@@ -4,7 +4,7 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, finance, finance_analytics, footprints, habits, health, life,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, footprints, habits, health, life,
     life_activity, mcp, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
     portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
@@ -120,6 +120,7 @@ fn routes_account() -> Router<auth::ApiState> {
 
 fn routes_productivity() -> Router<auth::ApiState> {
     Router::new()
+        .route("/briefing/trigger", post(briefing::trigger_briefing))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route(
             "/todos/:id",

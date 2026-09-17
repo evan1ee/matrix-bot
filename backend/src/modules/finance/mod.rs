@@ -232,8 +232,7 @@ mod tests {
             &UserSettings {
                 timezone: "UTC".to_string(),
                 currency: "CNY".to_string(),
-                dev_room_id: None,
-                max_history_turns: 10,
+                ..UserSettings::default()
             },
         )
         .await

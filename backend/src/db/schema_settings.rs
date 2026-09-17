@@ -10,6 +10,9 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             currency TEXT NOT NULL DEFAULT 'USD',
             dev_room_id TEXT,
             max_history_turns INTEGER NOT NULL DEFAULT 10,
+            briefing_enabled INTEGER NOT NULL DEFAULT 1,
+            briefing_time TEXT NOT NULL DEFAULT '07:00',
+            last_briefing_date TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         "#,
@@ -26,6 +29,22 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await;
+
+    let _ = sqlx::query(
+        "ALTER TABLE user_settings ADD COLUMN briefing_enabled INTEGER NOT NULL DEFAULT 1;",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "ALTER TABLE user_settings ADD COLUMN briefing_time TEXT NOT NULL DEFAULT '07:00';",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN last_briefing_date TEXT;")
+        .execute(pool)
+        .await;
 
     Ok(())
 }

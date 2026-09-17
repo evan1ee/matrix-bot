@@ -10,6 +10,7 @@ use crate::events::EventBroadcaster;
 pub mod account;
 pub mod ai;
 pub mod bookmarks;
+pub mod briefing;
 pub mod core;
 pub mod due_reminder;
 pub mod finance;

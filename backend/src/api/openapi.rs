@@ -3,7 +3,7 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, finance, finance_analytics, health, portfolio, portfolio_alerts,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, health, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
     settings, sse, todos, webhooks,
 };
@@ -53,6 +53,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         rooms::sync_rooms,
         settings::get_settings,
         settings::update_settings,
+        briefing::trigger_briefing,
         todos::list_todos,
         todos::create_todo,
         todos::update_todo,
@@ -155,6 +156,9 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             rooms::JoinedRoomInfo,
             UserSettings,
             settings::UpdateSettingsRequest,
+            crate::modules::briefing::models::BriefingPayload,
+            crate::modules::briefing::models::BriefingSummary,
+            crate::modules::briefing::models::TickerPerformance,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,

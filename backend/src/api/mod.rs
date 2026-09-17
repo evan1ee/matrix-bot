@@ -23,6 +23,7 @@ pub mod account;
 pub mod ai;
 pub mod auth;
 pub mod bookmarks;
+pub mod briefing;
 pub mod finance;
 pub mod finance_analytics;
 pub mod footprints;

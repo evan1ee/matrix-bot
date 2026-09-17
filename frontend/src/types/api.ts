@@ -678,6 +678,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/briefing/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["trigger_briefing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -1460,6 +1476,22 @@ export interface components {
             total_count: number;
             /** Format: int64 */
             unread_count: number;
+        };
+        /** @description Formatted briefing payload ready for Matrix delivery and REST preview. */
+        BriefingPayload: {
+            html_content: string;
+            owner_id: string;
+            plain_text: string;
+            summary: components["schemas"]["BriefingSummary"];
+            tickers: components["schemas"]["TickerPerformance"][];
+        };
+        /** @description Key statistics summarizing a generated morning briefing. */
+        BriefingSummary: {
+            habits_completed_count: number;
+            habits_total_count: number;
+            holdings_count: number;
+            pending_tasks_count: number;
+            upcoming_bills_count: number;
         };
         /**
          * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
@@ -2246,6 +2278,19 @@ export interface components {
             price: number;
             symbol: string;
         };
+        /** @description Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes. */
+        TickerPerformance: {
+            /** Format: double */
+            change_1d_pct?: number | null;
+            /** Format: double */
+            change_1m_pct?: number | null;
+            /** Format: double */
+            change_1w_pct?: number | null;
+            currency: string;
+            /** Format: double */
+            current_price: number;
+            symbol: string;
+        };
         TickerSearchResult: {
             exchange?: string | null;
             name: string;
@@ -2439,6 +2484,10 @@ export interface components {
          *     row, so there is no partial-update path to get wrong.
          */
         UpdateSettingsRequest: {
+            /** @description Optional toggle for morning briefing. */
+            briefing_enabled?: boolean | null;
+            /** @description Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00). */
+            briefing_time?: string | null;
             /** @description ISO 4217 code, e.g. `CNY`. */
             currency: string;
             /** @description Optional Matrix room ID for development and error notifications. */
@@ -2499,6 +2548,10 @@ export interface components {
          *     answer no matter which door they came through.
          */
         UserSettings: {
+            /** @description Whether automated morning briefing is enabled. */
+            briefing_enabled?: boolean;
+            /** @description Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00). */
+            briefing_time?: string;
             /** @description ISO 4217 code, e.g. `CNY`. Validated on write. */
             currency: string;
             /** @description Matrix room ID where development errors and alerts are sent. */
@@ -3729,6 +3782,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    trigger_briefing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Generated morning briefing snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BriefingPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };
