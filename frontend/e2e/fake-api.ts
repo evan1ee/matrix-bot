@@ -2746,6 +2746,33 @@ export class FakeApi {
       return json(route, 200, { success: true, id });
     }
 
+    // --- ocr scan ---
+    if (path === '/ocr/scan' && method === 'POST') {
+      return json(route, 200, {
+        raw_text: 'STARBUCKS COFFEE\n123 MAIN ST\nTOTAL $9.99\nDATE 2026-09-15',
+        blocks: [
+          { text: 'STARBUCKS COFFEE', score: 0.98 },
+          { text: '123 MAIN ST', score: 0.95 },
+          { text: 'TOTAL $9.99', score: 0.99 },
+          { text: 'DATE 2026-09-15', score: 0.97 },
+        ],
+        structured: {
+          merchant: 'STARBUCKS COFFEE',
+          amount: '9.99',
+          currency: 'USD',
+          date: '2026-09-15',
+          category_suggestion: 'Dining',
+        },
+      });
+    }
+
+    // --- voice transcribe ---
+    if (path === '/voice/transcribe' && method === 'POST') {
+      return json(route, 200, {
+        text: 'Spent $15 on lunch at Subway',
+      });
+    }
+
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });
   }
 

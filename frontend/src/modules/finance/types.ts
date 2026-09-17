@@ -79,4 +79,24 @@ export interface NetWorthResponse {
   native_breakdowns: CurrencyNetWorthBreakdown[];
 }
 
+export interface ReceiptExtraction {
+  merchant?: string | null;
+  amount?: string | null;
+  currency?: string | null;
+  date?: string | null;
+  category_suggestion?: string | null;
+}
+
+export interface OcrTextBlock {
+  text: string;
+  score: number;
+}
+
+export interface OcrScanResponse {
+  raw_text: string;
+  blocks: OcrTextBlock[];
+  structured?: ReceiptExtraction | null;
+}
+
+
 

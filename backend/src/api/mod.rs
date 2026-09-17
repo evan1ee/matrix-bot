@@ -34,6 +34,7 @@ pub mod life;
 pub mod life_activity;
 pub mod life_activity_collectors;
 pub mod mcp;
+pub mod ocr;
 pub mod openapi;
 pub mod portfolio;
 pub mod portfolio_alerts;
@@ -49,6 +50,7 @@ pub mod settings;
 pub mod sse;
 pub mod static_files;
 pub mod todos;
+pub mod voice;
 pub mod webhooks;
 pub mod webhooks_telegram;
 
@@ -81,7 +83,18 @@ pub async fn start_api_server(
             .build()
             .unwrap_or_else(|_| reqwest::Client::new()),
     )
-    .with_registration_open(config.registration_open);
+    .with_registration_open(config.registration_open)
+    .with_ocr_and_voice(
+        crate::modules::ocr::OcrConfig {
+            enabled: config.ocr_enabled,
+            model_dir: config.ocr_model_dir.clone(),
+        },
+        crate::modules::voice::VoiceConfig {
+            enabled: config.voice_enabled,
+            model_dir: config.voice_model_dir.clone(),
+            language: "auto".to_string(),
+        },
+    );
 
     // The Relying Party is a boot-time decision: an RP ID that does not match
     // the origin the browser loads mints credentials no browser will return, so

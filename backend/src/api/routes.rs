@@ -5,8 +5,8 @@ use axum::{
 
 use super::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth, footprints, habits, health, life,
-    life_activity, mcp, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
-    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
+    life_activity, mcp, ocr, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -348,5 +348,7 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
             get(ai::get_ai_config).put(ai::update_ai_config),
         )
         .route("/ai/retrospective", get(ai::get_retrospective))
+        .route("/ocr/scan", post(ocr::scan_image))
+        .route("/voice/transcribe", post(voice::transcribe_voice))
         .nest("/mcp", mcp::mcp_routes())
 }

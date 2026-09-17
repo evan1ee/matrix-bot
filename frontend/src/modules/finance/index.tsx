@@ -21,6 +21,8 @@ import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { PublicTransparencyView } from './components/PublicTransparencyView';
 import { NetWorthStatStrip } from './components/NetWorthStatStrip';
+import { ReceiptDropzone } from './components/ReceiptDropzone';
+import { ReceiptExtraction } from './types';
 import {
   CURRENCY_OPTIONS,
   formatDateInZone,
@@ -391,6 +393,27 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
     });
   };
 
+  const handleReceiptScanned = (extracted: ReceiptExtraction) => {
+    if (extracted.amount) {
+      setAmount(extracted.amount);
+    }
+    if (extracted.currency) {
+      setCurrency(extracted.currency.toUpperCase());
+    }
+    if (extracted.merchant) {
+      setNote(extracted.merchant);
+    }
+    if (extracted.category_suggestion && categories) {
+      const match = categories.find(
+        (c) => c.name.toLowerCase() === extracted.category_suggestion!.toLowerCase()
+      );
+      if (match) {
+        setCategoryId(String(match.id));
+      }
+    }
+    setDirection('expense');
+  };
+
   const items = ledger?.items ?? [];
 
   return (
@@ -541,6 +564,8 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
             </p>
           </div>
         )}
+
+        <ReceiptDropzone onReceiptScanned={handleReceiptScanned} />
 
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">

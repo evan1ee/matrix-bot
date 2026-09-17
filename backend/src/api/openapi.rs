@@ -3,9 +3,9 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth, health, portfolio, portfolio_alerts,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth, health, ocr, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, todos, webhooks,
+    settings, sse, todos, voice, webhooks,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
@@ -128,7 +128,9 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         bookmarks::update_bookmark,
         bookmarks::toggle_favorite,
         bookmarks::toggle_archive,
-        bookmarks::delete_bookmark
+        bookmarks::delete_bookmark,
+        ocr::scan_image,
+        voice::transcribe_voice
     ),
     components(
         schemas(
@@ -246,7 +248,11 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             crate::modules::bookmarks::models::DomainCount,
             crate::modules::mcp::models::CreateMcpTokenRequest,
             crate::modules::mcp::models::CreateMcpTokenResponse,
-            crate::modules::mcp::models::McpTokenSummary
+            crate::modules::mcp::models::McpTokenSummary,
+            ocr::OcrScanResponse,
+            ocr::OcrBlockDto,
+            ocr::ReceiptExtractionDto,
+            voice::VoiceTranscribeResponse
         )
     ),
     modifiers(&SecurityAddon),

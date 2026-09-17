@@ -119,6 +119,8 @@ pub struct ApiState {
     /// two halves of one flow: a stale entry should evaporate on restart rather
     /// than linger as a standing authorisation to absorb an account.
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
+    pub ocr_config: crate::modules::ocr::OcrConfig,
+    pub voice_config: crate::modules::voice::VoiceConfig,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -177,12 +179,25 @@ impl ApiState {
             cookie_secure: false,
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            ocr_config: crate::modules::ocr::OcrConfig::default(),
+            voice_config: crate::modules::voice::VoiceConfig::default(),
         }
     }
 
     /// Configures whether open registration without an invite secret is permitted.
     pub fn with_registration_open(mut self, open: bool) -> Self {
         self.registration_open = open;
+        self
+    }
+
+    /// Configures OCR and voice transcription module settings.
+    pub fn with_ocr_and_voice(
+        mut self,
+        ocr_config: crate::modules::ocr::OcrConfig,
+        voice_config: crate::modules::voice::VoiceConfig,
+    ) -> Self {
+        self.ocr_config = ocr_config;
+        self.voice_config = voice_config;
         self
     }
 

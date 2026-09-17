@@ -1,5 +1,6 @@
 pub mod alerts;
 pub mod cash;
+pub mod net_worth;
 
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -26,6 +27,11 @@ pub async fn execute_tool(
 
     // 2. Check alert operations
     if let Some(res) = alerts::execute_tool(pool, broadcaster, owner_id, name, args).await {
+        return Some(res);
+    }
+
+    // 3. Check net worth operations
+    if let Some(res) = net_worth::execute_tool(pool, owner_id, name, args).await {
         return Some(res);
     }
 
@@ -409,5 +415,6 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     ];
     defs.extend(cash::tool_definitions());
     defs.extend(alerts::tool_definitions());
+    defs.extend(net_worth::tool_definitions());
     defs
 }

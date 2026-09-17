@@ -862,6 +862,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ocr/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Scans an uploaded receipt image using local PaddleOCR, extracting text and receipt fields. */
+        post: operations["scan_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/portfolio/activity": {
         parameters: {
             query?: never;
@@ -1373,6 +1390,23 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["update_todo"];
+        trace?: never;
+    };
+    "/api/v1/voice/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference. */
+        post: operations["transcribe_voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/webhooks/{token}": {
@@ -1988,6 +2022,16 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        OcrBlockDto: {
+            /** Format: float */
+            score: number;
+            text: string;
+        };
+        OcrScanResponse: {
+            blocks: components["schemas"]["OcrBlockDto"][];
+            raw_text: string;
+            structured?: components["schemas"]["ReceiptExtractionDto"] | null;
+        };
         PasskeySummary: {
             /** Format: date-time */
             created_at?: string | null;
@@ -2133,6 +2177,13 @@ export interface components {
             note?: string | null;
             /** Format: date-time */
             occurred_at: string;
+        };
+        ReceiptExtractionDto: {
+            amount?: string | null;
+            category_suggestion?: string | null;
+            currency?: string | null;
+            date?: string | null;
+            merchant?: string | null;
         };
         RecoveryCodesResponse: {
             /** @description Shown exactly once. The server keeps only hashes. */
@@ -2624,6 +2675,12 @@ export interface components {
         VerifyAiKeyResponse: {
             message: string;
             valid: boolean;
+        };
+        VoiceTranscribeResponse: {
+            /** Format: float */
+            duration_secs: number;
+            language?: string | null;
+            text: string;
         };
         Webhook: {
             /** Format: date-time */
@@ -4391,6 +4448,40 @@ export interface operations {
             };
         };
     };
+    scan_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image OCR scan succeeded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OcrScanResponse"];
+                };
+            };
+            /** @description Invalid or empty image uploaded */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description OCR engine is disabled or models missing */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_portfolio_activity: {
         parameters: {
             query?: {
@@ -6016,6 +6107,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
+            };
+        };
+    };
+    transcribe_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio transcribed successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceTranscribeResponse"];
+                };
+            };
+            /** @description Invalid or empty audio payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Voice transcription engine is disabled */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

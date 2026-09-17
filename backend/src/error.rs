@@ -65,6 +65,12 @@ impl ApiError {
             message: msg.into(),
         }
     }
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: msg.into(),
+        }
+    }
     /// Records the underlying failure and returns an opaque 500.
     ///
     /// Call sites pass raw `sqlx`/IO errors here. Those name tables, columns and

@@ -2368,6 +2368,38 @@
         }
       }
     },
+    "/api/v1/ocr/scan": {
+      "post": {
+        "tags": [
+          "OCR"
+        ],
+        "summary": "Scans an uploaded receipt image using local PaddleOCR, extracting text and receipt fields.",
+        "operationId": "scan_image",
+        "responses": {
+          "200": {
+            "description": "Image OCR scan succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty image uploaded"
+          },
+          "503": {
+            "description": "OCR engine is disabled or models missing"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/portfolio/activity": {
       "get": {
         "tags": [
@@ -4599,6 +4631,38 @@
         ]
       }
     },
+    "/api/v1/voice/transcribe": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference.",
+        "operationId": "transcribe_voice",
+        "responses": {
+          "200": {
+            "description": "Audio transcribed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTranscribeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty audio payload"
+          },
+          "503": {
+            "description": "Voice transcription engine is disabled"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/webhooks/{token}": {
       "post": {
         "tags": [
@@ -6326,6 +6390,48 @@
           }
         }
       },
+      "OcrBlockDto": {
+        "type": "object",
+        "required": [
+          "text",
+          "score"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "float"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "OcrScanResponse": {
+        "type": "object",
+        "required": [
+          "raw_text",
+          "blocks"
+        ],
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OcrBlockDto"
+            }
+          },
+          "raw_text": {
+            "type": "string"
+          },
+          "structured": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptExtractionDto"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
       "PasskeySummary": {
         "type": "object",
         "required": [
@@ -6720,6 +6826,31 @@
           "occurred_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "ReceiptExtractionDto": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "nullable": true
+          },
+          "category_suggestion": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "date": {
+            "type": "string",
+            "nullable": true
+          },
+          "merchant": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -7930,6 +8061,26 @@
           },
           "valid": {
             "type": "boolean"
+          }
+        }
+      },
+      "VoiceTranscribeResponse": {
+        "type": "object",
+        "required": [
+          "text",
+          "duration_secs"
+        ],
+        "properties": {
+          "duration_secs": {
+            "type": "number",
+            "format": "float"
+          },
+          "language": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string"
           }
         }
       },
