@@ -17,6 +17,7 @@ pub mod footprints;
 pub mod habits;
 pub mod journal;
 pub mod life;
+pub mod mcp;
 pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;

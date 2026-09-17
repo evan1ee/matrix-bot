@@ -92,6 +92,45 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     dotenvy::from_filename("../.env").ok();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "mcp" {
+        // Direct logs to stderr so stdout is purely reserved for JSON-RPC messages
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn,matrix_bot=info")),
+            )
+            .init();
+
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
+        let db = Database::connect(&database_url, 5).await?;
+
+        let mut owner_id = String::new();
+        let mut i = 2;
+        while i < args.len() {
+            if (args[i] == "--owner" || args[i] == "--account") && i + 1 < args.len() {
+                owner_id = args[i + 1].clone();
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        if owner_id.is_empty() {
+            let resolved: Option<String> =
+                sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1")
+                    .fetch_optional(&db.pool)
+                    .await
+                    .unwrap_or(None);
+            owner_id = resolved.unwrap_or_else(|| "default_owner".to_string());
+        }
+
+        matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()

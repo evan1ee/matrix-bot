@@ -31,6 +31,7 @@ pub mod health;
 pub mod life;
 pub mod life_activity;
 pub mod life_activity_collectors;
+pub mod mcp;
 pub mod openapi;
 pub mod portfolio;
 pub mod portfolio_alerts;

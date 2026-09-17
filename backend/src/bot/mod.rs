@@ -94,6 +94,7 @@ impl MatrixBot {
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
         registry.register(WebhookModule::new());
+        registry.register(crate::modules::mcp::McpModule::new());
         registry.register(crate::modules::ai::AiModule::new(
             client_handle.clone().unwrap_or_default(),
         ));

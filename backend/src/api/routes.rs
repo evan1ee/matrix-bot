@@ -5,7 +5,7 @@ use axum::{
 
 use super::{
     account, ai, auth, bookmarks, finance, finance_analytics, footprints, habits, health, life,
-    life_activity, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    life_activity, mcp, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
     portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
 
@@ -346,4 +346,5 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
             get(ai::get_ai_config).put(ai::update_ai_config),
         )
         .route("/ai/retrospective", get(ai::get_retrospective))
+        .nest("/mcp", mcp::mcp_routes())
 }
