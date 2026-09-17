@@ -151,8 +151,55 @@ pub async fn record_ai_tool_target(
     }
 }
 
-/// Dynamically resolves an untracked target message in the room by inspecting its content
-/// and correlating with recent pending reminders or open todos for the reaction sender.
+/// Copies targets from one event ID to another.
+pub async fn copy_targets(
+    pool: &SqlitePool,
+    from_event_id: &str,
+    to_event_id: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query(
+        r#"
+        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
+        SELECT ?, room_id, entity_type, entity_id, owner_id, title
+        FROM bot_message_targets
+        WHERE event_id = ?
+        ON CONFLICT(event_id) DO UPDATE SET
+            room_id = excluded.room_id,
+            entity_type = excluded.entity_type,
+            entity_id = excluded.entity_id,
+            owner_id = excluded.owner_id,
+            title = excluded.title
+        "#,
+    )
+    .bind(to_event_id)
+    .bind(from_event_id)
+    .execute(pool)
+    .await?;
+
+    Ok(res.rows_affected())
+}
+
+/// Links related events across a command turn (stage placeholder, final bot reply, user prompt event)
+/// to ensure reactions on any of these messages resolve to the underlying entity.
+pub async fn link_turn_targets(
+    pool: &SqlitePool,
+    stage_target_id: Option<&str>,
+    reply_event_id: Option<&str>,
+    user_event_id: &str,
+) {
+    if let (Some(ph_id), Some(reply_id)) = (stage_target_id, reply_event_id) {
+        if ph_id != reply_id {
+            let _ = copy_targets(pool, ph_id, reply_id).await;
+        }
+    }
+    let source_id = reply_event_id.or(stage_target_id);
+    if let Some(src) = source_id {
+        let _ = copy_targets(pool, src, user_event_id).await;
+    }
+}
+
+/// Dynamically resolves an untracked target message in the room by inspecting relations,
+/// decrypting encrypted events if needed, and correlating with recent reminders or todos.
 pub async fn resolve_untracked_target(
     room: &matrix_sdk::Room,
     target_event_id: &str,
@@ -163,42 +210,106 @@ pub async fn resolve_untracked_target(
         room::message::{MessageType, RoomMessageEvent},
         AnyMessageLikeEvent, AnyTimelineEvent,
     };
-    let eid = matrix_sdk::ruma::EventId::parse(target_event_id).ok()?;
-    let timeline_event = room.event(&eid).await.ok()?;
-    let any_event = timeline_event.event.deserialize().ok()?;
+    use tracing::{info, warn};
 
+    let eid = matrix_sdk::ruma::EventId::parse(target_event_id).ok()?;
+    let timeline_event = match room.event(&eid).await {
+        Ok(ev) => ev,
+        Err(err) => {
+            warn!("resolve_untracked_target: failed fetching event {}: {:?}", target_event_id, err);
+            return None;
+        }
+    };
+
+    let any_event = match timeline_event.event.deserialize() {
+        Ok(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(_))) => {
+            match room.decrypt_event(timeline_event.event.cast_ref()).await {
+                Ok(decrypted) => match decrypted.event.deserialize() {
+                    Ok(ev) => ev,
+                    Err(err) => {
+                        warn!("resolve_untracked_target: failed deserializing decrypted {}: {:?}", target_event_id, err);
+                        return None;
+                    }
+                },
+                Err(err) => {
+                    warn!("resolve_untracked_target: failed decrypting {}: {:?}", target_event_id, err);
+                    return None;
+                }
+            }
+        }
+        Ok(ev) => ev,
+        Err(err) => {
+            warn!("resolve_untracked_target: failed deserializing event {}: {:?}", target_event_id, err);
+            return None;
+        }
+    };
+
+    let room_id_str = room.room_id().as_str();
+
+    // 1. Check if the event is a replacement (edit) or rich reply relating to an already-tracked event
     let body = match any_event {
         AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
-            RoomMessageEvent::Original(msg),
-        )) => match msg.content.msgtype {
-            MessageType::Text(t) => {
-                let f = t.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
-                format!("{}\n{}", t.body, f)
+            RoomMessageEvent::Original(ref msg),
+        )) => {
+            if let Some(ref relates_to) = msg.content.relates_to {
+                let parent_id = match relates_to {
+                    matrix_sdk::ruma::events::room::message::Relation::Replacement(rep) => {
+                        Some(rep.event_id.as_str())
+                    }
+                    matrix_sdk::ruma::events::room::message::Relation::Reply { in_reply_to } => {
+                        Some(in_reply_to.event_id.as_str())
+                    }
+                    _ => None,
+                };
+                if let Some(pid) = parent_id {
+                    if let Ok(Some(parent_target)) = get_target(pool, pid).await {
+                        let _ = record_target(
+                            pool,
+                            target_event_id,
+                            room_id_str,
+                            &parent_target.entity_type,
+                            parent_target.entity_id,
+                            owner_id,
+                            &parent_target.title,
+                        )
+                        .await;
+                        info!("Resolved untracked event {} via related parent target {}", target_event_id, pid);
+                        return Some(parent_target);
+                    }
+                }
             }
-            MessageType::Notice(n) => {
-                let f = n.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
-                format!("{}\n{}", n.body, f)
+
+            match msg.content.msgtype {
+                MessageType::Text(ref t) => {
+                    let f = t.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                    format!("{}\n{}", t.body, f)
+                }
+                MessageType::Notice(ref n) => {
+                    let f = n.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                    format!("{}\n{}", n.body, f)
+                }
+                _ => return None,
             }
-            _ => return None,
-        },
+        }
         _ => return None,
     };
 
     let lower = body.to_lowercase();
-    let room_id_str = room.room_id().as_str();
 
-    // 1. Reminder detection
+    // 2. Reminder detection
     if lower.contains("reminder") || lower.contains("提醒") {
-        if let Ok(reminders) = sqlx::query_as::<_, crate::modules::reminder::models::Reminder>(
+        if let Ok(mut reminders) = sqlx::query_as::<_, crate::modules::reminder::models::Reminder>(
             "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at \
-             FROM reminders WHERE owner_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 10"
+             FROM reminders WHERE owner_id = ? ORDER BY id DESC LIMIT 15"
         )
         .bind(owner_id)
         .fetch_all(pool)
         .await {
+            reminders.sort_by_key(|r| if r.status == "pending" { 0 } else { 1 });
             for rem in &reminders {
                 if body.contains(&rem.message) || lower.contains(&rem.message.to_lowercase()) {
                     let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
+                    info!("Resolved untracked reminder #{} ({}) for event {}", rem.id, rem.message, target_event_id);
                     return Some(BotMessageTarget {
                         event_id: target_event_id.to_string(),
                         room_id: room_id_str.to_string(),
@@ -209,10 +320,11 @@ pub async fn resolve_untracked_target(
                     });
                 }
             }
-            let in_room: Vec<_> = reminders.into_iter().filter(|r| r.room_id == room_id_str).collect();
-            if in_room.len() == 1 {
-                let rem = &in_room[0];
+            let in_room_pending: Vec<_> = reminders.iter().filter(|r| r.room_id == room_id_str && r.status == "pending").collect();
+            if in_room_pending.len() == 1 {
+                let rem = in_room_pending[0];
                 let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
+                info!("Resolved single pending reminder #{} for event {}", rem.id, target_event_id);
                 return Some(BotMessageTarget {
                     event_id: target_event_id.to_string(),
                     room_id: room_id_str.to_string(),
@@ -225,18 +337,20 @@ pub async fn resolve_untracked_target(
         }
     }
 
-    // 2. Todo task detection
+    // 3. Todo task detection
     if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
-        if let Ok(todos) = sqlx::query_as::<_, crate::modules::todo::models::TodoItem>(
+        if let Ok(mut todos) = sqlx::query_as::<_, crate::modules::todo::models::TodoItem>(
             "SELECT id, room_id, owner_id, sender_name, text, priority, due_at, completed, created_at, remind_before_minutes \
-             FROM todos WHERE owner_id = ? AND completed = 0 ORDER BY id DESC LIMIT 10"
+             FROM todos WHERE owner_id = ? ORDER BY id DESC LIMIT 15"
         )
         .bind(owner_id)
         .fetch_all(pool)
         .await {
+            todos.sort_by_key(|t| if !t.completed { 0 } else { 1 });
             for todo in &todos {
                 if body.contains(&todo.text) || lower.contains(&todo.text.to_lowercase()) {
                     let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
+                    info!("Resolved untracked todo #{} ({}) for event {}", todo.id, todo.text, target_event_id);
                     return Some(BotMessageTarget {
                         event_id: target_event_id.to_string(),
                         room_id: room_id_str.to_string(),
@@ -247,10 +361,11 @@ pub async fn resolve_untracked_target(
                     });
                 }
             }
-            let in_room: Vec<_> = todos.into_iter().filter(|t| t.room_id == room_id_str).collect();
-            if in_room.len() == 1 {
-                let todo = &in_room[0];
+            let in_room_open: Vec<_> = todos.iter().filter(|t| t.room_id == room_id_str && !t.completed).collect();
+            if in_room_open.len() == 1 {
+                let todo = in_room_open[0];
                 let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
+                info!("Resolved single open todo #{} for event {}", todo.id, target_event_id);
                 return Some(BotMessageTarget {
                     event_id: target_event_id.to_string(),
                     room_id: room_id_str.to_string(),
@@ -386,5 +501,37 @@ mod tests {
         assert_eq!(todo_target.entity_type, "todo");
         assert_eq!(todo_target.entity_id, 42);
         assert_eq!(todo_target.title, "Buy groceries");
+    }
+
+    #[tokio::test]
+    async fn test_copy_targets_and_link_turn() {
+        let pool = setup_pool().await;
+
+        record_target(
+            &pool,
+            "$placeholder",
+            "!room:x",
+            "reminder",
+            12,
+            "@bob:x",
+            "Have my hair cut",
+        )
+        .await
+        .unwrap();
+
+        // Copy to edit/reply event ID
+        let copied = copy_targets(&pool, "$placeholder", "$edit_reply").await.unwrap();
+        assert_eq!(copied, 1);
+
+        let edit_target = get_target(&pool, "$edit_reply").await.unwrap().unwrap();
+        assert_eq!(edit_target.entity_type, "reminder");
+        assert_eq!(edit_target.entity_id, 12);
+        assert_eq!(edit_target.title, "Have my hair cut");
+
+        // Link full turn (placeholder, final bot reply, user prompt event)
+        link_turn_targets(&pool, Some("$placeholder"), Some("$edit_reply"), "$user_prompt").await;
+        let user_target = get_target(&pool, "$user_prompt").await.unwrap().unwrap();
+        assert_eq!(user_target.entity_type, "reminder");
+        assert_eq!(user_target.entity_id, 12);
     }
 }

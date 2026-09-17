@@ -161,7 +161,14 @@ pub fn register_handlers(
                 };
 
                 let plain_text = crate::utils::strip_html(&reply_html);
-                stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
+                let sent_eid = stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
+                crate::bot::reaction_targets::link_turn_targets(
+                    &db.pool,
+                    stage_indicator.event_id().map(|e| e.as_str()),
+                    sent_eid.as_deref().map(|e| e.as_str()),
+                    ev.event_id.as_str(),
+                )
+                .await;
                 return;
             }
 
@@ -276,7 +283,14 @@ pub fn register_handlers(
                 };
 
                 let plain_text = crate::utils::strip_html(&reply_html);
-                stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
+                let sent_eid = stage_indicator.finish_with_reply(&plain_text, &reply_html).await;
+                crate::bot::reaction_targets::link_turn_targets(
+                    &db.pool,
+                    stage_indicator.event_id().map(|e| e.as_str()),
+                    sent_eid.as_deref().map(|e| e.as_str()),
+                    ev.event_id.as_str(),
+                )
+                .await;
                 return;
             }
 
@@ -375,7 +389,7 @@ pub fn register_handlers(
                 }
             };
 
-            let is_ai = is_ai_prompt_command(&parsed);
+            let is_ai = CommandParser::is_ai_prompt_command(&parsed);
             let mut cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
 
             let typing_guard = if is_direct || cmd_ctx.is_mentioned {
@@ -410,22 +424,22 @@ pub fn register_handlers(
             match dispatch_res {
                 Ok(Some(reply_html)) => {
                     let plain_text = crate::utils::strip_html(&reply_html);
-                    let sent_eid = if let Some(indicator) = stage_indicator {
-                        let ev_id = indicator.event_id().cloned();
-                        indicator.finish_with_reply(&plain_text, &reply_html).await;
-                        ev_id
+                    let (sent_eid, ph_eid) = if let Some(indicator) = stage_indicator {
+                        let ev_id = indicator.finish_with_reply(&plain_text, &reply_html).await;
+                        (ev_id, indicator.event_id().cloned())
                     } else {
                         let content = RoomMessageEventContent::text_html(&plain_text, &reply_html);
-                        match room.send(content).await {
+                        let ev_id = match room.send(content).await {
                             Ok(resp) => Some(resp.event_id),
                             Err(err) => {
-                                error!("Failed to send message to room {}: {:?}", room.room_id(), err);
+                                error!("Failed sending reply to room {}: {:?}", room.room_id(), err);
                                 None
                             }
-                        }
+                        };
+                        (ev_id, None)
                     };
 
-                    if let Some(eid) = sent_eid {
+                    if let Some(ref eid) = sent_eid {
                         crate::bot::reaction_targets::try_record_from_reply(
                             &db.pool,
                             eid.as_str(),
@@ -435,6 +449,14 @@ pub fn register_handlers(
                         )
                         .await;
                     }
+
+                    crate::bot::reaction_targets::link_turn_targets(
+                        &db.pool,
+                        ph_eid.as_deref().map(|e| e.as_str()),
+                        sent_eid.as_deref().map(|e| e.as_str()),
+                        ev.event_id.as_str(),
+                    )
+                    .await;
                 }
                 Ok(None) => {
                     if let Some(indicator) = stage_indicator {
@@ -460,27 +482,4 @@ pub fn register_handlers(
             }
         }
     });
-}
-
-fn is_ai_prompt_command(parsed: &crate::modules::ParsedCommand) -> bool {
-    let cmd = parsed.command.to_ascii_lowercase();
-    if cmd == "ai" || cmd == "ask" {
-        let trimmed = parsed.raw_args.trim();
-        let first_word = trimmed.split_whitespace().next().unwrap_or("");
-        !matches!(
-            first_word.to_ascii_lowercase().as_str(),
-            "reset" | "clear" | "config" | "retro" | "retrospective" | "weekly"
-        )
-    } else if parsed.is_mentioned {
-        const BUILTIN_COMMANDS: &[&str] = &[
-            "ping", "help", "stat", "stats", "version", "uptime", "todo", "todos",
-            "remind", "reminder", "reminders", "finance", "expense", "income", "budget",
-            "portfolio", "invest", "stock", "crypto", "asset", "footprint", "footprints",
-            "trip", "trips", "habit", "habits", "life", "lifegrid", "bill", "bills",
-            "settings", "setting", "webhook", "webhooks", "link",
-        ];
-        !BUILTIN_COMMANDS.contains(&cmd.as_str())
-    } else {
-        false
-    }
 }

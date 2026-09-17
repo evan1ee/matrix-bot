@@ -145,7 +145,20 @@ pub fn register_reaction_handler(
                 apply_reaction(&db.pool, &target, action, broadcaster.as_ref()).await
             {
                 send_reaction(&room, target_event_id, outcome.ack_emoji).await;
-                send_reply(&room, &outcome.reply_html).await;
+                if let Some(reply_eid) = send_reply(&room, &outcome.reply_html).await {
+                    if action != AllowedReaction::Delete {
+                        let _ = crate::bot::reaction_targets::record_target(
+                            &db.pool,
+                            reply_eid.as_str(),
+                            room.room_id().as_str(),
+                            &target.entity_type,
+                            target.entity_id,
+                            &target.owner_id,
+                            &target.title,
+                        )
+                        .await;
+                    }
+                }
             }
         }
     });
@@ -423,15 +436,19 @@ async fn send_reaction(room: &Room, target_event_id: &EventId, emoji: &str) {
     }
 }
 
-async fn send_reply(room: &Room, html: &str) {
+async fn send_reply(room: &Room, html: &str) -> Option<matrix_sdk::ruma::OwnedEventId> {
     let plain = crate::utils::strip_html(html);
     let content = RoomMessageEventContent::text_html(&plain, html);
-    if let Err(err) = room.send(content).await {
-        error!(
-            "Failed sending reply to room {}: {:?}",
-            room.room_id(),
-            err
-        );
+    match room.send(content).await {
+        Ok(resp) => Some(resp.event_id),
+        Err(err) => {
+            error!(
+                "Failed sending reply to room {}: {:?}",
+                room.room_id(),
+                err
+            );
+            None
+        }
     }
 }
 

@@ -248,26 +248,34 @@ impl StageIndicator {
     }
 
     /// Replaces the placeholder message in-place with the final rich reply.
-    pub async fn finish_with_reply(&self, plain_text: &str, html_reply: &str) {
+    pub async fn finish_with_reply(&self, plain_text: &str, html_reply: &str) -> Option<OwnedEventId> {
         if let Some(ref target_id) = self.event_id {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_reply)
                 .make_replacement(metadata, None);
-            if let Err(err) = self.room.send(content).await {
-                error!(
-                    "Failed to replace stage indicator with final reply in room {}: {:?}",
-                    self.room.room_id(),
-                    err
-                );
+            match self.room.send(content).await {
+                Ok(resp) => Some(resp.event_id),
+                Err(err) => {
+                    error!(
+                        "Failed to replace stage indicator with final reply in room {}: {:?}",
+                        self.room.room_id(),
+                        err
+                    );
+                    None
+                }
             }
         } else {
             let content = RoomMessageEventContent::text_html(plain_text, html_reply);
-            if let Err(err) = self.room.send(content).await {
-                error!(
-                    "Failed to send final reply to room {}: {:?}",
-                    self.room.room_id(),
-                    err
-                );
+            match self.room.send(content).await {
+                Ok(resp) => Some(resp.event_id),
+                Err(err) => {
+                    error!(
+                        "Failed to send final reply to room {}: {:?}",
+                        self.room.room_id(),
+                        err
+                    );
+                    None
+                }
             }
         }
     }
