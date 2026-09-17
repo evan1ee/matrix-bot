@@ -18,6 +18,15 @@ jobs:
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-rust"
+
+      # Swatinem/rust-cache strips or prunes dynamic libraries (.so) during cache
+      # pruning, leaving an empty `target/sherpa-onnx-prebuilt/.../lib` folder.
+      # sherpa-onnx-sys detects that directory exists, skips downloading the archive,
+      # and panics because no .so files are present. Removing it forces a clean download.
+      - name: Clean sherpa-onnx prebuilt cache
+        run: rm -rf target/sherpa-onnx-prebuilt
 
       - name: Format check
         run: cargo fmt --all -- --check
