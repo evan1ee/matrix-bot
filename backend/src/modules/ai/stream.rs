@@ -28,7 +28,10 @@ pub async fn execute_stream_or_complete(
             })
             .await
         {
-            Ok(StreamTurnResult { content, tool_calls }) => Ok((content, tool_calls)),
+            Ok(StreamTurnResult {
+                content,
+                tool_calls,
+            }) => Ok((content, tool_calls)),
             Err(err) => {
                 warn!("AI stream error ({:?}), falling back to non-streaming", err);
                 fallback_complete(client, config, request).await

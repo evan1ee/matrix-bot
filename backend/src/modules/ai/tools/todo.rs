@@ -129,8 +129,7 @@ pub async fn execute_tool(
                     }
                 } else {
                     return Err(
-                        "Either 'id' or 'text' must be provided to complete a task"
-                            .to_string(),
+                        "Either 'id' or 'text' must be provided to complete a task".to_string()
                     );
                 };
 

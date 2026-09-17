@@ -488,7 +488,8 @@ mod tests {
         let chunk_line = r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"content":"Hello world"},"finish_reason":null}]}"#;
         assert_eq!(parse_sse_line(chunk_line), Some("Hello world".to_string()));
 
-        let empty_delta = r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":null}]}"#;
+        let empty_delta =
+            r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":null}]}"#;
         assert_eq!(parse_sse_line(empty_delta), None);
 
         let done_line = "data: [DONE]";
@@ -505,7 +506,10 @@ mod tests {
         assert_eq!(chunk.choices.len(), 1);
         let tc = &chunk.choices[0].delta.tool_calls.as_ref().unwrap()[0];
         assert_eq!(tc.id.as_deref(), Some("call_99"));
-        assert_eq!(tc.function.as_ref().unwrap().name.as_deref(), Some("search_web"));
+        assert_eq!(
+            tc.function.as_ref().unwrap().name.as_deref(),
+            Some("search_web")
+        );
     }
 
     #[test]

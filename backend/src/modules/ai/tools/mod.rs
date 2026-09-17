@@ -401,7 +401,10 @@ mod tests {
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].amount_minor, 8770);
         assert_eq!(txs[0].currency, "CNY");
-        assert_eq!(txs[0].note.as_deref(), Some("纽仕兰4.0全脂纯牛奶 250ml*24盒"));
+        assert_eq!(
+            txs[0].note.as_deref(),
+            Some("纽仕兰4.0全脂纯牛奶 250ml*24盒")
+        );
     }
 
     #[tokio::test]

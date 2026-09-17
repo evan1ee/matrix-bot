@@ -711,9 +711,10 @@ mod tests {
     async fn test_enroll_start_validates_and_stashes_ceremony() {
         let state = state_with_secret(None).await;
         // Auto-provision an account
-        let account_id = AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
-            .await
-            .unwrap();
+        let account_id =
+            AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
+                .await
+                .unwrap();
 
         // Issue enrollment token
         let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
@@ -723,20 +724,22 @@ mod tests {
         // enroll_start
         let res = enroll_start(
             State(state.clone()),
-            Json(EnrollStartRequest { token: token.clone() }),
+            Json(EnrollStartRequest {
+                token: token.clone(),
+            }),
         )
         .await
         .unwrap();
 
         assert!(!res.ceremony_id.is_empty());
-        assert!(state.webauthn_ceremonies.read().await.contains_key(&res.ceremony_id));
+        assert!(state
+            .webauthn_ceremonies
+            .read()
+            .await
+            .contains_key(&res.ceremony_id));
 
         // Reusing same token is rejected
-        let second = enroll_start(
-            State(state.clone()),
-            Json(EnrollStartRequest { token }),
-        )
-        .await;
+        let second = enroll_start(State(state.clone()), Json(EnrollStartRequest { token })).await;
         assert!(second.is_err());
     }
 }

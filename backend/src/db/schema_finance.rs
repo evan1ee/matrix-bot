@@ -90,12 +90,9 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_finance_shares_token ON finance_shares(token);",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_finance_shares_token ON finance_shares(token);")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
-

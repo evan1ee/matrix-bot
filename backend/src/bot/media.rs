@@ -4,15 +4,12 @@
 //! Supports Matrix 1.11 / MSC3916 Authenticated Media and transparently decrypts
 //! encrypted attachments (AES-CTR) in encrypted rooms.
 
-use std::io::{Cursor, Read};
-use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use matrix_sdk::{
-    crypto::AttachmentDecryptor,
-    ruma::events::room::MediaSource,
-    ruma::MxcUri,
-    Client,
+    crypto::AttachmentDecryptor, ruma::events::room::MediaSource, ruma::MxcUri, Client,
 };
+use std::io::{Cursor, Read};
+use std::time::Duration;
 use tracing::{debug, warn};
 
 /// Downloads a media file (plain or encrypted) using authenticated endpoints when available.
@@ -22,10 +19,8 @@ pub async fn download_media_file(client: &Client, source: &MediaSource) -> Resul
         MediaSource::Encrypted(file) => {
             let ciphertext = download_raw_media(client, &file.url).await?;
             let mut cursor = Cursor::new(ciphertext);
-            let mut decryptor = AttachmentDecryptor::new(
-                &mut cursor,
-                file.as_ref().clone().into(),
-            ).map_err(|e| anyhow!("Failed to initialize attachment decryptor: {:?}", e))?;
+            let mut decryptor = AttachmentDecryptor::new(&mut cursor, file.as_ref().clone().into())
+                .map_err(|e| anyhow!("Failed to initialize attachment decryptor: {:?}", e))?;
 
             let mut decrypted = Vec::new();
             decryptor
@@ -64,8 +59,14 @@ async fn download_raw_media(client: &Client, uri: &MxcUri) -> Result<Vec<u8>> {
     // 1. Matrix 1.11 / MSC3916 client endpoint
     // 2. MSC3916 legacy / Synapse media v3 endpoint
     let candidates = [
-        format!("{}/_matrix/client/v1/media/download/{}/{}", base_url, server_name, media_id),
-        format!("{}/_matrix/media/v3/download/{}/{}", base_url, server_name, media_id),
+        format!(
+            "{}/_matrix/client/v1/media/download/{}/{}",
+            base_url, server_name, media_id
+        ),
+        format!(
+            "{}/_matrix/media/v3/download/{}/{}",
+            base_url, server_name, media_id
+        ),
     ];
 
     let mut last_error = None;
@@ -113,7 +114,10 @@ async fn download_raw_media(client: &Client, uri: &MxcUri) -> Result<Vec<u8>> {
     {
         Ok(bytes) => Ok(bytes),
         Err(e) => {
-            warn!("Fallback get_media_content also failed for {}: {:?}", uri, e);
+            warn!(
+                "Fallback get_media_content also failed for {}: {:?}",
+                uri, e
+            );
             Err(last_error.unwrap_or_else(|| anyhow!("Failed to download media: {:?}", e)))
         }
     }

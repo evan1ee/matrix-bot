@@ -119,7 +119,8 @@ pub async fn handle_reset(
     owner_id: &str,
     room_id: &str,
 ) -> String {
-    if let Ok(conv) = AiRepository::get_or_create_conversation(pool, owner_id, room_id, 1800).await {
+    if let Ok(conv) = AiRepository::get_or_create_conversation(pool, owner_id, room_id, 1800).await
+    {
         if let Ok(true) = AiRepository::delete_conversation(pool, &conv.id, owner_id).await {
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::AiConversationDeleted {
@@ -163,13 +164,24 @@ pub async fn handle_ai_subcommand(
     }
     if let Some(rest) = trimmed.strip_prefix("model") {
         let model_arg = rest.trim();
-        if model_arg.is_empty() { return Some(handle_show_config(pool, owner_id).await); }
-        if model_arg.len() > 500 { return Some(format_error("Model name exceeds maximum length of 500 characters.")); }
+        if model_arg.is_empty() {
+            return Some(handle_show_config(pool, owner_id).await);
+        }
+        if model_arg.len() > 500 {
+            return Some(format_error(
+                "Model name exceeds maximum length of 500 characters.",
+            ));
+        }
         return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
     }
-    if let Some(rest) = trimmed.strip_prefix("history").or_else(|| trimmed.strip_prefix("turns")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("history")
+        .or_else(|| trimmed.strip_prefix("turns"))
+    {
         let num_arg = rest.trim();
-        if num_arg.is_empty() { return Some(handle_show_config(pool, owner_id).await); }
+        if num_arg.is_empty() {
+            return Some(handle_show_config(pool, owner_id).await);
+        }
         return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
     }
     None

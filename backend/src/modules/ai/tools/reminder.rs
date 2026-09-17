@@ -43,10 +43,10 @@ pub async fn execute_tool(
                 let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                 let tz = settings.tz();
 
-                let trigger_at = if let Some(mins) = args
-                    .get("in_minutes")
-                    .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
-                {
+                let trigger_at = if let Some(mins) = args.get("in_minutes").and_then(|v| {
+                    v.as_i64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                }) {
                     Utc::now() + Duration::minutes(mins)
                 } else if let Some(trig_str) = args
                     .get("trigger_at")
@@ -67,7 +67,10 @@ pub async fn execute_tool(
                     if let Ok(naive_dt) =
                         chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%dT%H:%M:%S")
                             .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%d %H:%M:%S")
+                                chrono::NaiveDateTime::parse_from_str(
+                                    clean_local,
+                                    "%Y-%m-%d %H:%M:%S",
+                                )
                             })
                             .or_else(|_| {
                                 chrono::NaiveDateTime::parse_from_str(clean_local, "%Y-%m-%dT%H:%M")
@@ -309,4 +312,3 @@ mod tests {
         assert_eq!(parsed["local_time"], "2026-09-17 20:00");
     }
 }
-

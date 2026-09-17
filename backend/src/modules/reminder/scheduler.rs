@@ -200,7 +200,10 @@ pub fn format_reminder_alert(
     tz: &chrono_tz::Tz,
     recurrence: &str,
 ) -> String {
-    let local_time = trigger_at.with_timezone(tz).format("%Y-%m-%d %H:%M").to_string();
+    let local_time = trigger_at
+        .with_timezone(tz)
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
     let mut html = format!(
         "⏰ <b>提醒时间到了</b><br/>• <b>事项:</b> {}<br/>• <b>设定时间:</b> {}",
         html_escape(message),

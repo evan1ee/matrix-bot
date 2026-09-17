@@ -17,14 +17,14 @@ pub mod footprints;
 pub mod habits;
 pub mod journal;
 pub mod life;
+pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
 pub mod settings;
 pub mod todo;
-pub mod webhook;
-pub mod ocr;
 pub mod voice;
+pub mod webhook;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.

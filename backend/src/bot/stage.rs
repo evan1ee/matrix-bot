@@ -248,7 +248,11 @@ impl StageIndicator {
     }
 
     /// Replaces the placeholder message in-place with the final rich reply.
-    pub async fn finish_with_reply(&self, plain_text: &str, html_reply: &str) -> Option<OwnedEventId> {
+    pub async fn finish_with_reply(
+        &self,
+        plain_text: &str,
+        html_reply: &str,
+    ) -> Option<OwnedEventId> {
         if let Some(ref target_id) = self.event_id {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_reply)
@@ -315,7 +319,10 @@ mod tests {
 
     #[test]
     fn test_tool_to_stage_label_mappings() {
-        assert_eq!(tool_to_stage_label("record_finance_entry"), "⚡ 正在记录支出...");
+        assert_eq!(
+            tool_to_stage_label("record_finance_entry"),
+            "⚡ 正在记录支出..."
+        );
         assert_eq!(tool_to_stage_label("set_reminder"), "⚡ 正在设定提醒...");
         assert_eq!(tool_to_stage_label("search_web"), "🌐 正在联网搜索验证...");
         assert_eq!(tool_to_stage_label("add_todo"), "⚡ 正在更新待办事项...");
@@ -335,14 +342,21 @@ mod tests {
     #[tokio::test]
     async fn test_stream_throttler_accumulation() {
         let reporter = StageReporter::noop();
-        let mut throttler = reporter.throttler().with_interval(Duration::from_millis(50));
+        let mut throttler = reporter
+            .throttler()
+            .with_interval(Duration::from_millis(50));
         assert_eq!(throttler.accumulated(), "");
 
         throttler.push_delta("Hello").await;
-        throttler.push_delta(" world! This is a longer stream test.").await;
+        throttler
+            .push_delta(" world! This is a longer stream test.")
+            .await;
         assert!(throttler.accumulated().contains("Hello world!"));
 
         throttler.flush().await;
-        assert_eq!(throttler.accumulated(), "Hello world! This is a longer stream test.");
+        assert_eq!(
+            throttler.accumulated(),
+            "Hello world! This is a longer stream test."
+        );
     }
 }

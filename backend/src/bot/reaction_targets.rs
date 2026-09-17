@@ -71,13 +71,12 @@ pub async fn delete_target_by_entity(
     entity_type: &str,
     entity_id: i64,
 ) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?",
-    )
-    .bind(entity_type)
-    .bind(entity_id)
-    .execute(pool)
-    .await?;
+    let res =
+        sqlx::query("DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?")
+            .bind(entity_type)
+            .bind(entity_id)
+            .execute(pool)
+            .await?;
 
     Ok(res.rows_affected())
 }
@@ -143,7 +142,10 @@ pub async fn record_ai_tool_target(
         }
     } else if func_name == "add_todo" {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(result_str) {
-            let title = val.get("title").or_else(|| val.get("text")).and_then(|v| v.as_str());
+            let title = val
+                .get("title")
+                .or_else(|| val.get("text"))
+                .and_then(|v| v.as_str());
             if let (Some(id), Some(t)) = (val.get("id").and_then(|v| v.as_i64()), title) {
                 let _ = record_target(pool, eid, room_id, "todo", id, owner_id, t).await;
             }
@@ -216,7 +218,10 @@ pub async fn resolve_untracked_target(
     let timeline_event = match room.event(&eid).await {
         Ok(ev) => ev,
         Err(err) => {
-            warn!("resolve_untracked_target: failed fetching event {}: {:?}", target_event_id, err);
+            warn!(
+                "resolve_untracked_target: failed fetching event {}: {:?}",
+                target_event_id, err
+            );
             return None;
         }
     };
@@ -227,19 +232,28 @@ pub async fn resolve_untracked_target(
                 Ok(decrypted) => match decrypted.event.deserialize() {
                     Ok(ev) => ev,
                     Err(err) => {
-                        warn!("resolve_untracked_target: failed deserializing decrypted {}: {:?}", target_event_id, err);
+                        warn!(
+                            "resolve_untracked_target: failed deserializing decrypted {}: {:?}",
+                            target_event_id, err
+                        );
                         return None;
                     }
                 },
                 Err(err) => {
-                    warn!("resolve_untracked_target: failed decrypting {}: {:?}", target_event_id, err);
+                    warn!(
+                        "resolve_untracked_target: failed decrypting {}: {:?}",
+                        target_event_id, err
+                    );
                     return None;
                 }
             }
         }
         Ok(ev) => ev,
         Err(err) => {
-            warn!("resolve_untracked_target: failed deserializing event {}: {:?}", target_event_id, err);
+            warn!(
+                "resolve_untracked_target: failed deserializing event {}: {:?}",
+                target_event_id, err
+            );
             return None;
         }
     };
@@ -273,7 +287,10 @@ pub async fn resolve_untracked_target(
                             &parent_target.title,
                         )
                         .await;
-                        info!("Resolved untracked event {} via related parent target {}", target_event_id, pid);
+                        info!(
+                            "Resolved untracked event {} via related parent target {}",
+                            target_event_id, pid
+                        );
                         return Some(parent_target);
                     }
                 }
@@ -281,11 +298,19 @@ pub async fn resolve_untracked_target(
 
             match msg.content.msgtype {
                 MessageType::Text(ref t) => {
-                    let f = t.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                    let f = t
+                        .formatted
+                        .as_ref()
+                        .map(|x| x.body.as_str())
+                        .unwrap_or_default();
                     format!("{}\n{}", t.body, f)
                 }
                 MessageType::Notice(ref n) => {
-                    let f = n.formatted.as_ref().map(|x| x.body.as_str()).unwrap_or_default();
+                    let f = n
+                        .formatted
+                        .as_ref()
+                        .map(|x| x.body.as_str())
+                        .unwrap_or_default();
                     format!("{}\n{}", n.body, f)
                 }
                 _ => return None,
@@ -418,20 +443,14 @@ mod tests {
     fn test_parse_todo_reply() {
         let reply = "✅ Added Task <b>#42</b> for Alice: <i>\"Buy groceries\"</i> [Med]";
         let parsed = parse_entity_from_reply(reply);
-        assert_eq!(
-            parsed,
-            Some(("todo", 42, "Buy groceries".to_string()))
-        );
+        assert_eq!(parsed, Some(("todo", 42, "Buy groceries".to_string())));
     }
 
     #[test]
     fn test_parse_reminder_reply() {
         let reply = "⏱️ <b>Reminder #10 set!</b> I will remind you in <b>10 minutes</b> for: <i>\"Call doctor\"</i>";
         let parsed = parse_entity_from_reply(reply);
-        assert_eq!(
-            parsed,
-            Some(("reminder", 10, "Call doctor".to_string()))
-        );
+        assert_eq!(parsed, Some(("reminder", 10, "Call doctor".to_string())));
     }
 
     #[tokio::test]
@@ -486,7 +505,15 @@ mod tests {
 
         // 1. AI creates reminder
         let rem_json = r#"{"id":12,"message":"Have my hair cut","room_id":"!room:x"}"#;
-        record_ai_tool_target(&pool, Some("$rem_ev"), "!room:x", "@bob:x", "set_reminder", rem_json).await;
+        record_ai_tool_target(
+            &pool,
+            Some("$rem_ev"),
+            "!room:x",
+            "@bob:x",
+            "set_reminder",
+            rem_json,
+        )
+        .await;
 
         let rem_target = get_target(&pool, "$rem_ev").await.unwrap().unwrap();
         assert_eq!(rem_target.entity_type, "reminder");
@@ -495,7 +522,15 @@ mod tests {
 
         // 2. AI creates todo
         let todo_json = r#"{"id":42,"title":"Buy groceries","room_id":"!room:x"}"#;
-        record_ai_tool_target(&pool, Some("$todo_ev"), "!room:x", "@bob:x", "add_todo", todo_json).await;
+        record_ai_tool_target(
+            &pool,
+            Some("$todo_ev"),
+            "!room:x",
+            "@bob:x",
+            "add_todo",
+            todo_json,
+        )
+        .await;
 
         let todo_target = get_target(&pool, "$todo_ev").await.unwrap().unwrap();
         assert_eq!(todo_target.entity_type, "todo");
@@ -520,7 +555,9 @@ mod tests {
         .unwrap();
 
         // Copy to edit/reply event ID
-        let copied = copy_targets(&pool, "$placeholder", "$edit_reply").await.unwrap();
+        let copied = copy_targets(&pool, "$placeholder", "$edit_reply")
+            .await
+            .unwrap();
         assert_eq!(copied, 1);
 
         let edit_target = get_target(&pool, "$edit_reply").await.unwrap().unwrap();
@@ -529,7 +566,13 @@ mod tests {
         assert_eq!(edit_target.title, "Have my hair cut");
 
         // Link full turn (placeholder, final bot reply, user prompt event)
-        link_turn_targets(&pool, Some("$placeholder"), Some("$edit_reply"), "$user_prompt").await;
+        link_turn_targets(
+            &pool,
+            Some("$placeholder"),
+            Some("$edit_reply"),
+            "$user_prompt",
+        )
+        .await;
         let user_target = get_target(&pool, "$user_prompt").await.unwrap().unwrap();
         assert_eq!(user_target.entity_type, "reminder");
         assert_eq!(user_target.entity_id, 12);

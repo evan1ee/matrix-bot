@@ -15,9 +15,12 @@ const TOKENS_DOWNLOAD_URL: &str =
 /// Ensures SenseVoiceSmall ONNX model and tokens are present in `model_dir`,
 /// downloading them automatically from Hugging Face if needed.
 pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError> {
-    tokio::fs::create_dir_all(model_dir)
-        .await
-        .map_err(|e| VoiceError::Io(format!("Failed to create voice model dir {:?}: {}", model_dir, e)))?;
+    tokio::fs::create_dir_all(model_dir).await.map_err(|e| {
+        VoiceError::Io(format!(
+            "Failed to create voice model dir {:?}: {}",
+            model_dir, e
+        ))
+    })?;
 
     let files = [
         (SENSEVOICE_MODEL_FILE, MODEL_DOWNLOAD_URL),
@@ -27,7 +30,10 @@ pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError
     for (name, url) in files {
         let dest = model_dir.join(name);
         if !dest.exists() {
-            info!("SenseVoice model asset {} missing; downloading from {}", name, url);
+            info!(
+                "SenseVoice model asset {} missing; downloading from {}",
+                name, url
+            );
             download_model(url, &dest).await?;
             info!("SenseVoice asset {} downloaded to {:?}", name, dest);
         }
@@ -56,10 +62,9 @@ async fn download_model(url: &str, dest: &Path) -> Result<(), VoiceError> {
         )));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| VoiceError::ModelDownload(format!("Failed to read stream from {}: {}", url, e)))?;
+    let bytes = response.bytes().await.map_err(|e| {
+        VoiceError::ModelDownload(format!("Failed to read stream from {}: {}", url, e))
+    })?;
 
     let tmp_dest = dest.with_extension("tmp");
     tokio::fs::write(&tmp_dest, &bytes)
@@ -118,18 +123,16 @@ pub fn run_transcription_sync(
         ..Default::default()
     };
 
-    let recognizer = sherpa_onnx::OfflineRecognizer::create(&recognizer_config).ok_or_else(|| {
-        VoiceError::Inference("Failed to create sherpa-onnx OfflineRecognizer".to_string())
-    })?;
+    let recognizer =
+        sherpa_onnx::OfflineRecognizer::create(&recognizer_config).ok_or_else(|| {
+            VoiceError::Inference("Failed to create sherpa-onnx OfflineRecognizer".to_string())
+        })?;
 
     let stream = recognizer.create_stream();
     stream.accept_waveform(TARGET_SAMPLE_RATE as i32, samples);
     recognizer.decode(&stream);
 
-    let raw_text = stream
-        .get_result()
-        .map(|r| r.text)
-        .unwrap_or_default();
+    let raw_text = stream.get_result().map(|r| r.text).unwrap_or_default();
 
     let cleaned_text = clean_sensevoice_output(&raw_text);
     let duration_secs = samples.len() as f32 / TARGET_SAMPLE_RATE as f32;

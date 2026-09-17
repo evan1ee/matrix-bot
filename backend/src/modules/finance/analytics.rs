@@ -117,7 +117,10 @@ impl FinanceAnalyticsRepository {
             month_keys.push(format!("{y:04}-{m:02}"));
         }
 
-        let earliest_month = month_keys.first().cloned().unwrap_or_else(|| "1970-01".into());
+        let earliest_month = month_keys
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "1970-01".into());
         let cutoff_start = format!("{earliest_month}-01 00:00:00");
 
         // Query transactions aggregated by month and direction
@@ -300,7 +303,19 @@ impl FinanceAnalyticsRepository {
         let report = Self::get_analytics_report(pool, &share.owner_id, None, months).await?;
 
         // Query sanitized recent transactions for public audit ledger (max 50)
-        let tx_rows = sqlx::query_as::<_, (i64, String, i64, String, i64, Option<String>, Option<String>, DateTime<Utc>)>(
+        let tx_rows = sqlx::query_as::<
+            _,
+            (
+                i64,
+                String,
+                i64,
+                String,
+                i64,
+                Option<String>,
+                Option<String>,
+                DateTime<Utc>,
+            ),
+        >(
             r#"
             SELECT t.id, t.direction, t.amount_minor, t.currency, t.currency_exponent,
                    c.name AS category_name, t.note, t.occurred_at
@@ -318,16 +333,18 @@ impl FinanceAnalyticsRepository {
 
         let recent_transactions = tx_rows
             .into_iter()
-            .map(|(id, dir, amt, cur, exp, cat, note, occ)| PublicTransaction {
-                id,
-                direction: dir,
-                amount_minor: amt,
-                currency: cur,
-                currency_exponent: exp,
-                category_name: cat,
-                note,
-                occurred_at: occ,
-            })
+            .map(
+                |(id, dir, amt, cur, exp, cat, note, occ)| PublicTransaction {
+                    id,
+                    direction: dir,
+                    amount_minor: amt,
+                    currency: cur,
+                    currency_exponent: exp,
+                    category_name: cat,
+                    note,
+                    occurred_at: occ,
+                },
+            )
             .collect();
 
         Ok(Some(PublicFinanceReport {
@@ -437,11 +454,10 @@ mod tests {
         assert_eq!(share.title.as_deref(), Some("Alice's Public Budget"));
 
         // Fetch public report by token
-        let pub_report =
-            FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
-                .await
-                .unwrap()
-                .expect("public report should exist");
+        let pub_report = FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
+            .await
+            .unwrap()
+            .expect("public report should exist");
         assert_eq!(pub_report.title, "Alice's Public Budget");
         assert_eq!(pub_report.recent_transactions.len(), 2);
 

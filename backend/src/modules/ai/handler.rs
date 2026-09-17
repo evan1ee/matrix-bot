@@ -10,8 +10,8 @@ pub use super::config_cmd::{
     format_error, format_help, handle_ai_subcommand, handle_reset, handle_set_history,
     handle_set_model, handle_show_config,
 };
-pub use super::prompt::{format_response, render_bot_footer};
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
+pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
@@ -31,16 +31,33 @@ pub struct AiTurnResult {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
-    pool: &SqlitePool, broadcaster: Option<&EventBroadcaster>,
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
-    room_id: &str, owner_id: &str, sender_name: &str,
-    command: &str, raw_args: &str, full_body: &str,
-    is_direct: bool, is_mentioned: bool,
+    room_id: &str,
+    owner_id: &str,
+    sender_name: &str,
+    command: &str,
+    raw_args: &str,
+    full_body: &str,
+    is_direct: bool,
+    is_mentioned: bool,
     quoted: Option<&crate::bot::quote::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
-        pool, broadcaster, client_handle, room_id, owner_id, sender_name,
-        command, raw_args, full_body, is_direct, is_mentioned, quoted, None,
+        pool,
+        broadcaster,
+        client_handle,
+        room_id,
+        owner_id,
+        sender_name,
+        command,
+        raw_args,
+        full_body,
+        is_direct,
+        is_mentioned,
+        quoted,
+        None,
     )
     .await
 }
@@ -223,7 +240,8 @@ pub async fn run_ai_turn_with_stage(
 
     let mut chat_messages = Vec::new();
 
-    let sys_prompt = super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
+    let sys_prompt =
+        super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),
@@ -303,7 +321,11 @@ pub async fn run_ai_turn_with_stage(
 
                     chat_messages.push(ChatCompletionMessage {
                         role: "assistant".to_string(),
-                        content: if content.is_empty() { None } else { Some(content) },
+                        content: if content.is_empty() {
+                            None
+                        } else {
+                            Some(content)
+                        },
                         tool_calls: Some(tool_calls.clone()),
                         tool_call_id: None,
                         name: None,
@@ -350,8 +372,18 @@ pub async fn run_ai_turn_with_stage(
                     for (tool_call_id, func_name, result_str) in execution_results {
                         tool_calls_executed.push(func_name.clone());
 
-                        let eid = stage_reporter.and_then(|r| r.event_id()).map(|e| e.as_str());
-                        crate::bot::reaction_targets::record_ai_tool_target(pool, eid, room_id, owner_id, &func_name, &result_str).await;
+                        let eid = stage_reporter
+                            .and_then(|r| r.event_id())
+                            .map(|e| e.as_str());
+                        crate::bot::reaction_targets::record_ai_tool_target(
+                            pool,
+                            eid,
+                            room_id,
+                            owner_id,
+                            &func_name,
+                            &result_str,
+                        )
+                        .await;
 
                         // Persist tool result message in SQLite
                         let _ = AiRepository::add_message(
@@ -460,7 +492,16 @@ pub async fn run_ai_turn_with_stage(
         final_content = "⚠️ **Action Not Recorded**: The AI assistant generated a text summary but did not execute the database tool. Please retry sending the image or use the `!ai` command to log the expense.".to_string();
     }
 
-    if let Err(e) = AiRepository::add_message(pool, &conversation.id, "assistant", &final_content, None, None).await {
+    if let Err(e) = AiRepository::add_message(
+        pool,
+        &conversation.id,
+        "assistant",
+        &final_content,
+        None,
+        None,
+    )
+    .await
+    {
         warn!("Failed to persist assistant message: {}", e);
     }
 

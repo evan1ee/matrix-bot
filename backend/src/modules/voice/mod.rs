@@ -60,24 +60,24 @@ pub async fn process_audio_event(
     };
 
     // 2. Run offline speech recognition via sherpa-onnx + SenseVoice
-    let transcription = match sherpa::run_transcription(
-        samples,
-        config.model_dir.clone(),
-        config.language.clone(),
-    )
-    .await
-    {
-        Ok(res) => res,
-        Err(err) => {
-            warn!("Voice transcription failed for owner {}: {:?}", owner_id, err);
-            return format!(
-                "⚠️ <b>语音转写服务异常</b><br/>\
+    let transcription =
+        match sherpa::run_transcription(samples, config.model_dir.clone(), config.language.clone())
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                warn!(
+                    "Voice transcription failed for owner {}: {:?}",
+                    owner_id, err
+                );
+                return format!(
+                    "⚠️ <b>语音转写服务异常</b><br/>\
                  • <b>原因:</b> 语音识别引擎暂时不可用（{}）<br/>\
                  • <b>建议:</b> 请稍后重试，或直接输入文字。",
-                html_escape(&err.to_string())
-            );
-        }
-    };
+                    html_escape(&err.to_string())
+                );
+            }
+        };
 
     if transcription.is_empty() {
         return "⚠️ <b>语音未能识别</b><br/>\

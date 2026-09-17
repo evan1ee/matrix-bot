@@ -94,7 +94,10 @@ pub fn register_reaction_handler(
             {
                 Ok(oid) => oid,
                 Err(err) => {
-                    warn!("Failed resolving account for reaction sender {}: {:?}", ev.sender, err);
+                    warn!(
+                        "Failed resolving account for reaction sender {}: {:?}",
+                        ev.sender, err
+                    );
                     return;
                 }
             };
@@ -123,7 +126,10 @@ pub fn register_reaction_handler(
                     }
                 }
                 Err(err) => {
-                    error!("Error querying reaction target {}: {:?}", target_event_id, err);
+                    error!(
+                        "Error querying reaction target {}: {:?}",
+                        target_event_id, err
+                    );
                     return;
                 }
             };
@@ -221,7 +227,10 @@ async fn handle_done(
                 })
             }
             Err(err) => {
-                error!("Failed marking reminder #{} done: {:?}", target.entity_id, err);
+                error!(
+                    "Failed marking reminder #{} done: {:?}",
+                    target.entity_id, err
+                );
                 None
             }
         },
@@ -247,7 +256,10 @@ async fn handle_delete(
                 }
                 Some(ReactionOutcome {
                     ack_emoji: "🗑️",
-                    reply_html: format!("🗑️ Deleted task: <i>\"{}\"</i>", html_escape(&target.title)),
+                    reply_html: format!(
+                        "🗑️ Deleted task: <i>\"{}\"</i>",
+                        html_escape(&target.title)
+                    ),
                 })
             }
             Ok(false) => None,
@@ -285,7 +297,10 @@ async fn handle_delete(
                 }
                 Ok(_) => None,
                 Err(err) => {
-                    error!("Failed cancelling reminder #{}: {:?}", target.entity_id, err);
+                    error!(
+                        "Failed cancelling reminder #{}: {:?}",
+                        target.entity_id, err
+                    );
                     None
                 }
             }
@@ -304,7 +319,8 @@ async fn handle_delay(
             match TodoRepository::find_owned(pool, target.entity_id, &target.owner_id).await {
                 Ok(Some(item)) => {
                     let new_due = item.due_at.unwrap_or_else(Utc::now) + Duration::days(1);
-                    match TodoRepository::set_due_date(pool, target.entity_id, Some(new_due)).await {
+                    match TodoRepository::set_due_date(pool, target.entity_id, Some(new_due)).await
+                    {
                         Ok(Some(updated)) => {
                             let _ = crate::modules::todo::due_reminder::sync(
                                 pool,
@@ -326,7 +342,10 @@ async fn handle_delay(
                         }
                         Ok(None) => None,
                         Err(err) => {
-                            error!("Failed updating todo #{} due date: {:?}", target.entity_id, err);
+                            error!(
+                                "Failed updating todo #{} due date: {:?}",
+                                target.entity_id, err
+                            );
                             None
                         }
                     }
@@ -345,11 +364,15 @@ async fn handle_delay(
                     if let Err(err) =
                         ReminderRepository::reschedule(pool, target.entity_id, new_trigger).await
                     {
-                        error!("Failed rescheduling reminder #{}: {:?}", target.entity_id, err);
+                        error!(
+                            "Failed rescheduling reminder #{}: {:?}",
+                            target.entity_id, err
+                        );
                         return None;
                     }
                     if let Ok(Some(updated_rem)) =
-                        ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id).await
+                        ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id)
+                            .await
                     {
                         if let Some(bc) = broadcaster {
                             bc.send(SystemEvent::ReminderUpdated(updated_rem));
@@ -417,7 +440,10 @@ async fn handle_celebrate(
                 })
             }
             Err(err) => {
-                error!("Failed marking reminder #{} done: {:?}", target.entity_id, err);
+                error!(
+                    "Failed marking reminder #{} done: {:?}",
+                    target.entity_id, err
+                );
                 None
             }
         },
@@ -442,11 +468,7 @@ async fn send_reply(room: &Room, html: &str) -> Option<matrix_sdk::ruma::OwnedEv
     match room.send(content).await {
         Ok(resp) => Some(resp.event_id),
         Err(err) => {
-            error!(
-                "Failed sending reply to room {}: {:?}",
-                room.room_id(),
-                err
-            );
+            error!("Failed sending reply to room {}: {:?}", room.room_id(), err);
             None
         }
     }
@@ -471,7 +493,10 @@ mod tests {
         assert_eq!(parse_reaction_emoji("👎️"), Some(AllowedReaction::Delete));
         assert_eq!(parse_reaction_emoji("👍"), Some(AllowedReaction::Done));
         assert_eq!(parse_reaction_emoji("👎"), Some(AllowedReaction::Delete));
-        assert_eq!(parse_reaction_emoji("😝"), Some(AllowedReaction::DelayOneDay));
+        assert_eq!(
+            parse_reaction_emoji("😝"),
+            Some(AllowedReaction::DelayOneDay)
+        );
         assert_eq!(parse_reaction_emoji("🎉"), Some(AllowedReaction::Celebrate));
 
         assert_eq!(parse_reaction_emoji("❤️"), None);

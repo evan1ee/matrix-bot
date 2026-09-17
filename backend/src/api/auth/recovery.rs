@@ -1,6 +1,5 @@
 //! Endpoint for redeeming account recovery codes to regain access.
 
-use std::net::SocketAddr;
 use axum::{
     extract::{ConnectInfo, State},
     http::HeaderMap,
@@ -9,6 +8,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+use std::net::SocketAddr;
 use utoipa::ToSchema;
 
 use crate::accounts::{
@@ -268,7 +268,9 @@ mod tests {
             )
             .await;
             // First 5 attempts fail with unauthorized/not found (401)
-            let Err(err) = res else { panic!("expected failure") };
+            let Err(err) = res else {
+                panic!("expected failure")
+            };
             assert_ne!(err.status, StatusCode::TOO_MANY_REQUESTS);
         }
 
@@ -286,7 +288,9 @@ mod tests {
         )
         .await;
 
-        let Err(err) = res_limited else { panic!("expected rate limit error") };
+        let Err(err) = res_limited else {
+            panic!("expected rate limit error")
+        };
         assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
     }
 }

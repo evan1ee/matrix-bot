@@ -1,6 +1,6 @@
-use std::io::Cursor;
 use ogg::PacketReader;
 use opus_decoder::OpusDecoder;
+use std::io::Cursor;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -18,7 +18,9 @@ pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// into a mono 16kHz normalized `f32` sample buffer ready for SenseVoiceSmall inference.
 pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
     if bytes.is_empty() {
-        return Err(VoiceError::AudioDecode("Empty audio byte buffer".to_string()));
+        return Err(VoiceError::AudioDecode(
+            "Empty audio byte buffer".to_string(),
+        ));
     }
 
     let decode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -26,14 +28,20 @@ pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         if is_ogg_container(bytes) {
             match decode_ogg_opus(bytes) {
                 Ok(samples) if !samples.is_empty() => {
-                    debug!("Decoded {} 16kHz mono samples via Ogg Opus decoder", samples.len());
+                    debug!(
+                        "Decoded {} 16kHz mono samples via Ogg Opus decoder",
+                        samples.len()
+                    );
                     return Ok(samples);
                 }
                 Ok(_) => {
                     debug!("Ogg Opus decoder returned 0 samples, trying generic fallback");
                 }
                 Err(err) => {
-                    debug!("Ogg Opus decode attempt returned: {:?}, attempting fallback", err);
+                    debug!(
+                        "Ogg Opus decode attempt returned: {:?}, attempting fallback",
+                        err
+                    );
                 }
             }
         }
@@ -46,7 +54,9 @@ pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         Ok(res) => res,
         Err(panic_err) => {
             warn!("Audio decoder panicked on input: {:?}", panic_err);
-            Err(VoiceError::AudioDecode("Audio decoding failed due to an internal decoder error".to_string()))
+            Err(VoiceError::AudioDecode(
+                "Audio decoding failed due to an internal decoder error".to_string(),
+            ))
         }
     }
 }
@@ -94,7 +104,10 @@ pub fn decode_ogg_opus(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
                 }
                 Ok(None) => break,
                 Err(err) => {
-                    return Err(VoiceError::AudioDecode(format!("Ogg packet error: {:?}", err)));
+                    return Err(VoiceError::AudioDecode(format!(
+                        "Ogg packet error: {:?}",
+                        err
+                    )));
                 }
             }
         }
@@ -106,7 +119,9 @@ pub fn decode_ogg_opus(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         Ok(res) => res,
         Err(panic_err) => {
             warn!("Opus decoding loop panicked: {:?}", panic_err);
-            Err(VoiceError::AudioDecode("Internal Opus packet decoding error".to_string()))
+            Err(VoiceError::AudioDecode(
+                "Internal Opus packet decoding error".to_string(),
+            ))
         }
     }
 }
@@ -186,7 +201,11 @@ pub fn decode_generic_audio(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
     if sample_rate == TARGET_SAMPLE_RATE || raw_mono_samples.is_empty() {
         Ok(raw_mono_samples)
     } else {
-        Ok(resample_linear(&raw_mono_samples, sample_rate, TARGET_SAMPLE_RATE))
+        Ok(resample_linear(
+            &raw_mono_samples,
+            sample_rate,
+            TARGET_SAMPLE_RATE,
+        ))
     }
 }
 

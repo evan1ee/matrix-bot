@@ -654,9 +654,10 @@ mod tests {
         assert!(reply.contains("/account"));
 
         // Verify passkeys were NOT deleted from database
-        let creds_after = crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
-            .await
-            .unwrap();
+        let creds_after =
+            crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
+                .await
+                .unwrap();
         assert_eq!(creds_after.len(), 2);
 
         // Unlink sessions

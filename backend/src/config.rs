@@ -141,8 +141,7 @@ impl Config {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("data/voice_models"));
 
-        let voice_language = env::var("VOICE_LANGUAGE")
-            .unwrap_or_else(|_| "auto".to_string());
+        let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
 
         Ok(Self {
             homeserver,

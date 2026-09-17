@@ -274,7 +274,8 @@ mod tests {
         let bypass_input = "<a href=\"#\" autofocus onfocus=\"alert(1)\">Click</a> <font onanimationstart=\"steal()\">text</font> <span ontoggle=\"leak()\">badge</span>";
         let bypass_sanitized = sanitize_html(bypass_input);
         assert!(!bypass_sanitized.contains("<a href=\"#\" autofocus onfocus=\"alert(1)\">"));
-        assert!(bypass_sanitized.contains("&lt;a href=&quot;#&quot; autofocus onfocus=&quot;alert(1)&quot;&gt;"));
+        assert!(bypass_sanitized
+            .contains("&lt;a href=&quot;#&quot; autofocus onfocus=&quot;alert(1)&quot;&gt;"));
         assert!(!bypass_sanitized.contains("<font onanimationstart"));
         assert!(!bypass_sanitized.contains("<span ontoggle"));
     }

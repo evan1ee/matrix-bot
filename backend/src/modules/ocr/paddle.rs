@@ -77,10 +77,9 @@ async fn download_model(url: &str, dest: &Path) -> Result<(), OcrError> {
         )));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| OcrError::ModelDownload(format!("Failed to read stream from {}: {}", url, e)))?;
+    let bytes = response.bytes().await.map_err(|e| {
+        OcrError::ModelDownload(format!("Failed to read stream from {}: {}", url, e))
+    })?;
 
     let tmp_dest = dest.with_extension("tmp");
     tokio::fs::write(&tmp_dest, &bytes)
@@ -96,8 +95,8 @@ async fn download_model(url: &str, dest: &Path) -> Result<(), OcrError> {
 
 /// Synchronous text recognition on raw image bytes using PaddleOCR ONNX models.
 pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, OcrError> {
-    let dynamic_img = image::load_from_memory(image_bytes)
-        .map_err(|e| OcrError::ImageDecode(e.to_string()))?;
+    let dynamic_img =
+        image::load_from_memory(image_bytes).map_err(|e| OcrError::ImageDecode(e.to_string()))?;
     let rgb_img = dynamic_img.to_rgb8();
 
     let resolved_dir = resolve_model_dir(model_dir);
