@@ -766,6 +766,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/net-worth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_net_worth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/share": {
         parameters: {
             query?: never;
@@ -1678,6 +1694,23 @@ export interface components {
             raw_token: string;
             webhook: components["schemas"]["Webhook"];
         };
+        CurrencyNetWorthBreakdown: {
+            /** Format: int64 */
+            cash_deposits_minor: number;
+            /** Format: int64 */
+            converted_minor: number;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: double */
+            fx_rate_to_primary: number;
+            /** Format: int64 */
+            ledger_cash_minor: number;
+            /** Format: int64 */
+            portfolio_market_value_minor: number;
+            /** Format: int64 */
+            total_minor: number;
+        };
         CurrencySpendSummary: {
             currency: string;
             /** Format: int64 */
@@ -1935,6 +1968,25 @@ export interface components {
             month: string;
             /** Format: int64 */
             net_minor: number;
+        };
+        NetWorthResponse: {
+            /** Format: int64 */
+            cash_deposits_minor: number;
+            currencies: components["schemas"]["CurrencyNetWorthBreakdown"][];
+            fx_rates: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            ledger_cash_minor: number;
+            /** Format: int64 */
+            portfolio_market_value_minor: number;
+            primary_currency: string;
+            /** Format: int64 */
+            primary_currency_exponent: number;
+            /** Format: int64 */
+            total_net_worth_minor: number;
+            /** Format: date-time */
+            updated_at: string;
         };
         PasskeySummary: {
             /** Format: date-time */
@@ -3993,6 +4045,35 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_net_worth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unified estimated net worth across ledger, portfolio, and cash deposits */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetWorthResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -5,9 +5,11 @@ use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
 pub mod analytics;
+pub mod fx;
 pub mod handler;
 pub mod models;
 pub mod money;
+pub mod net_worth;
 pub mod repository;
 
 pub struct FinanceModule;

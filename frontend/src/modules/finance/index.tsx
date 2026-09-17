@@ -20,6 +20,7 @@ import {
 import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { PublicTransparencyView } from './components/PublicTransparencyView';
+import { NetWorthStatStrip } from './components/NetWorthStatStrip';
 import {
   CURRENCY_OPTIONS,
   formatDateInZone,
@@ -294,9 +295,10 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
   const [newCategory, setNewCategory] = useState('');
   const [categoryError, setCategoryError] = useState<string | null>(null);
 
+  const directionQuery = filter !== 'all' ? `&direction=${filter}` : '';
   const { data: ledger, isLoading } = useQuery<LedgerResponse>({
-    queryKey: ['transactions'],
-    queryFn: () => fetchApi<LedgerResponse>('/finance/transactions?limit=200'),
+    queryKey: ['transactions', filter],
+    queryFn: () => fetchApi<LedgerResponse>(`/finance/transactions?limit=200${directionQuery}`),
   });
 
   const { data: categories } = useQuery<Category[]>({
@@ -389,9 +391,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
     });
   };
 
-  const items = (ledger?.items ?? []).filter((tx) =>
-    filter === 'all' ? true : tx.direction === filter
-  );
+  const items = ledger?.items ?? [];
 
   return (
     <div className="space-y-6">
@@ -429,6 +429,9 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
         <PublicTransparencyView currency={currency} />
       ) : (
         <>
+          {/* Unified cross-currency net worth header widget */}
+          <NetWorthStatStrip />
+
           {/* Per-currency summary — currencies are never added together. */}
           {summary && summary.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="finance-summary">
@@ -769,6 +772,7 @@ export const financeModule: FrontendModule = {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
       queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['net-worth'] });
     }
     if (event.type === 'CategoryCreated' || event.type === 'CategoryDeleted') {
       queryClient.invalidateQueries({ queryKey: ['finance-categories'] });

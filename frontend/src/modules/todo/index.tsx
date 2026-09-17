@@ -344,9 +344,12 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const completedQuery =
+    filter === 'active' ? '&completed=false' : filter === 'completed' ? '&completed=true' : '';
+
   const { data, isLoading } = useQuery<TodoListResponse>({
-    queryKey: ['todos'],
-    queryFn: () => fetchApi<TodoListResponse>('/todos?limit=100'),
+    queryKey: ['todos', filter],
+    queryFn: () => fetchApi<TodoListResponse>(`/todos?limit=100${completedQuery}`),
   });
 
   // Rooms the bot and this account are both in. Local (@web-*) accounts share
@@ -396,7 +399,33 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
         method: 'PATCH',
         body: JSON.stringify({ completed, priority }),
       }),
-    onSuccess: () => {
+    onMutate: async ({ id, completed, priority }) => {
+      await queryClient.cancelQueries({ queryKey: ['todos'] });
+      const previousTodos = queryClient.getQueriesData<TodoListResponse>({ queryKey: ['todos'] });
+      queryClient.setQueriesData<TodoListResponse>({ queryKey: ['todos'] }, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          items: old.items.map((item) => {
+            if (item.id !== id) return item;
+            return {
+              ...item,
+              ...(completed !== undefined ? { completed } : {}),
+              ...(priority !== undefined ? { priority } : {}),
+            };
+          }),
+        };
+      });
+      return { previousTodos };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousTodos) {
+        context.previousTodos.forEach(([key, oldData]) => {
+          queryClient.setQueryData(key, oldData);
+        });
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['todos'] });
     },
   });
@@ -455,11 +484,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
     });
   };
 
-  const filteredItems = (data?.items || []).filter((item) => {
-    if (filter === 'active') return !item.completed;
-    if (filter === 'completed') return item.completed;
-    return true;
-  });
+  const filteredItems = data?.items || [];
 
   return (
     <div className="space-y-6">

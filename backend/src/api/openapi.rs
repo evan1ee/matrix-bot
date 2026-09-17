@@ -3,7 +3,7 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, health, portfolio, portfolio_alerts,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth, health, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
     settings, sse, todos, webhooks,
 };
@@ -68,6 +68,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         finance::update_transaction,
         finance::delete_transaction,
         finance::summary,
+        finance_net_worth::get_net_worth,
         finance::list_categories,
         finance::create_category,
         finance::delete_category,
@@ -183,6 +184,8 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
+            crate::modules::finance::net_worth::NetWorthResponse,
+            crate::modules::finance::net_worth::CurrencyNetWorthBreakdown,
             crate::modules::finance::analytics::MonthlyCashflowBucket,
             crate::modules::finance::analytics::ExpenseCategorySlice,
             crate::modules::finance::analytics::FinanceAnalyticsReport,

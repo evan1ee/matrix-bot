@@ -1928,6 +1928,41 @@
         ]
       }
     },
+    "/api/v1/finance/net-worth": {
+      "get": {
+        "tags": [
+          "finance_net_worth"
+        ],
+        "operationId": "get_net_worth",
+        "responses": {
+          "200": {
+            "description": "Unified estimated net worth across ledger, portfolio, and cash deposits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetWorthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/finance/share": {
       "get": {
         "tags": [
@@ -5504,6 +5539,52 @@
           }
         }
       },
+      "CurrencyNetWorthBreakdown": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "ledger_cash_minor",
+          "portfolio_market_value_minor",
+          "cash_deposits_minor",
+          "total_minor",
+          "fx_rate_to_primary",
+          "converted_minor"
+        ],
+        "properties": {
+          "cash_deposits_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "converted_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fx_rate_to_primary": {
+            "type": "number",
+            "format": "double"
+          },
+          "ledger_cash_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "portfolio_market_value_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "CurrencySpendSummary": {
         "type": "object",
         "required": [
@@ -6186,6 +6267,62 @@
           "net_minor": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "NetWorthResponse": {
+        "type": "object",
+        "required": [
+          "primary_currency",
+          "primary_currency_exponent",
+          "total_net_worth_minor",
+          "ledger_cash_minor",
+          "portfolio_market_value_minor",
+          "cash_deposits_minor",
+          "currencies",
+          "fx_rates",
+          "updated_at"
+        ],
+        "properties": {
+          "cash_deposits_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrencyNetWorthBreakdown"
+            }
+          },
+          "fx_rates": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "ledger_cash_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "portfolio_market_value_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "primary_currency": {
+            "type": "string"
+          },
+          "primary_currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_net_worth_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

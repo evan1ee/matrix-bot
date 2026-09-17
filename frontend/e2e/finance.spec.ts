@@ -365,3 +365,24 @@ test('renders unauthenticated public transparency report via token', async ({ an
   await expect(anonApp.getByRole('img', { name: 'Expense breakdown donut chart' })).toBeVisible();
 });
 
+test('renders cross-currency net worth stat strip in ledger view', async ({ app, api }) => {
+  api.seedTransaction({
+    direction: 'income',
+    amount_minor: 125000,
+    currency: 'USD',
+    currency_exponent: 2,
+    note: 'Consulting',
+  });
+
+  await gotoApp(app, TAB.finance);
+
+  // Unified net worth widget
+  const strip = app.getByTestId('net-worth-stat-strip');
+  await expect(strip).toBeVisible();
+  await expect(strip.getByText('ESTIMATED NET WORTH')).toBeVisible();
+  await expect(strip.getByText('LEDGER CASH')).toBeVisible();
+  await expect(strip.getByText('INVESTMENTS')).toBeVisible();
+  await expect(strip.getByText('PORTFOLIO CASH')).toBeVisible();
+});
+
+

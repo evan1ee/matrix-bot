@@ -939,11 +939,18 @@ export class FakeApi {
 
     // --- todos ---
     if (path === '/todos' && method === 'GET') {
+      const completedParam = url?.searchParams?.get('completed');
+      let items = this.todos;
+      if (completedParam === 'true') {
+        items = items.filter((t) => t.completed);
+      } else if (completedParam === 'false') {
+        items = items.filter((t) => !t.completed);
+      }
       return json(route, 200, {
-        items: this.todos,
+        items,
         page: 1,
         limit: 100,
-        total: this.todos.length,
+        total: items.length,
       });
     }
 
@@ -1069,11 +1076,15 @@ export class FakeApi {
     }
 
     if (path === '/finance/transactions' && method === 'GET') {
+      const direction = url?.searchParams?.get('direction');
+      const items = direction
+        ? this.transactions.filter((t) => t.direction === direction)
+        : this.transactions;
       return json(route, 200, {
-        items: this.transactions,
+        items,
         page: 1,
         limit: 200,
-        total: this.transactions.length,
+        total: items.length,
       });
     }
     if (path === '/finance/transactions' && method === 'POST') {
@@ -1129,6 +1140,50 @@ export class FakeApi {
       }
       this.transactions = this.transactions.filter((t) => t.id !== id);
       return route.fulfill({ status: 204, body: '' });
+    }
+
+    if (path === '/finance/net-worth' && method === 'GET') {
+      const primaryCurrency = this.settings.currency || 'USD';
+      const primaryExponent = primaryCurrency === 'JPY' ? 0 : 2;
+
+      let totalLedgerMinor = 0;
+      for (const tx of this.transactions) {
+        if (tx.direction === 'income') totalLedgerMinor += tx.amount_minor;
+        else totalLedgerMinor -= tx.amount_minor;
+      }
+
+      let totalPortfolioCashMinor = 0;
+      for (const c of this.cash) {
+        totalPortfolioCashMinor += c.balance_minor;
+      }
+
+      let totalMarketValueMinor = 0;
+      for (const h of this.holdings) {
+        const p = h.current_price_minor ?? h.avg_cost_minor;
+        totalMarketValueMinor += Math.round((h.quantity_minor * p) / 10 ** 8);
+      }
+
+      const totalNetWorth = totalLedgerMinor + totalPortfolioCashMinor + totalMarketValueMinor;
+
+      return json(route, 200, {
+        primary_currency: primaryCurrency,
+        primary_currency_exponent: primaryExponent,
+        total_net_worth_minor: totalNetWorth,
+        ledger_cash_minor: totalLedgerMinor,
+        portfolio_market_value_minor: totalMarketValueMinor,
+        portfolio_cash_minor: totalPortfolioCashMinor,
+        fx_source: 'ECB Reference Rates',
+        native_breakdowns: [
+          {
+            currency: primaryCurrency,
+            currency_exponent: primaryExponent,
+            ledger_cash_minor: totalLedgerMinor,
+            portfolio_market_value_minor: totalMarketValueMinor,
+            portfolio_cash_minor: totalPortfolioCashMinor,
+            converted_total_minor: totalNetWorth,
+          },
+        ],
+      });
     }
 
     if (path === '/finance/summary') {

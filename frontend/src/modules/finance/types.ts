@@ -58,3 +58,25 @@ export interface PublicFinanceReport {
   expense_categories: ExpenseCategorySlice[];
   recent_transactions: PublicTransaction[];
 }
+
+export interface CurrencyNetWorthBreakdown {
+  currency: string;
+  currency_exponent: number;
+  ledger_cash_minor: number;
+  portfolio_market_value_minor: number;
+  portfolio_cash_minor: number;
+  converted_total_minor: number;
+}
+
+export interface NetWorthResponse {
+  primary_currency: string;
+  primary_currency_exponent: number;
+  total_net_worth_minor: number;
+  ledger_cash_minor: number;
+  portfolio_market_value_minor: number;
+  portfolio_cash_minor: number;
+  fx_source: string;
+  native_breakdowns: CurrencyNetWorthBreakdown[];
+}
+
+

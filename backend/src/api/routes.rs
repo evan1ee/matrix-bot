@@ -4,7 +4,7 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, footprints, habits, health, life,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth, footprints, habits, health, life,
     life_activity, mcp, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
     portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
 };
@@ -181,6 +181,7 @@ fn routes_finance() -> Router<auth::ApiState> {
             put(finance::update_transaction).delete(finance::delete_transaction),
         )
         .route("/finance/summary", get(finance::summary))
+        .route("/finance/net-worth", get(finance_net_worth::get_net_worth))
         .route("/finance/analytics", get(finance_analytics::get_analytics))
         .route(
             "/finance/share",

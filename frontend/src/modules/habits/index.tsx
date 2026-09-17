@@ -69,7 +69,75 @@ export const HabitsView: React.FC = () => {
       if (!res.ok) throw new Error('Failed to toggle habit');
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (id: number) => {
+      await queryClient.cancelQueries({ queryKey: ['habits'] });
+      await queryClient.cancelQueries({ queryKey: ['habits-stats'] });
+
+      const previousHabits = queryClient.getQueryData<HabitWithStatus[]>(['habits']);
+      const previousStats = queryClient.getQueryData<HabitStatsSummary>(['habits-stats']);
+
+      if (previousHabits) {
+        queryClient.setQueryData<HabitWithStatus[]>(['habits'], (old) => {
+          if (!old) return old;
+          return old.map((habit) => {
+            if (habit.id !== id) return habit;
+            const willBeCompleted = !habit.completed_today;
+            const newStreak = willBeCompleted
+              ? habit.current_streak + 1
+              : Math.max(0, habit.current_streak - 1);
+            const newTotal = willBeCompleted
+              ? habit.total_completions + 1
+              : Math.max(0, habit.total_completions - 1);
+
+            let updated7Days = habit.last_7_days;
+            if (habit.last_7_days && habit.last_7_days.length > 0) {
+              const lastIdx = habit.last_7_days.length - 1;
+              updated7Days = habit.last_7_days.map((day, idx) =>
+                idx === lastIdx ? { ...day, completed: willBeCompleted } : day
+              );
+            }
+
+            return {
+              ...habit,
+              completed_today: willBeCompleted,
+              current_streak: newStreak,
+              longest_streak: Math.max(habit.longest_streak, newStreak),
+              total_completions: newTotal,
+              last_7_days: updated7Days,
+            };
+          });
+        });
+      }
+
+      if (previousStats && previousHabits) {
+        const target = previousHabits.find((h) => h.id === id);
+        if (target) {
+          const delta = target.completed_today ? -1 : 1;
+          const newCompletedToday = Math.max(0, previousStats.completed_today + delta);
+          const totalActive = previousStats.total_active_habits || 1;
+          queryClient.setQueryData<HabitStatsSummary>(['habits-stats'], {
+            ...previousStats,
+            completed_today: newCompletedToday,
+            completion_rate_today_percent: Math.min(
+              100,
+              Math.round((newCompletedToday / totalActive) * 100)
+            ),
+            total_all_time_completions: Math.max(0, previousStats.total_all_time_completions + delta),
+          });
+        }
+      }
+
+      return { previousHabits, previousStats };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previousHabits) {
+        queryClient.setQueryData(['habits'], context.previousHabits);
+      }
+      if (context?.previousStats) {
+        queryClient.setQueryData(['habits-stats'], context.previousStats);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['habits'] });
       queryClient.invalidateQueries({ queryKey: ['habits-heatmap'] });
       queryClient.invalidateQueries({ queryKey: ['habits-stats'] });
