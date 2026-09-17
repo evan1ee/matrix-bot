@@ -125,12 +125,31 @@ When running `matrix-bot` as a persistent daemon or remote server:
     "matrix-bot-remote": {
       "url": "https://your-bot-domain.com/api/v1/mcp/sse",
       "headers": {
-        "Authorization": "Bearer YOUR_API_OR_SESSION_TOKEN"
+        "Authorization": "Bearer mb_mcp_your_token_here"
       }
     }
   }
 }
 ```
+
+---
+
+### 🔑 User-Friendly Authentication Methods
+
+You can generate an MCP personal access token (`mb_mcp_...`) in seconds through either method:
+
+#### Method 1: Instant In-Chat Setup (`!mcp token`)
+Send a private direct message (DM) to your bot in Matrix:
+```text
+!mcp token Claude-Laptop
+```
+The bot instantly generates a token and replies with ready-to-copy, pre-filled JSON configurations for Claude Desktop and Cursor.
+
+#### Method 2: Web Dashboard Settings
+1. Open the Web Dashboard.
+2. Click **Settings** (gear icon) → **MCP** tab.
+3. Enter a connection name (e.g. `Claude Desktop`) and click **Generate Token**.
+4. Copy the pre-rendered JSON snippet or raw Bearer token with 1 click.
 
 ---
 
@@ -142,15 +161,14 @@ In Cursor:
 3. Choose transport type:
    - **Type**: `command`
    - **Command**: `matrix-bot mcp --owner @your_user:matrix.org`
-4. Or configure `.cursor/mcp.json` in your project root:
+4. Or configure `.cursor/mcp.json` with the remote SSE endpoint:
 ```json
 {
   "mcpServers": {
     "matrix-bot": {
-      "command": "matrix-bot",
-      "args": ["mcp", "--owner", "@your_user:matrix.org"],
-      "env": {
-        "DATABASE_URL": "sqlite://./data/matrix-bot.db"
+      "url": "https://your-bot-domain.com/api/v1/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer mb_mcp_your_token_here"
       }
     }
   }
@@ -159,22 +177,12 @@ In Cursor:
 
 ---
 
-## 💬 Matrix Bot In-Chat Command
+## 💬 Matrix Bot In-Chat Commands
 
-You can inspect the status of the MCP server directly within any Matrix room where the bot is present:
+You can inspect the status of the MCP server and manage tokens directly within Matrix chat:
 
-```text
-!mcp
-```
+- `!mcp` — Show protocol status, tool count, and active resources.
+- `!mcp token [name]` — Generate a personal access token and instant client configuration (Direct Message only).
+- `!mcp list` — List all active tokens, creation dates, and last used timestamps.
+- `!mcp revoke <id_or_prefix>` — Revoke a token immediately.
 
-**Response Example:**
-> **MCP (Model Context Protocol) Server**
-> - **Protocol Version**: `2024-11-05`
-> - **Status**: Active
-> - **Available Tools**: 34 unified function tools
-> - **Resources**: `todos/pending`, `finance/recent`, `portfolio/summary`, `habits/today`, `life/profile`
-> - **Prompt Templates**: `daily-briefing`, `weekly-retrospective`, `portfolio-review`
-> - **Endpoints**:
->   - SSE: `/api/v1/mcp/sse`
->   - JSON-RPC: `/api/v1/mcp`
->   - STDIO: `matrix-bot mcp [--owner <id>]`

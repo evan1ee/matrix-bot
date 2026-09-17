@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CustomSelect } from './CustomSelect';
 import { RoomsPanel } from './RoomsPanel';
 import { SecurityPanel } from './SecurityPanel';
+import { McpPanel } from './McpPanel';
 import { fetchApi } from '../core/apiClient';
 import {
   browserTimezone,
@@ -34,7 +35,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const saved = useSettings();
   const { mutateAsync, isPending } = useUpdateSettings();
 
-  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security'>('preferences');
+  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security' | 'mcp'>('preferences');
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
   const [devRoomId, setDevRoomId] = useState(saved.dev_room_id ?? '');
@@ -132,19 +133,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <h3 id="settings-modal-title" className="sr-only">
               Settings
             </h3>
-            {(['preferences', 'rooms', 'security'] as const).map((t) => (
+            {(['preferences', 'rooms', 'security', 'mcp'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
                 aria-current={tab === t}
-                className={`text-sm font-semibold capitalize transition ${
+                className={`text-sm font-semibold uppercase font-mono transition ${
                   tab === t
-                    ? 'text-neutral-900 dark:text-neutral-100'
-                    : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'
+                    ? 'text-neutral-900 dark:text-neutral-100 border-b-2 border-neutral-900 dark:border-neutral-100 pb-1'
+                    : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 pb-1'
                 }`}
               >
-                {t}
+                {t === 'mcp' ? 'MCP' : t}
               </button>
             ))}
           </div>
@@ -161,6 +162,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <SecurityPanel />
         ) : tab === 'rooms' ? (
           <RoomsPanel />
+        ) : tab === 'mcp' ? (
+          <McpPanel />
         ) : (
         <>
         {errorMsg && (

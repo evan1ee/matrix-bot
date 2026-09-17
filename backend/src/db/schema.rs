@@ -22,6 +22,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::db::schema_portfolio::create_tables(pool).await?;
     crate::db::schema_footprints::create_tables(pool).await?;
     crate::db::schema_habits::create_tables(pool).await?;
+    crate::db::schema_mcp::create_tables(pool).await?;
     crate::db::schema_life::run_life_schema(pool).await?;
     crate::db::schema_bookmarks::create_tables(pool).await?;
     crate::db::schema_rooms::create_tables(pool).await?;

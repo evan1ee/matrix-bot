@@ -1592,6 +1592,23 @@ export interface components {
             title?: string | null;
             url: string;
         };
+        CreateMcpTokenRequest: {
+            /** Format: int64 */
+            expires_in_days?: number | null;
+            name: string;
+        };
+        CreateMcpTokenResponse: {
+            claude_config: unknown;
+            /** Format: date-time */
+            created_at: string;
+            cursor_config: unknown;
+            /** Format: date-time */
+            expires_at?: string | null;
+            id: string;
+            name: string;
+            prefix: string;
+            token: string;
+        };
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
@@ -1816,6 +1833,17 @@ export interface components {
             display_name: string;
             mxid: string;
             session_token: string;
+        };
+        McpTokenSummary: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string | null;
+            id: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            name: string;
+            prefix: string;
         };
         MediaProxyQuery: {
             media_id: string;

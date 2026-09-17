@@ -93,6 +93,39 @@ where
             }
         }
 
+        if is_bearer && token.starts_with("mb_mcp_") {
+            let mcp_token = crate::modules::mcp::repository::McpTokenRepository::resolve(&api_state.db.pool, token)
+                .await
+                .map_err(|err| {
+                    tracing::error!("Could not read MCP token: {:?}", err);
+                    ApiError::internal("Could not read MCP token")
+                })?
+                .ok_or_else(|| ApiError::unauthorized("That MCP token is invalid or has expired"))?;
+
+            let pool = api_state.db.pool.clone();
+            let token_id = mcp_token.id.clone();
+            tokio::spawn(async move {
+                let _ = crate::modules::mcp::repository::McpTokenRepository::touch_last_used(&pool, &token_id).await;
+            });
+
+            let display_name = AccountRepository::find(&api_state.db.pool, &mcp_token.account_id)
+                .await
+                .map_err(|err| {
+                    tracing::error!("Could not read the account: {:?}", err);
+                    ApiError::internal("Could not read the account")
+                })?
+                .map(|account| account.display_name)
+                .ok_or_else(|| ApiError::unauthorized("That account no longer exists"))?;
+
+            return Ok(AuthUser {
+                account_id: mcp_token.account_id,
+                display_name,
+                session_id_hash: mcp_token.token_hash,
+                last_verified_at: mcp_token.created_at,
+                restricted_until: None,
+            });
+        }
+
         let session = SessionRepository::resolve(&api_state.db.pool, token)
             .await
             .map_err(|err| {

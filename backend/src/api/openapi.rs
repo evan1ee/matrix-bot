@@ -236,7 +236,10 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             crate::modules::bookmarks::models::CreateBookmarkInput,
             crate::modules::bookmarks::models::UpdateBookmarkInput,
             crate::modules::bookmarks::models::BookmarkStats,
-            crate::modules::bookmarks::models::DomainCount
+            crate::modules::bookmarks::models::DomainCount,
+            crate::modules::mcp::models::CreateMcpTokenRequest,
+            crate::modules::mcp::models::CreateMcpTokenResponse,
+            crate::modules::mcp::models::McpTokenSummary
         )
     ),
     modifiers(&SecurityAddon),

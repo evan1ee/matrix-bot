@@ -16,6 +16,11 @@ use crate::error::ApiError;
 use crate::modules::mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
 use crate::modules::mcp::service::McpService;
 
+use crate::modules::mcp::models::{
+    self, CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenSummary,
+};
+use crate::modules::mcp::repository::McpTokenRepository;
+
 #[derive(Debug, Deserialize)]
 pub struct McpQuery {
     pub session_id: Option<String>,
@@ -25,6 +30,8 @@ pub fn mcp_routes() -> Router<ApiState> {
     Router::new()
         .route("/sse", get(mcp_sse_handler))
         .route("/messages", post(mcp_message_handler))
+        .route("/tokens", get(list_mcp_tokens).post(create_mcp_token))
+        .route("/tokens/:id", axum::routing::delete(delete_mcp_token))
         .route("/", post(mcp_direct_handler))
 }
 
@@ -74,6 +81,84 @@ pub async fn mcp_direct_handler(
     Ok(Json(resp))
 }
 
+/// GET /api/v1/mcp/tokens — Lists active personal access tokens for the authenticated user.
+pub async fn list_mcp_tokens(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<Vec<McpTokenSummary>>, ApiError> {
+    let tokens = McpTokenRepository::list_for_account(&state.db.pool, &user.account_id)
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed to list MCP tokens: {:?}", err);
+            ApiError::internal("Failed to list MCP tokens")
+        })?;
+
+    let summaries = tokens.into_iter().map(McpTokenSummary::from).collect();
+    Ok(Json(summaries))
+}
+
+/// POST /api/v1/mcp/tokens — Generates a new personal access token and returns client JSON.
+pub async fn create_mcp_token(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Json(payload): Json<CreateMcpTokenRequest>,
+) -> Result<Json<CreateMcpTokenResponse>, ApiError> {
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("Token name cannot be empty"));
+    }
+    if name.len() > 100 {
+        return Err(ApiError::bad_request("Token name cannot exceed 100 characters"));
+    }
+
+    let (raw_token, token) = McpTokenRepository::create(
+        &state.db.pool,
+        &user.account_id,
+        name,
+        payload.expires_in_days,
+    )
+    .await
+    .map_err(|err| {
+        tracing::error!("Failed to create MCP token: {:?}", err);
+        ApiError::internal("Failed to create MCP token")
+    })?;
+
+    let endpoint_url = "/api/v1/mcp/sse";
+    let claude_config = models::build_claude_config(endpoint_url, &raw_token);
+    let cursor_config = models::build_cursor_config(endpoint_url, &raw_token);
+
+    Ok(Json(CreateMcpTokenResponse {
+        id: token.id,
+        name: token.name,
+        token: raw_token,
+        prefix: token.prefix,
+        created_at: token.created_at,
+        expires_at: token.expires_at,
+        claude_config,
+        cursor_config,
+    }))
+}
+
+/// DELETE /api/v1/mcp/tokens/:id — Revokes an MCP personal access token.
+pub async fn delete_mcp_token(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let deleted = McpTokenRepository::delete(&state.db.pool, &user.account_id, &id)
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed to delete MCP token: {:?}", err);
+            ApiError::internal("Failed to delete MCP token")
+        })?;
+
+    if deleted {
+        Ok(Json(serde_json::json!({ "success": true })))
+    } else {
+        Err(ApiError::not_found("Token not found"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +182,36 @@ mod tests {
         let resp = service.handle_request(req).await.unwrap();
         assert_eq!(resp.id, json!(42));
         assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tokens_api_flow() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::schema_auth::create_tables(&pool).await.unwrap();
+        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let (raw, token) = McpTokenRepository::create(&pool, "acct_test", "API Test", None)
+            .await
+            .unwrap();
+        assert!(raw.starts_with("mb_mcp_"));
+
+        let list = McpTokenRepository::list_for_account(&pool, "acct_test")
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, token.id);
+
+        let deleted = McpTokenRepository::delete(&pool, "acct_test", &token.id)
+            .await
+            .unwrap();
+        assert!(deleted);
     }
 }
