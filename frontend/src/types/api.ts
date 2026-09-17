@@ -1231,6 +1231,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reminders/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["clear_reminder_history"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reminders/{id}": {
         parameters: {
             query?: never;
@@ -2097,6 +2113,8 @@ export interface components {
             trigger_at: string;
         };
         ReminderListResponse: {
+            /** @description Whether more records exist beyond the current page. */
+            has_more: boolean;
             items: components["schemas"]["Reminder"][];
             /** Format: int64 */
             limit: number;
@@ -2104,7 +2122,7 @@ export interface components {
             page: number;
             /**
              * Format: int64
-             * @description Total pending reminders matching the query.
+             * @description Total reminders matching the query.
              */
             total: number;
         };
@@ -2114,6 +2132,11 @@ export interface components {
             /** Format: int64 */
             page?: number | null;
             room_id?: string | null;
+            /**
+             * @description Narrows the listing to one status or view: 'pending', 'history' (non-pending),
+             *     'triggered', 'cancelled', 'failed', or 'all'. Defaults to 'pending'.
+             */
+            status?: string | null;
         };
         /**
          * @description Status of a reminder in the database.
@@ -5299,6 +5322,11 @@ export interface operations {
                 room_id?: string | null;
                 page?: number | null;
                 limit?: number | null;
+                /**
+                 * @description Narrows the listing to one status or view: 'pending', 'history' (non-pending),
+                 *     'triggered', 'cancelled', 'failed', or 'all'. Defaults to 'pending'.
+                 */
+                status?: string | null;
             };
             header?: never;
             path?: never;
@@ -5306,7 +5334,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List pending reminders */
+            /** @description List reminders with optional status filter */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5368,6 +5396,33 @@ export interface operations {
             };
         };
     };
+    clear_reminder_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminder history cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     delete_reminder: {
         parameters: {
             query?: never;
@@ -5380,7 +5435,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Reminder cancelled */
+            /** @description Reminder cancelled or deleted */
             204: {
                 headers: {
                     [name: string]: unknown;

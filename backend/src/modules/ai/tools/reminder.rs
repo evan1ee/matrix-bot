@@ -113,16 +113,41 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let sender_name = owner_id
-                    .strip_prefix('@')
-                    .and_then(|s| s.split(':').next())
-                    .unwrap_or(owner_id);
+                let sender_name = if let Ok(Some(acct)) =
+                    crate::accounts::AccountRepository::find(pool, owner_id).await
+                {
+                    if !acct.display_name.trim().is_empty() {
+                        acct.display_name
+                    } else {
+                        "You".to_string()
+                    }
+                } else if let Ok(Some(account_id)) =
+                    crate::accounts::AccountRepository::find_by_mxid(pool, owner_id).await
+                {
+                    if let Ok(Some(acct)) =
+                        crate::accounts::AccountRepository::find(pool, &account_id).await
+                    {
+                        if !acct.display_name.trim().is_empty() {
+                            acct.display_name
+                        } else {
+                            "You".to_string()
+                        }
+                    } else {
+                        "You".to_string()
+                    }
+                } else if let Some(localpart) =
+                    owner_id.strip_prefix('@').and_then(|s| s.split(':').next())
+                {
+                    localpart.to_string()
+                } else {
+                    "You".to_string()
+                };
 
                 let rem = ReminderRepository::create(
                     pool,
                     &target_room,
                     owner_id,
-                    sender_name,
+                    &sender_name,
                     message,
                     trigger_at,
                     recurrence,
@@ -310,5 +335,43 @@ mod tests {
         assert_eq!(parsed["message"], "Go running");
         assert_eq!(parsed["time"], "2026-09-17 20:00");
         assert_eq!(parsed["local_time"], "2026-09-17 20:00");
+    }
+
+    #[sqlx::test]
+    async fn test_set_reminder_resolves_account_display_name(pool: SqlitePool) {
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let acct_id = crate::accounts::AccountRepository::create(
+            &pool,
+            "evan",
+            crate::accounts::STATUS_ACTIVE,
+        )
+        .await
+        .unwrap();
+
+        let res = execute_tool(
+            &pool,
+            None,
+            &acct_id,
+            "!room:example.org",
+            "set_reminder",
+            &json!({
+                "text": "Have my hair cut",
+                "in_minutes": 30
+            }),
+        )
+        .await
+        .expect("tool execution result")
+        .expect("success");
+
+        let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(parsed["message"], "Have my hair cut");
+
+        let items =
+            ReminderRepository::list_user_reminders(&pool, &acct_id, Some("all"), None, 10, 0)
+                .await
+                .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sender_name, "evan");
     }
 }

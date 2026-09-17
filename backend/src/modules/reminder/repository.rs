@@ -247,6 +247,116 @@ impl ReminderRepository {
         Self::find_owned(pool, owner_id, id).await
     }
 
+    pub async fn list_user_reminders(
+        pool: &SqlitePool,
+        owner_id: &str,
+        status: Option<&str>,
+        room_id: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Reminder>> {
+        let (status_filter, order_clause) = match status {
+            Some("history") => (
+                "AND status != 'pending'",
+                "ORDER BY trigger_at DESC, id DESC",
+            ),
+            Some("all") => ("", "ORDER BY trigger_at DESC, id DESC"),
+            Some("triggered") => (
+                "AND status = 'triggered'",
+                "ORDER BY trigger_at DESC, id DESC",
+            ),
+            Some("cancelled") => (
+                "AND status = 'cancelled'",
+                "ORDER BY trigger_at DESC, id DESC",
+            ),
+            Some("failed") => ("AND status = 'failed'", "ORDER BY trigger_at DESC, id DESC"),
+            Some("pending") | None => ("AND status = 'pending'", "ORDER BY trigger_at ASC"),
+            Some(_) => ("AND status = 'pending'", "ORDER BY trigger_at ASC"),
+        };
+
+        let reminders = if let Some(room) = room_id {
+            let sql = format!(
+                "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? AND room_id = ? {status_filter} {order_clause} LIMIT ? OFFSET ?"
+            );
+            sqlx::query_as::<_, Reminder>(&sql)
+                .bind(owner_id)
+                .bind(room)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?
+        } else {
+            let sql = format!(
+                "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? {status_filter} {order_clause} LIMIT ? OFFSET ?"
+            );
+            sqlx::query_as::<_, Reminder>(&sql)
+                .bind(owner_id)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?
+        };
+
+        Ok(reminders)
+    }
+
+    pub async fn count_user_reminders(
+        pool: &SqlitePool,
+        owner_id: &str,
+        status: Option<&str>,
+        room_id: Option<&str>,
+    ) -> Result<i64> {
+        let status_filter = match status {
+            Some("history") => "AND status != 'pending'",
+            Some("all") => "",
+            Some("triggered") => "AND status = 'triggered'",
+            Some("cancelled") => "AND status = 'cancelled'",
+            Some("failed") => "AND status = 'failed'",
+            Some("pending") | None => "AND status = 'pending'",
+            Some(_) => "AND status = 'pending'",
+        };
+
+        let total = if let Some(room) = room_id {
+            let sql = format!(
+                "SELECT COUNT(*) FROM reminders WHERE owner_id = ? AND room_id = ? {status_filter}"
+            );
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(owner_id)
+                .bind(room)
+                .fetch_one(pool)
+                .await?
+        } else {
+            let sql = format!("SELECT COUNT(*) FROM reminders WHERE owner_id = ? {status_filter}");
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(owner_id)
+                .fetch_one(pool)
+                .await?
+        };
+
+        Ok(total)
+    }
+
+    pub async fn delete_history_item(pool: &SqlitePool, owner_id: &str, id: i64) -> Result<bool> {
+        let res = sqlx::query(
+            "DELETE FROM reminders WHERE id = ? AND owner_id = ? AND status != 'pending'",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .execute(pool)
+        .await?;
+
+        Ok(res.rows_affected() > 0)
+    }
+
+    pub async fn clear_user_history(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
+        let res = sqlx::query("DELETE FROM reminders WHERE owner_id = ? AND status != 'pending'")
+            .bind(owner_id)
+            .execute(pool)
+            .await?;
+
+        Ok(res.rows_affected())
+    }
+
     pub async fn cancel(pool: &SqlitePool, owner_id: &str, id: i64) -> Result<bool> {
         let res = sqlx::query(
             "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ? AND status = 'pending'",
@@ -459,5 +569,151 @@ mod tests {
                 .unwrap();
         assert_eq!(row.0, 0);
         assert_eq!(row.1, "pending");
+    }
+
+    #[tokio::test]
+    async fn test_reminder_history_flow() {
+        let pool = setup_test_db().await;
+        let past = Utc::now() - Duration::hours(2);
+
+        let rem1 = ReminderRepository::create(
+            &pool,
+            "!room:1",
+            "@alice:m",
+            "Alice",
+            "Reminder 1",
+            past,
+            RecurrencePattern::None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let rem2 = ReminderRepository::create(
+            &pool,
+            "!room:1",
+            "@alice:m",
+            "Alice",
+            "Reminder 2",
+            past + Duration::minutes(10),
+            RecurrencePattern::None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let rem3 = ReminderRepository::create(
+            &pool,
+            "!room:1",
+            "@alice:m",
+            "Alice",
+            "Reminder 3",
+            past + Duration::hours(1),
+            RecurrencePattern::None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Mark rem1 triggered, rem2 cancelled
+        ReminderRepository::mark_triggered(&pool, rem1.id)
+            .await
+            .unwrap();
+        ReminderRepository::cancel(&pool, "@alice:m", rem2.id)
+            .await
+            .unwrap();
+
+        // Pending count should be 1 (rem3)
+        let pending = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("pending"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, rem3.id);
+
+        // History count should be 2 (rem1, rem2)
+        let history = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("history"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(history.len(), 2);
+        let total_hist =
+            ReminderRepository::count_user_reminders(&pool, "@alice:m", Some("history"), None)
+                .await
+                .unwrap();
+        assert_eq!(total_hist, 2);
+
+        // Filter by triggered
+        let triggered = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("triggered"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(triggered.len(), 1);
+        assert_eq!(triggered[0].id, rem1.id);
+
+        // Delete history item
+        let deleted = ReminderRepository::delete_history_item(&pool, "@alice:m", rem1.id)
+            .await
+            .unwrap();
+        assert!(deleted);
+        let history_after_del = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("history"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(history_after_del.len(), 1);
+
+        // Clear user history
+        let cleared = ReminderRepository::clear_user_history(&pool, "@alice:m")
+            .await
+            .unwrap();
+        assert_eq!(cleared, 1);
+        let history_empty = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("history"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(history_empty.len(), 0);
+
+        // rem3 is still pending and untouched
+        let pending_after = ReminderRepository::list_user_reminders(
+            &pool,
+            "@alice:m",
+            Some("pending"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending_after.len(), 1);
     }
 }

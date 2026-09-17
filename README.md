@@ -171,7 +171,7 @@ The backend is built to power native iOS apps, specifically designed to plug dir
    - Element X iOS already runs background sync and push notifications for incoming room events, delivering native lock-screen push notifications automatically!
 
 👉 **Complete Step-by-Step iOS Integration Guide**:
-See [**`ELEMENT_X_IOS_INTEGRATION.md`**](ELEMENT_X_IOS_INTEGRATION.md) for full Swift networking code (`BotClient.swift`), SwiftUI views (`AssistantTabView.swift`), Keychain management, and instructions on registering the tab inside Element X's `HomeScreen.swift` and `AppCoordinator.swift`.
+See [**`docs/ELEMENT_X_IOS_INTEGRATION.md`**](docs/ELEMENT_X_IOS_INTEGRATION.md) for full Swift networking code (`BotClient.swift`), SwiftUI views (`AssistantTabView.swift`), Keychain management, and instructions on registering the tab inside Element X's `HomeScreen.swift` and `AppCoordinator.swift`.
 
 ---
 
@@ -337,9 +337,8 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # webhook, ai, settings, account
     └── utils/
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
-ELEMENT_X_IOS_INTEGRATION.md  # Comprehensive guide, Swift client, and SwiftUI views for iOS
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
-docs/                         # testing-auth-locally.md, webhooks.md
+docs/                         # documentation, roadmap, architecture reviews, guides
 ```
 
 `AGENTS.md` holds the development conventions; `CLAUDE.md` explains *why* the

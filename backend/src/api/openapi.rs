@@ -61,6 +61,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         reminders::create_reminder,
         reminders::update_reminder,
         reminders::delete_reminder,
+        reminders::clear_reminder_history,
         finance::list_transactions,
         finance::create_transaction,
         finance::update_transaction,

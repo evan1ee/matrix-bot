@@ -6,6 +6,15 @@ import { Clock, Plus, Trash2, BellRing, Repeat, AlertCircle, Pencil, Sparkles } 
 import { triggerAiPrompt } from '../ai';
 import { CustomSelect } from '../../components/CustomSelect';
 import { formatTimeInZone, nowInZone, useSettings } from '../../core/settings';
+import { useSession } from '../../core/session';
+import { ReminderHistory } from './ReminderHistory';
+
+export function formatSenderDisplay(senderName: string, currentDisplayName?: string | null): string {
+  if (senderName.startsWith('acct_')) {
+    return currentDisplayName || 'You';
+  }
+  return senderName;
+}
 
 export interface ReminderItem {
   id: number;
@@ -25,6 +34,7 @@ export interface ReminderListResponse {
   page: number;
   limit: number;
   total: number;
+  has_more?: boolean;
 }
 
 export interface JoinedRoomInfo {
@@ -74,6 +84,7 @@ const ReminderRow: React.FC<{
   onDelete: (id: number) => void;
 }> = ({ item, timezone, roomLabel, timeLeft, onDelete }) => {
   const queryClient = useQueryClient();
+  const { user } = useSession();
   const [editing, setEditing] = useState(false);
   const [draftMessage, setDraftMessage] = useState(item.message);
   const [draftValue, setDraftValue] = useState(1);
@@ -209,7 +220,7 @@ const ReminderRow: React.FC<{
         <div className="flex items-center gap-2 text-xs font-mono text-neutral-500">
           <span>Target: {formatTimeInZone(item.trigger_at, timezone)}</span>
           <span>•</span>
-          <span>by {item.sender_name}</span>
+          <span>by {formatSenderDisplay(item.sender_name, user?.display_name || user?.username)}</span>
           <span>•</span>
           <span className="truncate max-w-[180px]">Room: {roomLabel(item.room_id)}</span>
         </div>
@@ -402,6 +413,13 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
     return id;
   };
 
+  const handleReuse = (reusedMessage: string, reusedRecurrence: string) => {
+    setMessage(reusedMessage);
+    setRecurrence(reusedRecurrence || 'none');
+    messageInputRef.current?.focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <div className="space-y-6">
       {/* Create Reminder Form */}
@@ -572,6 +590,13 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
           </div>
         )}
       </div>
+
+      {/* Reminder History */}
+      <ReminderHistory
+        timezone={timezone}
+        roomLabel={getRoomDisplayName}
+        onReuse={handleReuse}
+      />
     </div>
   );
 };
@@ -587,9 +612,12 @@ export const reminderModule: FrontendModule = {
       event.type === 'ReminderCreated' ||
       event.type === 'ReminderUpdated' ||
       event.type === 'ReminderTriggered' ||
-      event.type === 'ReminderCancelled'
+      event.type === 'ReminderCancelled' ||
+      event.type === 'ReminderDeleted' ||
+      event.type === 'ReminderHistoryCleared'
     ) {
       queryClient.invalidateQueries({ queryKey: ['reminders'] });
+      queryClient.invalidateQueries({ queryKey: ['reminders-history'] });
     }
   },
 };

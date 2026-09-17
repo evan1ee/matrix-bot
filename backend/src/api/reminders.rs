@@ -18,6 +18,9 @@ pub struct ReminderQuery {
     pub room_id: Option<String>,
     pub page: Option<i64>,
     pub limit: Option<i64>,
+    /// Narrows the listing to one status or view: 'pending', 'history' (non-pending),
+    /// 'triggered', 'cancelled', 'failed', or 'all'. Defaults to 'pending'.
+    pub status: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -33,8 +36,10 @@ pub struct ReminderListResponse {
     pub items: Vec<Reminder>,
     pub page: i64,
     pub limit: i64,
-    /// Total pending reminders matching the query.
+    /// Total reminders matching the query.
     pub total: i64,
+    /// Whether more records exist beyond the current page.
+    pub has_more: bool,
 }
 
 #[utoipa::path(
@@ -42,7 +47,7 @@ pub struct ReminderListResponse {
     path = "/api/v1/reminders",
     params(ReminderQuery),
     responses(
-        (status = 200, description = "List pending reminders", body = ReminderListResponse),
+        (status = 200, description = "List reminders with optional status filter", body = ReminderListResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
     security(("session_cookie" = []))
@@ -57,43 +62,34 @@ pub async fn list_reminders(
     let offset = (page - 1) * limit;
     let owner_id = user.owner_id();
 
-    let (items, total) = if let Some(room) = &query.room_id {
-        let items = sqlx::query_as::<_, Reminder>(
-            "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, created_at FROM reminders WHERE room_id = ? AND owner_id = ? AND status = 'pending' ORDER BY trigger_at ASC LIMIT ? OFFSET ?",
-        )
-        .bind(room)
-        .bind(&owner_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&state.db.pool)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let items = ReminderRepository::list_user_reminders(
+        &state.db.pool,
+        &owner_id,
+        query.status.as_deref(),
+        query.room_id.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM reminders WHERE room_id = ? AND owner_id = ? AND status = 'pending'",
-        )
-        .bind(room)
-        .bind(&owner_id)
-        .fetch_one(&state.db.pool)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let total = ReminderRepository::count_user_reminders(
+        &state.db.pool,
+        &owner_id,
+        query.status.as_deref(),
+        query.room_id.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
-        (items, total)
-    } else {
-        let items = ReminderRepository::list_user_pending(&state.db.pool, &owner_id, limit, offset)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = ReminderRepository::count_user_pending(&state.db.pool, &owner_id)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        (items, total)
-    };
+    let has_more = offset + (items.len() as i64) < total;
 
     Ok(Json(ReminderListResponse {
         items,
         page,
         limit,
         total,
+        has_more,
     }))
 }
 
@@ -228,7 +224,7 @@ pub async fn update_reminder(
     path = "/api/v1/reminders/{id}",
     params(("id" = i64, Path, description = "Reminder ID")),
     responses(
-        (status = 204, description = "Reminder cancelled"),
+        (status = 204, description = "Reminder cancelled or deleted"),
         (status = 404, description = "Reminder not found", body = ApiErrorResponse),
         (status = 401, description = "Unauthorized", body = ApiErrorResponse)
     ),
@@ -240,30 +236,69 @@ pub async fn delete_reminder(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT room_id FROM reminders WHERE id = ? AND owner_id = ?")
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT room_id, status FROM reminders WHERE id = ? AND owner_id = ?")
             .bind(id)
             .bind(&owner_id)
             .fetch_optional(&state.db.pool)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let (room_id,) = match row {
+    let (room_id, status) = match row {
         Some(r) => r,
         None => return Err(ApiError::not_found("Reminder not found or access denied")),
     };
 
-    sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
-        .bind(id)
-        .execute(&state.db.pool)
+    if status == "pending" {
+        sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
+            .bind(id)
+            .execute(&state.db.pool)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        state.broadcaster.send(SystemEvent::ReminderCancelled {
+            id,
+            room_id,
+            owner_id,
+        });
+    } else {
+        sqlx::query("DELETE FROM reminders WHERE id = ?")
+            .bind(id)
+            .execute(&state.db.pool)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        state.broadcaster.send(SystemEvent::ReminderDeleted {
+            id,
+            room_id,
+            owner_id,
+        });
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/reminders/history",
+    responses(
+        (status = 204, description = "Reminder history cleared"),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn clear_reminder_history(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<StatusCode, ApiError> {
+    let owner_id = user.owner_id();
+    ReminderRepository::clear_user_history(&state.db.pool, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    state.broadcaster.send(SystemEvent::ReminderCancelled {
-        id,
-        room_id,
-        owner_id,
-    });
+    state
+        .broadcaster
+        .send(SystemEvent::ReminderHistoryCleared { owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -306,6 +341,7 @@ mod tests {
             room_id: None,
             page: None,
             limit: None,
+            status: None,
         };
         let bob_list = list_reminders(State(state.clone()), bob.clone(), Query(query))
             .await
@@ -401,5 +437,129 @@ mod tests {
             updated.trigger_at > created.trigger_at,
             "the new delay should push the fire time out"
         );
+    }
+
+    #[tokio::test]
+    async fn test_reminder_history_api() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let alice = AuthUser::named("alice", "acct_alice");
+
+        // Create 2 reminders
+        let r1 = create_reminder(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateReminderRequest {
+                room_id: Some("!room:1".to_string()),
+                message: "Reminder 1".to_string(),
+                seconds: 60,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let r2 = create_reminder(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateReminderRequest {
+                room_id: Some("!room:1".to_string()),
+                message: "Reminder 2".to_string(),
+                seconds: 120,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Cancel r1 -> moves to history
+        delete_reminder(State(state.clone()), alice.clone(), Path(r1.id))
+            .await
+            .unwrap();
+
+        // Query pending -> only r2
+        let pending = list_reminders(
+            State(state.clone()),
+            alice.clone(),
+            Query(ReminderQuery {
+                room_id: None,
+                page: Some(1),
+                limit: Some(10),
+                status: Some("pending".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending.items.len(), 1);
+        assert_eq!(pending.items[0].id, r2.id);
+        assert_eq!(pending.total, 1);
+        assert!(!pending.has_more);
+
+        // Query history -> r1
+        let history = list_reminders(
+            State(state.clone()),
+            alice.clone(),
+            Query(ReminderQuery {
+                room_id: None,
+                page: Some(1),
+                limit: Some(10),
+                status: Some("history".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(history.items.len(), 1);
+        assert_eq!(history.items[0].id, r1.id);
+        assert_eq!(history.items[0].status, "cancelled");
+
+        // Delete r1 again -> permanently deletes from history
+        let status = delete_reminder(State(state.clone()), alice.clone(), Path(r1.id))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let history_after_del = list_reminders(
+            State(state.clone()),
+            alice.clone(),
+            Query(ReminderQuery {
+                room_id: None,
+                page: Some(1),
+                limit: Some(10),
+                status: Some("history".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(history_after_del.items.len(), 0);
+
+        // Cancel r2 and test clear_reminder_history
+        delete_reminder(State(state.clone()), alice.clone(), Path(r2.id))
+            .await
+            .unwrap();
+        let cleared = clear_reminder_history(State(state.clone()), alice.clone())
+            .await
+            .unwrap();
+        assert_eq!(cleared, StatusCode::NO_CONTENT);
+
+        let history_cleared = list_reminders(
+            State(state),
+            alice,
+            Query(ReminderQuery {
+                room_id: None,
+                page: Some(1),
+                limit: Some(10),
+                status: Some("history".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(history_cleared.items.len(), 0);
     }
 }

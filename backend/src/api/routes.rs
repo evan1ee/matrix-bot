@@ -130,6 +130,10 @@ fn routes_productivity() -> Router<auth::ApiState> {
             get(reminders::list_reminders).post(reminders::create_reminder),
         )
         .route(
+            "/reminders/history",
+            delete(reminders::clear_reminder_history),
+        )
+        .route(
             "/reminders/:id",
             patch(reminders::update_reminder).delete(reminders::delete_reminder),
         )
