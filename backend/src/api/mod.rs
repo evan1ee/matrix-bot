@@ -6,7 +6,6 @@ use axum::{
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::services::ServeDir;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -45,6 +44,7 @@ pub mod rooms;
 pub mod routes;
 pub mod settings;
 pub mod sse;
+pub mod static_files;
 pub mod todos;
 pub mod webhooks;
 pub mod webhooks_telegram;
@@ -138,14 +138,6 @@ pub async fn start_api_server(
 
     let api_routes = api_routes();
 
-    let web_dist = if std::path::Path::new("web/dist").exists() {
-        "web/dist"
-    } else if std::path::Path::new("backend/web/dist").exists() {
-        "backend/web/dist"
-    } else {
-        "web/dist"
-    };
-
     let app = Router::new()
         .nest("/api/v1", api_routes)
         .route(
@@ -154,7 +146,7 @@ pub async fn start_api_server(
         )
         .route("/webhooks/:token", post(webhooks::inbound_webhook))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
-        .fallback_service(ServeDir::new(web_dist))
+        .fallback(static_files::static_handler)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(180)))
