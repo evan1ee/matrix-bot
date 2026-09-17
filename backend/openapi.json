@@ -3854,11 +3854,21 @@
               "format": "int64",
               "nullable": true
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Narrows the listing to one status or view: 'pending', 'history' (non-pending),\n'triggered', 'cancelled', 'failed', or 'all'. Defaults to 'pending'.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "List pending reminders",
+            "description": "List reminders with optional status filter",
             "content": {
               "application/json": {
                 "schema": {
@@ -3938,6 +3948,34 @@
         ]
       }
     },
+    "/api/v1/reminders/history": {
+      "delete": {
+        "tags": [
+          "reminders"
+        ],
+        "operationId": "clear_reminder_history",
+        "responses": {
+          "204": {
+            "description": "Reminder history cleared"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/reminders/{id}": {
       "delete": {
         "tags": [
@@ -3958,7 +3996,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Reminder cancelled"
+            "description": "Reminder cancelled or deleted"
           },
           "401": {
             "description": "Unauthorized",
@@ -6607,9 +6645,14 @@
           "items",
           "page",
           "limit",
-          "total"
+          "total",
+          "has_more"
         ],
         "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more records exist beyond the current page."
+          },
           "items": {
             "type": "array",
             "items": {
@@ -6627,7 +6670,7 @@
           "total": {
             "type": "integer",
             "format": "int64",
-            "description": "Total pending reminders matching the query."
+            "description": "Total reminders matching the query."
           }
         }
       },
@@ -6646,6 +6689,11 @@
           },
           "room_id": {
             "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Narrows the listing to one status or view: 'pending', 'history' (non-pending),\n'triggered', 'cancelled', 'failed', or 'all'. Defaults to 'pending'.",
             "nullable": true
           }
         }

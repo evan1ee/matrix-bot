@@ -35,21 +35,85 @@ pub async fn handle_reminder_command(
         .await
         .tz();
 
-    let is_list = clean_lower == "remind"
-        || clean_lower == "!remind"
-        || clean_lower == "reminders"
-        || clean_lower == "!reminders"
-        || clean_lower == "remind list"
-        || clean_lower == "!remind list"
-        || clean_lower == "reminders list"
-        || clean_lower == "!reminders list"
-        || clean_lower.starts_with("remind list ")
-        || clean_lower.starts_with("!remind list ")
-        || clean_lower.starts_with("reminders list ")
-        || clean_lower.starts_with("!reminders list ");
+    let is_history = clean_lower == "remind history"
+        || clean_lower == "!remind history"
+        || clean_lower == "reminders history"
+        || clean_lower == "!reminders history"
+        || clean_lower.starts_with("remind history ")
+        || clean_lower.starts_with("!remind history ")
+        || clean_lower.starts_with("reminders history ")
+        || clean_lower.starts_with("!reminders history ");
 
-    // 1. !remind list [page] / bare !remind / !reminders
-    if is_list {
+    let is_list = !is_history
+        && (clean_lower == "remind"
+            || clean_lower == "!remind"
+            || clean_lower == "reminders"
+            || clean_lower == "!reminders"
+            || clean_lower == "remind list"
+            || clean_lower == "!remind list"
+            || clean_lower == "reminders list"
+            || clean_lower == "!reminders list"
+            || clean_lower.starts_with("remind list ")
+            || clean_lower.starts_with("!remind list ")
+            || clean_lower.starts_with("reminders list ")
+            || clean_lower.starts_with("!reminders list "));
+
+    // 1. !remind history [page]
+    if is_history {
+        let rest = clean_body.split_whitespace().last().unwrap_or("1");
+        let page: i64 = rest.parse().unwrap_or(1).max(1);
+        let offset = (page - 1) * 25;
+
+        match ReminderRepository::list_user_reminders(
+            pool,
+            owner_id,
+            Some("history"),
+            None,
+            25,
+            offset,
+        )
+        .await
+        {
+            Ok(reminders) => {
+                if reminders.is_empty() {
+                    if page > 1 {
+                        Some(format!("📜 <b>Reminder History (Page {}):</b><br/>No more history on this page.", page))
+                    } else {
+                        Some(format!("📜 <b>Reminder History for {}:</b><br/>You have no reminder history yet.", html_escape(sender_name)))
+                    }
+                } else {
+                    let mut lines = vec![format!(
+                        "📜 <b>Reminder History for {} (Page {}):</b>",
+                        html_escape(sender_name),
+                        page
+                    )];
+                    for r in &reminders {
+                        let formatted_time = format_datetime(&r.trigger_at, &tz);
+                        let status_label = match r.status.as_str() {
+                            "triggered" => " <font color=\"#10b981\">[Triggered ✅]</font>",
+                            "cancelled" => " <font color=\"#6b7280\">[Cancelled 🗑️]</font>",
+                            "failed" => " <font color=\"#ef4444\">[Failed ❌]</font>",
+                            _ => "",
+                        };
+                        lines.push(format!(
+                            "• [<b>#{}</b>] <code>{}</code> — {}{}",
+                            r.id,
+                            formatted_time,
+                            html_escape(&r.message),
+                            status_label
+                        ));
+                    }
+                    Some(lines.join("<br/>"))
+                }
+            }
+            Err(err) => {
+                error!("Failed listing reminder history: {:?}", err);
+                Some("❌ Database error retrieving reminder history.".to_string())
+            }
+        }
+    }
+    // 2. !remind list [page] / bare !remind / !reminders
+    else if is_list {
         let rest = clean_body.split_whitespace().last().unwrap_or("1");
         let page: i64 = rest.parse().unwrap_or(1).max(1);
         let offset = (page - 1) * 25;
@@ -289,6 +353,15 @@ mod tests {
                 .await
                 .unwrap();
         assert!(res_rm.contains("Cancelled reminder"));
+
+        // Check history command
+        let res_hist =
+            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind history", None)
+                .await
+                .unwrap();
+        assert!(res_hist.contains("Reminder History for bob"));
+        assert!(res_hist.contains("Check oven"));
+        assert!(res_hist.contains("[Cancelled 🗑️]"));
     }
 
     #[tokio::test]

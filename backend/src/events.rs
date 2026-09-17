@@ -34,6 +34,14 @@ pub enum SystemEvent {
         room_id: String,
         owner_id: String,
     },
+    ReminderDeleted {
+        id: i64,
+        room_id: String,
+        owner_id: String,
+    },
+    ReminderHistoryCleared {
+        owner_id: String,
+    },
     TransactionCreated(Transaction),
     TransactionUpdated(Transaction),
     TransactionDeleted {
@@ -159,7 +167,9 @@ impl SystemEvent {
             | SystemEvent::ReminderUpdated(rem)
             | SystemEvent::ReminderTriggered(rem) => &rem.owner_id,
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
-            SystemEvent::ReminderCancelled { owner_id, .. } => owner_id,
+            SystemEvent::ReminderCancelled { owner_id, .. }
+            | SystemEvent::ReminderDeleted { owner_id, .. }
+            | SystemEvent::ReminderHistoryCleared { owner_id } => owner_id,
             SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
                 &tx.owner_id
             }

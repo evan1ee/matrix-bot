@@ -171,7 +171,7 @@ The backend is built to power native iOS apps, specifically designed to plug dir
    - Element X iOS already runs background sync and push notifications for incoming room events, delivering native lock-screen push notifications automatically!
 
 👉 **Complete Step-by-Step iOS Integration Guide**:
-See [**`ELEMENT_X_IOS_INTEGRATION.md`**](ELEMENT_X_IOS_INTEGRATION.md) for full Swift networking code (`BotClient.swift`), SwiftUI views (`AssistantTabView.swift`), Keychain management, and instructions on registering the tab inside Element X's `HomeScreen.swift` and `AppCoordinator.swift`.
+See [**`docs/ELEMENT_X_IOS_INTEGRATION.md`**](docs/ELEMENT_X_IOS_INTEGRATION.md) for full Swift networking code (`BotClient.swift`), SwiftUI views (`AssistantTabView.swift`), Keychain management, and instructions on registering the tab inside Element X's `HomeScreen.swift` and `AppCoordinator.swift`.
 
 ---
 
@@ -235,58 +235,187 @@ The SSE stream authenticates via cookie or `Bearer` token. Events carry `{ "type
 
 ---
 
-## 🛠️ Setup
+## 🛠️ Setup & Running
 
-### Prerequisites
-- [Rust & Cargo](https://rustup.rs/) (edition 2021)
-- Node 20+ for the frontend
-- A Matrix account for the bot on any homeserver
+You can run `matrix-bot` in any of the following ways:
+1. **[Standalone Single Binary](#option-1-standalone-single-binary-recommended)** — zero-dependency executable with embedded Web SPA UI (fastest & easiest).
+2. **[Docker Compose](#option-2-docker-compose-recommended-for-containers)** — containerized deployment with managed storage and healthchecks.
+3. **[Docker Run](#option-3-docker-run)** — direct single-container command.
+4. **[From Source (Development)](#option-4-development-from-source)** — development mode with hot-reloading.
 
-### Configure
+---
+
+### Configuration (`.env`)
+
+Before running through any method, prepare your environment configuration:
 
 ```bash
 cp .env.example .env
 ```
 
 ```env
+# Matrix Bot Credentials
 MATRIX_HOMESERVER=https://matrix.org
 MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=optional_e2ee_recovery_key
+
+# SQLite Database
 DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
+
+# Web & API Server
 API_HOST=0.0.0.0
 API_PORT=8080
 API_REGISTRATION_SECRET=optional_secret_gating_registration
 
-# Passkeys. RP ID is a bare hostname and ignores ports; ORIGIN carries the port
-# and must match where the browser loads the page.
+# WebAuthn / Passkeys
+# WEBAUTHN_RP_ID is a bare domain (no port or scheme).
+# WEBAUTHN_ORIGIN must match the exact URL the browser loads.
 WEBAUTHN_RP_ID=localhost
-WEBAUTHN_ORIGIN=http://localhost:5173
+WEBAUTHN_ORIGIN=http://localhost:8080
 
-# --- AI Assistant & Live Web Search -------------------------------------------
+# AI Assistant & Live Web Search (Optional)
 AI_ENDPOINT=https://api.x.ai/v1
 AI_API_KEY=xai-...
 AI_MODEL=grok-4.6
-# Optional outbound HTTP proxy for AI & search (e.g. for mainland China networks)
-AI_PROXY=http://127.0.0.1:7897
-
-# Live Web Search (Tavily API with DuckDuckGo fallback)
-TAVILY_API_KEY=tvly-...
+# AI_PROXY=http://127.0.0.1:7897        # Optional proxy for restricted networks
+TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo if unset)
 ```
 
-⚠️ **`WEBAUTHN_RP_ID` is baked into every passkey at creation.** Changing it
-invalidates every credential ever registered, so pick the production hostname
-before anyone registers. The app refuses to boot in production while these are
-still the localhost defaults.
+> [!WARNING]
+> **`WEBAUTHN_RP_ID` is baked into passkey credentials upon registration.**
+> Changing it invalidates existing passkeys. If deploying to production (e.g. `bot.example.com`), set `WEBAUTHN_RP_ID=bot.example.com` and `WEBAUTHN_ORIGIN=https://bot.example.com` before creating passkeys.
 
-### Run
+---
+
+### Option 1: Standalone Single Binary (Recommended)
+
+The standalone binary is fully self-contained: **no Node.js, external web server, or container runtime required**. The React Web SPA is embedded directly into the executable.
+
+#### 1. Download Prebuilt Binary
+Download the prebuilt archive for your platform from the [GitHub Releases](https://github.com/evan1ee/matrix-bot/releases) page:
+- **Linux (x86_64)**: `matrix-bot-linux-x86_64.tar.gz`
+- **Linux (ARM64 / Raspberry Pi)**: `matrix-bot-linux-arm64.tar.gz`
+- **macOS (Apple Silicon M1-M4)**: `matrix-bot-macos-arm64.tar.gz`
+- **macOS (Intel)**: `matrix-bot-macos-x86_64.tar.gz`
+- **Windows (x64)**: `matrix-bot-windows-x86_64.zip`
+
+#### 2. Run
+```bash
+# Linux / macOS
+tar -xzf matrix-bot-linux-x86_64.tar.gz
+chmod +x matrix-bot
+./matrix-bot
+
+# Windows (Command Prompt / PowerShell)
+Expand-Archive matrix-bot-windows-x86_64.zip -DestinationPath .
+.\matrix-bot.exe
+```
+
+Open **`http://localhost:8080`** in your browser to access the Web UI.
+
+#### 3. (Optional) Run as a Linux Systemd Service
+To keep the bot running 24/7 in the background:
+
+```ini
+# /etc/systemd/system/matrix-bot.service
+[Unit]
+Description=Matrix Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/matrix-bot
+ExecStart=/opt/matrix-bot/matrix-bot
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/matrix-bot/.env
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-cargo run                        # bot + API on :8080
-npm --prefix frontend run dev    # SPA on :5173, proxying /api
+sudo systemctl daemon-reload
+sudo systemctl enable --now matrix-bot
+sudo systemctl status matrix-bot
 ```
 
-Open <http://localhost:5173> — the port `WEBAUTHN_ORIGIN` names.
+---
+
+### Option 2: Docker Compose (Recommended for Containers)
+
+Docker Compose manages persistent data volumes and restarts automatically.
+
+```bash
+# 1. Clone repo & setup .env
+cp .env.example .env
+# Set WEBAUTHN_ORIGIN=http://localhost:8080 (matching API_PORT)
+
+# 2. Build and start in background
+docker compose up -d
+
+# 3. View streaming logs
+docker compose logs -f
+
+# 4. Stop service
+docker compose down
+```
+
+Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts.
+
+---
+
+### Option 3: Docker Run
+
+Run directly as a single container without compose:
+
+```bash
+# 1. Create a persistent named volume for SQLite and Matrix crypto store
+docker volume create matrix-bot-data
+
+# 2. Run the container
+docker run -d \
+  --name matrix-bot \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  --env-file .env \
+  -v matrix-bot-data:/app/data \
+  matrix-bot:latest
+
+# 3. Check logs
+docker logs -f matrix-bot
+```
+
+---
+
+### Option 4: Development from Source
+
+For local development with hot-reloading frontend and active Rust compiler feedback:
+
+```bash
+# Terminal 1: Bot + REST API & SSE Server
+cargo run
+
+# Terminal 2: React SPA dev server with Vite hot reload
+npm --prefix frontend run dev
+```
+
+In development, open **`http://localhost:5173`** (Vite proxies `/api` requests to `:8080`).
+
+#### Building the Standalone Binary Locally
+You can also compile your own standalone single binary anytime:
+```bash
+# 1. Build the frontend bundle into backend/web/dist
+npm --prefix frontend ci
+npm --prefix frontend run build
+
+# 2. Compile the release binary (embeds the web bundle into the executable)
+cargo build --release --bin matrix-bot
+
+# Output binary: target/release/matrix-bot (or matrix-bot.exe)
+```
 
 ### Test
 
@@ -337,9 +466,8 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # webhook, ai, settings, account
     └── utils/
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
-ELEMENT_X_IOS_INTEGRATION.md  # Comprehensive guide, Swift client, and SwiftUI views for iOS
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
-docs/                         # testing-auth-locally.md, webhooks.md
+docs/                         # documentation, roadmap, architecture reviews, guides
 ```
 
 `AGENTS.md` holds the development conventions; `CLAUDE.md` explains *why* the

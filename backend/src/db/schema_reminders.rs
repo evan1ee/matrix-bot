@@ -62,6 +62,18 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_reminders_owner_status_trigger ON reminders(owner_id, status, trigger_at DESC, id DESC);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_reminders_owner_room_status ON reminders(owner_id, room_id, status, trigger_at DESC);",
+    )
+    .execute(pool)
+    .await?;
+
     // Clean up legacy matrix.org room_id placeholders
     let _ = sqlx::query("UPDATE reminders SET room_id = 'web' WHERE room_id LIKE '%matrix.org%';")
         .execute(pool)

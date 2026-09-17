@@ -1263,12 +1263,29 @@ export class FakeApi {
 
     // --- reminders ---
     if (path === '/reminders' && method === 'GET') {
-      const pending = this.reminders.filter((r) => r.status === 'pending');
+      const statusParam = url.searchParams.get('status') || 'pending';
+      const page = parseInt(url.searchParams.get('page') || '1', 10);
+      const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+
+      let filtered = this.reminders;
+      if (statusParam === 'history') {
+        filtered = this.reminders.filter((r) => r.status !== 'pending');
+      } else if (statusParam === 'triggered' || statusParam === 'cancelled' || statusParam === 'failed') {
+        filtered = this.reminders.filter((r) => r.status === statusParam);
+      } else if (statusParam === 'pending') {
+        filtered = this.reminders.filter((r) => r.status === 'pending');
+      }
+
+      const total = filtered.length;
+      const offset = (page - 1) * limit;
+      const paged = filtered.slice(offset, offset + limit);
+
       return json(route, 200, {
-        items: pending,
-        page: 1,
-        limit: 100,
-        total: pending.length,
+        items: paged,
+        page,
+        limit,
+        total,
+        has_more: offset + paged.length < total,
       });
     }
     if (path === '/reminders' && method === 'POST') {
@@ -1282,12 +1299,21 @@ export class FakeApi {
       });
       return json(route, 200, reminder);
     }
+    if (path === '/reminders/history' && method === 'DELETE') {
+      this.reminders = this.reminders.filter((r) => r.status === 'pending');
+      return route.fulfill({ status: 204, body: '' });
+    }
     const reminderMatch = path.match(/^\/reminders\/(\d+)$/);
     if (reminderMatch && method === 'DELETE') {
       const id = Number(reminderMatch[1]);
-      const reminder = this.reminders.find((r) => r.id === id);
-      if (!reminder) return json(route, 404, { error: 'Reminder not found', code: 404 });
-      reminder.status = 'cancelled';
+      const reminderIndex = this.reminders.findIndex((r) => r.id === id);
+      if (reminderIndex === -1) return json(route, 404, { error: 'Reminder not found', code: 404 });
+      const reminder = this.reminders[reminderIndex];
+      if (reminder.status === 'pending') {
+        reminder.status = 'cancelled';
+      } else {
+        this.reminders.splice(reminderIndex, 1);
+      }
       return route.fulfill({ status: 204, body: '' });
     }
 

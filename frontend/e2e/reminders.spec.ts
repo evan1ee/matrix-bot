@@ -52,3 +52,79 @@ test('a reminder scheduled from a todo shows up in the reminders list', async ({
 
   await expect(app.getByText(`Task #${todo.id} is due: Ship the thing`)).toBeVisible();
 });
+
+test('displays reminder history with status badges and filters', async ({ app, api }) => {
+  api.seedReminder({ message: 'Pending task', status: 'pending' });
+  api.seedReminder({ message: 'Triggered task', status: 'triggered' });
+  api.seedReminder({ message: 'Cancelled task', status: 'cancelled' });
+  await gotoApp(app, TAB.reminder);
+
+  // Pending section has Pending task
+  await expect(app.getByText('Pending task')).toBeVisible();
+
+  // History section has Triggered and Cancelled tasks
+  await expect(app.getByText('Reminder history')).toBeVisible();
+  await expect(app.getByText('Triggered task')).toBeVisible();
+  await expect(app.getByText('Cancelled task')).toBeVisible();
+
+  // Filter to only Triggered
+  await app.getByRole('button', { name: 'Triggered' }).click();
+  await expect(app.getByText('Triggered task')).toBeVisible();
+  await expect(app.getByText('Cancelled task')).toHaveCount(0);
+
+  // Filter to Cancelled
+  await app.getByRole('button', { name: 'Cancelled' }).click();
+  await expect(app.getByText('Cancelled task')).toBeVisible();
+  await expect(app.getByText('Triggered task')).toHaveCount(0);
+});
+
+test('deletes an item from history', async ({ app, api }) => {
+  api.seedReminder({ message: 'Historical item', status: 'cancelled' });
+  await gotoApp(app, TAB.reminder);
+
+  await expect(app.getByText('Historical item')).toBeVisible();
+  await app.getByTitle('Delete from history').click();
+
+  await expect(app.getByText('Historical item')).toHaveCount(0);
+  expect(api.reminders.find((r) => r.message === 'Historical item')).toBeUndefined();
+});
+
+test('clears all reminder history', async ({ app, api }) => {
+  api.seedReminder({ message: 'Keep me pending', status: 'pending' });
+  api.seedReminder({ message: 'History 1', status: 'triggered' });
+  api.seedReminder({ message: 'History 2', status: 'cancelled' });
+  await gotoApp(app, TAB.reminder);
+
+  await expect(app.getByText('History 1')).toBeVisible();
+  await expect(app.getByText('History 2')).toBeVisible();
+
+  await app.getByRole('button', { name: 'Clear history' }).click();
+  await app.getByRole('button', { name: 'Yes, clear' }).click();
+
+  await expect(app.getByText('No reminder history found.')).toBeVisible();
+  await expect(app.getByText('Keep me pending')).toBeVisible();
+  expect(api.reminders.filter((r) => r.status !== 'pending')).toHaveLength(0);
+});
+
+test('re-schedules an item from history into form', async ({ app, api }) => {
+  api.seedReminder({ message: 'Weekly sync meeting', recurrence: 'weekly', status: 'triggered' });
+  await gotoApp(app, TAB.reminder);
+
+  await expect(app.getByText('Weekly sync meeting')).toBeVisible();
+  await app.getByTitle('Re-schedule this reminder').click();
+
+  await expect(app.getByPlaceholder('Reminder message...')).toHaveValue('Weekly sync meeting');
+});
+
+test('formats raw acct_ sender IDs gracefully with user display name', async ({ app, api }) => {
+  api.seedReminder({
+    message: 'Have my hair cut',
+    sender_name: 'acct_796cac95ea66412e8d758526fab863cd',
+    status: 'pending',
+  });
+  await gotoApp(app, TAB.reminder);
+
+  await expect(app.getByText('Have my hair cut')).toBeVisible();
+  await expect(app.getByText('by acct_796cac95ea66412e8d758526fab863cd')).toHaveCount(0);
+  await expect(app.getByText('by tester')).toBeVisible();
+});
