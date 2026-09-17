@@ -79,7 +79,8 @@ pub async fn start_api_server(
             .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new()),
-    );
+    )
+    .with_registration_open(config.registration_open);
 
     // The Relying Party is a boot-time decision: an RP ID that does not match
     // the origin the browser loads mints credentials no browser will return, so

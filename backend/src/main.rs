@@ -142,6 +142,14 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env()?;
     config.validate()?;
+
+    if config.registration_secret.is_some() {
+        info!("Registration mode: INVITE-ONLY (invite secret configured)");
+    } else if config.registration_open {
+        info!("Registration mode: OPEN (open registration enabled)");
+    } else {
+        info!("Registration mode: CLOSED (release default: open internet scanners cannot register accounts)");
+    }
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
 

@@ -14,6 +14,37 @@ fn is_production() -> bool {
     }
 }
 
+/// Resolves the registration policy based on release/debug mode, invite secret, and open flags.
+///
+/// In release / production builds, open registration is disabled by default to protect
+/// self-hosted instances against automated open-internet scanning.
+pub fn resolve_registration_policy(
+    is_prod: bool,
+    invite_secret: Option<String>,
+    registration_open_env: Option<String>,
+    allow_open_flag: bool,
+) -> (Option<String>, bool) {
+    let secret = invite_secret
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let open = if allow_open_flag {
+        true
+    } else if let Some(env_val) = registration_open_env {
+        let v = env_val.trim();
+        v.eq_ignore_ascii_case("true")
+            || v == "1"
+            || v.eq_ignore_ascii_case("yes")
+            || v.eq_ignore_ascii_case("on")
+    } else if is_prod {
+        false
+    } else {
+        secret.is_none()
+    };
+
+    (secret, open)
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -27,6 +58,7 @@ pub struct Config {
     pub api_host: String,
     pub api_port: u16,
     pub registration_secret: Option<String>,
+    pub registration_open: bool,
     pub db_max_connections: u32,
     /// Origins permitted to call the API cross-origin.
     ///
@@ -102,7 +134,22 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(8080);
 
-        let registration_secret = env::var("API_REGISTRATION_SECRET").ok();
+        let invite_secret = env::var("INVITE_SECRET")
+            .or_else(|_| env::var("API_REGISTRATION_SECRET"))
+            .ok();
+
+        let registration_open_env = env::var("REGISTRATION_OPEN")
+            .or_else(|_| env::var("ALLOW_OPEN_REGISTRATION"))
+            .ok();
+
+        let allow_open_flag = env::args().any(|a| a == "--allow-open-registration");
+
+        let (registration_secret, registration_open) = resolve_registration_policy(
+            is_production(),
+            invite_secret,
+            registration_open_env,
+            allow_open_flag,
+        );
 
         let db_max_connections: u32 = env::var("DATABASE_MAX_CONNECTIONS")
             .ok()
@@ -153,6 +200,7 @@ impl Config {
             api_host,
             api_port,
             registration_secret,
+            registration_open,
             db_max_connections,
             cors_allowed_origins,
             webauthn_rp_id,
@@ -228,6 +276,7 @@ mod tests {
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
+            registration_open: true,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
@@ -264,6 +313,7 @@ mod tests {
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
+            registration_open: true,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
@@ -305,5 +355,53 @@ mod tests {
             cfg.validate().is_err(),
             "an origin without a scheme must be rejected"
         );
+    }
+
+    #[test]
+    fn test_resolve_registration_policy_matrix() {
+        // 1. Release / production mode defaults to closed without secrets or flags
+        let (secret, open) = resolve_registration_policy(true, None, None, false);
+        assert_eq!(secret, None);
+        assert!(!open, "release build must default to registration closed");
+
+        // 2. Release / production mode with invite secret enables invite-only
+        let (secret, open) =
+            resolve_registration_policy(true, Some("my_secret".to_string()), None, false);
+        assert_eq!(secret.as_deref(), Some("my_secret"));
+        assert!(!open, "invite secret means invite-only, not open registration");
+
+        // 3. Release / production mode with CLI flag --allow-open-registration
+        let (secret, open) = resolve_registration_policy(true, None, None, true);
+        assert_eq!(secret, None);
+        assert!(open, "CLI flag --allow-open-registration opens registration");
+
+        // 4. Release / production mode with REGISTRATION_OPEN=true env var
+        let (secret, open) =
+            resolve_registration_policy(true, None, Some("true".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(open, "REGISTRATION_OPEN=true opens registration in release");
+
+        // 5. Release / production mode with REGISTRATION_OPEN=false env var
+        let (secret, open) =
+            resolve_registration_policy(true, None, Some("false".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(!open, "REGISTRATION_OPEN=false keeps registration closed");
+
+        // 6. Debug / local mode defaults to open when no secret is configured
+        let (secret, open) = resolve_registration_policy(false, None, None, false);
+        assert_eq!(secret, None);
+        assert!(open, "debug/local mode defaults to open registration");
+
+        // 7. Debug / local mode with explicit secret is invite-only
+        let (secret, open) =
+            resolve_registration_policy(false, Some("dev_secret".to_string()), None, false);
+        assert_eq!(secret.as_deref(), Some("dev_secret"));
+        assert!(!open, "debug mode with secret is invite-only");
+
+        // 8. Debug / local mode with REGISTRATION_OPEN=false explicitly closes it
+        let (secret, open) =
+            resolve_registration_policy(false, None, Some("false".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(!open, "debug mode with REGISTRATION_OPEN=false closes registration");
     }
 }

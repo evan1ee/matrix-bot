@@ -1308,6 +1308,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Registration is closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         }
       }

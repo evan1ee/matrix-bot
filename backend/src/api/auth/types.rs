@@ -81,6 +81,7 @@ pub struct ApiState {
     pub db: Database,
     pub broadcaster: crate::events::EventBroadcaster,
     pub registration_secret: Option<String>,
+    pub registration_open: bool,
     pub homeserver: String,
     pub http_client: reqwest::Client,
     /// The **bot's** own Matrix access token, shared with the bot bootstrap.
@@ -162,6 +163,7 @@ impl ApiState {
             db,
             broadcaster,
             registration_secret,
+            registration_open: true,
             homeserver,
             http_client,
             bot_access_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
@@ -176,6 +178,12 @@ impl ApiState {
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Configures whether open registration without an invite secret is permitted.
+    pub fn with_registration_open(mut self, open: bool) -> Self {
+        self.registration_open = open;
+        self
     }
 
     /// Points this state at the configured Relying Party.
