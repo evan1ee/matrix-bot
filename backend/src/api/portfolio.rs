@@ -10,13 +10,9 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
-use crate::modules::portfolio::models::{
-    normalise_symbol, CashBalance, Holding, PortfolioCurrencySummary, QUANTITY_EXPONENT,
-};
+use crate::modules::portfolio::models::{normalise_symbol, Holding, PortfolioCurrencySummary};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
-use crate::modules::portfolio::trade;
-
-const MAX_NOTE_LEN: usize = 500;
+use crate::modules::portfolio::service::{self, PortfolioError, TradeRequest};
 
 /// Amounts and quantities arrive as decimal strings, never as JSON numbers —
 /// the same reason `finance::TransactionRequest` does: a JSON number is an
@@ -62,15 +58,14 @@ pub struct SellResponse {
     pub realized_pl_minor: i64,
 }
 
-fn note_or_reject(note: &Option<String>) -> Result<Option<&str>, ApiError> {
-    match note {
-        Some(text) if text.len() > MAX_NOTE_LEN => Err(ApiError::bad_request(format!(
-            "Note exceeds {} character limit",
-            MAX_NOTE_LEN
-        ))),
-        Some(text) if text.trim().is_empty() => Ok(None),
-        Some(text) => Ok(Some(text.as_str())),
-        None => Ok(None),
+/// `MAX_NOTE_LEN` and the note-length check live in `service` now — this
+/// module owns the response shape, not the limit.
+impl From<PortfolioError> for ApiError {
+    fn from(err: PortfolioError) -> Self {
+        match err {
+            PortfolioError::Db(inner) => ApiError::internal(inner.to_string()),
+            other => ApiError::bad_request(other.to_string()),
+        }
     }
 }
 
@@ -112,38 +107,31 @@ pub async fn buy_holding(
 ) -> Result<Json<Holding>, ApiError> {
     let owner_id = user.owner_id();
 
+    // Recomputed here only to word the two failure branches below — by the
+    // time either is reached, `service::buy` has already accepted these as
+    // well-formed, so this cannot itself produce a new rejection.
     let symbol = normalise_symbol(&payload.symbol).map_err(ApiError::bad_request)?;
     let currency =
         normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let exponent = exponent_for(&currency);
-    let price_minor =
-        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let note = note_or_reject(&payload.note)?;
 
-    let outcome = trade::buy_at(
+    let outcome = service::buy(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
-        &symbol,
-        quantity_minor,
-        price_minor,
-        &currency,
-        exponent as i64,
-        note,
-        payload.executed_at,
+        TradeRequest {
+            symbol: &payload.symbol,
+            quantity: &payload.quantity,
+            price: &payload.price,
+            currency: &payload.currency,
+            note: payload.note.as_deref(),
+            executed_at: payload.executed_at,
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await?;
 
     match outcome {
-        BuyOutcome::Ok { holding, cash } => {
-            state
-                .broadcaster
-                .send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
-            state.broadcaster.send(cash_event(&owner_id, &cash));
-            Ok(Json(holding))
-        }
+        BuyOutcome::Ok { holding, .. } => Ok(Json(holding)),
         BuyOutcome::CurrencyMismatch { existing_currency } => Err(ApiError::bad_request(format!(
             "{} is already held in {}",
             symbol, existing_currency
@@ -166,14 +154,6 @@ pub async fn buy_holding(
 /// path's happy-path imports.
 pub(crate) fn format_for_error(minor: i64, exponent: u32) -> String {
     crate::modules::finance::money::format_amount(minor, exponent)
-}
-
-pub(crate) fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
-    SystemEvent::PortfolioCashUpdated {
-        owner_id: owner_id.to_string(),
-        currency: cash.currency.clone(),
-        balance_minor: cash.balance_minor,
-    }
 }
 
 #[utoipa::path(
@@ -202,22 +182,16 @@ pub async fn sell_holding(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
-    let exponent = existing.currency_exponent as u32;
-    let price_minor =
-        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-    let outcome = trade::sell_at(
+    let outcome = service::sell(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
         &existing.symbol,
-        quantity_minor,
-        price_minor,
+        &payload.quantity,
+        &payload.price,
         payload.executed_at,
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await?;
 
     match outcome {
         SellOutcome::NotFound => Err(ApiError::not_found("Holding not found or access denied")),
@@ -226,35 +200,19 @@ pub async fn sell_holding(
             held_minor
         ))),
         SellOutcome::Closed {
+            realized_pl_minor, ..
+        } => Ok(Json(SellResponse {
+            holding: None,
             realized_pl_minor,
-            cash,
-        } => {
-            state
-                .broadcaster
-                .send(SystemEvent::PortfolioHoldingDeleted {
-                    id,
-                    owner_id: owner_id.clone(),
-                });
-            state.broadcaster.send(cash_event(&owner_id, &cash));
-            Ok(Json(SellResponse {
-                holding: None,
-                realized_pl_minor,
-            }))
-        }
+        })),
         SellOutcome::Reduced {
             holding,
             realized_pl_minor,
-            cash,
-        } => {
-            state
-                .broadcaster
-                .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-            state.broadcaster.send(cash_event(&owner_id, &cash));
-            Ok(Json(SellResponse {
-                holding: Some(holding),
-                realized_pl_minor,
-            }))
-        }
+            ..
+        } => Ok(Json(SellResponse {
+            holding: Some(holding),
+            realized_pl_minor,
+        })),
     }
 }
 
@@ -320,7 +278,17 @@ pub async fn set_note(
     Json(payload): Json<SetNoteRequest>,
 ) -> Result<Json<Holding>, ApiError> {
     let owner_id = user.owner_id();
-    let note = note_or_reject(&payload.note)?;
+    let note = match &payload.note {
+        Some(text) if text.len() > service::MAX_NOTE_LEN => {
+            return Err(ApiError::bad_request(format!(
+                "Note exceeds {} character limit",
+                service::MAX_NOTE_LEN
+            )))
+        }
+        Some(text) if text.trim().is_empty() => None,
+        Some(text) => Some(text.as_str()),
+        None => None,
+    };
 
     let existing = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
         .await
@@ -402,6 +370,8 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use crate::modules::portfolio::cash_repo;
+    use crate::modules::portfolio::models::QUANTITY_EXPONENT;
+    use crate::modules::portfolio::service::MAX_NOTE_LEN;
     use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {

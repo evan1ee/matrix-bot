@@ -3,15 +3,13 @@
 use sqlx::SqlitePool;
 use tracing::error;
 
-use super::trade;
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::finance::money::{
     exponent_for, format_amount, looks_like_currency, normalise_currency, parse_amount,
 };
-use crate::modules::portfolio::cash::cash_event;
-use crate::modules::portfolio::handler::broadcast;
 use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
+use crate::modules::portfolio::service::{self, PortfolioError, TradeRequest};
 use crate::modules::portfolio::view::{format_quantity, signed_amount};
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
@@ -88,22 +86,30 @@ pub async fn handle_buy(
     };
 
     let exponent = exponent_for(&parsed.currency);
-    let outcome = trade::buy(
+    // The grammar already parsed these into minor units (and the unit tests
+    // for `parse_buy` assert on exactly that), so they are re-rendered as
+    // decimal strings for the service, which owns the parse-write-announce
+    // sequence and takes raw input like every other transport.
+    let quantity_str = format_amount(parsed.quantity_minor, QUANTITY_EXPONENT);
+    let price_str = format_amount(parsed.price_minor, exponent);
+
+    let outcome = service::buy(
         pool,
+        broadcaster,
         owner_id,
-        &parsed.symbol,
-        parsed.quantity_minor,
-        parsed.price_minor,
-        &parsed.currency,
-        exponent as i64,
-        parsed.note.as_deref(),
+        TradeRequest {
+            symbol: &parsed.symbol,
+            quantity: &quantity_str,
+            price: &price_str,
+            currency: &parsed.currency,
+            note: parsed.note.as_deref(),
+            executed_at: None,
+        },
     )
     .await;
 
     match outcome {
         Ok(BuyOutcome::Ok { holding, cash }) => {
-            broadcast(broadcaster, SystemEvent::PortfolioHoldingCreated(holding.clone()));
-            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📈 Bought <b>{} {}</b> @ {} {}. Position: {} @ avg {} {}. Cash remaining: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -132,6 +138,9 @@ pub async fn handle_buy(
             html_escape(&parsed.currency),
             html_escape(&parsed.currency),
         ),
+        Err(PortfolioError::NoteTooLong { max }) => {
+            format!("⚠️ Note exceeds {} character limit.", max)
+        }
         Err(err) => {
             error!("Failed to record a portfolio buy: {:?}", err);
             "❌ Database error recording the purchase.".to_string()
@@ -153,24 +162,25 @@ pub async fn handle_record(
         Err(err) => return format!("⚠️ {}.", html_escape(&err)),
     };
     let exponent = exponent_for(&parsed.currency);
+    let quantity_str = format_amount(parsed.quantity_minor, QUANTITY_EXPONENT);
+    let price_str = format_amount(parsed.price_minor, exponent);
 
-    match trade::record_holding(
+    match service::record(
         pool,
+        broadcaster,
         owner_id,
-        &parsed.symbol,
-        parsed.quantity_minor,
-        parsed.price_minor,
-        &parsed.currency,
-        exponent as i64,
-        parsed.note.as_deref(),
+        TradeRequest {
+            symbol: &parsed.symbol,
+            quantity: &quantity_str,
+            price: &price_str,
+            currency: &parsed.currency,
+            note: parsed.note.as_deref(),
+            executed_at: None,
+        },
     )
     .await
     {
         Ok(Ok(holding)) => {
-            broadcast(
-                broadcaster,
-                SystemEvent::PortfolioHoldingCreated(holding.clone()),
-            );
             format!(
                 "📝 Recorded holding of <b>{} {}</b> @ {} {}. Total position: {} @ avg {} {} (no cash deducted).",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -187,6 +197,9 @@ pub async fn handle_record(
             html_escape(&parsed.symbol),
             html_escape(&existing_currency),
         ),
+        Err(PortfolioError::NoteTooLong { max }) => {
+            format!("⚠️ Note exceeds {} character limit.", max)
+        }
         Err(err) => {
             error!("Failed to record holding: {:?}", err);
             "❌ Database error recording position.".to_string()
@@ -261,12 +274,23 @@ pub async fn handle_sell(
         return format!("⚠️ You do not hold <b>{}</b>.", html_escape(&parsed.symbol));
     };
 
-    match trade::sell(
+    // `parse_sell` above already split and validated these two tokens (using
+    // `existing`'s own currency exponent); they are handed to the service raw
+    // rather than re-derived from `parsed`'s already-converted minor units,
+    // since the service — not this grammar — owns turning a decimal string
+    // into minor units.
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    let quantity_raw = tokens.get(1).copied().unwrap_or_default();
+    let price_raw = tokens.get(3).copied().unwrap_or_default();
+
+    match service::sell(
         pool,
+        broadcaster,
         owner_id,
         &parsed.symbol,
-        parsed.quantity_minor,
-        parsed.price_minor,
+        quantity_raw,
+        price_raw,
+        None,
     )
     .await
     {
@@ -283,14 +307,6 @@ pub async fn handle_sell(
             cash,
         }) => {
             let exp = existing.currency_exponent as u32;
-            broadcast(
-                broadcaster,
-                SystemEvent::PortfolioHoldingDeleted {
-                    id: existing.id,
-                    owner_id: owner_id.to_string(),
-                },
-            );
-            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📉 Sold <b>{} {}</b> — position closed. Realized P&amp;L: {} {}. Cash balance: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -307,11 +323,6 @@ pub async fn handle_sell(
             cash,
         }) => {
             let exp = holding.currency_exponent as u32;
-            broadcast(
-                broadcaster,
-                SystemEvent::PortfolioHoldingUpdated(holding.clone()),
-            );
-            broadcast(broadcaster, cash_event(owner_id, &cash));
             format!(
                 "📉 Sold <b>{} {}</b>. Remaining: {} @ avg {} {}. Realized P&amp;L: {} {}. Cash balance: {} {}.",
                 html_escape(&format_quantity(parsed.quantity_minor)),
@@ -387,5 +398,22 @@ mod tests {
     #[test]
     fn test_parse_sell_unknown_symbol_is_rejected_before_price_parsing() {
         assert!(parse_sell("AAPL 5 @ 180.00", |_| None).is_err());
+    }
+
+    /// The defect this migration fixes for the Matrix path: before routing
+    /// through `service::buy`, a note of any length reached the database.
+    #[tokio::test]
+    async fn test_a_matrix_buy_enforces_the_note_limit() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
+        let args = format!("AAPL 10 @ 150.00 USD {}", over_limit_note);
+
+        let reply = handle_buy(&pool, "@alice:a", &args, None).await;
+        assert!(
+            reply.contains(&service::MAX_NOTE_LEN.to_string()),
+            "the reply must report the character limit: {reply}"
+        );
     }
 }

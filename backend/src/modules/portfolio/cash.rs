@@ -16,9 +16,9 @@ use crate::modules::finance::money::{
     exponent_for, format_amount, normalise_currency, parse_amount,
 };
 use crate::modules::finance::service as finance_service;
-use crate::modules::portfolio::handler::broadcast;
 use crate::modules::portfolio::models::CashBalance;
 use crate::modules::portfolio::repository::WithdrawOutcome;
+use crate::modules::portfolio::service;
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
@@ -161,12 +161,15 @@ async fn handle_cash_deposit(
             )
         }
     };
+    // `parse_cash_amount`'s own tests destructure its tuple return, so it
+    // cannot also hand back the raw amount string — re-render it instead of
+    // widening that signature.
+    let amount_str = format_amount(amount_minor, exponent);
 
-    match cash_repo::deposit_cash(pool, owner_id, &currency, exponent as i64, amount_minor).await {
+    match service::deposit_cash(pool, broadcaster, owner_id, &currency, &amount_str, None).await {
         Ok(cash) => {
-            broadcast(broadcaster, cash_event(owner_id, &cash));
-            // The service broadcasts `TransactionCreated` itself; this call
-            // site only needs the `PortfolioCashUpdated` event above.
+            // The service broadcasts `PortfolioCashUpdated` itself; this call
+            // site only needs to post the finance-ledger transaction below.
             record_portfolio_cash_transaction(
                 pool,
                 broadcaster,
@@ -212,12 +215,12 @@ async fn handle_cash_withdraw(
             )
         }
     };
+    let amount_str = format_amount(amount_minor, exponent);
 
-    match cash_repo::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
+    match service::withdraw_cash(pool, broadcaster, owner_id, &currency, &amount_str, None).await {
         Ok(WithdrawOutcome::Ok(cash)) => {
-            broadcast(broadcaster, cash_event(owner_id, &cash));
-            // The service broadcasts `TransactionCreated` itself; this call
-            // site only needs the `PortfolioCashUpdated` event above.
+            // The service broadcasts `PortfolioCashUpdated` itself; this call
+            // site only needs to post the finance-ledger transaction below.
             record_portfolio_cash_transaction(
                 pool,
                 broadcaster,

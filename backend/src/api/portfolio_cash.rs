@@ -5,11 +5,12 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
-use crate::api::portfolio::{cash_event, format_for_error};
+use crate::api::portfolio::format_for_error;
 use crate::error::ApiError;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::models::{CashBalance, WithdrawOutcome};
+use crate::modules::portfolio::service;
 
 #[derive(Deserialize, ToSchema)]
 pub struct CashAmountRequest {
@@ -68,22 +69,24 @@ pub async fn deposit_cash(
     Json(payload): Json<CashAmountRequest>,
 ) -> Result<Json<CashBalance>, ApiError> {
     let owner_id = user.owner_id();
+    // Recomputed here (the service validates its own copy) only to post the
+    // matching finance-ledger transaction below, which needs the resolved
+    // currency and minor-unit amount and which the portfolio service does
+    // not know about.
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    let cash = cash_repo::deposit_cash_at(
+    let cash = service::deposit_cash(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
-        &currency,
-        exponent,
-        amount_minor,
+        &payload.currency,
+        &payload.amount,
         payload.executed_at,
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await?;
 
-    state.broadcaster.send(cash_event(&owner_id, &cash));
-    // The service broadcasts `TransactionCreated` itself; this handler only
-    // needs the `PortfolioCashUpdated` event above.
+    // The service broadcasts `PortfolioCashUpdated` itself; this handler only
+    // needs to post the finance-ledger transaction below.
     crate::modules::portfolio::cash::record_portfolio_cash_transaction(
         &state.db.pool,
         Some(&state.broadcaster),
@@ -116,22 +119,25 @@ pub async fn withdraw_cash(
     Json(payload): Json<CashAmountRequest>,
 ) -> Result<Json<CashBalance>, ApiError> {
     let owner_id = user.owner_id();
+    // Recomputed here (the service validates its own copy) only to post the
+    // matching finance-ledger transaction below and to word the
+    // insufficient-funds message, neither of which the portfolio service
+    // knows about.
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    match cash_repo::withdraw_cash_at(
+    match service::withdraw_cash(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
-        &currency,
-        amount_minor,
+        &payload.currency,
+        &payload.amount,
         payload.executed_at,
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
+    .await?
     {
         WithdrawOutcome::Ok(cash) => {
-            state.broadcaster.send(cash_event(&owner_id, &cash));
-            // The service broadcasts `TransactionCreated` itself; this
-            // handler only needs the `PortfolioCashUpdated` event above.
+            // The service broadcasts `PortfolioCashUpdated` itself; this
+            // handler only needs to post the finance-ledger transaction below.
             crate::modules::portfolio::cash::record_portfolio_cash_transaction(
                 &state.db.pool,
                 Some(&state.broadcaster),
