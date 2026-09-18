@@ -31,7 +31,7 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R8 | AR-002 — portfolio service | ✅ | ✅ | ✅ | `922fccd`. 620 pass. |
 | R9 | AR-002 — reminder service + AiError | ✅ | ✅ | ✅ | `daf016c`, `349768f`. 630 pass. |
 | R10 | AR-005 — split `bot/handler.rs` | ✅ | ✅ | ✅ | `44283f1`. 634 pass. 487 → 102 lines. |
-| R12a | AR-008 — OpenAPI coverage for 5 unannotated files | ✅ | — | — | In progress |
+| R12a | AR-008 — OpenAPI coverage for the undocumented API files | ✅ | ✅ | ✅ | `e3f987a`. 635 pass. 87 → 107 paths. |
 | R12b | AR-008 — generated DTOs, registry-driven nav | — | — | — | Not started |
 | R2c | AR-004 — `search.rs` env reads | — | — | — | **Declined**, see below |
 
@@ -450,3 +450,42 @@ Declined as disproportionate. The project's own rules say to choose the simplest
 requirement and avoid indirection that does not pay for itself. The gap is already named in the allowlist with
 its reason, and the guard still prevents any *new* environment read appearing anywhere. Worth revisiting only if
 the tool executor is restructured for another reason, at which point the parameter comes almost free.
+
+### R12a — AR-008 OpenAPI coverage (`e3f987a`)
+
+Six API files carried no `#[utoipa::path]` annotations, so twenty routes were absent from `openapi.json` and
+from the generated frontend client. CI diffs that document, but it cannot guard an endpoint that was never in
+it: a field could be renamed on any of those routes and nothing would notice.
+
+**Verified here, independently of the implementation report:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings |
+| `cargo test --workspace` | 635 passed, 0 failed, 7 ignored |
+| `openapi.json` | 87 → 107 paths, regenerates byte-identically |
+| `frontend/src/types/api.ts` | regenerates identically; `npm run build` succeeds |
+| Route guard mutation | removing a handler from `paths(...)` fails the test naming `/api/v1/footprints/stats` |
+
+The guard **parses `routes.rs` at test time** rather than keeping a second list of routes beside them. That is
+now the fourth guard in this shape, after the ownership tables, the no-`crate::api` walk and the environment-read
+walk. It converts Axum's `:id` to OpenAPI's `{id}`, follows the `nest` into `mcp.rs`, and allowlists five
+endpoints with no schema to describe.
+
+**Two defects surfaced.** Two further routes were undocumented beyond the six files. And `habits` and `bookmarks`
+both defaulted to the operationId `get_stats`, producing a duplicate identifier in the generated TypeScript;
+`habits` now sets an explicit one, following the `portfolio_summary` precedent.
+
+### Process note — two sessions, one working tree
+
+Partway through R12a a second Claude session was found working the same roadmap against the same branch and
+working tree. It had been given a brief asking for a hand-maintained `ROUTE_PATHS` constant — the exact
+"hand-maintained mirror" anti-pattern this review named as root cause RC-D — and re-added it twice while this
+session was removing it, breaking the build both times.
+
+Resolved by message: the derived version stands, the peer stopped, and `ROUTE_PATHS` is absent from the tree.
+
+Worth recording as a risk rather than an anecdote. The two sessions came close to committing contradictory
+versions of the same test, and nothing in the tooling would have caught it — both were running with the same
+permissions against the same checkout. Surfaced to the user, because whether two sessions should be running at
+once is their call.
