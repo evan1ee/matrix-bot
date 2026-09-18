@@ -76,6 +76,11 @@ Pre-engineered prompt workflows packaged for AI clients:
 
 ## 🚀 Client Configuration
 
+> **`--owner` is required.** MCP mode no longer falls back to the oldest account in the
+> database when `--owner`/`--account` is omitted — that used to make an authorisation
+> decision by accident. Every example below passes it explicitly; omitting it now fails
+> fast with `MCP mode needs an explicit account: pass --owner <account id>`.
+
 ### A. Claude Desktop (Local STDIO Transport)
 
 Add the server to your Claude Desktop configuration file:

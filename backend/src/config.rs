@@ -45,6 +45,15 @@ pub fn resolve_registration_policy(
     (secret, open)
 }
 
+/// The database URL, with the default every entry point shares.
+///
+/// MCP mode does not build a full `Config` — it needs no Matrix credentials —
+/// but it must not carry its own copy of this default either, or the two
+/// silently diverge.
+pub fn database_url_from_env() -> String {
+    env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string())
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -124,8 +133,7 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
+        let database_url = database_url_from_env();
 
         let api_host = env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
@@ -368,12 +376,18 @@ mod tests {
         let (secret, open) =
             resolve_registration_policy(true, Some("my_secret".to_string()), None, false);
         assert_eq!(secret.as_deref(), Some("my_secret"));
-        assert!(!open, "invite secret means invite-only, not open registration");
+        assert!(
+            !open,
+            "invite secret means invite-only, not open registration"
+        );
 
         // 3. Release / production mode with CLI flag --allow-open-registration
         let (secret, open) = resolve_registration_policy(true, None, None, true);
         assert_eq!(secret, None);
-        assert!(open, "CLI flag --allow-open-registration opens registration");
+        assert!(
+            open,
+            "CLI flag --allow-open-registration opens registration"
+        );
 
         // 4. Release / production mode with REGISTRATION_OPEN=true env var
         let (secret, open) =
@@ -402,6 +416,75 @@ mod tests {
         let (secret, open) =
             resolve_registration_policy(false, None, Some("false".to_string()), false);
         assert_eq!(secret, None);
-        assert!(!open, "debug mode with REGISTRATION_OPEN=false closes registration");
+        assert!(
+            !open,
+            "debug mode with REGISTRATION_OPEN=false closes registration"
+        );
+    }
+
+    /// Configuration is read in one place. Everything else is handed values.
+    ///
+    /// The bot half used to re-read `OCR_MODEL_DIR`, `VOICE_*` and the
+    /// verification allowlist at the point of use, so it could disagree with
+    /// the copy the API server was given and `validate` could not check what it
+    /// did not own. The files below still read the environment directly and are
+    /// listed rather than ignored: the AI client resolves its endpoint through a
+    /// chain of five fallbacks that has to move as one piece, and the two test
+    /// files only read in `#[ignore]`d live tests. Shrink this list; do not grow
+    /// it.
+    #[test]
+    fn test_only_config_reads_the_environment() {
+        const ALLOWED: &[&str] = &[
+            "config.rs",
+            // Resolves AI_ENDPOINT/AI_API_BASE/OPENAI_* and proxy settings
+            // through fallback chains that belong in Config; tracked separately.
+            "client.rs",
+            "models.rs",
+            "search.rs",
+            // TRUST_FORWARDED_FOR; moves to ApiState when that is restructured.
+            "recovery.rs",
+            // Read only inside #[ignore]d live tests.
+            "self_verify.rs",
+            "backfill.rs",
+        ];
+
+        fn walk(dir: &std::path::Path, offenders: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("src/ must be readable") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    walk(&path, offenders);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if ALLOWED.contains(&name.as_str()) {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path).expect("a readable source file");
+                for (number, line) in source.lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    if line.contains(&["env", "var"].join("::")) {
+                        offenders.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        walk(&src, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "only config.rs may read the environment; found: {offenders:#?}"
+        );
     }
 }

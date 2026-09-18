@@ -103,8 +103,7 @@ async fn main() -> Result<()> {
             )
             .init();
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
+        let database_url = matrix_bot::config::database_url_from_env();
         let db = Database::connect(&database_url, 5).await?;
 
         let mut owner_id = String::new();
@@ -119,12 +118,11 @@ async fn main() -> Result<()> {
         }
 
         if owner_id.is_empty() {
-            let resolved: Option<String> =
-                sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1")
-                    .fetch_optional(&db.pool)
-                    .await
-                    .unwrap_or(None);
-            owner_id = resolved.unwrap_or_else(|| "default_owner".to_string());
+            anyhow::bail!(
+                "MCP mode needs an explicit account: pass --owner <account id>. \
+                 It used to default to the oldest account in the database, which made \
+                 an authorisation decision by accident."
+            );
         }
 
         matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;

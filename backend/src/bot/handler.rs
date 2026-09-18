@@ -16,13 +16,18 @@ use crate::modules::{ModuleRegistry, ParsedCommand};
 
 pub fn register_handlers(
     client: &Client,
+    config: &crate::config::Config,
     registry: Arc<ModuleRegistry>,
     db: Database,
     broadcaster: Option<EventBroadcaster>,
     pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
 ) {
     // 1. Authorized invite event handler
-    crate::bot::invite::register_invite_handler(client, db.clone());
+    crate::bot::invite::register_invite_handler(
+        client,
+        db.clone(),
+        config.verification_allowlist.clone(),
+    );
 
     // 2. Reaction event handler
     crate::bot::reaction::register_reaction_handler(client, db.clone(), broadcaster.clone());
@@ -35,12 +40,20 @@ pub fn register_handlers(
             return;
         }
     };
+    let ocr_model_dir = config.ocr_model_dir.clone();
+    let voice_config = crate::modules::voice::VoiceConfig {
+        enabled: config.voice_enabled,
+        model_dir: config.voice_model_dir.clone(),
+        language: config.voice_language.clone(),
+    };
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room| {
         let own_id = bot_user_id.clone();
         let registry = registry.clone();
         let db = db.clone();
         let broadcaster = broadcaster.clone();
         let pending_merges = pending_merges.clone();
+        let ocr_model_dir = ocr_model_dir.clone();
+        let voice_config = voice_config.clone();
 
         async move {
             if room.state() != RoomState::Joined || ev.sender == own_id {
@@ -131,10 +144,7 @@ pub fn register_handlers(
                     }
                 };
 
-                let model_dir = std::path::PathBuf::from(
-                    std::env::var("OCR_MODEL_DIR")
-                        .unwrap_or_else(|_| "data/ocr_models".to_string()),
-                );
+                let model_dir = ocr_model_dir;
 
                 let reporter = stage_indicator.reporter();
                 let ocr_res = std::panic::AssertUnwindSafe(crate::modules::ocr::process_image_event(
@@ -245,18 +255,6 @@ pub fn register_handlers(
                             .await;
                         return;
                     }
-                };
-
-                let voice_config = crate::modules::voice::VoiceConfig {
-                    enabled: std::env::var("VOICE_ENABLED")
-                        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-                        .unwrap_or(true),
-                    model_dir: std::path::PathBuf::from(
-                        std::env::var("VOICE_MODEL_DIR")
-                            .unwrap_or_else(|_| "data/voice_models".to_string()),
-                    ),
-                    language: std::env::var("VOICE_LANGUAGE")
-                        .unwrap_or_else(|_| "auto".to_string()),
                 };
 
                 let reporter = stage_indicator.reporter();

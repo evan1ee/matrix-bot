@@ -45,6 +45,7 @@ pub struct MatrixBot {
     /// Shared with the API, so a merge confirmed in the web UI is the same one
     /// `!link` recorded.
     pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
+    config: Config,
 }
 
 impl MatrixBot {
@@ -113,6 +114,7 @@ impl MatrixBot {
             registry: registry_arc,
             broadcaster,
             pending_merges,
+            config: config.clone(),
         })
     }
 
@@ -126,6 +128,7 @@ impl MatrixBot {
         // Register Matrix event handlers
         register_handlers(
             &self.client,
+            &self.config,
             self.registry.clone(),
             self.db.clone(),
             self.broadcaster.clone(),
