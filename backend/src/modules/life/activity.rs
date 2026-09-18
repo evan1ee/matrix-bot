@@ -7,11 +7,12 @@
 
 use serde::Serialize;
 use sqlx::SqlitePool;
+use utoipa::ToSchema;
 
 use crate::modules::life::activity_collectors::*;
 
 /// A single event from any module that happened on a given date.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ActivityEvent {
     /// ISO time within the day, e.g. "09:15:00" (or null if date-only)
     pub time: Option<String>,
@@ -28,7 +29,7 @@ pub struct ActivityEvent {
 }
 
 /// Summary counts per module.
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, ToSchema)]
 pub struct ActivityStats {
     pub total_events: usize,
     pub todos_created: usize,
@@ -44,7 +45,7 @@ pub struct ActivityStats {
     pub footprints: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DayActivityResponse {
     pub date: String,
     pub events: Vec<ActivityEvent>,

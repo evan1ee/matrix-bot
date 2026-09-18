@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
@@ -148,7 +148,7 @@ pub struct InboundPayload {
     pub format: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, IntoParams, ToSchema)]
 pub struct TelegramQuery {
     pub chat_id: Option<String>,
     pub text: Option<String>,
@@ -161,13 +161,13 @@ pub struct InboundAcceptedResponse {
     pub outbox_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TelegramResponse {
     pub ok: bool,
     pub result: TelegramMessageResult,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TelegramMessageResult {
     pub message_id: i64,
     pub date: i64,

@@ -8,6 +8,18 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::modules::life::activity::{collect_day_activity, DayActivityResponse};
 
+#[utoipa::path(
+    get,
+    tag = "life",
+    path = "/api/v1/life/days/{date}/activity",
+    params(("date" = String, Path, description = "Day, as YYYY-MM-DD")),
+    responses(
+        (status = 200, description = "Everything that happened across every module on that day", body = DayActivityResponse),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_day_activity(
     user: AuthUser,
     State(state): State<ApiState>,

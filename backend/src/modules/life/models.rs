@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
 pub struct LifeProfile {
     pub owner_id: String,
     pub birth_date: String,
@@ -10,7 +11,7 @@ pub struct LifeProfile {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
 pub struct LifeDayLog {
     pub id: i64,
     pub owner_id: String,
@@ -24,13 +25,13 @@ pub struct LifeDayLog {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpsertLifeProfileInput {
     pub birth_date: String,
     pub expected_lifespan_years: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpsertLifeDayLogInput {
     #[serde(alias = "date")]
     pub log_date: String,
@@ -41,12 +42,12 @@ pub struct UpsertLifeDayLogInput {
     pub time_allocation: Option<Vec<Option<String>>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateTimeAllocationInput {
     pub time_allocation: Vec<Option<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
 pub struct LifeHorizonDay {
     pub date: String,
     pub mood: String,
@@ -55,7 +56,7 @@ pub struct LifeHorizonDay {
     pub activity_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct LifeProfileStats {
     pub profile: Option<LifeProfile>,
     pub age_days: i64,
@@ -68,7 +69,7 @@ pub struct LifeProfileStats {
     pub today_date: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct LifeYearView {
     pub year: i64,
     pub logs: Vec<LifeDayLog>,

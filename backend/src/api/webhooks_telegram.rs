@@ -15,6 +15,24 @@ use crate::modules::webhook::{
     repository::{hash_token, WebhookRepository},
 };
 
+/// Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of
+/// Telegram's own Bot API (`https://api.telegram.org/bot<token>/sendMessage`)
+/// so existing Telegram integrations can point at this host unmodified. It is
+/// unauthenticated in the session-cookie sense — the token in the URL path is
+/// the credential — so it carries no `security(...)` requirement.
+#[utoipa::path(
+    post,
+    tag = "webhooks",
+    path = "/bot{token}/sendMessage",
+    params(("token" = String, Path, description = "Webhook token")),
+    request_body(content = TelegramQuery, description = "Accepts this shape as JSON, as `application/x-www-form-urlencoded`, or as a bare text body"),
+    responses(
+        (status = 200, description = "Message accepted", body = TelegramResponse),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Invalid or inactive webhook token", body = ApiErrorResponse),
+        (status = 429, description = "Rate limit exceeded", body = ApiErrorResponse)
+    )
+)]
 pub async fn telegram_send_message_post(
     State(state): State<ApiState>,
     Path(token): Path<String>,
@@ -85,6 +103,19 @@ pub async fn telegram_send_message_post(
     }))
 }
 
+/// Mounted outside `/api/v1` — see `telegram_send_message_post`.
+#[utoipa::path(
+    get,
+    tag = "webhooks",
+    path = "/bot{token}/sendMessage",
+    params(("token" = String, Path, description = "Webhook token"), TelegramQuery),
+    responses(
+        (status = 200, description = "Message accepted", body = TelegramResponse),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Invalid or inactive webhook token", body = ApiErrorResponse),
+        (status = 429, description = "Rate limit exceeded", body = ApiErrorResponse)
+    )
+)]
 pub async fn telegram_send_message_get(
     State(state): State<ApiState>,
     Path(token): Path<String>,
