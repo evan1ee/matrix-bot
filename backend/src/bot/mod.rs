@@ -94,7 +94,10 @@ impl MatrixBot {
         registry.register(crate::modules::briefing::BriefingModule::new());
         registry.register(WebhookModule::new());
         registry.register(crate::modules::mcp::McpModule::new());
-        registry.register(crate::modules::ai::AiModule::new(handles.client.clone()));
+        registry.register(crate::modules::ai::AiModule::new(
+            handles.client.clone(),
+            config.ai.clone(),
+        ));
         registry.register(crate::modules::account::AccountModule::new(
             handles.client.clone(),
             config.web_url.clone(),

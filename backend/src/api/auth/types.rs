@@ -131,6 +131,8 @@ pub struct ApiState {
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     pub ocr_config: crate::modules::ocr::OcrConfig,
     pub voice_config: crate::modules::voice::VoiceConfig,
+    /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
+    pub ai: crate::config::AiEnvConfig,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -194,6 +196,7 @@ impl ApiState {
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             ocr_config: crate::modules::ocr::OcrConfig::default(),
             voice_config: crate::modules::voice::VoiceConfig::default(),
+            ai: crate::config::AiEnvConfig::default(),
         }
     }
 
@@ -253,6 +256,7 @@ impl ApiState {
                 model_dir: config.voice_model_dir.clone(),
                 language: config.voice_language.clone(),
             },
+            ai: config.ai.clone(),
         })
     }
 
@@ -430,6 +434,7 @@ mod tests {
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
             trust_forwarded_for: true,
+            ai: crate::config::AiEnvConfig::default(),
         }
     }
 

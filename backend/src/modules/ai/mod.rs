@@ -22,17 +22,21 @@ use tokio::sync::RwLock;
 
 pub struct AiModule {
     client_handle: Arc<RwLock<Option<Client>>>,
+    ai: crate::config::AiEnvConfig,
 }
 
 impl Default for AiModule {
     fn default() -> Self {
-        Self::new(Arc::new(RwLock::new(None)))
+        Self::new(
+            Arc::new(RwLock::new(None)),
+            crate::config::AiEnvConfig::default(),
+        )
     }
 }
 
 impl AiModule {
-    pub fn new(client_handle: Arc<RwLock<Option<Client>>>) -> Self {
-        Self { client_handle }
+    pub fn new(client_handle: Arc<RwLock<Option<Client>>>, ai: crate::config::AiEnvConfig) -> Self {
+        Self { client_handle, ai }
     }
 }
 
@@ -80,6 +84,7 @@ impl BotModule for AiModule {
     ) -> Option<String> {
         handler::handle_ai_command_with_stage(
             &db.pool,
+            &self.ai,
             broadcaster,
             Some(&self.client_handle),
             &ctx.room_id,

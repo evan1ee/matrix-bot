@@ -49,6 +49,7 @@ pub async fn chat(
         std::time::Duration::from_secs(180),
         run_ai_turn(
             &state.db.pool,
+            &state.ai,
             Some(&state.broadcaster),
             owner_id,
             &room_id,
@@ -155,7 +156,7 @@ pub async fn get_ai_config(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
-    let resolved = ResolvedAiConfig::from_user_config(None);
+    let resolved = ResolvedAiConfig::from_user_config(&state.ai, None);
     let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
         &state.db.pool,
         &user.account_id,
@@ -217,7 +218,9 @@ pub async fn update_ai_config(
     user: AuthUser,
     Json(input): Json<UpdateAiConfigInput>,
 ) -> Result<Json<AiUserConfig>, ApiError> {
-    input.validate().map_err(ApiError::bad_request)?;
+    input
+        .validate(state.ai.allow_private_base_url)
+        .map_err(ApiError::bad_request)?;
 
     if let Some(turns) = input.max_history_turns {
         let mut settings =
@@ -271,13 +274,15 @@ pub async fn verify_ai_config(
     user: AuthUser,
     Json(input): Json<VerifyAiKeyInput>,
 ) -> Result<Json<VerifyAiKeyResponse>, ApiError> {
-    input.validate().map_err(ApiError::bad_request)?;
+    input
+        .validate(state.ai.allow_private_base_url)
+        .map_err(ApiError::bad_request)?;
 
     let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
-    let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
+    let resolved = ResolvedAiConfig::from_user_config(&state.ai, user_config.as_ref());
 
     let target_base_url = input
         .api_base_url
@@ -295,7 +300,7 @@ pub async fn verify_ai_config(
         .filter(|m| !m.trim().is_empty())
         .unwrap_or(resolved.model_name);
 
-    match get_ai_client()
+    match get_ai_client(&state.ai)
         .verify_api_key(&target_base_url, target_key.as_deref(), Some(&target_model))
         .await
     {

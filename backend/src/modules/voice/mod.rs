@@ -18,8 +18,10 @@ pub use models::{VoiceConfig, VoiceError, VoiceTranscriptionResult};
 /// 3. Builds a structured semantic intent prompt with the transcription.
 /// 4. Executes an AI turn with all productivity tools enabled (add_expense, add_todo, create_reminder).
 /// 5. Formats and returns an HTML reply summarizing the actions taken.
+#[allow(clippy::too_many_arguments)]
 pub async fn process_audio_event(
     db: &Database,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
     owner_id: &str,
@@ -101,6 +103,7 @@ pub async fn process_audio_event(
     // 4. Run AI turn with full domain tool capabilities
     match crate::modules::ai::handler::run_ai_turn_with_stage(
         &db.pool,
+        ai,
         broadcaster,
         owner_id,
         room.room_id().as_str(),

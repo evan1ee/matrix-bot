@@ -35,28 +35,22 @@ pub struct ResolvedAiConfig {
 }
 
 impl ResolvedAiConfig {
-    pub fn from_user_config(user_config: Option<&AiUserConfig>) -> Self {
-        let env_base = std::env::var("AI_ENDPOINT")
-            .or_else(|_| std::env::var("AI_API_BASE"))
-            .or_else(|_| std::env::var("AI_BASE_URL"))
-            .or_else(|_| std::env::var("OPENAI_API_BASE"))
-            .or_else(|_| std::env::var("OPENAI_BASE_URL"))
-            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-        let env_key = std::env::var("AI_API_KEY")
-            .or_else(|_| std::env::var("XAI_API_KEY"))
-            .or_else(|_| std::env::var("OPENAI_API_KEY"))
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let env_model = std::env::var("AI_MODEL")
-            .or_else(|_| std::env::var("XAI_MODEL"))
-            .or_else(|_| std::env::var("OPENAI_MODEL"))
-            .unwrap_or_else(|_| {
-                if env_base.contains("x.ai") {
-                    "grok-4.6".to_string()
-                } else {
-                    "gpt-4o-mini".to_string()
-                }
-            });
+    pub fn from_user_config(
+        ai: &crate::config::AiEnvConfig,
+        user_config: Option<&AiUserConfig>,
+    ) -> Self {
+        let env_base = ai
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let env_key = ai.api_key.clone();
+        let env_model = ai.model.clone().unwrap_or_else(|| {
+            if env_base.contains("x.ai") {
+                "grok-4.6".to_string()
+            } else {
+                "gpt-4o-mini".to_string()
+            }
+        });
 
         let api_base_url = user_config
             .and_then(|c| c.api_base_url.as_ref())
@@ -108,22 +102,14 @@ pub struct AiClient {
 }
 
 impl AiClient {
-    pub fn new() -> Self {
-        dotenvy::dotenv().ok();
+    pub fn new(proxy: Option<&str>) -> Self {
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
             .tcp_keepalive(Some(Duration::from_secs(30)))
             .pool_idle_timeout(Some(Duration::from_secs(30)))
             .timeout(Duration::from_secs(120));
 
-        if let Ok(proxy_url) = std::env::var("AI_PROXY")
-            .or_else(|_| std::env::var("HTTPS_PROXY"))
-            .or_else(|_| std::env::var("https_proxy"))
-            .or_else(|_| std::env::var("ALL_PROXY"))
-            .or_else(|_| std::env::var("all_proxy"))
-            .or_else(|_| std::env::var("HTTP_PROXY"))
-            .or_else(|_| std::env::var("http_proxy"))
-        {
+        if let Some(proxy_url) = proxy {
             let trimmed = proxy_url.trim();
             if !trimmed.is_empty() {
                 match reqwest::Proxy::all(trimmed) {
@@ -459,23 +445,21 @@ pub fn parse_sse_line(line: &str) -> Option<String> {
     None
 }
 
-impl Default for AiClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(not(test))]
 static AI_CLIENT: std::sync::OnceLock<AiClient> = std::sync::OnceLock::new();
 
 #[cfg(not(test))]
-pub fn get_ai_client() -> AiClient {
-    AI_CLIENT.get_or_init(AiClient::new).clone()
+pub fn get_ai_client(ai: &crate::config::AiEnvConfig) -> AiClient {
+    // Built once and shared: the point of the global is the connection pool, and
+    // the proxy cannot change without a restart.
+    AI_CLIENT
+        .get_or_init(|| AiClient::new(ai.proxy.as_deref()))
+        .clone()
 }
 
 #[cfg(test)]
-pub fn get_ai_client() -> AiClient {
-    AiClient::new()
+pub fn get_ai_client(ai: &crate::config::AiEnvConfig) -> AiClient {
+    AiClient::new(ai.proxy.as_deref())
 }
 
 #[cfg(test)]
@@ -514,14 +498,10 @@ mod tests {
 
     #[test]
     fn test_resolved_config_defaults() {
-        let resolved = ResolvedAiConfig::from_user_config(None);
-        if std::env::var("AI_ENDPOINT").is_err()
-            && std::env::var("AI_API_BASE").is_err()
-            && std::env::var("OPENAI_API_BASE").is_err()
-        {
-            assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
-            assert_eq!(resolved.model_name, "gpt-4o-mini");
-        }
+        let resolved =
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+        assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
+        assert_eq!(resolved.model_name, "gpt-4o-mini");
         assert_eq!(resolved.temperature, 0.7);
         assert_eq!(resolved.max_tokens, 2048);
     }
@@ -541,7 +521,10 @@ mod tests {
             has_api_key: true,
         };
 
-        let resolved = ResolvedAiConfig::from_user_config(Some(&user_config));
+        let resolved = ResolvedAiConfig::from_user_config(
+            &crate::config::AiEnvConfig::default(),
+            Some(&user_config),
+        );
         assert_eq!(resolved.api_base_url, "https://api.openai.com/v1");
         assert_eq!(resolved.api_key.as_deref(), Some("sk-test1234"));
         assert_eq!(resolved.model_name, "gpt-4o-mini");
@@ -568,7 +551,10 @@ mod tests {
             has_api_key: false,
         };
 
-        let resolved = ResolvedAiConfig::from_user_config(Some(&user_config));
+        let resolved = ResolvedAiConfig::from_user_config(
+            &crate::config::AiEnvConfig::default(),
+            Some(&user_config),
+        );
         assert_eq!(resolved.temperature, 2.0);
         assert_eq!(resolved.max_tokens, 8192);
     }
@@ -579,7 +565,8 @@ mod tests {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
-        let config = ResolvedAiConfig::from_user_config(None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         println!("\n=== Live Test Config ===");
         println!("Resolved base URL: {}", config.api_base_url);
         println!("Resolved model: {}", config.model_name);
@@ -589,7 +576,7 @@ mod tests {
             _ => return, // Skip test if no live key is configured
         };
 
-        let client = AiClient::new();
+        let client = AiClient::new(ai_env.proxy.as_deref());
         let verify = client
             .verify_api_key(
                 &config.api_base_url,

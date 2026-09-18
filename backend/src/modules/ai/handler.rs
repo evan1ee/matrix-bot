@@ -32,6 +32,7 @@ pub struct AiTurnResult {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
     pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
     room_id: &str,
@@ -46,6 +47,7 @@ pub async fn handle_ai_command(
 ) -> Option<String> {
     handle_ai_command_with_stage(
         pool,
+        ai,
         broadcaster,
         client_handle,
         room_id,
@@ -65,6 +67,7 @@ pub async fn handle_ai_command(
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command_with_stage(
     pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
     room_id: &str,
@@ -85,7 +88,7 @@ pub async fn handle_ai_command_with_stage(
             return Some(format_help());
         }
         if let Some(sub_reply) =
-            handle_ai_subcommand(pool, broadcaster, owner_id, room_id, trimmed).await
+            handle_ai_subcommand(pool, ai, broadcaster, owner_id, room_id, trimmed).await
         {
             return Some(sub_reply);
         }
@@ -120,6 +123,7 @@ pub async fn handle_ai_command_with_stage(
 
     match run_ai_turn_with_stage(
         pool,
+        ai,
         broadcaster,
         owner_id,
         room_id,
@@ -148,6 +152,7 @@ pub async fn handle_ai_command_with_stage(
 
 pub async fn run_ai_turn(
     pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -156,6 +161,7 @@ pub async fn run_ai_turn(
 ) -> Result<AiTurnResult, String> {
     run_ai_turn_with_stage(
         pool,
+        ai,
         broadcaster,
         owner_id,
         room_id,
@@ -166,8 +172,10 @@ pub async fn run_ai_turn(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn_with_stage(
     pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -196,7 +204,7 @@ pub async fn run_ai_turn_with_stage(
     let user_config = AiRepository::get_user_config(pool, owner_id)
         .await
         .map_err(|e| e.to_string())?;
-    let resolved_config = ResolvedAiConfig::from_user_config(user_config.as_ref());
+    let resolved_config = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
 
     let conversation = if let Some(conv_id) = conversation_id_override {
         AiRepository::get_conversation(pool, conv_id, owner_id)
@@ -268,7 +276,7 @@ pub async fn run_ai_turn_with_stage(
         });
     }
 
-    let client = get_ai_client();
+    let client = get_ai_client(ai);
     let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
         .into_iter()
         .filter_map(|t| serde_json::to_value(t).ok())
@@ -549,6 +557,7 @@ mod tests {
 
         let help = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -567,6 +576,7 @@ mod tests {
 
         let config = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -591,6 +601,7 @@ mod tests {
 
         let res = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -609,6 +620,7 @@ mod tests {
 
         let hist = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -627,6 +639,7 @@ mod tests {
 
         let config2 = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -645,6 +658,7 @@ mod tests {
 
         let reset = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -681,6 +695,7 @@ mod tests {
 
         let result1 = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:general",
@@ -705,6 +720,7 @@ mod tests {
         // Second failure during same outage
         let result2 = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:general",
@@ -806,7 +822,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config = ResolvedAiConfig::from_user_config(None);
+        let config =
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
         if config.api_key.is_none() {
             return; // Skip test if no live key is provided in env
         }
@@ -842,6 +859,7 @@ mod tests {
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -877,7 +895,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config = ResolvedAiConfig::from_user_config(None);
+        let config =
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
         if config.api_key.is_none() {
             return;
         }
@@ -887,6 +906,7 @@ mod tests {
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -917,6 +937,7 @@ mod tests {
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -953,7 +974,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config = ResolvedAiConfig::from_user_config(None);
+        let config =
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
         if config.api_key.is_none() {
             return;
         }
@@ -963,6 +985,7 @@ mod tests {
         // Turn 1: Add a task
         let turn1 = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -980,6 +1003,7 @@ mod tests {
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -1006,7 +1030,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config = ResolvedAiConfig::from_user_config(None);
+        let config =
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
         if config.api_key.is_none() {
             return;
         }
@@ -1015,6 +1040,7 @@ mod tests {
 
         let result = run_ai_turn(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             &owner,
             "!room:mbm.one",
@@ -1081,6 +1107,7 @@ mod tests {
         // When neither mentioned nor direct, unrecognized command returns None immediately
         let unhandled = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -1111,6 +1138,7 @@ mod tests {
         // When mentioned in a room, prompt is routed to AI
         let _ = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",
@@ -1156,6 +1184,7 @@ mod tests {
         // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
         let _ = handle_ai_command(
             &db.pool,
+            &crate::config::AiEnvConfig::default(),
             None,
             None,
             "!room:mbm.one",

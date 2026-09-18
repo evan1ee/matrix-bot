@@ -46,6 +46,7 @@ pub fn register_handlers(
         model_dir: config.voice_model_dir.clone(),
         language: config.voice_language.clone(),
     };
+    let ai_config = config.ai.clone();
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room| {
         let own_id = bot_user_id.clone();
         let registry = registry.clone();
@@ -54,6 +55,7 @@ pub fn register_handlers(
         let pending_merges = pending_merges.clone();
         let ocr_model_dir = ocr_model_dir.clone();
         let voice_config = voice_config.clone();
+        let ai_config = ai_config.clone();
 
         async move {
             if room.state() != RoomState::Joined || ev.sender == own_id {
@@ -149,6 +151,7 @@ pub fn register_handlers(
                 let reporter = stage_indicator.reporter();
                 let ocr_res = std::panic::AssertUnwindSafe(crate::modules::ocr::process_image_event(
                     &db,
+                    &ai_config,
                     broadcaster.as_ref(),
                     &room,
                     &owner_id,
@@ -260,6 +263,7 @@ pub fn register_handlers(
                 let reporter = stage_indicator.reporter();
                 let voice_res = std::panic::AssertUnwindSafe(crate::modules::voice::process_audio_event(
                     &db,
+                    &ai_config,
                     broadcaster.as_ref(),
                     &room,
                     &owner_id,
