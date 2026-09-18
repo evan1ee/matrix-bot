@@ -26,6 +26,7 @@ use crate::bot::reaction_targets::{delete_target_by_entity, get_target, BotMessa
 use crate::db::Database;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::reminder::repository::ReminderRepository;
+use crate::modules::reminder::service::{self as reminder_service, ReminderError};
 use crate::modules::todo::repository::TodoRepository;
 use crate::modules::todo::service::{self, TodoError, TodoPatch};
 use crate::utils::html_escape;
@@ -216,23 +217,22 @@ async fn handle_done(
                 None
             }
         },
-        "reminder" => match ReminderRepository::mark_triggered(pool, target.entity_id).await {
-            Ok(()) => {
-                if let Ok(Some(rem)) =
-                    ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id).await
-                {
-                    if let Some(bc) = broadcaster {
-                        bc.send(SystemEvent::ReminderUpdated(rem));
-                    }
-                }
-                Some(ReactionOutcome {
-                    ack_emoji: "✅",
-                    reply_html: format!(
-                        "✅ Marked reminder as done: <i>\"{}\"</i>",
-                        html_escape(&target.title)
-                    ),
-                })
-            }
+        "reminder" => match reminder_service::mark_triggered(
+            pool,
+            broadcaster,
+            &target.owner_id,
+            target.entity_id,
+        )
+        .await
+        {
+            Ok(_) => Some(ReactionOutcome {
+                ack_emoji: "✅",
+                reply_html: format!(
+                    "✅ Marked reminder as done: <i>\"{}\"</i>",
+                    html_escape(&target.title)
+                ),
+            }),
+            Err(ReminderError::NotFound) => None,
             Err(err) => {
                 error!(
                     "Failed marking reminder #{} done: {:?}",
@@ -271,6 +271,13 @@ async fn handle_delete(
             }
         }
         "reminder" => {
+            // Deliberately not `reminder_service::cancel`: that mirrors
+            // `ReminderRepository::cancel`, which only touches a *pending*
+            // row. A 👎 here must still succeed on a reminder a prior 👍/🎉
+            // already marked `triggered` — the reaction is "make the bot
+            // message's item gone", not "cancel an active plan" — so this
+            // stays a direct, unconditional status flip. See the Part A
+            // report for the full reasoning.
             let res = sqlx::query(
                 "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ?",
             )
@@ -361,30 +368,31 @@ async fn handle_delay(
             match ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id).await {
                 Ok(Some(rem)) => {
                     let new_trigger = rem.trigger_at + Duration::days(1);
-                    if let Err(err) =
-                        ReminderRepository::reschedule(pool, target.entity_id, new_trigger).await
+                    match reminder_service::reschedule(
+                        pool,
+                        broadcaster,
+                        &target.owner_id,
+                        target.entity_id,
+                        new_trigger,
+                    )
+                    .await
                     {
-                        error!(
-                            "Failed rescheduling reminder #{}: {:?}",
-                            target.entity_id, err
-                        );
-                        return None;
-                    }
-                    if let Ok(Some(updated_rem)) =
-                        ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id)
-                            .await
-                    {
-                        if let Some(bc) = broadcaster {
-                            bc.send(SystemEvent::ReminderUpdated(updated_rem));
+                        Ok(_) => Some(ReactionOutcome {
+                            ack_emoji: "⏰",
+                            reply_html: format!(
+                                "⏰ Postponed reminder by 1 day: <i>\"{}\"</i>",
+                                html_escape(&target.title)
+                            ),
+                        }),
+                        Err(ReminderError::NotFound) => None,
+                        Err(err) => {
+                            error!(
+                                "Failed rescheduling reminder #{}: {:?}",
+                                target.entity_id, err
+                            );
+                            None
                         }
                     }
-                    Some(ReactionOutcome {
-                        ack_emoji: "⏰",
-                        reply_html: format!(
-                            "⏰ Postponed reminder by 1 day: <i>\"{}\"</i>",
-                            html_escape(&target.title)
-                        ),
-                    })
                 }
                 Ok(None) => None,
                 Err(err) => {
@@ -428,23 +436,22 @@ async fn handle_celebrate(
                 None
             }
         },
-        "reminder" => match ReminderRepository::mark_triggered(pool, target.entity_id).await {
-            Ok(()) => {
-                if let Ok(Some(rem)) =
-                    ReminderRepository::find_owned(pool, &target.owner_id, target.entity_id).await
-                {
-                    if let Some(bc) = broadcaster {
-                        bc.send(SystemEvent::ReminderUpdated(rem));
-                    }
-                }
-                Some(ReactionOutcome {
-                    ack_emoji: "🎉",
-                    reply_html: format!(
-                        "🎉 Fantastic! Completed reminder: <i>\"{}\"</i> 🚀",
-                        html_escape(&target.title)
-                    ),
-                })
-            }
+        "reminder" => match reminder_service::mark_triggered(
+            pool,
+            broadcaster,
+            &target.owner_id,
+            target.entity_id,
+        )
+        .await
+        {
+            Ok(_) => Some(ReactionOutcome {
+                ack_emoji: "🎉",
+                reply_html: format!(
+                    "🎉 Fantastic! Completed reminder: <i>\"{}\"</i> 🚀",
+                    html_escape(&target.title)
+                ),
+            }),
+            Err(ReminderError::NotFound) => None,
             Err(err) => {
                 error!(
                     "Failed marking reminder #{} done: {:?}",

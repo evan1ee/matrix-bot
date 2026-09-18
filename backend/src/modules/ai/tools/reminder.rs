@@ -1,10 +1,11 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
+use crate::modules::reminder::service::{self, NewReminder};
 use crate::modules::settings::repository::SettingsRepository;
 use serde_json::json;
 
@@ -143,22 +144,20 @@ pub async fn execute_tool(
                     "You".to_string()
                 };
 
-                let rem = ReminderRepository::create(
+                let rem = service::create(
                     pool,
-                    &target_room,
+                    broadcaster,
                     owner_id,
-                    &sender_name,
-                    message,
-                    trigger_at,
-                    recurrence,
-                    None,
+                    NewReminder {
+                        message,
+                        trigger_at,
+                        room_id: &target_room,
+                        owner_name: &sender_name,
+                        recurrence,
+                    },
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::ReminderCreated(rem.clone()));
-                }
 
                 let local_time = rem
                     .trigger_at
@@ -182,26 +181,10 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let rem = ReminderRepository::find_owned(pool, owner_id, id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Reminder #{} not found or not owned by user", id))?;
 
-                let ok = ReminderRepository::cancel(pool, owner_id, id)
+                service::cancel(pool, broadcaster, owner_id, id)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!("Reminder #{} could not be cancelled", id));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::ReminderCancelled {
-                        id,
-                        room_id: rem.room_id.clone(),
-                        owner_id: owner_id.to_string(),
-                    });
-                }
 
                 serde_json::to_string(&serde_json::json!({
                     "id": id,
@@ -290,6 +273,14 @@ mod tests {
     async fn test_set_reminder_with_local_time(pool: SqlitePool) {
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
+        // Dated relative to the run: the service rejects a trigger time that has
+
+        // passed, and a hard-coded year only defers the day this test expires.
+
+        let day = (chrono::Utc::now() + chrono::Duration::days(365))
+            .format("%Y-%m-%d")
+            .to_string();
+
         let res = execute_tool(
             &pool,
             None,
@@ -298,7 +289,9 @@ mod tests {
             "set_reminder",
             &json!({
                 "text": "Go running",
-                "trigger_at": "2026-09-17 20:00:00"
+                // Comfortably in the future of any plausible test run date —
+                // the service now rejects a trigger time that has passed.
+                "trigger_at": format!("{day} 20:00:00")
             }),
         )
         .await
@@ -307,15 +300,20 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
         assert_eq!(parsed["message"], "Go running");
-        assert_eq!(parsed["time"], "2026-09-17 20:00");
-        assert_eq!(parsed["local_time"], "2026-09-17 20:00");
+        assert_eq!(parsed["time"], format!("{day} 20:00"));
+        assert_eq!(parsed["local_time"], format!("{day} 20:00"));
     }
 
     #[sqlx::test]
     async fn test_set_reminder_with_z_suffix(pool: SqlitePool) {
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
-        // When an LLM sends a local time formatted as ISO-8601 with Z (e.g. 2026-09-17T20:00:00Z)
+        // When an LLM sends a local time formatted as ISO-8601 with Z
+        // Dated relative to the run: the service rejects a trigger time that has
+        // passed, and a hard-coded year only defers the day this test expires.
+        let day = (chrono::Utc::now() + chrono::Duration::days(365))
+            .format("%Y-%m-%d")
+            .to_string();
         let res = execute_tool(
             &pool,
             None,
@@ -324,7 +322,7 @@ mod tests {
             "set_reminder",
             &json!({
                 "text": "Go running",
-                "trigger_at": "2026-09-17T20:00:00Z"
+                "trigger_at": format!("{day}T20:00:00Z")
             }),
         )
         .await
@@ -333,8 +331,8 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
         assert_eq!(parsed["message"], "Go running");
-        assert_eq!(parsed["time"], "2026-09-17 20:00");
-        assert_eq!(parsed["local_time"], "2026-09-17 20:00");
+        assert_eq!(parsed["time"], format!("{day} 20:00"));
+        assert_eq!(parsed["local_time"], format!("{day} 20:00"));
     }
 
     #[sqlx::test]

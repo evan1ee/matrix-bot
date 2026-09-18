@@ -8,6 +8,7 @@ pub mod handler;
 pub mod models;
 pub mod repository;
 pub mod scheduler;
+pub mod service;
 
 pub struct ReminderModule;
 
@@ -54,10 +55,11 @@ impl BotModule for ReminderModule {
         &self,
         ctx: &CommandContext,
         db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
+        broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_reminder_command(
             &db.pool,
+            broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
             &ctx.sender_name,
@@ -133,5 +135,36 @@ mod tests {
             .handle_command(&ctx("!expense list"), &db, None)
             .await
             .is_none());
+    }
+
+    /// The module must hand the broadcaster to the command it dispatches.
+    ///
+    /// `handle_command` named it `_broadcaster` and dropped it, so every
+    /// reminder set over Matrix was invisible to an open browser until the
+    /// page was reloaded. The service-level test cannot catch that: it calls
+    /// the handler directly and supplies its own broadcaster, so it passes
+    /// either way. This one goes through the real `BotModule` entry point.
+    #[tokio::test]
+    async fn test_the_module_passes_the_broadcaster_to_the_command() {
+        let db = db().await;
+        let broadcaster = crate::events::EventBroadcaster::default();
+        let mut rx = broadcaster.subscribe();
+
+        let reply = ReminderModule::new()
+            .handle_command(&ctx("!remind 10s check oven"), &db, Some(&broadcaster))
+            .await
+            .expect("the set must be handled");
+        assert!(
+            reply.contains("Reminder #1 set!"),
+            "unexpected reply: {reply}"
+        );
+
+        let event = rx
+            .try_recv()
+            .expect("dispatching through the module must broadcast the creation");
+        assert!(matches!(
+            event,
+            crate::events::SystemEvent::ReminderCreated(_)
+        ));
     }
 }
