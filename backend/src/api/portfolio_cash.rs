@@ -9,8 +9,8 @@ use crate::api::portfolio::{cash_event, format_for_error};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::models::{CashBalance, WithdrawOutcome};
-use crate::modules::portfolio::repository::PortfolioRepository;
 
 #[derive(Deserialize, ToSchema)]
 pub struct CashAmountRequest {
@@ -45,7 +45,7 @@ pub async fn list_cash(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<CashBalance>>, ApiError> {
-    let balances = PortfolioRepository::list_cash(&state.db.pool, &user.owner_id())
+    let balances = cash_repo::list_cash(&state.db.pool, &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -71,7 +71,7 @@ pub async fn deposit_cash(
     let owner_id = user.owner_id();
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    let cash = PortfolioRepository::deposit_cash_at(
+    let cash = cash_repo::deposit_cash_at(
         &state.db.pool,
         &owner_id,
         &currency,
@@ -119,7 +119,7 @@ pub async fn withdraw_cash(
     let owner_id = user.owner_id();
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    match PortfolioRepository::withdraw_cash_at(
+    match cash_repo::withdraw_cash_at(
         &state.db.pool,
         &owner_id,
         &currency,

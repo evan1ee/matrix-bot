@@ -2,13 +2,14 @@
 //!
 //! Separated from `handler.rs` for size, along the seam the module already
 //! had. Cash is a hard precondition for buying and never for selling, and
-//! `PortfolioRepository::buy` performs its own funding check — nothing here
-//! gates a purchase, so this file is only the commands a user runs to move
-//! money in and out.
+//! `trade::buy` performs its own funding check — nothing here gates a
+//! purchase, so this file is only the commands a user runs to move money in
+//! and out.
 
 use sqlx::SqlitePool;
 use tracing::error;
 
+use super::cash_repo;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::models::{Transaction, TransactionSource};
 use crate::modules::finance::money::{
@@ -17,7 +18,7 @@ use crate::modules::finance::money::{
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::portfolio::handler::broadcast;
 use crate::modules::portfolio::models::CashBalance;
-use crate::modules::portfolio::repository::{PortfolioRepository, WithdrawOutcome};
+use crate::modules::portfolio::repository::WithdrawOutcome;
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
@@ -112,7 +113,7 @@ pub async fn handle_cash(
 }
 
 async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
-    match PortfolioRepository::list_cash(pool, owner_id).await {
+    match cash_repo::list_cash(pool, owner_id).await {
         Ok(balances) if balances.is_empty() => {
             "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>."
                 .to_string()
@@ -154,15 +155,7 @@ async fn handle_cash_deposit(
         }
     };
 
-    match PortfolioRepository::deposit_cash(
-        pool,
-        owner_id,
-        &currency,
-        exponent as i64,
-        amount_minor,
-    )
-    .await
-    {
+    match cash_repo::deposit_cash(pool, owner_id, &currency, exponent as i64, amount_minor).await {
         Ok(cash) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
             if let Some(tx) = record_portfolio_cash_transaction(
@@ -213,7 +206,7 @@ async fn handle_cash_withdraw(
         }
     };
 
-    match PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
+    match cash_repo::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
         Ok(WithdrawOutcome::Ok(cash)) => {
             broadcast(broadcaster, cash_event(owner_id, &cash));
             if let Some(tx) = record_portfolio_cash_transaction(

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use utoipa::ToSchema;
 
+use super::cash_repo;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::portfolio::repository::PortfolioRepository;
 
@@ -85,7 +86,7 @@ impl HistoryRepository {
         owner_id: &str,
     ) -> Result<()> {
         let holdings = PortfolioRepository::list(pool, owner_id).await?;
-        let cash_list = PortfolioRepository::list_cash(pool, owner_id).await?;
+        let cash_list = cash_repo::list_cash(pool, owner_id).await?;
         let today = Utc::now().format("%Y-%m-%d").to_string();
 
         let mut currencies = std::collections::HashSet::new();
@@ -173,7 +174,7 @@ impl HistoryRepository {
 
         // Also fetch current live status to ensure today is always up to date
         let holdings = PortfolioRepository::list(pool, owner_id).await?;
-        let cash_list = PortfolioRepository::list_cash(pool, owner_id).await?;
+        let cash_list = cash_repo::list_cash(pool, owner_id).await?;
 
         let mut live_holdings_value = 0i64;
         let mut currency_exponent = 2i64;

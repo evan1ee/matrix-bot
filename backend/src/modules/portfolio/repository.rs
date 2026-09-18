@@ -1,7 +1,8 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
+use super::cash_repo;
+use crate::modules::portfolio::models::{Holding, PortfolioCurrencySummary};
 
 const HOLDING_COLUMNS: &str = "id, owner_id, symbol, quantity_minor, avg_cost_minor, currency, \
                                 currency_exponent, current_price_minor, price_updated_at, note, \
@@ -9,6 +10,13 @@ const HOLDING_COLUMNS: &str = "id, owner_id, symbol, quantity_minor, avg_cost_mi
 
 pub use crate::modules::portfolio::models::{BuyOutcome, SellOutcome, WithdrawOutcome};
 
+/// Reading and editing holdings.
+///
+/// Buying, selling and cash movement are not here: they are transactional and
+/// live in [`super::trade`] and [`super::cash_repo`] with the audit-log writes
+/// they have to stay consistent with. This struct used to forward to both,
+/// which meant every operation was written twice and callers picked a level at
+/// random.
 pub struct PortfolioRepository;
 
 impl PortfolioRepository {
@@ -48,308 +56,7 @@ impl PortfolioRepository {
         Ok(holdings)
     }
 
-    // ---- cash ------------------------------------------------------------
-
-    /// The caller's cash balance in one currency, or a zero balance if they
-    /// have never deposited into it — the same "no row until you touch it"
-    /// convention as `settings::UserSettings`.
-    pub async fn get_cash_or_zero(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-    ) -> Result<CashBalance> {
-        crate::modules::portfolio::cash_repo::get_cash_or_zero(
-            pool,
-            owner_id,
-            currency,
-            currency_exponent,
-        )
-        .await
-    }
-
-    pub async fn list_cash(pool: &SqlitePool, owner_id: &str) -> Result<Vec<CashBalance>> {
-        crate::modules::portfolio::cash_repo::list_cash(pool, owner_id).await
-    }
-
-    pub async fn credit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-        amount_minor: i64,
-    ) -> Result<CashBalance> {
-        crate::modules::portfolio::cash_repo::credit_cash(
-            pool,
-            owner_id,
-            currency,
-            currency_exponent,
-            amount_minor,
-        )
-        .await
-    }
-
-    pub async fn deposit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-        amount_minor: i64,
-    ) -> Result<CashBalance> {
-        Self::deposit_cash_at(
-            pool,
-            owner_id,
-            currency,
-            currency_exponent,
-            amount_minor,
-            None,
-        )
-        .await
-    }
-
-    pub async fn deposit_cash_at(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        currency_exponent: i64,
-        amount_minor: i64,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<CashBalance> {
-        crate::modules::portfolio::cash_repo::deposit_cash_at(
-            pool,
-            owner_id,
-            currency,
-            currency_exponent,
-            amount_minor,
-            executed_at,
-        )
-        .await
-    }
-
-    pub async fn debit_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        amount_minor: i64,
-    ) -> Result<WithdrawOutcome> {
-        crate::modules::portfolio::cash_repo::debit_cash(pool, owner_id, currency, amount_minor)
-            .await
-    }
-
-    pub async fn withdraw_cash(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        amount_minor: i64,
-    ) -> Result<WithdrawOutcome> {
-        Self::withdraw_cash_at(pool, owner_id, currency, amount_minor, None).await
-    }
-
-    pub async fn withdraw_cash_at(
-        pool: &SqlitePool,
-        owner_id: &str,
-        currency: &str,
-        amount_minor: i64,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<WithdrawOutcome> {
-        crate::modules::portfolio::cash_repo::withdraw_cash_at(
-            pool,
-            owner_id,
-            currency,
-            amount_minor,
-            executed_at,
-        )
-        .await
-    }
-
     // ---- holdings ----------------------------------------------------------
-
-    /// Opens a new position, or adds to an existing one with the quantity
-    /// weighted into the average cost. Requires and debits sufficient cash in
-    /// the buy's currency first — `withdraw_cash` is the funding gate, so the
-    /// sufficiency check and the debit happen together with no window for a
-    /// concurrent buy to race between them. Nothing is written, on either
-    /// table, if the funds are not there.
-    ///
-    /// `note`, when given, replaces the stored note; when absent, the existing
-    /// note (if any) is left untouched — a routine top-up must not silently
-    /// wipe a note the user wrote earlier.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn buy(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        price_minor: i64,
-        currency: &str,
-        currency_exponent: i64,
-        note: Option<&str>,
-    ) -> Result<BuyOutcome> {
-        Self::buy_at(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            price_minor,
-            currency,
-            currency_exponent,
-            note,
-            None,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn buy_at(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        price_minor: i64,
-        currency: &str,
-        currency_exponent: i64,
-        note: Option<&str>,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<BuyOutcome> {
-        crate::modules::portfolio::trade::buy_at(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            price_minor,
-            currency,
-            currency_exponent,
-            note,
-            executed_at,
-        )
-        .await
-    }
-
-    /// Records an existing position without checking or debiting cash balances.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_holding(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        price_minor: i64,
-        currency: &str,
-        currency_exponent: i64,
-        note: Option<&str>,
-    ) -> Result<Result<Holding, String>> {
-        Self::record_holding_at(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            price_minor,
-            currency,
-            currency_exponent,
-            note,
-            None,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_holding_at(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        price_minor: i64,
-        currency: &str,
-        currency_exponent: i64,
-        note: Option<&str>,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<Result<Holding, String>> {
-        Self::record_holding_action(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            price_minor,
-            currency,
-            currency_exponent,
-            note,
-            "record",
-            executed_at,
-        )
-        .await
-    }
-
-    /// Internal position recording with customizable audit action ("buy" vs "record").
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_holding_action(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        price_minor: i64,
-        currency: &str,
-        currency_exponent: i64,
-        note: Option<&str>,
-        action: &str,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<Result<Holding, String>> {
-        crate::modules::portfolio::trade::record_holding_action(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            price_minor,
-            currency,
-            currency_exponent,
-            note,
-            action,
-            executed_at,
-        )
-        .await
-    }
-
-    /// Reduces or closes a position, crediting cash with the sale's gross
-    /// proceeds (quantity × sale price) — not just the realized gain. A
-    /// losing sale still returns the principal that came back out; the P&L is
-    /// reported separately for the reply, not what lands in cash.
-    ///
-    /// Selling the full quantity held deletes the row — average cost has no
-    /// meaning for a position of zero.
-    pub async fn sell(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        sell_price_minor: i64,
-    ) -> Result<SellOutcome> {
-        Self::sell_at(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            sell_price_minor,
-            None,
-        )
-        .await
-    }
-
-    pub async fn sell_at(
-        pool: &SqlitePool,
-        owner_id: &str,
-        symbol: &str,
-        quantity_minor: i64,
-        sell_price_minor: i64,
-        executed_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<SellOutcome> {
-        crate::modules::portfolio::trade::sell_at(
-            pool,
-            owner_id,
-            symbol,
-            quantity_minor,
-            sell_price_minor,
-            executed_at,
-        )
-        .await
-    }
 
     pub async fn set_price(
         pool: &SqlitePool,
@@ -457,7 +164,7 @@ impl PortfolioRepository {
         owner_id: &str,
     ) -> Result<Vec<PortfolioCurrencySummary>> {
         let holdings = Self::list(pool, owner_id).await?;
-        let cash_balances = Self::list_cash(pool, owner_id).await?;
+        let cash_balances = cash_repo::list_cash(pool, owner_id).await?;
         Ok(crate::modules::portfolio::models::build_summaries(
             &holdings,
             &cash_balances,
@@ -470,6 +177,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
+    use crate::modules::portfolio::trade;
 
     async fn pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -499,13 +207,13 @@ mod tests {
     /// Every buy test needs cash on hand first now that buying is gated on it;
     /// this deposits comfortably more than any single test spends.
     async fn fund(pool: &SqlitePool, owner_id: &str, currency: &str) {
-        PortfolioRepository::deposit_cash(pool, owner_id, currency, 2, 100_000_000)
+        cash_repo::deposit_cash(pool, owner_id, currency, 2, 100_000_000)
             .await
             .unwrap();
     }
 
     async fn fund_jpy(pool: &SqlitePool, owner_id: &str) {
-        PortfolioRepository::deposit_cash(pool, owner_id, "JPY", 0, 100_000_000)
+        cash_repo::deposit_cash(pool, owner_id, "JPY", 0, 100_000_000)
             .await
             .unwrap();
     }
@@ -516,7 +224,7 @@ mod tests {
         fund(&pool, "@a:x", "USD").await;
 
         let holding = unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
                 .await
                 .unwrap(),
         );
@@ -533,12 +241,12 @@ mod tests {
     async fn test_buying_more_blends_into_the_average_cost() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
         let holding = unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "USD", 2, None)
                 .await
                 .unwrap(),
         );
@@ -561,11 +269,11 @@ mod tests {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
         fund(&pool, "@a:x", "EUR").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
-        match PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "EUR", 2, None)
+        match trade::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "EUR", 2, None)
             .await
             .unwrap()
         {
@@ -581,7 +289,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(holding.quantity_minor, qty(10));
-        let eur_cash = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "EUR", 2)
+        let eur_cash = cash_repo::get_cash_or_zero(&pool, "@a:x", "EUR", 2)
             .await
             .unwrap();
         assert_eq!(eur_cash.balance_minor, 100_000_000);
@@ -592,7 +300,7 @@ mod tests {
     async fn test_buy_preserves_an_existing_note_when_none_is_given() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(
+        trade::buy(
             &pool,
             "@a:x",
             "AAPL",
@@ -606,14 +314,14 @@ mod tests {
         .unwrap();
 
         let holding = unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPL", qty(5), 18000, "USD", 2, None)
                 .await
                 .unwrap(),
         );
         assert_eq!(holding.note.as_deref(), Some("core position"));
 
         let holding = unwrap_ok(
-            PortfolioRepository::buy(
+            trade::buy(
                 &pool,
                 "@a:x",
                 "AAPL",
@@ -637,11 +345,11 @@ mod tests {
     async fn test_sell_reduces_an_open_position() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
-        match PortfolioRepository::sell(&pool, "@a:x", "AAPL", qty(4), 18000)
+        match trade::sell(&pool, "@a:x", "AAPL", qty(4), 18000)
             .await
             .unwrap()
         {
@@ -667,11 +375,11 @@ mod tests {
     async fn test_selling_the_full_quantity_closes_the_position() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
-        match PortfolioRepository::sell(&pool, "@a:x", "AAPL", qty(10), 18000)
+        match trade::sell(&pool, "@a:x", "AAPL", qty(10), 18000)
             .await
             .unwrap()
         {
@@ -698,11 +406,11 @@ mod tests {
     async fn test_a_losing_sale_still_credits_the_proceeds_not_just_the_loss() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
-        match PortfolioRepository::sell(&pool, "@a:x", "AAPL", qty(10), 12000)
+        match trade::sell(&pool, "@a:x", "AAPL", qty(10), 12000)
             .await
             .unwrap()
         {
@@ -723,11 +431,11 @@ mod tests {
     async fn test_selling_more_than_is_held_is_rejected() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
-        match PortfolioRepository::sell(&pool, "@a:x", "AAPL", qty(11), 18000)
+        match trade::sell(&pool, "@a:x", "AAPL", qty(11), 18000)
             .await
             .unwrap()
         {
@@ -741,7 +449,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(holding.quantity_minor, qty(10));
-        let cash = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let cash = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
         assert_eq!(cash.balance_minor, 100_000_000 - 150000);
@@ -751,7 +459,7 @@ mod tests {
     async fn test_selling_a_symbol_never_held_is_not_found() {
         let pool = pool().await;
         assert!(matches!(
-            PortfolioRepository::sell(&pool, "@a:x", "AAPL", qty(1), 18000)
+            trade::sell(&pool, "@a:x", "AAPL", qty(1), 18000)
                 .await
                 .unwrap(),
             SellOutcome::NotFound
@@ -762,7 +470,7 @@ mod tests {
     async fn test_set_price_and_delete() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
 
@@ -787,10 +495,10 @@ mod tests {
     async fn test_delete_does_not_touch_cash() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
-        let before = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let before = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
 
@@ -798,7 +506,7 @@ mod tests {
             .await
             .unwrap();
 
-        let after = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let after = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
         assert_eq!(after.balance_minor, before.balance_minor);
@@ -817,7 +525,7 @@ mod tests {
     async fn test_set_note_can_clear_it() {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
-        PortfolioRepository::buy(
+        trade::buy(
             &pool,
             "@a:x",
             "AAPL",
@@ -843,10 +551,10 @@ mod tests {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
         fund(&pool, "@b:x", "USD").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
-        PortfolioRepository::buy(&pool, "@b:x", "AAPL", qty(5), 20000, "USD", 2, None)
+        trade::buy(&pool, "@b:x", "AAPL", qty(5), 20000, "USD", 2, None)
             .await
             .unwrap();
 
@@ -864,13 +572,13 @@ mod tests {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
         fund_jpy(&pool, "@a:x").await;
-        PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap();
-        PortfolioRepository::buy(&pool, "@a:x", "MSFT", qty(2), 30000, "USD", 2, None)
+        trade::buy(&pool, "@a:x", "MSFT", qty(2), 30000, "USD", 2, None)
             .await
             .unwrap();
-        PortfolioRepository::buy(&pool, "@a:x", "SONY", qty(100), 2000, "JPY", 0, None)
+        trade::buy(&pool, "@a:x", "SONY", qty(100), 2000, "JPY", 0, None)
             .await
             .unwrap();
         PortfolioRepository::set_price(&pool, "@a:x", "AAPL", 18000)
@@ -902,7 +610,7 @@ mod tests {
     #[tokio::test]
     async fn test_summary_includes_a_cash_only_currency() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "GBP", 2, 50000)
+        cash_repo::deposit_cash(&pool, "@a:x", "GBP", 2, 50000)
             .await
             .unwrap();
 
@@ -923,7 +631,7 @@ mod tests {
         let pool = pool().await;
         fund(&pool, "@a:x", "USD").await;
         let holding = unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
                 .await
                 .unwrap(),
         );
@@ -943,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_user_with_no_deposit_has_a_zero_balance() {
         let pool = pool().await;
-        let cash = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let cash = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
         assert_eq!(cash.balance_minor, 0);
@@ -953,12 +661,12 @@ mod tests {
     #[tokio::test]
     async fn test_deposit_creates_then_adds() {
         let pool = pool().await;
-        let first = PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
+        let first = cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
             .await
             .unwrap();
         assert_eq!(first.balance_minor, 100000);
 
-        let second = PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 50000)
+        let second = cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 50000)
             .await
             .unwrap();
         assert_eq!(second.balance_minor, 150000);
@@ -974,11 +682,11 @@ mod tests {
     #[tokio::test]
     async fn test_withdraw_reduces_the_balance() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
+        cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
             .await
             .unwrap();
 
-        match PortfolioRepository::withdraw_cash(&pool, "@a:x", "USD", 40000)
+        match cash_repo::withdraw_cash(&pool, "@a:x", "USD", 40000)
             .await
             .unwrap()
         {
@@ -992,11 +700,11 @@ mod tests {
     #[tokio::test]
     async fn test_withdraw_exceeding_the_balance_is_rejected() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 10000)
+        cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 10000)
             .await
             .unwrap();
 
-        match PortfolioRepository::withdraw_cash(&pool, "@a:x", "USD", 10001)
+        match cash_repo::withdraw_cash(&pool, "@a:x", "USD", 10001)
             .await
             .unwrap()
         {
@@ -1005,7 +713,7 @@ mod tests {
             }
             WithdrawOutcome::Ok(_) => panic!("expected InsufficientFunds"),
         }
-        let cash = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let cash = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
         assert_eq!(
@@ -1013,7 +721,7 @@ mod tests {
             "the rejected withdrawal must not change the balance"
         );
 
-        match PortfolioRepository::withdraw_cash(&pool, "@a:x", "EUR", 1)
+        match cash_repo::withdraw_cash(&pool, "@a:x", "EUR", 1)
             .await
             .unwrap()
         {
@@ -1031,11 +739,11 @@ mod tests {
     #[tokio::test]
     async fn test_buy_without_enough_cash_is_rejected_and_writes_nothing() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
+        cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
             .await
             .unwrap();
 
-        match PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+        match trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
             .await
             .unwrap()
         {
@@ -1053,7 +761,7 @@ mod tests {
             .await
             .unwrap()
             .is_none());
-        let cash = PortfolioRepository::get_cash_or_zero(&pool, "@a:x", "USD", 2)
+        let cash = cash_repo::get_cash_or_zero(&pool, "@a:x", "USD", 2)
             .await
             .unwrap();
         assert_eq!(
@@ -1066,12 +774,12 @@ mod tests {
     #[tokio::test]
     async fn test_buy_spending_exactly_all_available_cash_succeeds() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 150000)
+        cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 150000)
             .await
             .unwrap();
 
         let BuyOutcome::Ok { cash, .. } =
-            PortfolioRepository::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPL", qty(10), 15000, "USD", 2, None)
                 .await
                 .unwrap()
         else {
@@ -1083,17 +791,17 @@ mod tests {
     #[tokio::test]
     async fn test_cash_is_isolated_per_owner_and_per_currency() {
         let pool = pool().await;
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
+        cash_repo::deposit_cash(&pool, "@a:x", "USD", 2, 100000)
             .await
             .unwrap();
-        PortfolioRepository::deposit_cash(&pool, "@a:x", "EUR", 2, 5000)
+        cash_repo::deposit_cash(&pool, "@a:x", "EUR", 2, 5000)
             .await
             .unwrap();
-        PortfolioRepository::deposit_cash(&pool, "@b:x", "USD", 2, 999999)
+        cash_repo::deposit_cash(&pool, "@b:x", "USD", 2, 999999)
             .await
             .unwrap();
 
-        let mine = PortfolioRepository::list_cash(&pool, "@a:x").await.unwrap();
+        let mine = cash_repo::list_cash(&pool, "@a:x").await.unwrap();
         assert_eq!(mine.len(), 2);
         assert_eq!(
             mine.iter()
@@ -1110,7 +818,7 @@ mod tests {
             5000
         );
 
-        let theirs = PortfolioRepository::list_cash(&pool, "@b:x").await.unwrap();
+        let theirs = cash_repo::list_cash(&pool, "@b:x").await.unwrap();
         assert_eq!(theirs.len(), 1);
         assert_eq!(theirs[0].balance_minor, 999999);
     }
@@ -1121,7 +829,7 @@ mod tests {
         fund(&pool, "@a:x", "USD").await;
 
         let holding = unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "AAPLL", qty(10), 15000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "AAPLL", qty(10), 15000, "USD", 2, None)
                 .await
                 .unwrap(),
         );
@@ -1146,7 +854,7 @@ mod tests {
 
         // Attempting to rename to an already held symbol must fail
         unwrap_ok(
-            PortfolioRepository::buy(&pool, "@a:x", "MSFT", qty(5), 30000, "USD", 2, None)
+            trade::buy(&pool, "@a:x", "MSFT", qty(5), 30000, "USD", 2, None)
                 .await
                 .unwrap(),
         );

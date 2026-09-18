@@ -14,6 +14,7 @@ use crate::modules::portfolio::models::{
     normalise_symbol, CashBalance, Holding, PortfolioCurrencySummary, QUANTITY_EXPONENT,
 };
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
+use crate::modules::portfolio::trade;
 
 const MAX_NOTE_LEN: usize = 500;
 
@@ -121,7 +122,7 @@ pub async fn buy_holding(
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let note = note_or_reject(&payload.note)?;
 
-    let outcome = PortfolioRepository::buy_at(
+    let outcome = trade::buy_at(
         &state.db.pool,
         &owner_id,
         &symbol,
@@ -207,7 +208,7 @@ pub async fn sell_holding(
     let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let outcome = PortfolioRepository::sell_at(
+    let outcome = trade::sell_at(
         &state.db.pool,
         &owner_id,
         &existing.symbol,
@@ -400,6 +401,7 @@ mod tests {
     use crate::api::portfolio_cash::{deposit_cash, list_cash, withdraw_cash};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use crate::modules::portfolio::cash_repo;
     use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
@@ -417,7 +419,7 @@ mod tests {
     /// Buying now requires cash on hand; this deposits comfortably more than
     /// any single test spends.
     async fn fund(state: &ApiState, user: &AuthUser, currency: &str, exponent: i64) {
-        PortfolioRepository::deposit_cash(
+        cash_repo::deposit_cash(
             &state.db.pool,
             &user.owner_id(),
             currency,

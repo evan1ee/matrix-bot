@@ -11,6 +11,7 @@ use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amo
 use crate::modules::portfolio::history::HistoryRepository;
 use crate::modules::portfolio::models::{cost_of, normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
+use crate::modules::portfolio::trade;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -137,7 +138,7 @@ pub async fn execute_tool(
                     parse_amount(&qty_str, QUANTITY_EXPONENT).map_err(|e| e.to_string())?;
                 let price_minor = parse_amount(&price_str, exp).map_err(|e| e.to_string())?;
 
-                let outcome = PortfolioRepository::buy(
+                let outcome = trade::buy(
                     pool,
                     owner_id,
                     &symbol,
@@ -217,7 +218,7 @@ pub async fn execute_tool(
                     parse_amount(&qty_str, QUANTITY_EXPONENT).map_err(|e| e.to_string())?;
                 let price_minor = parse_amount(&price_str, exp).map_err(|e| e.to_string())?;
 
-                let outcome = PortfolioRepository::sell(
+                let outcome = trade::sell(
                     pool,
                     owner_id,
                     &symbol,

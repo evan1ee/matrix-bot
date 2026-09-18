@@ -4,8 +4,8 @@ use sqlx::SqlitePool;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::models::WithdrawOutcome;
-use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -36,15 +36,10 @@ pub async fn execute_tool(
                 let exp = exponent_for(&currency);
                 let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let cash = PortfolioRepository::deposit_cash(
-                    pool,
-                    owner_id,
-                    &currency,
-                    exp as i64,
-                    amount_minor,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let cash =
+                    cash_repo::deposit_cash(pool, owner_id, &currency, exp as i64, amount_minor)
+                        .await
+                        .map_err(|e| e.to_string())?;
 
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::PortfolioCashUpdated {
@@ -78,10 +73,9 @@ pub async fn execute_tool(
                 let exp = exponent_for(&currency);
                 let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let outcome =
-                    PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                let outcome = cash_repo::withdraw_cash(pool, owner_id, &currency, amount_minor)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 match outcome {
                     WithdrawOutcome::Ok(cash) => {

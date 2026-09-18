@@ -3,6 +3,7 @@
 use sqlx::SqlitePool;
 use tracing::error;
 
+use super::trade;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{
     exponent_for, format_amount, looks_like_currency, normalise_currency, parse_amount,
@@ -87,7 +88,7 @@ pub async fn handle_buy(
     };
 
     let exponent = exponent_for(&parsed.currency);
-    let outcome = PortfolioRepository::buy(
+    let outcome = trade::buy(
         pool,
         owner_id,
         &parsed.symbol,
@@ -153,7 +154,7 @@ pub async fn handle_record(
     };
     let exponent = exponent_for(&parsed.currency);
 
-    match PortfolioRepository::record_holding(
+    match trade::record_holding(
         pool,
         owner_id,
         &parsed.symbol,
@@ -260,7 +261,7 @@ pub async fn handle_sell(
         return format!("⚠️ You do not hold <b>{}</b>.", html_escape(&parsed.symbol));
     };
 
-    match PortfolioRepository::sell(
+    match trade::sell(
         pool,
         owner_id,
         &parsed.symbol,

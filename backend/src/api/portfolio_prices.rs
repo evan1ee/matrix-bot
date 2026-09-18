@@ -12,6 +12,7 @@ use crate::modules::portfolio::price_feed::{
     refresh_all_for_owner, refresh_holding_price, RefreshSummary,
 };
 use crate::modules::portfolio::repository::PortfolioRepository;
+use crate::modules::portfolio::trade;
 
 #[utoipa::path(
     post,
@@ -111,7 +112,7 @@ pub async fn record_holding_position(
         None => None,
     };
 
-    match PortfolioRepository::record_holding_at(
+    match trade::record_holding_action(
         &state.db.pool,
         &owner_id,
         &symbol,
@@ -120,6 +121,7 @@ pub async fn record_holding_position(
         &currency,
         exponent as i64,
         note,
+        "record",
         payload.executed_at,
     )
     .await
