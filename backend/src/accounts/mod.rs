@@ -27,6 +27,7 @@
 pub mod credentials;
 pub mod linking;
 pub mod merge;
+pub mod principal;
 pub mod recovery;
 pub mod repository;
 pub mod security_events;
@@ -35,6 +36,7 @@ pub mod session;
 pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
 pub use merge::{MergePreview, MergeRepository};
+pub use principal::{resolve as resolve_credential, Credential};
 pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;
 pub use security_events::{SecurityEventKind, SecurityEventRepository};

@@ -139,8 +139,14 @@ merge — a session belongs to the credential that opened it.
 
 ### Auth: passkeys and cookie sessions
 
-Passkeys are the only way in. There is no password, no bearer token, and no JWT;
-`bcrypt` survives only to hash recovery codes.
+Passkeys are the only way to establish a session in the browser. There is still
+no password and no JWT; `bcrypt` survives only to hash recovery codes. A native
+client (Element X iOS) exchanges a Matrix session for a backend session token
+and carries it as `Authorization: Bearer` instead of a cookie, and an MCP
+client authenticates the same way with an `mb_mcp_`-prefixed personal access
+token — see `README.md` for both. An MCP token never satisfies the step-up
+gate below: it is a machine credential, so its creation time is never read as
+a passkey assertion.
 
 `api/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the
 credential carries the account handle, so there is no username field anywhere and
@@ -157,10 +163,13 @@ inside the challenge, and an abandoned ceremony must leave nothing behind. Hence
 is stored, so a leaked backup cannot be replayed. Both timeouts are checked on
 read rather than swept, so expiry never waits on a background job.
 
-`api/auth/extractor.rs` reads the `mb_session` cookie and enforces CSRF twice:
-`SameSite=Strict`, plus an `Origin` check on every state-changing request. A
-missing `Origin` on a mutating request is **refused** — browsers always send one
-on `fetch`, and no bearer-token client remains whose omission would be legitimate.
+`api/auth/extractor.rs` reads whichever credential the request carries and
+enforces CSRF twice: `SameSite=Strict`, plus an `Origin` check on every
+state-changing request that arrived on the ambient session cookie. A missing
+`Origin` on such a mutating request is **refused** — browsers always send one on
+`fetch`. A request carrying an explicit `Authorization: Bearer` credential is
+exempt from the Origin requirement, because a hostile site's ambient authority
+can never attach a header it does not know the value of.
 
 `VerifiedUser` is the step-up boundary: it wraps `AuthUser` and rejects a session
 whose last passkey assertion is older than `STEP_UP_WINDOW_MINUTES` (5), or that

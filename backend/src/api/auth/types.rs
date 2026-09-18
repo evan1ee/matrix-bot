@@ -381,14 +381,6 @@ impl FromRef<ApiState> for Database {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SseTicketResponse {
-    /// Present this as `?ticket=` when opening `/api/v1/events`.
-    pub ticket: String,
-    /// Seconds until the ticket expires.
-    pub expires_in: i64,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
 pub struct UserProfileResponse {
     /// The signed-in account. The frontend keys its caches on this.
     pub account_id: String,
