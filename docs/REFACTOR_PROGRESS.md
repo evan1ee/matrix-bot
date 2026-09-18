@@ -21,8 +21,9 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R1a | AR-001 — ownership-table drift, classification, transactional merge | ✅ | ✅ | ✅ | `ae2ed29`. 587 pass. Guards mutation-tested. |
 | R1b | AR-001 — `portfolio_audit_log` merge semantics | ✅ | ✅ | ✅ | `2f35a29`. 592 pass. Move + re-chain, per your decision. |
 | R3 | AR-003 — stop modules depending on the HTTP layer | ✅ | ✅ | ✅ | `4893c04`. 593 pass. Guard proven to catch a compiling violation. |
-| R2 | AR-004 — `Config` threaded into the bot side | — | — | — | Next up |
-| R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | |
+| R2 | AR-004 — `Config` threaded into the bot side | ✅ | ✅ | ✅ | `5fdfdfa`. 594 pass. AI env reads deferred to R2b. |
+| R2b | AR-004 — AI client env reads into Config | — | — | — | Split out of R2; allowlisted in the guard test |
+| R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | Next up |
 | R5 | AR-007 — collapse the portfolio facade | — | — | — | |
 | R11 | AR-009 — credential resolution extracted | — | — | — | |
 | R6–R9 | AR-002 — per-module service layer | — | — | — | |
@@ -172,3 +173,35 @@ runtime with a comment explaining why. Worth remembering for any future source-s
 
 **Deferred, noted:** `db/rooms.rs` still has four free functions that only delegate to the identical
 `RoomRepository` methods. Real duplication, unrelated to dependency direction, left for a quick-win pass.
+
+### R2 — AR-004 configuration threading, bot side (`5fdfdfa`)
+
+**Changed:** `bot/mod.rs` (MatrixBot keeps its Config), `bot/handler.rs` (four env reads gone),
+`bot/invite.rs` (allowlist passed in), `config.rs` (`database_url_from_env`, guard test), `main.rs`
+(MCP requires `--owner`), `docs/MCP_SERVER.md`.
+
+**Scope split.** The review's R2 also covered `modules/ai/{client,models,search}.rs`, which hold about
+twenty env reads behind five-deep fallback chains plus a process-global `OnceLock` that is initialised
+lazily. Moving those is a behaviour-sensitive change of its own, so it is **R2b**. Rather than postpone the
+guard, the guard ships now with an explicit allowlist naming exactly what is not fixed, so no *new* env read
+can appear anywhere while R2b is outstanding.
+
+**Verified by Opus 5:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings |
+| `cargo test --workspace` | 594 passed, 0 failed, 7 ignored (was 593) |
+| Behaviour preservation | every `Config` default compared against the inline default it replaced: `ocr_model_dir`, `voice_enabled` parse, `voice_model_dir`, `voice_language`, allowlist split — all identical |
+| OCR `enabled` check | deliberately still absent, as before; adding it would have been a silent behaviour change |
+| `cargo run --bin generate-openapi` | no diff |
+| `rustfmt --check` on the four leaf files | clean |
+| MCP change, run end to end | without `--owner`: exits with the new message. with `--owner acct_test`: starts normally |
+
+**Guard mutation-tested.** First attempt inserted invalid Rust and only produced a compile error — no signal.
+Re-run with a valid `fn probe_env() { std::env::var("PROBE") }` appended to `events.rs`: the guard failed,
+naming `events.rs:331`, and passed again once removed.
+
+**Accepted noise:** rustfmt reflowed three pre-existing `assert!` calls in the `config.rs` test module,
+because formatting the file it was already editing covers the whole file. Left in place — reverting them would
+leave `config.rs` not rustfmt-clean, which is the worse end state given F-3.
