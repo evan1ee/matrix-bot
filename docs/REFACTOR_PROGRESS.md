@@ -489,3 +489,32 @@ Worth recording as a risk rather than an anecdote. The two sessions came close t
 versions of the same test, and nothing in the tooling would have caught it — both were running with the same
 permissions against the same checkout. Surfaced to the user, because whether two sessions should be running at
 once is their call.
+
+### Formatting — the workspace is rustfmt-clean (`a76fb8f`)
+
+F-3 recorded that `cargo fmt --all -- --check` was failing at the branch point, 54 diffs across 18 files, and
+that CI runs exactly that command. Every item in this series formatted only the files it touched, deliberately,
+because running the formatter over the whole workspace would have buried the diff of whatever was being
+changed. With the series committed that reason is gone, so it is now done as its own commit.
+
+Formatting only. Three files differ at token level because rustfmt adds braces around single-expression closure
+and match-arm bodies (`Ok(false) => Some(x)` becomes `Ok(false) => { Some(x) }`); checked each rather than
+assumed. 635 tests, 0 warnings, `openapi.json` regenerates unchanged, and **CI's format step passes for the
+first time on this branch**.
+
+This also retires a workaround: `modules/todo/mod.rs` had been hand-formatted during the series because rustfmt
+recurses into the submodules a `mod.rs` declares and would have reformatted its siblings. Not needed now.
+
+## Where this stands
+
+Everything on the roadmap is committed and verified except **R12b**, which the second session has taken
+(generated DTOs replacing the hand-written module types, and a registry-driven Sidebar), and **R2c**, declined
+with reasons above. Two items the second session deferred rather than dropped, and which are not done:
+
+- Replacing the `window` custom-event navigation with a small store. Churn for modest gain.
+- Folding `modules/journal` into `modules/life`. Backend, and it changes command routing, so it wants its own
+  item rather than riding along in a frontend change.
+
+Known issues still open: `modules/ai/handler.rs` is over the 500-line production limit (pre-existing), and
+`test_ai_error_suppressed_from_chat_and_sent_once` flakes under full parallel load because of a process-global
+flag (predicted in AR-011).
