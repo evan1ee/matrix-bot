@@ -1,113 +1,39 @@
-export interface Holding {
-  id: number;
-  owner_id: string;
-  symbol: string;
-  /** Minor units, scaled at `QUANTITY_EXPONENT` — always positive. */
-  quantity_minor: number;
-  /** Minor units, scaled at `currency_exponent`. */
-  avg_cost_minor: number;
-  currency: string;
-  currency_exponent: number;
-  current_price_minor?: number | null;
-  price_updated_at?: string | null;
-  note?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+import type { components } from '../../types/api';
 
-export interface PortfolioCurrencySummary {
-  currency: string;
-  currency_exponent: number;
-  cost_basis_minor: number;
-  market_value_minor: number;
-  unrealized_pl_minor: number;
-  priced_holdings: number;
-  unpriced_holdings: number;
-  cash_minor: number;
-}
+export type Holding = components['schemas']['Holding'];
 
-export interface SellResponse {
-  holding: Holding | null;
-  realized_pl_minor: number;
-}
+export type PortfolioCurrencySummary = components['schemas']['PortfolioCurrencySummary'];
 
-export interface CashBalance {
-  id: number;
-  owner_id: string;
-  currency: string;
-  currency_exponent: number;
-  balance_minor: number;
-  updated_at?: string | null;
-}
+export type SellResponse = components['schemas']['SellResponse'];
 
-export interface RefreshSummary {
-  updated: string[];
-  failed: string[];
-}
+export type CashBalance = components['schemas']['CashBalance'];
 
-export interface PortfolioAuditEntry {
-  id: number;
-  owner_id: string;
+export type RefreshSummary = components['schemas']['RefreshSummary'];
+
+// Server types `action` as a bare `string` (no utoipa enum annotation), but
+// every write site (backend/src/modules/portfolio/{trade,cash,audit}.rs and
+// accounts/merge.rs) only ever uses these six values. Narrowed here rather
+// than widened, so `entry.action === 'merge'` checks stay meaningful.
+// Backend finding: PortfolioAuditEntry.action should be a proper OpenAPI enum.
+export type PortfolioAuditEntry = Omit<components['schemas']['PortfolioAuditEntry'], 'action'> & {
   action: 'buy' | 'sell' | 'deposit' | 'withdraw' | 'record' | 'merge';
-  symbol?: string | null;
-  quantity_minor?: number | null;
-  price_minor?: number | null;
-  amount_minor: number;
-  currency: string;
-  currency_exponent: number;
-  realized_pl_minor?: number | null;
-  note?: string | null;
-  prev_hash: string;
-  entry_hash: string;
-  created_at?: string | null;
-}
+};
 
-export interface AuditVerificationResult {
-  is_valid: boolean;
-  total_verified: number;
-  genesis_hash: string;
-  head_hash?: string | null;
-  broken_entry_id?: number | null;
-  message: string;
-}
+export type AuditVerificationResult = components['schemas']['AuditVerificationResult'];
 
-export interface TickerSearchResult {
-  symbol: string;
-  name: string;
-  exchange?: string | null;
-  quote_type?: string | null;
-}
+export type TickerSearchResult = components['schemas']['TickerSearchResult'];
 
-export type AlertCondition = 'above' | 'below';
+export type AlertCondition = components['schemas']['AlertCondition'];
 
-export interface PriceAlert {
-  id: number;
-  owner_id: string;
-  symbol: string;
-  target_price_minor: number;
-  currency: string;
-  currency_exponent: number;
+// Server types `condition` as a bare `string` even though the dedicated
+// `AlertCondition` enum schema exists and is used for the request type
+// (CreateAlertRequest) — just not wired up on this response field. Narrowed
+// here rather than widened.
+// Backend finding: PriceAlert.condition should reuse the AlertCondition enum.
+export type PriceAlert = Omit<components['schemas']['PriceAlert'], 'condition'> & {
   condition: AlertCondition;
-  is_triggered: boolean;
-  triggered_at?: string | null;
-  created_at: string;
-}
+};
 
-export interface PortfolioHistoryPoint {
-  date: string;
-  holdings_value_minor: number;
-  cash_minor: number;
-  total_net_worth_minor: number;
-}
+export type PortfolioHistoryPoint = components['schemas']['PortfolioHistoryPoint'];
 
-export interface PortfolioHistoryResponse {
-  currency: string;
-  currency_exponent: number;
-  timeframe: string;
-  points: PortfolioHistoryPoint[];
-  starting_value_minor: number;
-  current_value_minor: number;
-  period_change_minor: number;
-  period_change_pct: number;
-}
-
+export type PortfolioHistoryResponse = components['schemas']['PortfolioHistoryResponse'];

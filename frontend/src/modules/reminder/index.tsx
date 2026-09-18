@@ -8,6 +8,7 @@ import { CustomSelect } from '../../components/CustomSelect';
 import { formatTimeInZone, nowInZone, useSettings } from '../../core/settings';
 import { useSession } from '../../core/session';
 import { ReminderHistory } from './ReminderHistory';
+import type { components } from '../../types/api';
 
 export function formatSenderDisplay(senderName: string, currentDisplayName?: string | null): string {
   if (senderName.startsWith('acct_')) {
@@ -16,32 +17,12 @@ export function formatSenderDisplay(senderName: string, currentDisplayName?: str
   return senderName;
 }
 
-export interface ReminderItem {
-  id: number;
-  room_id: string;
-  owner_id: string;
-  sender_name: string;
-  message: string;
-  trigger_at: string;
-  recurrence: string;
-  status: string;
-  retry_count: number;
-  created_at?: string | null;
-}
+// Frontend-only name; server schema is Reminder.
+export type ReminderItem = components['schemas']['Reminder'];
 
-export interface ReminderListResponse {
-  items: ReminderItem[];
-  page: number;
-  limit: number;
-  total: number;
-  has_more?: boolean;
-}
+export type ReminderListResponse = components['schemas']['ReminderListResponse'];
 
-export interface JoinedRoomInfo {
-  room_id: string;
-  name: string;
-  is_direct?: boolean;
-}
+export type JoinedRoomInfo = components['schemas']['JoinedRoomInfo'];
 
 /** Duration units, and how many seconds one of each is worth. */
 const UNIT_SECONDS = {

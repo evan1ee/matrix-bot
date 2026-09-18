@@ -1165,22 +1165,29 @@ export class FakeApi {
 
       const totalNetWorth = totalLedgerMinor + totalPortfolioCashMinor + totalMarketValueMinor;
 
+      // Shape matches the real server response
+      // (backend/src/modules/finance/net_worth.rs::NetWorthResponse /
+      // CurrencyNetWorthBreakdown), not the earlier hand-written frontend
+      // type this mock used to mirror.
       return json(route, 200, {
         primary_currency: primaryCurrency,
         primary_currency_exponent: primaryExponent,
         total_net_worth_minor: totalNetWorth,
         ledger_cash_minor: totalLedgerMinor,
         portfolio_market_value_minor: totalMarketValueMinor,
-        portfolio_cash_minor: totalPortfolioCashMinor,
-        fx_source: 'ECB Reference Rates',
-        native_breakdowns: [
+        cash_deposits_minor: totalPortfolioCashMinor,
+        fx_rates: { [primaryCurrency]: 1.0 },
+        updated_at: new Date().toISOString(),
+        currencies: [
           {
             currency: primaryCurrency,
             currency_exponent: primaryExponent,
             ledger_cash_minor: totalLedgerMinor,
             portfolio_market_value_minor: totalMarketValueMinor,
-            portfolio_cash_minor: totalPortfolioCashMinor,
-            converted_total_minor: totalNetWorth,
+            cash_deposits_minor: totalPortfolioCashMinor,
+            fx_rate_to_primary: 1.0,
+            converted_minor: totalNetWorth,
+            total_minor: totalNetWorth,
           },
         ],
       });

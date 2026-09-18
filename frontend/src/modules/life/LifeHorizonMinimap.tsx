@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import type { LifeHorizonDay } from './types';
+import type { LifeHorizonCalendarDay } from './types';
 import { MOOD_CONFIG } from './types';
 
 interface LifeHorizonMinimapProps {
-  days: LifeHorizonDay[];
+  days: LifeHorizonCalendarDay[];
   onSelectDate: (date: string) => void;
   isDark?: boolean;
 }
@@ -281,7 +281,7 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   }, [updateSize]);
 
   // Update tooltip content directly in DOM (zero React re-render)
-  const updateTooltipDOM = useCallback((d: LifeHorizonDay) => {
+  const updateTooltipDOM = useCallback((d: LifeHorizonCalendarDay) => {
     if (tooltipDateRef.current) tooltipDateRef.current.textContent = d.date;
     if (tooltipBadgeRef.current) {
       const el = tooltipBadgeRef.current;
