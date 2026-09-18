@@ -17,8 +17,11 @@
 //! moves rows across twenty-odd tables and then deletes the account they used
 //! to belong to; a half-applied one is exactly what a transaction is for.
 //!
-//! `portfolio_audit_log` is the one `owner_id` table a merge does not touch.
-//! See `accounts::OWNER_ID_UNMERGED` for why.
+//! `portfolio_audit_log` is the one `owner_id` table the generic loop cannot
+//! move: it is immutable by trigger and its hashes are owner-bound. It is
+//! handled by `modules::portfolio::audit::absorb_ledger` instead. That is a
+//! deliberate reach into a feature module — the rule about what a ledger means
+//! across a merge belongs with the ledger, not here.
 
 use sqlx::SqlitePool;
 
@@ -129,6 +132,19 @@ impl MergeRepository {
             preview.set(table, count);
         }
 
+        // Counted even though the generic loop cannot move it, so the number a
+        // user is shown before confirming matches what the merge reports after.
+        for table in crate::accounts::OWNER_ID_MERGED_SEPARATELY {
+            let count: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(from)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
+
+            preview.set(table, count);
+        }
+
         Ok(preview)
     }
 
@@ -203,6 +219,13 @@ impl MergeRepository {
                 discarded += leftover;
             }
         }
+
+        // The audit ledger cannot go through the loop above: it is immutable by
+        // trigger and every hash is bound to the owner, so it needs the routine
+        // that knows how to rebuild it.
+        let ledger_rows =
+            crate::modules::portfolio::audit::absorb_ledger(&mut *conn, from, into).await?;
+        moved.set("portfolio_audit_log", ledger_rows);
 
         // Anything else pointing at the absorbed account follows it, so nothing
         // is left referring to an id that is about to disappear.
@@ -675,11 +698,15 @@ mod tests {
         }
     }
 
-    /// The audit ledger is immutable by trigger, so a merge must step around it
-    /// rather than fail. This pins the deliberate exception documented on
-    /// `accounts::OWNER_ID_UNMERGED`.
+    /// The headline case: the audit ledger cannot go through the generic
+    /// `owner_id` loop (immutable by trigger, hashes bound to the owner), so a
+    /// merge routes it through `absorb_ledger` instead. This pins that both
+    /// accounts' entries end up on the survivor, plus one marker row recording
+    /// the absorption itself.
     #[tokio::test]
-    async fn test_a_merge_does_not_touch_the_audit_ledger() {
+    async fn test_a_merge_absorbs_the_audit_ledger() {
+        use crate::modules::portfolio::audit::record_audit_entry;
+
         let pool = db().await;
         let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
             .await
@@ -688,25 +715,287 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT INTO portfolio_audit_log (owner_id, action, amount_minor, currency) \
-             VALUES (?, 'buy', 100, 'USD')",
+        record_audit_entry(
+            &pool, &into, "deposit", None, None, None, 100000, "USD", 2, None, None, None,
         )
-        .bind(&from)
-        .execute(&pool)
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool,
+            &from,
+            "buy",
+            Some("AAPL"),
+            Some(1_00000000),
+            Some(15000),
+            15000,
+            "USD",
+            2,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
         MergeRepository::merge(&pool, &from, &into)
             .await
-            .expect("a merge must succeed even though the audit ledger cannot move");
+            .expect("a merge must succeed and absorb the audit ledger");
 
-        let owner: String =
-            sqlx::query_scalar("SELECT owner_id FROM portfolio_audit_log WHERE action = 'buy'")
+        let stranded: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
+                .bind(&from)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(owner, from, "the ledger stays with the account it recorded");
+        assert_eq!(
+            stranded, 0,
+            "no ledger row may still reference the absorbed account"
+        );
+
+        let arrived: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
+                .bind(&into)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(arrived, 4, "1 + 2 entries plus the merge marker");
+    }
+
+    /// This is the test the whole change exists for: the rebuilt chain must
+    /// still verify from genesis to head after the ledgers of two different
+    /// accounts have been spliced together.
+    #[tokio::test]
+    async fn test_the_absorbed_ledger_still_verifies() {
+        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        record_audit_entry(
+            &pool, &into, "deposit", None, None, None, 100000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool,
+            &from,
+            "buy",
+            Some("AAPL"),
+            Some(1_00000000),
+            Some(15000),
+            15000,
+            "USD",
+            2,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let report = verify_audit_chain(&pool, &into).await.unwrap();
+        assert!(report.is_valid, "{}", report.message);
+        assert_eq!(report.total_verified, 4);
+    }
+
+    /// The absorption itself must be recorded in the ledger rather than
+    /// happening silently — an auditor reading the chain should be able to see
+    /// that a merge occurred and where the entries came from.
+    #[tokio::test]
+    async fn test_the_merge_is_recorded_in_the_ledger() {
+        use crate::modules::portfolio::audit::record_audit_entry;
+
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let markers: Vec<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, note FROM portfolio_audit_log WHERE owner_id = ? AND action = 'merge'",
+        )
+        .bind(&into)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            markers.len(),
+            1,
+            "exactly one merge marker must be recorded"
+        );
+
+        let (marker_id, note) = &markers[0];
+        let note = note.as_deref().unwrap_or_default();
+        assert!(note.contains(&from), "note must name the source account");
+        assert!(
+            note.contains('1'),
+            "note must say how many entries were absorbed"
+        );
+
+        let max_id: i64 =
+            sqlx::query_scalar("SELECT MAX(id) FROM portfolio_audit_log WHERE owner_id = ?")
+                .bind(&into)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            *marker_id, max_id,
+            "the marker must be the last entry in the chain"
+        );
+    }
+
+    /// Without this, a bug that skipped recreating the trigger would leave the
+    /// ledger permanently writable after the first merge.
+    #[tokio::test]
+    async fn test_the_immutability_trigger_survives_a_merge() {
+        use crate::modules::portfolio::audit::record_audit_entry;
+
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let result =
+            sqlx::query("UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?")
+                .bind(&into)
+                .execute(&pool)
+                .await;
+        assert!(
+            result.is_err(),
+            "the immutability trigger must still be active after a merge"
+        );
+    }
+
+    /// An account with no audit history must not cause a merge to append noise
+    /// or rewrite a chain that never needed rebuilding.
+    #[tokio::test]
+    async fn test_a_merge_with_no_ledger_leaves_no_marker() {
+        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        record_audit_entry(
+            &pool, &into, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
+                .bind(&into)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            count, 1,
+            "no marker row may be appended for an empty ledger"
+        );
+
+        let marker_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ? AND action = 'merge'",
+        )
+        .bind(&into)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(marker_count, 0);
+
+        let report = verify_audit_chain(&pool, &into).await.unwrap();
+        assert!(report.is_valid, "an untouched chain must remain valid");
+    }
+
+    /// Proves the transactional-DDL assumption `absorb_ledger` relies on: a
+    /// rolled-back merge must leave the trigger intact, because SQLite undoes
+    /// `DROP TRIGGER` along with everything else in the transaction.
+    #[tokio::test]
+    async fn test_a_rolled_back_merge_restores_the_trigger() {
+        use crate::modules::portfolio::audit::record_audit_entry;
+
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        MergeRepository::merge_within(&mut tx, &from, &into)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+
+        let result =
+            sqlx::query("UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?")
+                .bind(&from)
+                .execute(&pool)
+                .await;
+        assert!(
+            result.is_err(),
+            "the trigger must still be active after a rolled-back merge"
+        );
+
+        let owner: String =
+            sqlx::query_scalar("SELECT owner_id FROM portfolio_audit_log WHERE action = 'deposit'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            owner, from,
+            "the ledger must still belong to the source account"
+        );
     }
 
     /// `account_rooms` is keyed by `(account_id, room_id)`, so a room cached by

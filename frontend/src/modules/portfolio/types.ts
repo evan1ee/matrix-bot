@@ -48,7 +48,7 @@ export interface RefreshSummary {
 export interface PortfolioAuditEntry {
   id: number;
   owner_id: string;
-  action: 'buy' | 'sell' | 'deposit' | 'withdraw' | 'record';
+  action: 'buy' | 'sell' | 'deposit' | 'withdraw' | 'record' | 'merge';
   symbol?: string | null;
   quantity_minor?: number | null;
   price_minor?: number | null;

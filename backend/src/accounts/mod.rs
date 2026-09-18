@@ -83,19 +83,17 @@ pub const OWNED_TABLES: &[&str] = &[
     "bot_message_targets",
 ];
 
-/// Tables carrying `owner_id` whose rows deliberately do **not** follow a merge.
+/// Tables carrying `owner_id` that a merge moves through a dedicated routine
+/// rather than the generic loop.
 ///
-/// `portfolio_audit_log` is immutable at the database engine level — the
-/// `prevent_portfolio_audit_update` and `prevent_portfolio_audit_delete`
-/// triggers both `RAISE(ABORT)`, and an `OR IGNORE` conflict clause does not
-/// suppress a trigger's abort. Its `entry_hash` also folds `owner_id` into the
-/// digest, so a moved row would fail `verify_audit_chain` even if the trigger
-/// allowed the write. Moving this ledger therefore means dropping the trigger
-/// and recomputing the whole chain for the surviving owner, which is a decision
-/// about what a tamper-evident ledger means across a merge rather than
-/// something to do incidentally. Tracked separately; listed here so the
-/// omission is explicit and tested rather than silent.
-pub const OWNER_ID_UNMERGED: &[&str] = &["portfolio_audit_log"];
+/// `portfolio_audit_log` is immutable at the database engine level and its
+/// `entry_hash` folds `owner_id` into the digest, so it can be neither
+/// re-pointed by a plain `UPDATE` nor left valid by one. It is moved by
+/// `modules::portfolio::audit::absorb_ledger`, which drops the trigger for the
+/// length of the transaction and rebuilds the chain. Listed separately so the
+/// schema-derived test still accounts for it, and so nobody adds it to
+/// `OWNED_TABLES` and discovers at runtime that every merge now aborts.
+pub const OWNER_ID_MERGED_SEPARATELY: &[&str] = &["portfolio_audit_log"];
 
 /// Tables keyed by `account_id` whose rows follow the absorbed account.
 pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
@@ -283,7 +281,7 @@ mod tests {
     async fn test_owned_tables_and_exceptions_match_the_schema() {
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "owner_id").await;
-        let classified = declared(&[OWNED_TABLES, OWNER_ID_UNMERGED]);
+        let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
 
         let unclassified: Vec<_> = in_schema.difference(&classified).collect();
         assert!(
@@ -297,7 +295,7 @@ mod tests {
             "these tables are classified but are not in the schema: {phantom:?}"
         );
 
-        for table in OWNER_ID_UNMERGED {
+        for table in OWNER_ID_MERGED_SEPARATELY {
             assert!(
                 !OWNED_TABLES.contains(table),
                 "{table} cannot both follow a merge and be excluded from one"
