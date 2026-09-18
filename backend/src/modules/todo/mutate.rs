@@ -3,15 +3,16 @@ use chrono_tz::Tz;
 use sqlx::SqlitePool;
 use tracing::error;
 
+use crate::events::EventBroadcaster;
 use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
+use crate::modules::todo::service::{self, TodoError, TodoPatch};
 use crate::utils::{format_datetime, html_escape, parse_reminder_args, priority_badge};
 
-/// Maximum allowed length for task description text.
-pub const MAX_TASK_TEXT_LEN: usize = 500;
-/// Maximum active tasks per room.
-pub const MAX_ROOM_TASKS: i64 = 500;
+// `MAX_TASK_TEXT_LEN` and `MAX_ROOM_TASKS` live in `service` now — this module
+// owns the reply wording, not the limits.
+pub use crate::modules::todo::service::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
 pub const DUE_USAGE: &str =
     "⚠️ Usage: <code>!todo due &lt;id&gt; &lt;time&gt; [remind &lt;lead&gt;]</code> \
@@ -20,6 +21,7 @@ pub const DUE_USAGE: &str =
 
 pub async fn handle_add(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -61,36 +63,19 @@ pub async fn handle_add(
         return Some("⚠️ Please specify task description after priority tag!".to_string());
     }
 
-    if raw_text.len() > MAX_TASK_TEXT_LEN {
-        return Some(format!(
-            "⚠️ Task description too long! Maximum limit is {} characters.",
-            MAX_TASK_TEXT_LEN
-        ));
-    }
-
-    match TodoRepository::count_room_active(pool, room_id).await {
-        Ok(count) if count >= MAX_ROOM_TASKS => {
-            return Some(format!(
-                "⚠️ Room task limit reached ({} active tasks). Clear completed tasks using \
-                 <code>!todo clear room</code>.",
-                MAX_ROOM_TASKS
-            ));
-        }
-        Err(err) => {
-            error!("Failed checking room task count: {:?}", err);
-        }
-        _ => {}
-    }
-
-    match TodoRepository::add(
+    match service::create(
         pool,
-        room_id,
+        broadcaster,
         owner_id,
-        sender_name,
-        raw_text,
-        priority,
-        None,
-        None,
+        service::NewTodo {
+            text: raw_text,
+            priority,
+            room_id,
+            sender_name,
+            due_at: None,
+            remind_before_minutes: None,
+            remind_room_id: None,
+        },
     )
     .await
     {
@@ -101,14 +86,29 @@ pub async fn handle_add(
             html_escape(&item.text),
             priority_badge(&item.priority)
         )),
-        Err(err) => {
+        Err(TodoError::TextTooLong { max }) => Some(format!(
+            "⚠️ Task description too long! Maximum limit is {} characters.",
+            max
+        )),
+        Err(TodoError::RoomFull { max }) => Some(format!(
+            "⚠️ Room task limit reached ({} active tasks). Clear completed tasks using \
+             <code>!todo clear room</code>.",
+            max
+        )),
+        Err(TodoError::Db(err)) => {
             error!("Failed to add todo item: {:?}", err);
             Some("❌ Failed to save task to database.".to_string())
         }
+        Err(_) => Some("❌ Failed to save task to database.".to_string()),
     }
 }
 
-pub async fn handle_done(pool: &SqlitePool, room_id: &str, args_body: &str) -> Option<String> {
+pub async fn handle_done(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    args_body: &str,
+) -> Option<String> {
     let id_str = args_body[4..].trim();
     if id_str.is_empty() {
         return Some(
@@ -118,37 +118,57 @@ pub async fn handle_done(pool: &SqlitePool, room_id: &str, args_body: &str) -> O
         );
     }
 
-    if let Ok(id) = id_str.parse::<i64>() {
-        match TodoRepository::mark_done(pool, id).await {
-            Ok(Some(item)) => {
-                // A finished task should stop nagging.
-                let cancelled = matches!(
-                    due_reminder::sync(pool, None, &item, room_id).await,
-                    Ok(due_reminder::SyncOutcome::Cancelled)
-                );
-                Some(format!(
-                    "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}",
-                    item.id,
-                    html_escape(&item.text),
-                    if cancelled {
-                        " <i>(due reminder cancelled)</i>"
-                    } else {
-                        ""
-                    }
-                ))
+    let Ok(id) = id_str.parse::<i64>() else {
+        return Some("⚠️ Invalid task ID. Usage: <code>!todo done &lt;id&gt;</code>".to_string());
+    };
+
+    // A finished task should stop nagging. Whether it *was* nagging has to be
+    // read before the update — completing the task is exactly what removes
+    // the signal we'd otherwise use to tell.
+    let had_reminder = TodoRepository::find_owned(pool, id, owner_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|existing| due_reminder::wanted_trigger(&existing).is_some())
+        .unwrap_or(false);
+
+    match service::update(
+        pool,
+        broadcaster,
+        owner_id,
+        id,
+        TodoPatch {
+            completed: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    {
+        Ok(item) => Some(format!(
+            "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}",
+            item.id,
+            html_escape(&item.text),
+            if had_reminder {
+                " <i>(due reminder cancelled)</i>"
+            } else {
+                ""
             }
-            Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-            Err(err) => {
-                error!("Failed to mark todo done: {:?}", err);
-                Some("❌ Database error marking task completed.".to_string())
-            }
+        )),
+        Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(TodoError::Db(err)) => {
+            error!("Failed to mark todo done: {:?}", err);
+            Some("❌ Database error marking task completed.".to_string())
         }
-    } else {
-        Some("⚠️ Invalid task ID. Usage: <code>!todo done &lt;id&gt;</code>".to_string())
+        Err(_) => Some("❌ Database error marking task completed.".to_string()),
     }
 }
 
-pub async fn handle_edit(pool: &SqlitePool, args_body: &str) -> Option<String> {
+pub async fn handle_edit(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    args_body: &str,
+) -> Option<String> {
     let rest = args_body[4..].trim();
     let mut parts = rest.splitn(2, ' ');
     let id_str = parts.next().unwrap_or("");
@@ -165,28 +185,45 @@ pub async fn handle_edit(pool: &SqlitePool, args_body: &str) -> Option<String> {
         ));
     }
 
-    if let Ok(id) = id_str.parse::<i64>() {
-        match TodoRepository::edit_text(pool, id, new_text).await {
-            Ok(Some(item)) => Some(format!(
-                "✏️ Updated Task <b>#{}</b> text to: <i>\"{}\"</i>",
-                item.id,
-                html_escape(&item.text)
-            )),
-            Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-            Err(err) => {
-                error!("Failed to edit todo text: {:?}", err);
-                Some("❌ Database error updating task.".to_string())
-            }
-        }
-    } else {
-        Some(
+    let Ok(id) = id_str.parse::<i64>() else {
+        return Some(
             "⚠️ Invalid task ID. Usage: <code>!todo edit &lt;id&gt; &lt;new text&gt;</code>"
                 .to_string(),
-        )
+        );
+    };
+
+    match service::update(
+        pool,
+        broadcaster,
+        owner_id,
+        id,
+        TodoPatch {
+            text: Some(new_text),
+            ..Default::default()
+        },
+    )
+    .await
+    {
+        Ok(item) => Some(format!(
+            "✏️ Updated Task <b>#{}</b> text to: <i>\"{}\"</i>",
+            item.id,
+            html_escape(&item.text)
+        )),
+        Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(TodoError::Db(err)) => {
+            error!("Failed to edit todo text: {:?}", err);
+            Some("❌ Database error updating task.".to_string())
+        }
+        Err(_) => Some("❌ Database error updating task.".to_string()),
     }
 }
 
-pub async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<String> {
+pub async fn handle_priority(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    args_body: &str,
+) -> Option<String> {
     let rest = args_body[8..].trim();
     let mut parts = rest.splitn(2, ' ');
     let id_str = parts.next().unwrap_or("");
@@ -198,28 +235,45 @@ pub async fn handle_priority(pool: &SqlitePool, args_body: &str) -> Option<Strin
         );
     }
 
-    if let Ok(id) = id_str.parse::<i64>() {
-        let prio = TodoPriority::from_str_or_default(prio_str);
-        match TodoRepository::set_priority(pool, id, prio.clone()).await {
-            Ok(Some(item)) => Some(format!(
-                "🏷️ Set Task <b>#{}</b> priority to {}",
-                item.id,
-                priority_badge(&item.priority)
-            )),
-            Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-            Err(err) => {
-                error!("Failed to update todo priority: {:?}", err);
-                Some("❌ Database error updating priority.".to_string())
-            }
+    let Ok(id) = id_str.parse::<i64>() else {
+        return Some(
+            "⚠️ Invalid task ID. Usage: <code>!todo priority &lt;id&gt; &lt;low|medium|high&gt;</code>"
+                .to_string(),
+        );
+    };
+
+    let prio = TodoPriority::from_str_or_default(prio_str);
+    match service::update(
+        pool,
+        broadcaster,
+        owner_id,
+        id,
+        TodoPatch {
+            priority: Some(prio),
+            ..Default::default()
+        },
+    )
+    .await
+    {
+        Ok(item) => Some(format!(
+            "🏷️ Set Task <b>#{}</b> priority to {}",
+            item.id,
+            priority_badge(&item.priority)
+        )),
+        Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(TodoError::Db(err)) => {
+            error!("Failed to update todo priority: {:?}", err);
+            Some("❌ Database error updating priority.".to_string())
         }
-    } else {
-        Some("⚠️ Invalid task ID. Usage: <code>!todo priority &lt;id&gt; &lt;low|medium|high&gt;</code>".to_string())
+        Err(_) => Some("❌ Database error updating priority.".to_string()),
     }
 }
 
 pub async fn handle_due(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
+    owner_id: &str,
     args_body: &str,
     tz: &Tz,
 ) -> Option<String> {
@@ -243,19 +297,28 @@ pub async fn handle_due(
     };
 
     if matches!(due_arg.to_lowercase().as_str(), "none" | "clear") {
-        return match TodoRepository::set_due_date(pool, id, None).await {
-            Ok(Some(item)) => {
-                due_reminder::tear_down(pool, None, item.id).await.ok();
-                Some(format!(
-                    "📅 Cleared the due date on Task <b>#{}</b>.",
-                    item.id
-                ))
-            }
-            Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-            Err(err) => {
+        return match service::update(
+            pool,
+            broadcaster,
+            owner_id,
+            id,
+            TodoPatch {
+                due_at: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            Ok(item) => Some(format!(
+                "📅 Cleared the due date on Task <b>#{}</b>.",
+                item.id
+            )),
+            Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+            Err(TodoError::Db(err)) => {
                 error!("Failed to clear todo due date: {:?}", err);
                 Some("❌ Database error clearing due date.".to_string())
             }
+            Err(_) => Some("❌ Database error clearing due date.".to_string()),
         };
     }
 
@@ -281,91 +344,110 @@ pub async fn handle_due(
         None => None,
     };
 
-    if let Err(err) = TodoRepository::set_due_date(pool, id, Some(due_dt)).await {
-        error!("Failed to set todo due date: {:?}", err);
-        return Some("❌ Database error setting due date.".to_string());
+    // An explicit `remind` replaces whatever was set before; omitting it
+    // leaves an existing lead time alone, so re-dating a task keeps its
+    // reminder — this is exactly `TodoPatch::remind_before_minutes`'s
+    // "None leaves it alone, Some(x) sets it" semantics.
+    let had_reminder_before = TodoRepository::find_owned(pool, id, owner_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|existing| due_reminder::wanted_trigger(&existing).is_some())
+        .unwrap_or(false);
+
+    let result = service::update(
+        pool,
+        broadcaster,
+        owner_id,
+        id,
+        TodoPatch {
+            due_at: Some(Some(due_dt)),
+            remind_before_minutes: lead_minutes.map(Some),
+            remind_room_id: Some(room_id),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    match result {
+        Ok(item) => {
+            let due_note = format!(
+                "📅 Set Task <b>#{}</b> due date to <b>{}</b>",
+                item.id,
+                html_escape(&format_datetime(&due_dt, tz))
+            );
+
+            let reminder_note = match due_reminder::wanted_trigger(&item) {
+                Some(trigger) if trigger > Utc::now() => format!(
+                    "<br/>⏰ Reminder set for <b>{}</b>.",
+                    html_escape(&format_datetime(&trigger, tz))
+                ),
+                Some(_) => "<br/>⚠️ That lead time is already in the past, so no reminder was set."
+                    .to_string(),
+                None if had_reminder_before => {
+                    "<br/>⏰ Previous due reminder cancelled.".to_string()
+                }
+                None => String::new(),
+            };
+
+            Some(format!("{}{}", due_note, reminder_note))
+        }
+        Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(TodoError::Db(err)) => {
+            error!("Failed to set todo due date: {:?}", err);
+            Some("❌ Database error setting due date.".to_string())
+        }
+        Err(_) => Some("❌ Database error setting due date.".to_string()),
     }
-
-    // An explicit `remind` replaces whatever was set before; omitting it leaves
-    // an existing lead time alone, so re-dating a task keeps its reminder.
-    if lead_minutes.is_some() {
-        if let Err(err) = TodoRepository::set_remind_before(pool, id, lead_minutes).await {
-            error!("Failed to set todo reminder lead time: {:?}", err);
-            return Some("❌ Database error setting reminder lead time.".to_string());
-        }
-    }
-
-    let item = match TodoRepository::find(pool, id).await {
-        Ok(Some(item)) => item,
-        Ok(None) => return Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-        Err(err) => {
-            error!("Failed to re-read todo after setting due date: {:?}", err);
-            return Some("❌ Database error setting due date.".to_string());
-        }
-    };
-
-    let due_note = format!(
-        "📅 Set Task <b>#{}</b> due date to <b>{}</b>",
-        item.id,
-        html_escape(&format_datetime(&due_dt, tz))
-    );
-
-    let reminder_note = match due_reminder::sync(pool, None, &item, room_id).await {
-        Ok(due_reminder::SyncOutcome::Scheduled(at)) => format!(
-            "<br/>⏰ Reminder set for <b>{}</b>.",
-            html_escape(&format_datetime(&at, tz))
-        ),
-        Ok(due_reminder::SyncOutcome::LeadTimeInPast(_)) => {
-            "<br/>⚠️ That lead time is already in the past, so no reminder was set.".to_string()
-        }
-        Ok(due_reminder::SyncOutcome::Cancelled) => {
-            "<br/>⏰ Previous due reminder cancelled.".to_string()
-        }
-        Ok(due_reminder::SyncOutcome::Nothing) => String::new(),
-        Err(err) => {
-            error!("Failed to sync due reminder: {:?}", err);
-            "<br/>❌ Due date saved, but the reminder could not be scheduled.".to_string()
-        }
-    };
-
-    Some(format!("{}{}", due_note, reminder_note))
 }
 
 pub async fn handle_clear(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
     args_body: &str,
 ) -> Option<String> {
     let target = args_body[5..].trim();
-    if target == "room" {
-        match TodoRepository::clear_completed_room(pool, room_id).await {
-            Ok(count) => Some(format!(
-                "🗑️ Cleared <b>{}</b> completed task(s) from this room!",
-                count
-            )),
-            Err(err) => {
-                error!("Failed to clear room todos: {:?}", err);
-                Some("❌ Database error clearing room tasks.".to_string())
+    let for_room = target == "room";
+    let room_arg = for_room.then_some(room_id);
+
+    match service::clear_completed(pool, broadcaster, owner_id, room_arg).await {
+        Ok(items) => {
+            let count = items.len();
+            if for_room {
+                Some(format!(
+                    "🗑️ Cleared <b>{}</b> completed task(s) from this room!",
+                    count
+                ))
+            } else {
+                Some(format!(
+                    "🗑️ Cleared <b>{}</b> of {}'s completed task(s) globally!",
+                    count,
+                    html_escape(sender_name)
+                ))
             }
         }
-    } else {
-        match TodoRepository::clear_completed_user(pool, owner_id).await {
-            Ok(count) => Some(format!(
-                "🗑️ Cleared <b>{}</b> of {}'s completed task(s) globally!",
-                count,
-                html_escape(sender_name)
-            )),
-            Err(err) => {
+        Err(TodoError::Db(err)) => {
+            if for_room {
+                error!("Failed to clear room todos: {:?}", err);
+                Some("❌ Database error clearing room tasks.".to_string())
+            } else {
                 error!("Failed to clear user todos: {:?}", err);
                 Some("❌ Database error clearing tasks.".to_string())
             }
         }
+        Err(_) => Some("❌ Database error clearing tasks.".to_string()),
     }
 }
 
-pub async fn handle_delete(pool: &SqlitePool, owner_id: &str, args_body: &str) -> Option<String> {
+pub async fn handle_delete(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    args_body: &str,
+) -> Option<String> {
     let id_str = args_body
         .trim_start_matches("delete")
         .trim_start_matches("rm")
@@ -381,22 +463,55 @@ pub async fn handle_delete(pool: &SqlitePool, owner_id: &str, args_body: &str) -
         return Some("⚠️ Task ID must be a number.".to_string());
     };
 
-    match TodoRepository::find_owned(pool, id, owner_id).await {
-        Ok(Some(item)) => {
-            due_reminder::tear_down(pool, None, id).await.ok();
-            match TodoRepository::delete(pool, id).await {
-                Ok(true) => Some(format!(
-                    "🗑️ Deleted Task <b>#{}</b>: <i>\"{}\"</i>",
-                    id,
-                    html_escape(&item.text)
-                )),
-                _ => Some(format!("⚠️ Failed to delete task <b>#{}</b>.", id)),
-            }
-        }
-        Ok(None) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
-        Err(err) => {
+    match service::delete(pool, broadcaster, owner_id, id).await {
+        Ok(item) => Some(format!(
+            "🗑️ Deleted Task <b>#{}</b>: <i>\"{}\"</i>",
+            id,
+            html_escape(&item.text)
+        )),
+        Err(TodoError::NotFound) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(TodoError::Db(err)) => {
             error!("Failed to delete task {}: {:?}", id, err);
             Some("❌ Database error deleting task.".to_string())
         }
+        Err(_) => Some("❌ Database error deleting task.".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+    use crate::events::{EventBroadcaster, SystemEvent};
+
+    async fn setup_test_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    /// The bug this refactor exists to fix: `!todo add` never reached an open
+    /// browser because the Matrix path never broadcast anything.
+    #[tokio::test]
+    async fn test_a_matrix_add_announces_itself() {
+        let pool = setup_test_db().await;
+        let broadcaster = EventBroadcaster::default();
+        let mut rx = broadcaster.subscribe();
+
+        let reply = handle_add(
+            &pool,
+            Some(&broadcaster),
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "add Buy milk",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(reply.contains("Added Task"));
+
+        let event = rx.try_recv().expect("the add must broadcast an event");
+        assert!(matches!(event, SystemEvent::TodoCreated(_)));
     }
 }

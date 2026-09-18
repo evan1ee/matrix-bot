@@ -27,6 +27,7 @@ use crate::db::Database;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::todo::repository::TodoRepository;
+use crate::modules::todo::service::{self, TodoError, TodoPatch};
 use crate::utils::html_escape;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,20 +191,26 @@ async fn handle_done(
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
     match target.entity_type.as_str() {
-        "todo" => match TodoRepository::set_completed(pool, target.entity_id, true).await {
-            Ok(Some(item)) => {
-                if let Some(bc) = broadcaster {
-                    bc.send(SystemEvent::TodoUpdated(item));
-                }
-                Some(ReactionOutcome {
-                    ack_emoji: "✅",
-                    reply_html: format!(
-                        "✅ Marked task as done: <i>\"{}\"</i>",
-                        html_escape(&target.title)
-                    ),
-                })
-            }
-            Ok(None) => None,
+        "todo" => match service::update(
+            pool,
+            broadcaster,
+            &target.owner_id,
+            target.entity_id,
+            TodoPatch {
+                completed: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            Ok(_) => Some(ReactionOutcome {
+                ack_emoji: "✅",
+                reply_html: format!(
+                    "✅ Marked task as done: <i>\"{}\"</i>",
+                    html_escape(&target.title)
+                ),
+            }),
+            Err(TodoError::NotFound) => None,
             Err(err) => {
                 error!("Failed marking todo #{} done: {:?}", target.entity_id, err);
                 None
@@ -244,30 +251,25 @@ async fn handle_delete(
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
     match target.entity_type.as_str() {
-        "todo" => match TodoRepository::delete(pool, target.entity_id).await {
-            Ok(true) => {
-                let _ = delete_target_by_entity(pool, "todo", target.entity_id).await;
-                if let Some(bc) = broadcaster {
-                    bc.send(SystemEvent::TodoDeleted {
-                        id: target.entity_id,
-                        room_id: target.room_id.clone(),
-                        owner_id: target.owner_id.clone(),
-                    });
+        "todo" => {
+            match service::delete(pool, broadcaster, &target.owner_id, target.entity_id).await {
+                Ok(_) => {
+                    let _ = delete_target_by_entity(pool, "todo", target.entity_id).await;
+                    Some(ReactionOutcome {
+                        ack_emoji: "🗑️",
+                        reply_html: format!(
+                            "🗑️ Deleted task: <i>\"{}\"</i>",
+                            html_escape(&target.title)
+                        ),
+                    })
                 }
-                Some(ReactionOutcome {
-                    ack_emoji: "🗑️",
-                    reply_html: format!(
-                        "🗑️ Deleted task: <i>\"{}\"</i>",
-                        html_escape(&target.title)
-                    ),
-                })
+                Err(TodoError::NotFound) => None,
+                Err(err) => {
+                    error!("Failed deleting todo #{}: {:?}", target.entity_id, err);
+                    None
+                }
             }
-            Ok(false) => None,
-            Err(err) => {
-                error!("Failed deleting todo #{}: {:?}", target.entity_id, err);
-                None
-            }
-        },
+        }
         "reminder" => {
             let res = sqlx::query(
                 "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ?",
@@ -319,28 +321,26 @@ async fn handle_delay(
             match TodoRepository::find_owned(pool, target.entity_id, &target.owner_id).await {
                 Ok(Some(item)) => {
                     let new_due = item.due_at.unwrap_or_else(Utc::now) + Duration::days(1);
-                    match TodoRepository::set_due_date(pool, target.entity_id, Some(new_due)).await
+                    match service::update(
+                        pool,
+                        broadcaster,
+                        &target.owner_id,
+                        target.entity_id,
+                        TodoPatch {
+                            due_at: Some(Some(new_due)),
+                            ..Default::default()
+                        },
+                    )
+                    .await
                     {
-                        Ok(Some(updated)) => {
-                            let _ = crate::modules::todo::due_reminder::sync(
-                                pool,
-                                broadcaster,
-                                &updated,
-                                &target.room_id,
-                            )
-                            .await;
-                            if let Some(bc) = broadcaster {
-                                bc.send(SystemEvent::TodoUpdated(updated));
-                            }
-                            Some(ReactionOutcome {
-                                ack_emoji: "⏰",
-                                reply_html: format!(
-                                    "⏰ Postponed task by 1 day: <i>\"{}\"</i>",
-                                    html_escape(&target.title)
-                                ),
-                            })
-                        }
-                        Ok(None) => None,
+                        Ok(_) => Some(ReactionOutcome {
+                            ack_emoji: "⏰",
+                            reply_html: format!(
+                                "⏰ Postponed task by 1 day: <i>\"{}\"</i>",
+                                html_escape(&target.title)
+                            ),
+                        }),
+                        Err(TodoError::NotFound) => None,
                         Err(err) => {
                             error!(
                                 "Failed updating todo #{} due date: {:?}",
@@ -403,20 +403,26 @@ async fn handle_celebrate(
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
     match target.entity_type.as_str() {
-        "todo" => match TodoRepository::set_completed(pool, target.entity_id, true).await {
-            Ok(Some(item)) => {
-                if let Some(bc) = broadcaster {
-                    bc.send(SystemEvent::TodoUpdated(item));
-                }
-                Some(ReactionOutcome {
-                    ack_emoji: "🎉",
-                    reply_html: format!(
-                        "🎉 Awesome work! Completed task: <i>\"{}\"</i> 🚀 Keep up the momentum!",
-                        html_escape(&target.title)
-                    ),
-                })
-            }
-            Ok(None) => None,
+        "todo" => match service::update(
+            pool,
+            broadcaster,
+            &target.owner_id,
+            target.entity_id,
+            TodoPatch {
+                completed: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            Ok(_) => Some(ReactionOutcome {
+                ack_emoji: "🎉",
+                reply_html: format!(
+                    "🎉 Awesome work! Completed task: <i>\"{}\"</i> 🚀 Keep up the momentum!",
+                    html_escape(&target.title)
+                ),
+            }),
+            Err(TodoError::NotFound) => None,
             Err(err) => {
                 error!("Failed marking todo #{} done: {:?}", target.entity_id, err);
                 None
@@ -478,7 +484,7 @@ async fn send_reply(room: &Room, html: &str) -> Option<matrix_sdk::ruma::OwnedEv
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use crate::modules::reminder::models::RecurrencePattern;
+    use crate::modules::reminder::models::{RecurrencePattern, ReminderSource};
     use crate::modules::todo::models::TodoPriority;
 
     async fn setup_pool() -> SqlitePool {
@@ -565,6 +571,62 @@ mod tests {
 
         let item_after_delete = TodoRepository::find(&pool, todo.id).await.unwrap();
         assert!(item_after_delete.is_none());
+    }
+
+    /// Completing a task by reaction used to leave its lead-time reminder
+    /// pending, so it fired later for a task that was already done. The
+    /// reaction path now goes through the same service the other transports
+    /// use, which tears the reminder down as part of the same write.
+    #[tokio::test]
+    async fn test_completing_by_reaction_cancels_the_reminder() {
+        let pool = setup_pool().await;
+
+        let due = Utc::now() + Duration::hours(4);
+        let todo = TodoRepository::add(
+            &pool,
+            "!room:x",
+            "@alice:x",
+            "alice",
+            "Ship the thing",
+            TodoPriority::High,
+            Some(due),
+            Some(60),
+        )
+        .await
+        .unwrap();
+
+        crate::modules::todo::due_reminder::sync(&pool, None, &todo, "!room:x")
+            .await
+            .unwrap();
+        assert!(
+            ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
+                .await
+                .unwrap()
+                .is_some(),
+            "a reminder must be pending before the task is completed"
+        );
+
+        let target = BotMessageTarget {
+            event_id: "$ev3".to_string(),
+            room_id: "!room:x".to_string(),
+            entity_type: "todo".to_string(),
+            entity_id: todo.id,
+            owner_id: "@alice:x".to_string(),
+            title: todo.text.clone(),
+        };
+
+        let outcome = apply_reaction(&pool, &target, AllowedReaction::Done, None)
+            .await
+            .unwrap();
+        assert_eq!(outcome.ack_emoji, "✅");
+
+        assert!(
+            ReminderRepository::find_pending_for_source(&pool, ReminderSource::Todo, todo.id)
+                .await
+                .unwrap()
+                .is_none(),
+            "completing the task by reaction must cancel its reminder"
+        );
     }
 
     #[tokio::test]

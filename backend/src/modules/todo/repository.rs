@@ -316,6 +316,32 @@ impl TodoRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Rows `clear_completed_user` is about to remove, read first so the
+    /// caller can announce each one individually.
+    pub async fn list_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<Vec<TodoItem>> {
+        let items = sqlx::query_as::<_, TodoItem>(&format!(
+            "SELECT {COLUMNS} FROM todos WHERE owner_id = ? AND completed = 1"
+        ))
+        .bind(owner_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(items)
+    }
+
+    /// Rows `clear_completed_room` is about to remove, read first so the
+    /// caller can announce each one individually.
+    pub async fn list_completed_room(pool: &SqlitePool, room_id: &str) -> Result<Vec<TodoItem>> {
+        let items = sqlx::query_as::<_, TodoItem>(&format!(
+            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND completed = 1"
+        ))
+        .bind(room_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(items)
+    }
+
     pub async fn clear_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
         let result = sqlx::query("DELETE FROM todos WHERE owner_id = ? AND completed = 1")
             .bind(owner_id)

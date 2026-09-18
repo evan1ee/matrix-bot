@@ -9,6 +9,7 @@ pub mod handler;
 pub mod models;
 pub mod mutate;
 pub mod repository;
+pub mod service;
 pub mod view;
 
 pub struct TodoModule;
@@ -82,10 +83,11 @@ impl BotModule for TodoModule {
         &self,
         ctx: &CommandContext,
         db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
+        broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_todo_command(
             &db.pool,
+            broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
             &ctx.sender_name,
@@ -234,5 +236,33 @@ mod tests {
             !listed.contains("UTC"),
             "should no longer claim UTC: {listed}"
         );
+    }
+
+    /// The module must hand the broadcaster to the command it dispatches.
+    ///
+    /// `handle_command` named it `_broadcaster` and dropped it, so every task
+    /// added over Matrix was invisible to an open browser until the page was
+    /// reloaded. The service-level test cannot catch that: it calls the handler
+    /// directly and supplies its own broadcaster, so it passes either way. This
+    /// one goes through the real `BotModule` entry point.
+    #[tokio::test]
+    async fn test_the_module_passes_the_broadcaster_to_the_command() {
+        let db = db().await;
+        let broadcaster = crate::events::EventBroadcaster::default();
+        let mut rx = broadcaster.subscribe();
+
+        let reply = TodoModule::new()
+            .handle_command(&ctx("!todo add Buy milk"), &db, Some(&broadcaster))
+            .await
+            .expect("the add must be handled");
+        assert!(reply.contains("Added Task"), "unexpected reply: {reply}");
+
+        let event = rx
+            .try_recv()
+            .expect("dispatching through the module must broadcast the creation");
+        assert!(matches!(
+            event,
+            crate::events::SystemEvent::TodoCreated(_)
+        ));
     }
 }

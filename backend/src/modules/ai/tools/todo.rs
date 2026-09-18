@@ -2,11 +2,12 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
+use crate::modules::todo::service::{self, NewTodo, TodoPatch};
 use serde_json::json;
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
@@ -83,22 +84,23 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let item = TodoRepository::add(
+                let item = service::create(
                     pool,
-                    &target_room,
+                    broadcaster,
                     owner_id,
-                    "AI Assistant",
-                    text,
-                    priority,
-                    due_at,
-                    remind_before,
+                    NewTodo {
+                        text,
+                        priority,
+                        room_id: &target_room,
+                        sender_name: "AI Assistant",
+                        due_at,
+                        remind_before_minutes: remind_before,
+                        remind_room_id: None,
+                    },
                 )
                 .await
                 .map_err(|e| e.to_string())?;
 
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::TodoCreated(item.clone()));
-                }
                 serde_json::to_string(&item).map_err(|e| e.to_string())
             }
             .await,
@@ -133,19 +135,19 @@ pub async fn execute_tool(
                     );
                 };
 
-                let item = TodoRepository::find_owned(pool, target_id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Task #{} not found or not owned by user", target_id))?;
+                let updated = service::update(
+                    pool,
+                    broadcaster,
+                    owner_id,
+                    target_id,
+                    TodoPatch {
+                        completed: Some(true),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
 
-                let updated = TodoRepository::set_completed(pool, item.id, true)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "Failed to complete task".to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::TodoUpdated(updated.clone()));
-                }
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
             .await,
@@ -157,25 +159,15 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let _existing = TodoRepository::find_owned(pool, id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Task #{} not found or not owned by user", id))?;
 
-                if let Some(text) = args.get("text").and_then(|v| v.as_str()) {
-                    TodoRepository::edit_text(pool, id, text)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
+                let text = args.get("text").and_then(|v| v.as_str());
+                let priority = args
+                    .get("priority")
+                    .and_then(|v| v.as_str())
+                    .map(TodoPriority::from_str_or_default);
 
-                if let Some(priority_str) = args.get("priority").and_then(|v| v.as_str()) {
-                    let priority = TodoPriority::from_str_or_default(priority_str);
-                    TodoRepository::set_priority(pool, id, priority)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
-
-                if args.get("due_in_minutes").is_some() || args.get("due_at").is_some() {
+                let due_at = if args.get("due_in_minutes").is_some() || args.get("due_at").is_some()
+                {
                     let due_at =
                         if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                             Some(Utc::now() + Duration::minutes(mins))
@@ -185,19 +177,25 @@ pub async fn execute_tool(
                         } else {
                             None
                         };
-                    TodoRepository::set_due_date(pool, id, due_at)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
+                    Some(due_at)
+                } else {
+                    None
+                };
 
-                let updated = TodoRepository::find_owned(pool, id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "Failed to retrieve updated task".to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::TodoUpdated(updated.clone()));
-                }
+                let updated = service::update(
+                    pool,
+                    broadcaster,
+                    owner_id,
+                    id,
+                    TodoPatch {
+                        text,
+                        priority,
+                        due_at,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
@@ -210,26 +208,10 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let existing = TodoRepository::find_owned(pool, id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Task #{} not found or not owned by user", id))?;
 
-                let ok = TodoRepository::delete(pool, id)
+                service::delete(pool, broadcaster, owner_id, id)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!("Failed to delete task #{}", id));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::TodoDeleted {
-                        id,
-                        room_id: existing.room_id.clone(),
-                        owner_id: owner_id.to_string(),
-                    });
-                }
 
                 serde_json::to_string(&serde_json::json!({
                     "id": id,
@@ -356,4 +338,61 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::modules::reminder::models::ReminderSource;
+    use crate::modules::reminder::repository::ReminderRepository;
+
+    async fn setup_db() -> (Database, String) {
+        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let account_id =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
+                .await
+                .unwrap();
+        (db, account_id)
+    }
+
+    /// The AI path used to call the repository directly and skip validation
+    /// entirely — this is the length limit every other transport enforces.
+    #[tokio::test]
+    async fn test_the_ai_tool_enforces_the_text_limit() {
+        let (db, owner) = setup_db().await;
+        let over_limit = "x".repeat(service::MAX_TASK_TEXT_LEN + 1);
+        let args = json!({ "text": over_limit });
+
+        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args).await;
+        assert!(matches!(result, Some(Err(_))));
+    }
+
+    /// The bug this whole conversion exists to fix: `add_todo` never reconciled
+    /// a lead-time reminder, so a due date plus `remind_before_minutes` silently
+    /// scheduled nothing.
+    #[tokio::test]
+    async fn test_the_ai_tool_schedules_a_due_reminder() {
+        let (db, owner) = setup_db().await;
+        let due = (Utc::now() + Duration::hours(4)).to_rfc3339();
+        let args = json!({
+            "text": "Ship it",
+            "due_at": due,
+            "remind_before_minutes": 60,
+        });
+
+        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args)
+            .await
+            .unwrap()
+            .unwrap();
+        let todo: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let todo_id = todo["id"].as_i64().unwrap();
+
+        let pending =
+            ReminderRepository::find_pending_for_source(&db.pool, ReminderSource::Todo, todo_id)
+                .await
+                .unwrap();
+        assert!(pending.is_some(), "a due reminder must be scheduled");
+    }
 }
