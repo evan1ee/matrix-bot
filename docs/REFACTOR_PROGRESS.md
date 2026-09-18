@@ -27,10 +27,10 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R5 | AR-007 — collapse the portfolio facade | ✅ | ✅ | ✅ | `3b49628`. 596 pass, count unchanged. −293 lines. |
 | R11 | AR-009 — credential resolution extracted | ✅ | ✅ | ✅ | `6633de7`. 597 pass. Found a real step-up hole. |
 | R6 | AR-002 — todo service | ✅ | ✅ | ✅ | `7ffb79d`. 605 pass. Fixed 4 user-visible bugs. |
-| R7 | AR-002 — finance service | — | — | — | Next up |
-| R8 | AR-002 — portfolio service | — | — | — | |
-| R9 | AR-002 — reminder/bills services, AiError | — | — | — | |
-| R10 | AR-005 — split `bot/handler.rs` | — | — | — | |
+| R7 | AR-002 — finance service | ✅ | ✅ | ✅ | `72ed406`. Caught a regression in review. |
+| R8 | AR-002 — portfolio service | ✅ | ✅ | ✅ | `922fccd`. 620 pass. |
+| R9 | AR-002 — reminder service + AiError | ✅ | ✅ | ✅ | `daf016c`, `349768f`. 630 pass. |
+| R10 | AR-005 — split `bot/handler.rs` | — | — | — | Next up |
 | R12 | AR-008 — OpenAPI coverage, generated DTOs, registry-driven nav | — | — | — | |
 
 ## Findings that correct the review
@@ -340,3 +340,67 @@ reaction arm fails the reminder test.
 **Interruption.** The first implementation run hit a usage limit partway through and left the tree not
 compiling: the AI tool path was half-converted and the reaction path untouched. Assessed the tree, wrote a
 continuation brief naming exactly what was done and what remained, and finished with a second run.
+
+### R7 — AR-002 finance service (`72ed406`)
+
+Same drift as todo: `FinanceModule` dropped its broadcaster so Matrix expenses never reached the browser, the
+note limit existed twice under two names, the category limit was a bare literal on one path, and the AI tool
+validated nothing. Also routed two writes that bypassed everything: `RecurringBillRepository::mark_paid` and
+the portfolio cash bookkeeping both wrote transactions directly and announced nothing.
+
+**A regression caught in review, and the lesson from it.** The first implementation unified category handling
+by making every path create an unknown category on demand. That silently deleted a documented rule — the Matrix
+path refused, with a comment explaining that implicit creation lets a typo fragment one category into two. My
+brief said "use the repository's own method so there is one behaviour", which the implementer reasonably read
+as licence to unify. It was not: the three transports differ on purpose and unifying them is a product decision.
+Restored, with `create_missing_category` making the difference explicit at each call site, and a test that
+asserts the **category row count** rather than just the error, because the side effect is the point.
+
+Brief-writing lesson: "make it consistent" is an instruction to change behaviour unless it says which way.
+
+### R8 — AR-002 portfolio service (`922fccd`)
+
+Scoped down after checking. R5 had already deleted the facade and the parsing helpers were already shared, so
+the remaining duplication was the parse-then-write-then-announce sequence. Two real defects: the note limit
+existed only on REST, and a buy announced `PortfolioHoldingCreated` from REST and Matrix but
+`PortfolioHoldingUpdated` from the AI tool. The service checks whether the symbol was already held and emits
+the one that describes what happened.
+
+Checked before acting: the frontend treats both events identically, so that inconsistency was cosmetic rather
+than a live bug. Recorded rather than overstated.
+
+**Two fixes after review.** The first version dropped the REST path's collapsing of a whitespace-only note to
+`None`, so a blank field would have begun storing `''` instead of `NULL` — invisible, since both render as
+nothing. Now pinned by a test and applied to every transport. And an unused `NotFound` variant kept "for parity"
+with the other services was removed; nothing constructed it, and the project's own rules say not to keep
+abstractions on speculation.
+
+### R9 — AR-002 reminder service and AiError (`daf016c`, `349768f`)
+
+Two independent changes, committed separately because they touch disjoint files.
+
+**Reminder.** `ReminderModule` dropped its broadcaster too. The message limit was 500 over REST, 300 over
+Matrix, and absent from the AI tool; the service owns one, and it is the REST value, so a Matrix reminder may
+now be longer than before. A past trigger time is now rejected everywhere — equivalent to the old
+"seconds must be greater than zero" on REST and Matrix, which take a duration, and a genuinely new rejection on
+the AI tool, which takes an absolute timestamp.
+
+Deliberately left alone: `due_reminder` (the shared reconciler) and the scheduler (the delivery loop) are not
+transports and already announce correctly. The delete reaction keeps its own SQL because the service's cancel
+only moves pending rows, and that reaction must still work on a reminder already marked triggered — a genuine
+finding by the implementer, and the right call.
+
+**AiError.** `run_ai_turn` returned `Result<_, String>` and the API mapped all of it to 400 with the internal
+message in the body, so a provider outage was indistinguishable from a bad prompt. Now 400 / 503 / 500, with the
+existing 504 for the outer timeout untouched.
+
+**A test I improved during verification:** two AI tool tests carried a hard-coded 2026 trigger date that the new
+past-time check had just invalidated. The implementer bumped them to 2030, which only defers the day they
+expire. They now derive the date from the run.
+
+### Known issues, not addressed
+
+- `modules/ai/handler.rs` is 540 production lines, over the project's 500 limit. Pre-existing — it was 538
+  before this series touched it.
+- `modules::ai::handler::tests::test_ai_error_suppressed_from_chat_and_sent_once` flakes under full parallel
+  load because of the process-global `AI_ERROR_ALERTED` flag. Passes 5/5 in isolation. Predicted in AR-011.
