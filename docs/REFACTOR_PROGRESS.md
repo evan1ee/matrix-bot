@@ -18,8 +18,8 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 
 | Item | Scope | Planned | Implemented | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
-| R1a | AR-001 — ownership-table drift, classification, transactional merge | ✅ | — | — | In progress |
-| R1b | AR-001 — `portfolio_audit_log` merge semantics | — | — | — | Split out of R1; see finding below |
+| R1a | AR-001 — ownership-table drift, classification, transactional merge | ✅ | ✅ | ✅ | `ae2ed29`. 587 pass. Guards mutation-tested. |
+| R1b | AR-001 — `portfolio_audit_log` merge semantics | — | — | — | Split out of R1; see F-1. Next up |
 | R3 | AR-003 — move misplaced `api/` functions into `modules/`+`db/` | — | — | — | |
 | R2 | AR-004 — `Config` threaded into the bot side | — | — | — | |
 | R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | |
@@ -59,3 +59,42 @@ passes and the exception is explicit and tested rather than silently absent.
 `merge.rs:191-203` already re-points `security_events` as well as `matrix_links` and `webauthn_credentials`.
 The genuinely unhandled `account_id` tables are `account_rooms`, `mcp_tokens`, `passkey_enrollment_tokens`,
 `matrix_link_challenges`, and the legacy `web_users`.
+
+### F-3 — the repository is not `rustfmt`-clean at the branch point (pre-existing)
+
+`cargo fmt --all -- --check` reports 60 diffs across roughly 20 files at `1138ef9`, before any of this work.
+They are real formatting differences (over-long lines that rustfmt would wrap), not line-ending noise. CI runs
+that exact command, so this step was already failing on the branch.
+
+Left alone deliberately: reformatting 20 unrelated files is exactly the drive-by change this workstream is
+meant to avoid, and it would bury every subsequent diff. Each item here instead formats only the files it
+touches, checked with `rustfmt --check` on those paths. Worth its own commit at some point, on its own.
+
+## Completed items
+
+### R1a — AR-001 ownership-table drift (`ae2ed29`)
+
+**Changed:** `backend/src/accounts/mod.rs`, `backend/src/accounts/merge.rs`.
+
+**Verified by Opus 5:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings, exit 0 |
+| `cargo test --workspace` | 587 passed, 0 failed, 7 ignored (baseline 581, net +6) |
+| `rustfmt --check` on both changed files | clean |
+| OpenAPI regenerated | no diff — `MergePreview` kept its fields, the two new tables fall into `other` |
+| Public API | `MergeRepository::merge` signature unchanged; no caller touched |
+
+**Mutation-tested the new guards** rather than trusting that they pass:
+
+| Mutation | Caught? |
+| --- | --- |
+| Remove `finance_shares` from `OWNED_TABLES` | ✅ `these tables carry owner_id but no list classifies them: ["finance_shares"]` |
+| Remove `mcp_tokens` from `ACCOUNT_ID_DISCARDED` | ✅ `these tables carry account_id but no list classifies them: ["mcp_tokens"]` |
+| Add a table name that is not in the schema | ✅ `these tables are classified but are not in the schema: ["not_a_real_table"]` |
+
+**Deviation from plan, accepted:** the pre-existing `test_no_owned_table_is_left_behind` inserts one row per
+entry in `OWNED_TABLES` and asserts the total. Growing the constant from 20 to 22 required inserting rows for
+the two new tables and raising the expected count. Reviewed as extending coverage in step with the constant,
+not weakening it — the test still asserts one arrived row for every table including the new ones.
