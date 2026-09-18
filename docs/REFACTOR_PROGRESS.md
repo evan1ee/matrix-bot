@@ -19,8 +19,8 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | Item | Scope | Planned | Implemented | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
 | R1a | AR-001 — ownership-table drift, classification, transactional merge | ✅ | ✅ | ✅ | `ae2ed29`. 587 pass. Guards mutation-tested. |
-| R1b | AR-001 — `portfolio_audit_log` merge semantics | — | — | — | Split out of R1; see F-1. Next up |
-| R3 | AR-003 — move misplaced `api/` functions into `modules/`+`db/` | — | — | — | |
+| R1b | AR-001 — `portfolio_audit_log` merge semantics | ✅ | ✅ | ✅ | `2f35a29`. 592 pass. Move + re-chain, per your decision. |
+| R3 | AR-003 — move misplaced `api/` functions into `modules/`+`db/` | — | — | — | Next up |
 | R2 | AR-004 — `Config` threaded into the bot side | — | — | — | |
 | R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | |
 | R5 | AR-007 — collapse the portfolio facade | — | — | — | |
@@ -98,3 +98,41 @@ touches, checked with `rustfmt --check` on those paths. Worth its own commit at 
 entry in `OWNED_TABLES` and asserts the total. Growing the constant from 20 to 22 required inserting rows for
 the two new tables and raising the expected count. Reviewed as extending coverage in step with the constant,
 not weakening it — the test still asserts one arrived row for every table including the new ones.
+
+### R1b — AR-001 audit ledger across a merge (`2f35a29`)
+
+Decision taken by the user from three options: **move the ledger and re-chain it**, rather than leaving it
+behind as a tombstone or keeping the documented exception.
+
+**Changed:** `modules/portfolio/audit.rs` (new `absorb_ledger`), `db/schema_portfolio.rs` (shared
+`AUDIT_UPDATE_TRIGGER` constant), `accounts/mod.rs` (`OWNER_ID_UNMERGED` → `OWNER_ID_MERGED_SEPARATELY`),
+`accounts/merge.rs`, `frontend/.../ActivitySection.tsx`, `frontend/.../types.ts`.
+
+`portfolio_audit_log` stays out of `OWNED_TABLES` on purpose. Putting it there would send it through the
+generic `UPDATE OR IGNORE` loop, which the immutability trigger aborts, breaking every merge.
+
+**Verified by Opus 5:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings |
+| `cargo test --workspace` | 592 passed, 0 failed, 7 ignored (was 587) |
+| `rustfmt --check` on all four changed `.rs` files | clean |
+| `cargo run --bin generate-openapi` | no diff — `MergePreview` shape held |
+| `npm --prefix frontend run build` | succeeded (pre-existing chunk-size warning only) |
+
+**Mutation-tested the two guarantees:**
+
+| Mutation | Caught? |
+| --- | --- |
+| Delete the trigger-recreation call | ✅ `test_the_immutability_trigger_survives_a_merge` fails |
+| Neuter the chain-rebuild loop | ✅ `test_the_absorbed_ledger_still_verifies` fails |
+
+A first mutation attempt silently failed to apply and the tests passed — which proves nothing. Re-run with
+line-based edits, confirmed applied, and both then failed correctly. Worth repeating on later items: always
+confirm the mutation landed before trusting a red or green result.
+
+**Deviation from plan, accepted:** `frontend/src/modules/portfolio/types.ts` was not in the planned file list,
+but `PortfolioAuditEntry.action` is a hand-written union there, so `case 'merge'` would not typecheck without
+adding the variant. That file being hand-maintained rather than generated from `openapi.json` is exactly the
+drift AR-008 describes, and is a good concrete example to cite when R12 comes round.
