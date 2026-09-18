@@ -32,7 +32,7 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R9 | AR-002 — reminder service + AiError | ✅ | ✅ | ✅ | `daf016c`, `349768f`. 630 pass. |
 | R10 | AR-005 — split `bot/handler.rs` | ✅ | ✅ | ✅ | `44283f1`. 634 pass. 487 → 102 lines. |
 | R12a | AR-008 — OpenAPI coverage for the undocumented API files | ✅ | ✅ | ✅ | `e3f987a`. 635 pass. 87 → 107 paths. |
-| R12b | AR-008 — generated DTOs, registry-driven nav | — | — | — | Not started |
+| R12b | AR-008 — generated DTOs | ✅ | ✅ | ✅ | `f938e30`. Found a live production bug. |
 | R2c | AR-004 — `search.rs` env reads | — | — | — | **Declined**, see below |
 
 ## Findings that correct the review
@@ -518,3 +518,51 @@ with reasons above. Two items the second session deferred rather than dropped, a
 Known issues still open: `modules/ai/handler.rs` is over the 500-line production limit (pre-existing), and
 `test_ai_error_suppressed_from_chat_and_sent_once` flakes under full parallel load because of a process-global
 flag (predicted in AR-011).
+
+### R12b — AR-008 generated DTOs (`f938e30`)
+
+**This item found a live production bug, which is the whole argument for doing it.**
+
+`frontend/src/modules/finance/components/NetWorthStatStrip.tsx` read `data.native_breakdowns`,
+`data.fx_source` and `data.portfolio_cash_minor`. The server returns `currencies`, `fx_rates` and
+`cash_deposits_minor`, and has since the widget shipped in `dff0c4c`. Line 35 did
+`data.native_breakdowns.length`, so the component threw on render for anyone whose Finance or Portfolio page
+loaded it.
+
+Verified against the backend rather than taken on report: `net_worth.rs::NetWorthResponse` has no serde
+renames, and the generated client agrees. The three fields simply do not exist.
+
+**Why no test caught it.** `frontend/e2e/fake-api.ts` mocked the shape the *frontend type* claimed, not the one
+the server returns. The tests were asserting against a response the API has never produced. Fixing the
+component made the mock's fiction visible as a crash across `finance`, `portfolio` and `navigation` specs. The
+mock now mirrors `net_worth.rs` and carries a comment saying so.
+
+That is worth generalising: a hand-written client type plus a mock written to match it will agree with each
+other forever and with the server never.
+
+**Other mismatches found:** `LifeHorizonDay` claimed `index`, `year` and `status`, none of which the server
+sends — they are computed client-side, so the wire type and the calendar view model are now separate.
+`LifeProfile.id` and a nested `stats` object the server never returned are gone, with the dead fallback chain
+that read them.
+
+About 65 interfaces became aliases. A dozen stay hand-written with a stated reason: filter unions, form drafts,
+a Nominatim result, view models assembled from several responses.
+
+**Verified:** `npm run build` (runs `tsc`) passes; Playwright 184/185 and 183/185 across two runs with the
+failures moving between passkey specs I never touched — pre-existing load flakiness, confirmed by the failing
+test passing 3/3 in isolation.
+
+### Backend findings from R12b, not fixed here
+
+`TodoPriority`, `RecurrencePattern` and `ReminderStatus` generate enum schemas from Rust variant names, so they
+advertise capitalised values (`"Medium"`) where the wire carries lowercase (`"medium"`). Adopting them would
+have introduced wrong values, so those fields stay `string`. The schemas should be corrected or dropped.
+
+`frontend/src/modules/dashboard/index.tsx` still has local duplicate DTOs, outside this item's file list.
+
+### Sidebar — not done, deliberately
+
+`Sidebar.tsx` carries information the registry cannot express: labels that differ from module names on purpose
+("Tasks" vs "Tasks & Todos"), an icon for `recurring_bills` that contradicts the module's own `iconName`, and
+five modules declaring no icon at all. Driving it from the registry would have changed rendered output or
+required duplicating fields. Skipped rather than half-done.
