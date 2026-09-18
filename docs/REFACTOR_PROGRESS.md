@@ -30,8 +30,10 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R7 | AR-002 — finance service | ✅ | ✅ | ✅ | `72ed406`. Caught a regression in review. |
 | R8 | AR-002 — portfolio service | ✅ | ✅ | ✅ | `922fccd`. 620 pass. |
 | R9 | AR-002 — reminder service + AiError | ✅ | ✅ | ✅ | `daf016c`, `349768f`. 630 pass. |
-| R10 | AR-005 — split `bot/handler.rs` | — | — | — | Next up |
-| R12 | AR-008 — OpenAPI coverage, generated DTOs, registry-driven nav | — | — | — | |
+| R10 | AR-005 — split `bot/handler.rs` | ✅ | ✅ | ✅ | `44283f1`. 634 pass. 487 → 102 lines. |
+| R12a | AR-008 — OpenAPI coverage for 5 unannotated files | ✅ | — | — | In progress |
+| R12b | AR-008 — generated DTOs, registry-driven nav | — | — | — | Not started |
+| R2c | AR-004 — `search.rs` env reads | — | — | — | **Declined**, see below |
 
 ## Findings that correct the review
 
@@ -404,3 +406,47 @@ expire. They now derive the date from the run.
   before this series touched it.
 - `modules::ai::handler::tests::test_ai_error_suppressed_from_chat_and_sent_once` flakes under full parallel
   load because of the process-global `AI_ERROR_ALERTED` flag. Passes 5/5 in isolation. Predicted in AR-011.
+
+### R10 — AR-005 splitting the bot message handler (`44283f1`)
+
+`register_handlers` was 487 production lines and its message closure ran for most of them, with the image and
+audio branches structurally identical — mention gate, typing guard, stage indicator, resolve owner, download,
+`catch_unwind` around the module call, render, link reaction targets — differing only in the module called, two
+stage labels and three error messages.
+
+| file | production lines |
+| --- | --- |
+| `bot/handler.rs` | 487 → **102**, pure wiring routing on `MessageType` |
+| `bot/attachments.rs` | 306, the media pipeline written once |
+| `bot/command_flow.rs` | 184, the text path |
+| `bot/reply.rs` | 25, the strip-build-send-log sequence |
+
+The "any text in a direct message is an AI prompt" rule moved into `CommandParser`, which owns every other rule
+about what counts as a command and previously could not be asked this one. Four new tests cover it.
+
+**Verified:** 0 warnings; 634 tests; `openapi.json` unchanged; `rustfmt` clean.
+
+**String preservation, the check that mattered:** this file had no tests and is the bot's only Matrix entry
+point, so I extracted every string literal of six or more characters from the original and diffed against the
+four new files. Of 34, exactly one does not survive — a log line the shared send helper now covers with its own,
+reporting the same failure with the room id. No user-facing message was lost.
+
+The `!link`-before-resolve ordering and the comment explaining why it is load-bearing travelled with the code.
+Confirmed by reading the new `command_flow.rs` directly.
+
+**Interruption.** The implementation run hit a usage limit partway through, but unlike R6 it left the tree
+compiling and complete; only the verification steps were missing. Ran those myself rather than dispatching again.
+
+### R2c — `search.rs` environment reads: declined, with reasons
+
+The last three entries on the environment-read allowlist are `search.rs` plus two files that only read inside
+`#[ignore]`d live tests. Closing `search.rs` means threading an `AiEnvConfig` through
+`ToolRegistry::execute_tool` → `executor::execute` → `execute_web_search`.
+
+Measured the cost before starting: **35 call sites**, and the chain reaches MCP stdio mode, which deliberately
+builds no `Config`. The benefit is moving six environment variables that feed one feature.
+
+Declined as disproportionate. The project's own rules say to choose the simplest implementation that meets the
+requirement and avoid indirection that does not pay for itself. The gap is already named in the allowlist with
+its reason, and the guard still prevents any *new* environment read appearing anywhere. Worth revisiting only if
+the tool executor is restructured for another reason, at which point the parameter comes almost free.
