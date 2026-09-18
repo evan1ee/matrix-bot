@@ -50,12 +50,14 @@ pub const STATUS_ACTIVE: &str = "active";
 /// until someone claims it by registering a credential.
 pub const STATUS_UNCLAIMED: &str = "unclaimed";
 
-/// Every table that carries an `owner_id`, in the order a merge rewrites them.
+/// Every table that carries an `owner_id` and whose rows follow a merge.
 ///
-/// Kept here rather than inline at the call site because two separate
-/// operations need the exact same list — the Phase 1 backfill and the Phase 3
-/// account merge — and a table missing from one of them is a silent data leak
-/// rather than a compile error.
+/// Two separate operations need this exact list — the Phase 1 backfill and the
+/// Phase 3 account merge — and a table missing from it is a silent data leak
+/// rather than a compile error. It drifted three tables behind the schema
+/// before `test_owned_tables_and_exceptions_match_the_schema` existed; that
+/// test now derives the truth from `PRAGMA table_info` and fails on any new
+/// `owner_id` table that nobody classified.
 pub const OWNED_TABLES: &[&str] = &[
     "todos",
     "reminders",
@@ -66,6 +68,7 @@ pub const OWNED_TABLES: &[&str] = &[
     "portfolio_daily_snapshots",
     "portfolio_price_alerts",
     "finance_categories",
+    "finance_shares",
     "user_settings",
     "bookmarks",
     "habits",
@@ -77,7 +80,54 @@ pub const OWNED_TABLES: &[&str] = &[
     "ai_user_configs",
     "webhooks",
     "webhook_outbox",
+    "bot_message_targets",
 ];
+
+/// Tables carrying `owner_id` whose rows deliberately do **not** follow a merge.
+///
+/// `portfolio_audit_log` is immutable at the database engine level — the
+/// `prevent_portfolio_audit_update` and `prevent_portfolio_audit_delete`
+/// triggers both `RAISE(ABORT)`, and an `OR IGNORE` conflict clause does not
+/// suppress a trigger's abort. Its `entry_hash` also folds `owner_id` into the
+/// digest, so a moved row would fail `verify_audit_chain` even if the trigger
+/// allowed the write. Moving this ledger therefore means dropping the trigger
+/// and recomputing the whole chain for the surviving owner, which is a decision
+/// about what a tamper-evident ledger means across a merge rather than
+/// something to do incidentally. Tracked separately; listed here so the
+/// omission is explicit and tested rather than silent.
+pub const OWNER_ID_UNMERGED: &[&str] = &["portfolio_audit_log"];
+
+/// Tables keyed by `account_id` whose rows follow the absorbed account.
+pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
+    "matrix_links",
+    "webauthn_credentials",
+    "security_events",
+    "account_rooms",
+];
+
+/// Tables keyed by `account_id` whose rows are destroyed rather than moved.
+///
+/// Every one is a credential or a ceremony in flight. A credential belongs to
+/// the identity that minted it: carrying one across a merge would hand whoever
+/// held the absorbed account a live way in to the survivor. `sessions` is
+/// revoked rather than deleted so the row survives as an audit trail; the rest
+/// are deleted outright.
+pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
+    "sessions",
+    "recovery_codes",
+    "recovery_requests",
+    "mcp_tokens",
+    "passkey_enrollment_tokens",
+    "matrix_link_challenges",
+];
+
+/// Tables carrying `account_id` that a merge deliberately leaves alone.
+///
+/// `web_users` is the dead password table. Nothing authenticates against it —
+/// only `db::backfill` reads it, once, to decide whether a legacy owner had a
+/// credential. Deleting from it would destroy the only record that a legacy
+/// local account ever existed, and gain nothing.
+pub const ACCOUNT_ID_UNTOUCHED: &[&str] = &["web_users"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Account {
@@ -138,6 +188,9 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::schema::run_migrations;
+    use sqlx::{Row, SqlitePool};
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_display_name_is_the_localpart() {
@@ -182,26 +235,98 @@ mod tests {
         }
     }
 
-    /// The merge in Phase 3 and the backfill in Phase 1 must agree on the list
-    /// of tables that carry ownership, or one of them silently misses rows.
-    #[test]
-    fn test_owned_tables_covers_every_ownership_carrying_table() {
-        assert_eq!(OWNED_TABLES.len(), 20);
-        for table in [
-            "todos",
-            "reminders",
-            "transactions",
-            "user_settings",
-            "bookmarks",
-            "habits",
-            "life_day_logs",
-            "footprints",
-            "ai_conversations",
-        ] {
+    /// Every table in the schema that has `column`.
+    async fn tables_with_column(pool: &SqlitePool, column: &str) -> BTreeSet<String> {
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+
+        let mut found = BTreeSet::new();
+        for table in tables {
+            let has_column = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(pool)
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.get::<String, _>("name") == column);
+            if has_column {
+                found.insert(table);
+            }
+        }
+        found
+    }
+
+    fn declared(lists: &[&[&str]]) -> BTreeSet<String> {
+        lists
+            .iter()
+            .flat_map(|list| list.iter())
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    async fn migrated_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    /// The list a merge walks must be derived from the schema, not remembered.
+    ///
+    /// It fell three tables behind before this existed, so a merge silently
+    /// stranded a user's finance share, their audit ledger and their reaction
+    /// targets on an account it then deleted. A new `owner_id` table must now be
+    /// classified as following a merge or explicitly not, or this fails.
+    #[tokio::test]
+    async fn test_owned_tables_and_exceptions_match_the_schema() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "owner_id").await;
+        let classified = declared(&[OWNED_TABLES, OWNER_ID_UNMERGED]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry owner_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
+
+        for table in OWNER_ID_UNMERGED {
             assert!(
-                OWNED_TABLES.contains(&table),
-                "{table} must be re-pointed on merge"
+                !OWNED_TABLES.contains(table),
+                "{table} cannot both follow a merge and be excluded from one"
             );
         }
+    }
+
+    /// Same rule for the other ownership column. An unclassified table here leaves
+    /// a row pointing at an account id that the merge is about to delete.
+    #[tokio::test]
+    async fn test_account_id_tables_are_all_classified() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "account_id").await;
+        let classified = declared(&[
+            ACCOUNT_ID_FOLLOWS,
+            ACCOUNT_ID_DISCARDED,
+            ACCOUNT_ID_UNTOUCHED,
+        ]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry account_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
     }
 }

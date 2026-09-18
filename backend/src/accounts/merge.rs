@@ -11,17 +11,18 @@
 //! the second path has to exist anyway and two paths mean two things to get
 //! wrong.
 //!
-//! No explicit transaction wraps the rewrite. No repository in this project
-//! uses `pool.begin()` — `due_reminder::sync` already does multi-step
-//! coordinated writes without one — so this follows the existing precedent
-//! rather than introducing a new one. The consequence is stated plainly in
-//! [`MergeOutcome`]: an interrupted merge leaves some tables moved and some
-//! not, and re-running it finishes the job, because every statement is
-//! "re-point rows that still say `from`" and is therefore idempotent.
+//! The rewrite runs inside one transaction. It previously did not, on the
+//! grounds that no repository here used `pool.begin()` — which stopped being
+//! true once `modules::portfolio::trade` and `db::rooms` adopted one. A merge
+//! moves rows across twenty-odd tables and then deletes the account they used
+//! to belong to; a half-applied one is exactly what a transaction is for.
+//!
+//! `portfolio_audit_log` is the one `owner_id` table a merge does not touch.
+//! See `accounts::OWNER_ID_UNMERGED` for why.
 
 use sqlx::SqlitePool;
 
-use crate::accounts::OWNED_TABLES;
+use crate::accounts::{ACCOUNT_ID_DISCARDED, ACCOUNT_ID_FOLLOWS, OWNED_TABLES};
 
 /// How many rows each table would contribute to a merge.
 ///
@@ -147,6 +148,23 @@ impl MergeRepository {
             });
         }
 
+        let mut tx = pool.begin().await?;
+        let outcome = Self::merge_within(&mut tx, from, into).await?;
+        tx.commit().await?;
+
+        Ok(outcome)
+    }
+
+    /// The merge itself, against an open transaction.
+    ///
+    /// Separate from [`Self::merge`] so a test can run it and roll back, which
+    /// is the only way to assert that a merge leaves nothing behind when it
+    /// cannot finish.
+    pub(crate) async fn merge_within(
+        conn: &mut sqlx::SqliteConnection,
+        from: &str,
+        into: &str,
+    ) -> Result<MergeOutcome, sqlx::Error> {
         let mut moved = MergePreview::default();
         let mut discarded = 0i64;
 
@@ -162,7 +180,7 @@ impl MergeRepository {
             ))
             .bind(into)
             .bind(from)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?
             .rows_affected() as i64;
 
@@ -171,7 +189,7 @@ impl MergeRepository {
             let leftover: i64 =
                 sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
                     .bind(from)
-                    .fetch_one(pool)
+                    .fetch_one(&mut *conn)
                     .await
                     .unwrap_or(0);
 
@@ -180,7 +198,7 @@ impl MergeRepository {
                 // the source account can be deleted without stranding them.
                 sqlx::query(&format!("DELETE FROM {table} WHERE owner_id = ?"))
                     .bind(from)
-                    .execute(pool)
+                    .execute(&mut *conn)
                     .await?;
                 discarded += leftover;
             }
@@ -188,40 +206,60 @@ impl MergeRepository {
 
         // Anything else pointing at the absorbed account follows it, so nothing
         // is left referring to an id that is about to disappear.
-        for (table, column) in [
-            ("matrix_links", "account_id"),
-            ("webauthn_credentials", "account_id"),
-            ("security_events", "account_id"),
-        ] {
+        //
+        // `OR IGNORE` for the same reason as above: `account_rooms` is keyed by
+        // `(account_id, room_id)`, so a room both accounts had cached would
+        // otherwise collide and abort the whole merge.
+        for table in ACCOUNT_ID_FOLLOWS {
             sqlx::query(&format!(
-                "UPDATE {table} SET {column} = ? WHERE {column} = ?"
+                "UPDATE OR IGNORE {table} SET account_id = ? WHERE account_id = ?"
             ))
             .bind(into)
             .bind(from)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
+
+            let leftover: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {table} WHERE account_id = ?"
+            ))
+            .bind(from)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap_or(0);
+
+            if leftover > 0 {
+                sqlx::query(&format!("DELETE FROM {table} WHERE account_id = ?"))
+                    .bind(from)
+                    .execute(&mut *conn)
+                    .await?;
+                discarded += leftover;
+            }
         }
 
-        // Sessions and recovery material do *not* follow. A session belongs to
-        // the credential that opened it, and carrying one across a merge would
+        // Credentials and ceremonies do *not* follow. A session belongs to the
+        // credential that opened it, and carrying one across a merge would
         // silently hand the absorbed account's browser a live session on the
-        // surviving account.
-        sqlx::query("UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = ?")
-            .bind(from)
-            .execute(pool)
-            .await?;
-        sqlx::query("DELETE FROM recovery_codes WHERE account_id = ?")
-            .bind(from)
-            .execute(pool)
-            .await?;
-        sqlx::query("DELETE FROM recovery_requests WHERE account_id = ?")
-            .bind(from)
-            .execute(pool)
-            .await?;
+        // surviving account. The same argument covers MCP tokens, enrolment
+        // tokens and link challenges.
+        for table in ACCOUNT_ID_DISCARDED {
+            let statement = if *table == "sessions" {
+                // Revoked rather than deleted: the row is the record that the
+                // session existed, which the security log refers back to.
+                "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = ?"
+                    .to_string()
+            } else {
+                format!("DELETE FROM {table} WHERE account_id = ?")
+            };
+
+            sqlx::query(&statement)
+                .bind(from)
+                .execute(&mut *conn)
+                .await?;
+        }
 
         sqlx::query("DELETE FROM accounts WHERE id = ?")
             .bind(from)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
         Ok(MergeOutcome { moved, discarded })
@@ -538,9 +576,24 @@ mod tests {
             .bind(&from).execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)")
             .bind(&from).execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok1', 1)",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
+             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 20, "one row per owned table");
+        assert_eq!(preview.total(), 22, "one row per owned table");
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
@@ -564,5 +617,234 @@ mod tests {
                     .unwrap();
             assert_eq!(arrived, 1, "{table} did not receive its row");
         }
+    }
+
+    /// These two tables were missing from `OWNED_TABLES` until this change —
+    /// without it, a finance share link and a reaction target were stranded on
+    /// a deleted account.
+    #[tokio::test]
+    async fn test_a_merge_moves_the_finance_share_and_reaction_targets() {
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok123', 1)",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
+             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let share_owner: String =
+            sqlx::query_scalar("SELECT owner_id FROM finance_shares WHERE token = 'tok123'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(share_owner, into);
+
+        let target_owner: String =
+            sqlx::query_scalar("SELECT owner_id FROM bot_message_targets WHERE event_id = 'ev1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(target_owner, into);
+
+        for table in ["finance_shares", "bot_message_targets"] {
+            let stranded: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
+                    .bind(&from)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(stranded, 0, "{table} still references the absorbed account");
+        }
+    }
+
+    /// The audit ledger is immutable by trigger, so a merge must step around it
+    /// rather than fail. This pins the deliberate exception documented on
+    /// `accounts::OWNER_ID_UNMERGED`.
+    #[tokio::test]
+    async fn test_a_merge_does_not_touch_the_audit_ledger() {
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO portfolio_audit_log (owner_id, action, amount_minor, currency) \
+             VALUES (?, 'buy', 100, 'USD')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into)
+            .await
+            .expect("a merge must succeed even though the audit ledger cannot move");
+
+        let owner: String =
+            sqlx::query_scalar("SELECT owner_id FROM portfolio_audit_log WHERE action = 'buy'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, from, "the ledger stays with the account it recorded");
+    }
+
+    /// `account_rooms` is keyed by `(account_id, room_id)`, so a room cached by
+    /// both accounts must not abort the merge — the destination's copy wins and
+    /// the duplicate is dropped.
+    #[tokio::test]
+    async fn test_cached_rooms_follow_a_merge_and_duplicates_are_dropped() {
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')",
+        )
+        .bind(&into)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!only-from:x', 'Only from')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let shared_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_rooms WHERE account_id = ? AND room_id = '!shared:x'",
+        )
+        .bind(&into)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(shared_count, 1, "the shared room must appear exactly once");
+
+        let moved_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_rooms WHERE account_id = ? AND room_id = '!only-from:x'",
+        )
+        .bind(&into)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(moved_count, 1, "the source-only room must follow");
+
+        let leftover: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM account_rooms WHERE account_id = ?")
+                .bind(&from)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            leftover, 0,
+            "no row may still reference the absorbed account"
+        );
+    }
+
+    /// A credential must not survive a merge: it would hand whoever held the
+    /// absorbed account a live way into the surviving one.
+    #[tokio::test]
+    async fn test_an_mcp_token_does_not_survive_a_merge() {
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix) \
+             VALUES ('tok1', ?, 'my token', 'hash123', 'mcp_')",
+        )
+        .bind(&from)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MergeRepository::merge(&pool, &from, &into).await.unwrap();
+
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?")
+                .bind(&from)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(remaining, 0, "a credential must not follow a merge");
+
+        let survivor_has_it: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?")
+                .bind(&into)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            survivor_has_it, 0,
+            "it must not appear on the survivor either"
+        );
+    }
+
+    /// This is the test the transaction exists for: if a merge cannot finish,
+    /// nothing it touched should be visible afterward.
+    #[tokio::test]
+    async fn test_an_incomplete_merge_leaves_nothing_behind() {
+        let pool = db().await;
+        let from = AccountRepository::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = AccountRepository::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        add_todo(&pool, &from, "should not move").await;
+
+        let mut tx = pool.begin().await.unwrap();
+        MergeRepository::merge_within(&mut tx, &from, &into)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+
+        assert_eq!(owner_of(&pool, "should not move").await, from);
+        assert!(
+            AccountRepository::find(&pool, &from)
+                .await
+                .unwrap()
+                .is_some(),
+            "the source account must still exist after a rolled-back merge"
+        );
     }
 }
