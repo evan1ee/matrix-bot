@@ -22,10 +22,10 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R1b | AR-001 — `portfolio_audit_log` merge semantics | ✅ | ✅ | ✅ | `2f35a29`. 592 pass. Move + re-chain, per your decision. |
 | R3 | AR-003 — stop modules depending on the HTTP layer | ✅ | ✅ | ✅ | `4893c04`. 593 pass. Guard proven to catch a compiling violation. |
 | R2 | AR-004 — `Config` threaded into the bot side | ✅ | ✅ | ✅ | `5fdfdfa`. 594 pass. AI env reads deferred to R2b. |
-| R2b | AR-004 — AI client env reads into Config | — | — | — | Split out of R2; allowlisted in the guard test |
+| R2b | AR-004 — AI client env reads into Config | — | — | — | Next up |
 | R4 | AR-006 — `BotHandles`, `ApiState::from_config` | ✅ | ✅ | ✅ | `f7e682b`. 596 pass. Gate is compiler-enforced. |
-| R5 | AR-007 — collapse the portfolio facade | — | — | — | Next up |
-| R11 | AR-009 — credential resolution extracted | — | — | — | |
+| R5 | AR-007 — collapse the portfolio facade | ✅ | ✅ | ✅ | `3b49628`. 596 pass, count unchanged. −293 lines. |
+| R11 | AR-009 — credential resolution extracted | ✅ | ✅ | ✅ | `6633de7`. 597 pass. Found a real step-up hole. |
 | R6–R9 | AR-002 — per-module service layer | — | — | — | |
 | R10 | AR-005 — split `bot/handler.rs` | — | — | — | |
 | R12 | AR-008 — OpenAPI coverage, generated DTOs, registry-driven nav | — | — | — | |
@@ -247,3 +247,38 @@ assert the object the risk lives in, not a sibling field that happens to correla
 **One deliberate behaviour change:** the API half hard-coded `language: "auto"` when building `VoiceConfig`, so
 `VOICE_LANGUAGE` was honoured for a Matrix voice note and silently ignored for web dictation. Both paths now
 read the setting.
+
+### R5 — AR-007 portfolio facade (`3b49628`)
+
+Deleted 15 forwarding methods from `PortfolioRepository`; `repository.rs` lost 293 lines. Convenience forms
+(`trade::buy`, `trade::sell`, `trade::record_holding`) now sit beside the implementations they default.
+`cash_repo` already had its own `deposit_cash`/`withdraw_cash`, so the facade's were exact duplicates.
+
+**Verified:** 0 warnings; **596 tests, exactly the count before** — the check that matters, since this adds and
+removes no behaviour; every remaining `PortfolioRepository::` use is one of the eight kept read/edit methods;
+`openapi.json` unchanged.
+
+The implementer caught something the plan missed: `summary()`, a *kept* method, called `Self::list_cash`
+internally. Grepping for `PortfolioRepository::` would not have found it, and the crate would not have compiled.
+
+`CLAUDE.md` named two deleted methods and still claimed no repository uses `pool.begin()`. Corrected.
+
+### R11 — AR-009 credential resolution (`6633de7`)
+
+**Found a real security hole while implementing, not just structure.** The extractor set an MCP token's
+`last_verified_at` to the token's creation time, and `VerifiedUser` admits anything verified within five
+minutes. So a freshly minted MCP personal access token opened every step-up-gated route for its first five
+minutes. MCP is a machine credential with nobody to confirm anything with a passkey. It now reports the
+earliest representable instant.
+
+`accounts/principal.rs` owns what a credential is and how it resolves; the extractor is down from ~110 lines to
+about 40 and keeps only the transport decision. `Credential::is_ambient()` replaces an `is_bearer` flag and
+states the actual rule: only the cookie is attached by the browser unasked, so only the cookie needs a CSRF
+defence.
+
+**Verified:** 0 warnings; 597 tests; `openapi.json` unchanged; CSRF messages and `is_mutating` unchanged; all
+pre-existing extractor tests pass untouched. **Mutation:** restoring `last_verified_at: mcp_token.created_at`
+fails the new test.
+
+Three distinct 401 messages collapsed into one deliberately; no test asserted on them. `SseTicketResponse`
+deleted. `CLAUDE.md`'s claim that there is "no bearer token" corrected — native and MCP clients both use one.
