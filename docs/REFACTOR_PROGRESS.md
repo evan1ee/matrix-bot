@@ -20,8 +20,8 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | --- | --- | --- | --- | --- | --- |
 | R1a | AR-001 — ownership-table drift, classification, transactional merge | ✅ | ✅ | ✅ | `ae2ed29`. 587 pass. Guards mutation-tested. |
 | R1b | AR-001 — `portfolio_audit_log` merge semantics | ✅ | ✅ | ✅ | `2f35a29`. 592 pass. Move + re-chain, per your decision. |
-| R3 | AR-003 — move misplaced `api/` functions into `modules/`+`db/` | — | — | — | Next up |
-| R2 | AR-004 — `Config` threaded into the bot side | — | — | — | |
+| R3 | AR-003 — stop modules depending on the HTTP layer | ✅ | ✅ | ✅ | `4893c04`. 593 pass. Guard proven to catch a compiling violation. |
+| R2 | AR-004 — `Config` threaded into the bot side | — | — | — | Next up |
 | R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | |
 | R5 | AR-007 — collapse the portfolio facade | — | — | — | |
 | R11 | AR-009 — credential resolution extracted | — | — | — | |
@@ -136,3 +136,39 @@ confirm the mutation landed before trusting a red or green result.
 but `PortfolioAuditEntry.action` is a hand-written union there, so `case 'merge'` would not typecheck without
 adding the variant. That file being hand-maintained rather than generated from `openapi.json` is exactly the
 drift AR-008 describes, and is a good concrete example to cite when R12 comes round.
+
+### R3 — AR-003 layer direction (`4893c04`)
+
+**Changed:** day-activity collection moved to `modules/life/activity.rs` + `activity_collectors.rs`; room
+discovery and authorisation moved to a new `modules/rooms/`; `api/life_activity.rs` and `api/rooms.rs` reduced
+to their handlers; callers in `api/webhooks.rs` (3), `modules/journal/handler.rs` and
+`modules/webhook/scheduler.rs` updated; guard test added to `modules/mod.rs`.
+
+**Plan corrected during implementation.** AR-003 said to move the room functions into `db/rooms.rs`, quoting
+`AGENTS.md`. Checked first: `backend/src/db/` has **zero** `matrix_sdk` imports, and both functions need a live
+`matrix_sdk::Client`. Following the review literally would have made the persistence layer depend on the Matrix
+SDK — a worse inversion than the one being fixed. They went to a new `modules/rooms/` instead. `AGENTS.md` §4
+is right about the *cached* room data, which is already in `db/rooms.rs` and stayed there.
+
+**Verified by Opus 5:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings |
+| `cargo test --workspace` | 593 passed, 0 failed, 7 ignored (was 592, +1 guard test) |
+| `grep -rn "crate::api" backend/src/modules/` | no matches |
+| Moved code byte-identical | ✅ for all five functions except two lines where `crate::accounts::AccountRepository` shortened to `AccountRepository` under the new import |
+| `cargo run --bin generate-openapi` | no diff |
+| `rustfmt --check` on every touched leaf file | clean |
+| History | `git mv` used, so the collectors file keeps its history |
+
+**Guard mutation-tested twice.** Reintroducing the old call path fails to *compile*, so it never reaches the
+test — that proved nothing. Re-run with a violation that does compile (`use crate::api::auth::ApiState;` added
+to `modules/todo/mod.rs`): the guard failed and named the file, and passed again once reverted.
+
+**Bug found in the plan, fixed by the implementer:** the guard test as I specified it searched for a string
+literal that appears in its own source, so it flagged itself and could never pass. It now builds the needle at
+runtime with a comment explaining why. Worth remembering for any future source-scanning test.
+
+**Deferred, noted:** `db/rooms.rs` still has four free functions that only delegate to the identical
+`RoomRepository` methods. Real duplication, unrelated to dependency direction, left for a quick-win pass.
