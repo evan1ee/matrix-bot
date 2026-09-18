@@ -22,11 +22,14 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R1b | AR-001 — `portfolio_audit_log` merge semantics | ✅ | ✅ | ✅ | `2f35a29`. 592 pass. Move + re-chain, per your decision. |
 | R3 | AR-003 — stop modules depending on the HTTP layer | ✅ | ✅ | ✅ | `4893c04`. 593 pass. Guard proven to catch a compiling violation. |
 | R2 | AR-004 — `Config` threaded into the bot side | ✅ | ✅ | ✅ | `5fdfdfa`. 594 pass. AI env reads deferred to R2b. |
-| R2b | AR-004 — AI client env reads into Config | — | — | — | Next up |
+| R2b | AR-004 — AI client env reads into Config | ✅ | ✅ | ✅ | `ccafcce`. 597 pass. `search.rs` deferred to R2c. |
 | R4 | AR-006 — `BotHandles`, `ApiState::from_config` | ✅ | ✅ | ✅ | `f7e682b`. 596 pass. Gate is compiler-enforced. |
 | R5 | AR-007 — collapse the portfolio facade | ✅ | ✅ | ✅ | `3b49628`. 596 pass, count unchanged. −293 lines. |
 | R11 | AR-009 — credential resolution extracted | ✅ | ✅ | ✅ | `6633de7`. 597 pass. Found a real step-up hole. |
-| R6–R9 | AR-002 — per-module service layer | — | — | — | |
+| R6 | AR-002 — todo service | ✅ | ✅ | ✅ | `7ffb79d`. 605 pass. Fixed 4 user-visible bugs. |
+| R7 | AR-002 — finance service | — | — | — | Next up |
+| R8 | AR-002 — portfolio service | — | — | — | |
+| R9 | AR-002 — reminder/bills services, AiError | — | — | — | |
 | R10 | AR-005 — split `bot/handler.rs` | — | — | — | |
 | R12 | AR-008 — OpenAPI coverage, generated DTOs, registry-driven nav | — | — | — | |
 
@@ -282,3 +285,58 @@ fails the new test.
 
 Three distinct 401 messages collapsed into one deliberately; no test asserted on them. `SseTicketResponse`
 deleted. `CLAUDE.md`'s claim that there is "no bearer token" corrected — native and MCP clients both use one.
+
+### R2b — AR-004 AI provider settings (`ccafcce`)
+
+`AiEnvConfig` resolves twelve environment variables once at boot; the alias chains moved verbatim, including
+the order of the five endpoint aliases and seven proxy ones. `AiClient::new` takes its proxy and no longer
+calls `dotenvy::dotenv()` — a library constructor reloading the `.env` file was a side effect with no business
+there. `validate_ai_base_url` takes its `allow_private` flag, so what the SSRF guard permits is visible in
+configuration.
+
+The default endpoint deliberately stays at the point of use: the default *model* depends on whether the
+resolved base contains `x.ai`, so folding the default in early would change which model an operator with no
+`AI_MODEL` set gets.
+
+**Verified:** 0 warnings; 597 tests; `openapi.json` unchanged; confirmed ambient `AI_ENDPOINT` and `AI_MODEL`
+no longer influence resolution by running the tests with both set.
+
+A test improved as a side effect: `test_resolved_config_defaults` guarded its assertions behind a check that
+those variables were unset, so it silently skipped itself on any machine that had them.
+
+`search.rs` keeps its reads and its allowlist entry. It sits behind the AI tool executor, whose signature chain
+reaches MCP stdio mode where no `Config` is built. Tracked as **R2c**.
+
+### R6 — AR-002 todo service (`7ffb79d`)
+
+The big one. Four transports wrote todos and each carried its own partial copy of the rules. `modules::todo::service`
+now owns validate → write → reconcile → broadcast; the transports parse and render.
+
+**Four user-visible bugs fixed, not just structure:**
+
+| Bug | Was |
+| --- | --- |
+| `!todo add` never updated an open browser | `TodoModule::handle_command` named the broadcaster `_broadcaster` and dropped it |
+| A ✅ reaction left the lead-time reminder pending, firing later for a finished task | the reaction path never called the reconciler |
+| AI-created todos had no length limit and never scheduled their reminder | the AI tool called the repository directly |
+| Clearing completed tasks left deleted rows on screen | that path emitted no events |
+
+The room cap now applies to every transport. Deliberate behaviour change — a limit that held on one transport
+and not the others was the bug.
+
+**Verified:** 0 warnings; 605 tests; `openapi.json` unchanged; every file under the 500-line production limit
+(`api/todos.rs` fell from 414 to 278); every reaction reply string and ack emoji byte-identical, compared as
+literals; **the ~30 REST handler tests pass with no assertion edited** — only three imports moved into the test
+module, which is the strongest evidence the service preserved the behaviour it replaced.
+
+**A test gap I found and closed.** `test_a_matrix_add_announces_itself` calls the handler directly with its own
+broadcaster, so it passes whether or not the module threads one through — and that was the actual bug. Added
+`test_the_module_passes_the_broadcaster_to_the_command` at the real `BotModule` dispatch boundary and confirmed
+it fails when the regression is reintroduced. Same lesson as R4: assert at the boundary the bug lives on.
+
+**Mutations:** disabling the length check fails both the AI-tool test and the parity table. Reverting the
+reaction arm fails the reminder test.
+
+**Interruption.** The first implementation run hit a usage limit partway through and left the tree not
+compiling: the AI tool path was half-converted and the reaction path untouched. Assessed the tree, wrote a
+continuation brief naming exactly what was done and what remained, and finished with a second run.
