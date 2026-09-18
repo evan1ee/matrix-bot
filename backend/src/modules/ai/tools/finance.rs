@@ -2,11 +2,12 @@ use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::models::Direction;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
+use crate::modules::finance::service::{self, NewTransaction};
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -187,22 +188,6 @@ pub async fn execute_tool(
                 let exp = exponent_for(&currency);
                 let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let category_id = if let Some(existing) =
-                    FinanceRepository::find_category_by_name(pool, owner_id, category_name)
-                        .await
-                        .map_err(|e| e.to_string())?
-                {
-                    Some(existing.id)
-                } else if let Some(new_cat) =
-                    FinanceRepository::create_category(pool, owner_id, category_name)
-                        .await
-                        .map_err(|e| e.to_string())?
-                {
-                    Some(new_cat.id)
-                } else {
-                    None
-                };
-
                 let occurred_at = if let Some(date_str) = args
                     .get("occurred_at")
                     .or_else(|| args.get("date"))
@@ -234,27 +219,31 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let tx = FinanceRepository::create_transaction(
+                let tx = service::create_transaction(
                     pool,
-                    &target_room,
+                    broadcaster,
                     owner_id,
-                    "AI Assistant",
-                    direction.as_str(),
-                    amount_minor,
-                    &currency,
-                    exp as i64,
-                    category_id,
-                    Some(note),
-                    None,
-                    None,
-                    occurred_at,
+                    NewTransaction {
+                        direction: direction.as_str(),
+                        amount_minor,
+                        currency: &currency,
+                        currency_exponent: exp as i64,
+                        category: Some(category_name),
+                        note: Some(note),
+                        room_id: &target_room,
+                        sender_name: "AI Assistant",
+                        occurred_at,
+                        source: None,
+                        // The AI tool is filling in a category the user
+                        // described in prose rather than one they picked from
+                        // a list, so an unknown name is created rather than
+                        // refused — this transport always has, unlike Matrix.
+                        create_missing_category: true,
+                    },
                 )
                 .await
                 .map_err(|e| e.to_string())?;
 
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::TransactionCreated(tx.clone()));
-                }
                 serde_json::to_string(&tx).map_err(|e| e.to_string())
             }
             .await,
@@ -266,27 +255,11 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let tx = FinanceRepository::find_owned(pool, id, owner_id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Transaction #{} not found or not owned by user", id))?;
-
-                let deleted = FinanceRepository::delete(pool, tx.id)
+                let tx = service::delete_transaction(pool, broadcaster, owner_id, id)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                if deleted {
-                    if let Some(b) = broadcaster {
-                        b.send(SystemEvent::TransactionDeleted {
-                            id: tx.id,
-                            room_id: tx.room_id.clone(),
-                            owner_id: owner_id.to_string(),
-                        });
-                    }
-                    Ok(json!({ "deleted": true, "id": tx.id }).to_string())
-                } else {
-                    Err(format!("Failed to delete transaction #{}", id))
-                }
+                Ok(json!({ "deleted": true, "id": tx.id }).to_string())
             }
             .await,
         ),
@@ -419,4 +392,40 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    /// The bug this refactor exists to fix: the AI tool skipped validation
+    /// entirely, so a note over the limit reached the database while every
+    /// other transport rejected it.
+    #[tokio::test]
+    async fn test_the_ai_tool_enforces_the_note_limit() {
+        let pool = setup().await;
+        let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
+
+        let result = execute_tool(
+            &pool,
+            None,
+            "@alice:a",
+            "!room:1",
+            "record_finance_entry",
+            &json!({
+                "amount": 10.0,
+                "note": over_limit_note,
+            }),
+        )
+        .await
+        .expect("record_finance_entry must be handled");
+
+        assert!(result.is_err(), "a note over the limit must be rejected");
+    }
 }

@@ -274,14 +274,19 @@ pub async fn pay_bill(
     Path(id): Path<i64>,
 ) -> Result<Json<RecurringBill>, ApiError> {
     let owner_id = user.owner_id();
-    let (bill, tx) = RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                ApiError::not_found("Recurring bill not found or access denied")
-            }
-            err => ApiError::internal(err.to_string()),
-        })?;
+    // The finance service broadcasts `TransactionCreated` itself, so paying a
+    // bill announces the resulting transaction the same way any other write
+    // through the service does — this call site only announces the parts
+    // specific to the bill.
+    let (bill, _tx) =
+        RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id, Some(&state.broadcaster))
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    ApiError::not_found("Recurring bill not found or access denied")
+                }
+                err => ApiError::internal(err.to_string()),
+            })?;
 
     // Paying advanced `next_due_at`, so re-arm at the next period — or tear
     // down if that was the final installment.
@@ -297,7 +302,6 @@ pub async fn pay_bill(
     state
         .broadcaster
         .send(SystemEvent::RecurringBillUpdated(bill.clone()));
-    state.broadcaster.send(SystemEvent::TransactionCreated(tx));
 
     Ok(Json(bill))
 }

@@ -153,8 +153,8 @@ async fn handle_pay(
         Err(_) => return Some("Invalid bill ID.".to_string()),
     };
 
-    match RecurringBillRepository::mark_paid(&db.pool, id, &ctx.owner_id).await {
-        Ok((bill, tx)) => {
+    match RecurringBillRepository::mark_paid(&db.pool, id, &ctx.owner_id, broadcaster).await {
+        Ok((bill, _tx)) => {
             // Paying advanced `next_due_at`, so re-arm at the next period.
             let _ = due_reminder::sync(&db.pool, broadcaster, &bill).await;
             if let Some(b) = broadcaster {
@@ -164,7 +164,6 @@ async fn handle_pay(
                     next_due_at: bill.next_due_at.clone(),
                 });
                 b.send(SystemEvent::RecurringBillUpdated(bill.clone()));
-                b.send(SystemEvent::TransactionCreated(tx));
             }
             Some(format!(
                 "Marked bill <b>#{}</b> ({}) as paid. Next due: <b>{}</b>",

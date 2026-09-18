@@ -2,14 +2,18 @@ use chrono::{Datelike, TimeZone, Utc};
 use sqlx::SqlitePool;
 use tracing::error;
 
+use crate::events::EventBroadcaster;
 use crate::modules::finance::models::{Direction, Transaction};
 use crate::modules::finance::money::{
     exponent_for, format_amount, looks_like_currency, normalise_currency, parse_amount,
 };
 use crate::modules::finance::repository::FinanceRepository;
+use crate::modules::finance::service::{self, FinanceError};
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
-const MAX_NOTE_LEN: usize = 500;
+
+// `MAX_NOTE_LEN` and `MAX_CATEGORY_LEN` live in `service` now — this module
+// owns the reply wording, not the limits.
 const PAGE_SIZE: i64 = 25;
 
 /// The parsed pieces of an `add` command.
@@ -23,6 +27,7 @@ struct ParsedEntry {
 
 pub async fn handle_finance_command(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -43,7 +48,7 @@ pub async fn handle_finance_command(
     };
 
     if keyword == "category" {
-        return handle_category(pool, owner_id, rest).await;
+        return handle_category(pool, broadcaster, owner_id, rest).await;
     }
 
     let rest_lower = rest.to_lowercase();
@@ -70,7 +75,7 @@ pub async fn handle_finance_command(
         || rest_lower.starts_with("rm")
     {
         let id_str = rest.split_whitespace().nth(1).unwrap_or("");
-        return handle_delete(pool, owner_id, id_str).await;
+        return handle_delete(pool, broadcaster, owner_id, id_str).await;
     }
     if rest_lower.starts_with("add") {
         let args = rest[3..].trim();
@@ -81,6 +86,7 @@ pub async fn handle_finance_command(
             .currency;
         return handle_add(
             pool,
+            broadcaster,
             room_id,
             owner_id,
             sender_name,
@@ -137,13 +143,9 @@ fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String
     let exponent = exponent_for(&currency);
     let amount_minor = parse_amount(amount_raw, exponent).map_err(|e| e.to_string())?;
 
+    // Note length is a business rule, not a parsing concern — `service`
+    // enforces it now, on every transport alike.
     let note = note_parts.join(" ");
-    if note.len() > MAX_NOTE_LEN {
-        return Err(format!(
-            "Note is too long (max {} characters)",
-            MAX_NOTE_LEN
-        ));
-    }
 
     Ok(ParsedEntry {
         amount_minor,
@@ -156,6 +158,7 @@ fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String
 
 async fn handle_add(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -173,46 +176,31 @@ async fn handle_add(
         }
     };
 
-    // A named category must already exist. Creating one implicitly would let a
-    // typo silently fragment a category into two.
-    let category_id = match &entry.category {
-        Some(name) => match FinanceRepository::find_category_by_name(pool, owner_id, name).await {
-            Ok(Some(found)) => Some(found.id),
-            Ok(None) => {
-                return Some(format!(
-                    "⚠️ No category named <b>{}</b>. Create it with <code>!category add {}</code>.",
-                    html_escape(name),
-                    html_escape(name)
-                ))
-            }
-            Err(err) => {
-                error!("Failed looking up finance category: {:?}", err);
-                return Some("❌ Database error looking up the category.".to_string());
-            }
-        },
-        None => None,
-    };
-
     let note = if entry.note.is_empty() {
         None
     } else {
         Some(entry.note.as_str())
     };
 
-    match FinanceRepository::create_transaction(
+    match service::create_transaction(
         pool,
-        room_id,
+        broadcaster,
         owner_id,
-        sender_name,
-        direction.as_str(),
-        entry.amount_minor,
-        &entry.currency,
-        entry.exponent as i64,
-        category_id,
-        note,
-        None,
-        None,
-        Utc::now(),
+        service::NewTransaction {
+            direction: direction.as_str(),
+            amount_minor: entry.amount_minor,
+            currency: &entry.currency,
+            currency_exponent: entry.exponent as i64,
+            category: entry.category.as_deref(),
+            note,
+            room_id,
+            sender_name,
+            occurred_at: Utc::now(),
+            source: None,
+            // A named category must already exist. Creating one implicitly
+            // would let a typo silently fragment a category into two.
+            create_missing_category: false,
+        },
     )
     .await
     {
@@ -236,10 +224,23 @@ async fn handle_add(
                 .unwrap_or_default(),
             tx.id
         )),
-        Err(err) => {
+        Err(FinanceError::NoteTooLong { max }) => Some(format!(
+            "⚠️ Note is too long (max {} characters).<br/>Usage: <code>!expense add 15.50 EUR lunch -c food</code>",
+            max
+        )),
+        Err(FinanceError::CategoryNameInvalid { max }) => {
+            Some(format!("⚠️ A category name must be 1–{} characters.", max))
+        }
+        Err(FinanceError::UnknownCategory { name }) => Some(format!(
+            "⚠️ No category named <b>{}</b>. Create it with <code>!category add {}</code>.",
+            html_escape(&name),
+            html_escape(&name)
+        )),
+        Err(FinanceError::Db(err)) => {
             error!("Failed to record transaction: {:?}", err);
             Some("❌ Database error recording the entry.".to_string())
         }
+        Err(_) => Some("❌ Database error recording the entry.".to_string()),
     }
 }
 
@@ -348,29 +349,36 @@ async fn handle_summary(pool: &SqlitePool, owner_id: &str, sender_name: &str) ->
     }
 }
 
-async fn handle_delete(pool: &SqlitePool, owner_id: &str, id_str: &str) -> Option<String> {
+async fn handle_delete(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    id_str: &str,
+) -> Option<String> {
     let Ok(id) = id_str.trim().parse::<i64>() else {
         return Some("⚠️ Usage: <code>!expense delete &lt;id&gt;</code>".to_string());
     };
 
     // Ownership is checked before deleting; the id alone is not authority.
-    match FinanceRepository::find_owned(pool, id, owner_id).await {
-        Ok(Some(_)) => match FinanceRepository::delete(pool, id).await {
-            Ok(_) => Some(format!("🗑️ Removed entry <b>#{}</b>.", id)),
-            Err(err) => {
-                error!("Failed to delete transaction: {:?}", err);
-                Some("❌ Database error removing the entry.".to_string())
-            }
-        },
-        Ok(None) => Some(format!("⚠️ Entry <b>#{}</b> not found.", id)),
-        Err(err) => {
-            error!("Failed to look up transaction: {:?}", err);
+    match service::delete_transaction(pool, broadcaster, owner_id, id).await {
+        Ok(_) => Some(format!("🗑️ Removed entry <b>#{}</b>.", id)),
+        Err(FinanceError::TransactionNotFound) => {
+            Some(format!("⚠️ Entry <b>#{}</b> not found.", id))
+        }
+        Err(FinanceError::Db(err)) => {
+            error!("Failed to delete transaction: {:?}", err);
             Some("❌ Database error removing the entry.".to_string())
         }
+        Err(_) => Some("❌ Database error removing the entry.".to_string()),
     }
 }
 
-async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Option<String> {
+async fn handle_category(
+    pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
+    owner_id: &str,
+    rest: &str,
+) -> Option<String> {
     let lower = rest.to_lowercase();
 
     if lower.is_empty() || lower.starts_with("list") {
@@ -394,22 +402,23 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
 
     if let Some(name) = lower.strip_prefix("add ") {
         let name = rest[rest.len() - name.len()..].trim();
-        if name.is_empty() || name.len() > 64 {
-            return Some("⚠️ A category name must be 1–64 characters.".to_string());
-        }
-        return match FinanceRepository::create_category(pool, owner_id, name).await {
-            Ok(Some(cat)) => Some(format!(
+        return match service::create_category(pool, broadcaster, owner_id, name).await {
+            Ok(cat) => Some(format!(
                 "🏷️ Added category <b>{}</b>.",
                 html_escape(&cat.name)
             )),
-            Ok(None) => Some(format!(
+            Err(FinanceError::CategoryNameInvalid { max }) => {
+                Some(format!("⚠️ A category name must be 1–{} characters.", max))
+            }
+            Err(FinanceError::CategoryExists) => Some(format!(
                 "⚠️ You already have a category named <b>{}</b>.",
                 html_escape(name)
             )),
-            Err(err) => {
+            Err(FinanceError::Db(err)) => {
                 error!("Failed to create category: {:?}", err);
                 Some("❌ Database error adding the category.".to_string())
             }
+            Err(_) => Some("❌ Database error adding the category.".to_string()),
         };
     }
 
@@ -419,20 +428,24 @@ async fn handle_category(pool: &SqlitePool, owner_id: &str, rest: &str) -> Optio
     {
         let name = rest[rest.len() - name.len()..].trim();
         return match FinanceRepository::find_category_by_name(pool, owner_id, name).await {
-            Ok(Some(cat)) => match FinanceRepository::delete_category(pool, owner_id, cat.id).await
-            {
-                Ok(Some(orphaned)) => Some(format!(
-                    "🏷️ Removed <b>{}</b>. {} entr{} kept and left uncategorised.",
-                    html_escape(&cat.name),
-                    orphaned,
-                    if orphaned == 1 { "y" } else { "ies" }
-                )),
-                Ok(None) => Some("⚠️ Category not found.".to_string()),
-                Err(err) => {
-                    error!("Failed to delete category: {:?}", err);
-                    Some("❌ Database error removing the category.".to_string())
+            Ok(Some(cat)) => {
+                match service::delete_category(pool, broadcaster, owner_id, cat.id).await {
+                    Ok(orphaned) => Some(format!(
+                        "🏷️ Removed <b>{}</b>. {} entr{} kept and left uncategorised.",
+                        html_escape(&cat.name),
+                        orphaned,
+                        if orphaned == 1 { "y" } else { "ies" }
+                    )),
+                    Err(FinanceError::CategoryNotFound) => {
+                        Some("⚠️ Category not found.".to_string())
+                    }
+                    Err(FinanceError::Db(err)) => {
+                        error!("Failed to delete category: {:?}", err);
+                        Some("❌ Database error removing the category.".to_string())
+                    }
+                    Err(_) => Some("❌ Database error removing the category.".to_string()),
                 }
-            },
+            }
             Ok(None) => Some(format!(
                 "⚠️ No category named <b>{}</b>.",
                 html_escape(name)
@@ -527,6 +540,7 @@ mod tests {
         // Add expense via !expense add
         let add_res = handle_finance_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -537,16 +551,82 @@ mod tests {
         assert!(add_res.contains("Logged"));
 
         // Query via !finance
-        let fin_res = handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!finance")
-            .await
-            .unwrap();
+        let fin_res =
+            handle_finance_command(&pool, None, "!room:1", "@alice:1", "alice", "!finance")
+                .await
+                .unwrap();
         assert!(fin_res.contains("lunch"));
 
         // Delete via !expense rm 1
         let del_res =
-            handle_finance_command(&pool, "!room:1", "@alice:1", "alice", "!expense rm 1")
+            handle_finance_command(&pool, None, "!room:1", "@alice:1", "alice", "!expense rm 1")
                 .await
                 .unwrap();
         assert!(del_res.contains("Removed entry"));
+    }
+
+    /// The bug this refactor exists to fix: `!expense add` never reached an
+    /// open browser because the Matrix path never broadcast anything.
+    #[tokio::test]
+    async fn test_a_matrix_add_announces_itself() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let broadcaster = crate::events::EventBroadcaster::default();
+        let mut rx = broadcaster.subscribe();
+
+        let reply = handle_finance_command(
+            &pool,
+            Some(&broadcaster),
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!expense add 12.50 USD lunch",
+        )
+        .await
+        .unwrap();
+        assert!(reply.contains("Logged"));
+
+        let event = rx.try_recv().expect("the add must broadcast an event");
+        assert!(matches!(
+            event,
+            crate::events::SystemEvent::TransactionCreated(_)
+        ));
+    }
+
+    /// The regression this refactor exists to revert: an unknown category
+    /// name typed into `!expense add` must be refused, not silently created —
+    /// a typo would otherwise fragment a category into two. This is a smoke
+    /// test that the Matrix transport renders the refusal in its own format;
+    /// `service::test_create_missing_category_flag_controls_the_side_effect`
+    /// covers the side-effect-free rejection itself.
+    #[tokio::test]
+    async fn test_expense_add_refuses_an_unknown_category() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        let reply = handle_finance_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!expense add 12.50 USD lunch -c Groceries",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            reply.contains("No category named <b>Groceries</b>"),
+            "unexpected reply: {reply}"
+        );
+        assert!(reply.contains("!category add Groceries"));
+        assert_eq!(
+            FinanceRepository::list_categories(&pool, "@alice:1")
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "an unknown category must not be created as a side effect"
+        );
     }
 }

@@ -7,7 +7,6 @@ use utoipa::ToSchema;
 use crate::api::auth::{ApiState, AuthUser};
 use crate::api::portfolio::{cash_event, format_for_error};
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::models::{CashBalance, WithdrawOutcome};
@@ -83,8 +82,11 @@ pub async fn deposit_cash(
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(cash_event(&owner_id, &cash));
-    if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
+    // The service broadcasts `TransactionCreated` itself; this handler only
+    // needs the `PortfolioCashUpdated` event above.
+    crate::modules::portfolio::cash::record_portfolio_cash_transaction(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
         "deposit",
         amount_minor,
@@ -93,10 +95,7 @@ pub async fn deposit_cash(
         cash.id,
         payload.executed_at,
     )
-    .await
-    {
-        state.broadcaster.send(SystemEvent::TransactionCreated(tx));
-    }
+    .await;
     Ok(Json(cash))
 }
 
@@ -131,8 +130,11 @@ pub async fn withdraw_cash(
     {
         WithdrawOutcome::Ok(cash) => {
             state.broadcaster.send(cash_event(&owner_id, &cash));
-            if let Some(tx) = crate::modules::portfolio::cash::record_portfolio_cash_transaction(
+            // The service broadcasts `TransactionCreated` itself; this
+            // handler only needs the `PortfolioCashUpdated` event above.
+            crate::modules::portfolio::cash::record_portfolio_cash_transaction(
                 &state.db.pool,
+                Some(&state.broadcaster),
                 &owner_id,
                 "withdraw",
                 amount_minor,
@@ -141,10 +143,7 @@ pub async fn withdraw_cash(
                 cash.id,
                 payload.executed_at,
             )
-            .await
-            {
-                state.broadcaster.send(SystemEvent::TransactionCreated(tx));
-            }
+            .await;
             Ok(Json(cash))
         }
         WithdrawOutcome::InsufficientFunds { available_minor } => {
