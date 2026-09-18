@@ -109,6 +109,13 @@ pub struct Config {
     pub voice_model_dir: std::path::PathBuf,
     /// Default speech recognition language (e.g. "auto", "zh", "en", "ja", "ko", "yue").
     pub voice_language: String,
+    /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
+    ///
+    /// Forwarded headers are believed only when this is on *and* the connecting
+    /// peer is itself a private/loopback address (a reverse proxy on the same
+    /// host or LAN) — so it defaults off and is safe to leave off behind a
+    /// setup that does not put a trusted proxy in front of the bot.
+    pub trust_forwarded_for: bool,
 }
 
 impl Config {
@@ -198,6 +205,10 @@ impl Config {
 
         let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
 
+        let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
         Ok(Self {
             homeserver,
             username,
@@ -220,6 +231,7 @@ impl Config {
             voice_enabled,
             voice_model_dir,
             voice_language,
+            trust_forwarded_for,
         })
     }
 
@@ -296,6 +308,7 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            trust_forwarded_for: false,
         };
         assert!(valid_cfg.validate().is_ok());
 
@@ -333,6 +346,7 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            trust_forwarded_for: false,
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {
@@ -441,8 +455,6 @@ mod tests {
             "client.rs",
             "models.rs",
             "search.rs",
-            // TRUST_FORWARDED_FOR; moves to ApiState when that is restructured.
-            "recovery.rs",
             // Read only inside #[ignore]d live tests.
             "self_verify.rs",
             "backfill.rs",

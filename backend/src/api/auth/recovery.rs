@@ -36,16 +36,14 @@ fn is_trusted_private_ip(ip: std::net::IpAddr) -> bool {
 ///
 /// By default, rate-limiting keys on the peer socket address from `connect_info`.
 /// Forwarded headers (`X-Forwarded-For`, `X-Real-IP`) are ONLY trusted if
-/// `TRUST_FORWARDED_FOR` is enabled AND the connecting peer is a private/loopback reverse proxy.
+/// `trust_forwarded` is enabled AND the connecting peer is a private/loopback reverse proxy.
 fn extract_client_ip(
     connect_info: Option<&ConnectInfo<SocketAddr>>,
     headers: &HeaderMap,
+    trust_forwarded: bool,
 ) -> String {
     if let Some(ConnectInfo(addr)) = connect_info {
         let peer_ip = addr.ip();
-        let trust_forwarded = std::env::var("TRUST_FORWARDED_FOR")
-            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-            .unwrap_or(false);
 
         if trust_forwarded && is_trusted_private_ip(peer_ip) {
             if let Some(forwarded) = headers
@@ -91,7 +89,7 @@ pub async fn redeem_recovery(
     headers: HeaderMap,
     Json(payload): Json<RedeemRecoveryRequest>,
 ) -> Result<Response, ApiError> {
-    let client_ip = extract_client_ip(connect_info.as_ref(), &headers);
+    let client_ip = extract_client_ip(connect_info.as_ref(), &headers, state.trust_forwarded_for);
     if !check_recovery_limit(&client_ip) {
         return Err(ApiError::too_many_requests(
             "Too many recovery attempts. Please wait 15 minutes before trying again.",
