@@ -23,8 +23,8 @@ Workflow per item: Opus 5 plans → Sonnet 5 implements → Opus 5 verifies → 
 | R3 | AR-003 — stop modules depending on the HTTP layer | ✅ | ✅ | ✅ | `4893c04`. 593 pass. Guard proven to catch a compiling violation. |
 | R2 | AR-004 — `Config` threaded into the bot side | ✅ | ✅ | ✅ | `5fdfdfa`. 594 pass. AI env reads deferred to R2b. |
 | R2b | AR-004 — AI client env reads into Config | — | — | — | Split out of R2; allowlisted in the guard test |
-| R4 | AR-006 — `BotHandles`, `ApiState::from_config` | — | — | — | Next up |
-| R5 | AR-007 — collapse the portfolio facade | — | — | — | |
+| R4 | AR-006 — `BotHandles`, `ApiState::from_config` | ✅ | ✅ | ✅ | `f7e682b`. 596 pass. Gate is compiler-enforced. |
+| R5 | AR-007 — collapse the portfolio facade | — | — | — | Next up |
 | R11 | AR-009 — credential resolution extracted | — | — | — | |
 | R6–R9 | AR-002 — per-module service layer | — | — | — | |
 | R10 | AR-005 — split `bot/handler.rs` | — | — | — | |
@@ -205,3 +205,45 @@ naming `events.rs:331`, and passed again once removed.
 **Accepted noise:** rustfmt reflowed three pre-existing `assert!` calls in the `config.rs` test module,
 because formatting the file it was already editing covers the whole file. Left in place — reverting them would
 leave `config.rs` not rustfmt-clean, which is the worse end state given F-3.
+
+### R4 — AR-006 composition root (`f7e682b`)
+
+**Changed:** new `bot/handles.rs`; `api/auth/types.rs` (`from_config`, `trust_forwarded_for`, test
+constructors gated); `api/mod.rs` (`start_api_server` takes handles, returns `Result`); `bot/mod.rs`
+(`new_full` takes `BotHandles`); `main.rs` (owns composition); `config.rs`; `api/auth/recovery.rs`.
+
+**Scope trimmed from the review.** AR-006 also proposed grouping `ApiState`'s 15 fields into sub-structs.
+Dropped: it touches every field access site across the API layer for no behavioural or safety gain. The two
+parts that carried the risk — unsafe defaults and untyped wiring — are done.
+
+**Cheaper approach than planned.** The review said to rename `new` to `for_tests`, which meant editing 39 call
+sites. Marking `new` and the three builders `#[cfg(test)]` instead gives the same guarantee with 38 call sites
+untouched, and makes it a compiler gate rather than a convention.
+
+**Verified by Opus 5:**
+
+| Check | Result |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 0 warnings |
+| `cargo test --workspace` | 596 passed, 0 failed, 7 ignored (was 594) |
+| Production cannot use the test constructor | ✅ proven: adding `ApiState::new(..)` to library code gives `error[E0599]: no associated function named 'new'` |
+| Env-read guard with `recovery.rs` removed | passes; allowlist down to three AI files plus two test-only readers |
+| `cargo run --bin generate-openapi` | no diff |
+| `rustfmt --check` on the four leaf files | clean |
+
+**Mutation-tested, and it found a real gap in my own plan.**
+
+| Mutation | First result | After fix |
+| --- | --- | --- |
+| Hard-code `cookie_secure: false` | ✅ caught | — |
+| Hard-code the localhost Relying Party | ❌ **passed** | ✅ caught |
+
+The test I specified asserted `webauthn_origin`, a plain `String` field, and `is_allowed_origin`, which reads
+that same string. Neither looks at the `Webauthn` object, and the RP ID is what is actually baked into every
+credential — the precise failure AR-006 is about. Added an assertion over
+`state.webauthn.get_allowed_origins()` and re-ran the mutation to confirm it now fails. Lesson worth keeping:
+assert the object the risk lives in, not a sibling field that happens to correlate.
+
+**One deliberate behaviour change:** the API half hard-coded `language: "auto"` when building `VoiceConfig`, so
+`VOICE_LANGUAGE` was honoured for a Matrix voice note and silently ignored for web dictation. Both paths now
+read the setting.
