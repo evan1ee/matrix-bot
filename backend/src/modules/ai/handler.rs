@@ -10,6 +10,7 @@ pub use super::config_cmd::{
     format_error, format_help, handle_ai_subcommand, handle_reset, handle_set_history,
     handle_set_model, handle_show_config,
 };
+pub use super::error::AiError;
 use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
@@ -144,7 +145,7 @@ pub async fn handle_ai_command_with_stage(
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
-            notify_dev_room_ai_error(pool, client_handle, owner_id, &err).await;
+            notify_dev_room_ai_error(pool, client_handle, owner_id, &err.to_string()).await;
             None
         }
     }
@@ -158,7 +159,7 @@ pub async fn run_ai_turn(
     room_id: &str,
     conversation_id_override: Option<&str>,
     prompt: &str,
-) -> Result<AiTurnResult, String> {
+) -> Result<AiTurnResult, AiError> {
     run_ai_turn_with_stage(
         pool,
         ai,
@@ -182,16 +183,16 @@ pub async fn run_ai_turn_with_stage(
     conversation_id_override: Option<&str>,
     prompt: &str,
     stage_reporter: Option<&crate::bot::stage::StageReporter>,
-) -> Result<AiTurnResult, String> {
+) -> Result<AiTurnResult, AiError> {
     let prompt_trimmed = prompt.trim();
     if prompt_trimmed.is_empty() {
-        return Err("Prompt cannot be empty".to_string());
+        return Err(AiError::Validation("Prompt cannot be empty".to_string()));
     }
     if prompt_trimmed.len() > MAX_PROMPT_LENGTH {
-        return Err(format!(
+        return Err(AiError::Validation(format!(
             "Prompt exceeds maximum length of {} characters",
             MAX_PROMPT_LENGTH
-        ));
+        )));
     }
 
     info!(
@@ -203,18 +204,18 @@ pub async fn run_ai_turn_with_stage(
 
     let user_config = AiRepository::get_user_config(pool, owner_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AiError::Db(e.to_string()))?;
     let resolved_config = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
 
     let conversation = if let Some(conv_id) = conversation_id_override {
         AiRepository::get_conversation(pool, conv_id, owner_id)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Conversation not found".to_string())?
+            .map_err(|e| AiError::Db(e.to_string()))?
+            .ok_or_else(|| AiError::Validation("Conversation not found".to_string()))?
     } else {
         AiRepository::get_or_create_conversation(pool, owner_id, room_id, SESSION_TTL_SECONDS)
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| AiError::Db(e.to_string()))?
     };
 
     // Record user message in SQLite if not an exact immediate retry of the latest message
@@ -455,7 +456,7 @@ pub async fn run_ai_turn_with_stage(
             }
             Err(err) => {
                 error!("AI completion failed: {}", err);
-                return Err(err);
+                return Err(AiError::Provider(err));
             }
         }
     }

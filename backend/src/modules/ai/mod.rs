@@ -7,6 +7,7 @@ use crate::modules::{BotModule, CommandContext, CommandHelp};
 pub mod alert;
 pub mod client;
 pub mod config_cmd;
+pub mod error;
 pub mod handler;
 pub mod models;
 pub mod prompt;

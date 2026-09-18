@@ -122,7 +122,7 @@ pub async fn process_audio_event(
                  • <b>原因:</b> {}<br/>\
                  • <b>建议:</b> 请稍后重试，或直接发送文字指令。",
                 html_escape(&transcription.text),
-                html_escape(&err)
+                html_escape(&err.to_string())
             )
         }
     }
