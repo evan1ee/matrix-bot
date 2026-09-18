@@ -23,6 +23,7 @@ pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
+pub mod rooms;
 pub mod settings;
 pub mod todo;
 pub mod voice;
@@ -270,6 +271,52 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `modules/` is the transport-agnostic layer. It may depend on `db`,
+    /// `accounts` and `events`; it may not depend on the HTTP layer.
+    ///
+    /// Two modules did — `journal` reached into `api::life_activity` and the
+    /// webhook scheduler into `api::rooms` — which meant a background worker
+    /// could not be reasoned about without reading HTTP code, and put a rule
+    /// about who may post to a room inside a request handler. This fails the
+    /// build rather than waiting for the next review to notice.
+    #[test]
+    fn test_no_module_depends_on_the_http_layer() {
+        fn walk(dir: &std::path::Path, needle: &str, offenders: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("modules/ must be readable") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    walk(&path, needle, offenders);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path).expect("a readable source file");
+                for (number, line) in source.lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    if line.contains(needle) {
+                        offenders.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+
+        // Built at runtime rather than written as one literal: the literal
+        // itself would appear in this very source file and this test would
+        // then fail on itself the moment it started passing.
+        let needle = ["crate", "api"].join("::");
+        let modules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/modules");
+        let mut offenders = Vec::new();
+        walk(&modules, &needle, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "modules/ must not depend on api/; found: {offenders:#?}"
+        );
+    }
 
     /// Dropping the guard must actually stop the workers it owns.
     ///

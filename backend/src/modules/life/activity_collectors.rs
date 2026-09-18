@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
-use crate::api::life_activity::{ActivityEvent, ActivityStats};
+use crate::modules::life::activity::{ActivityEvent, ActivityStats};
 
 /// Helper to extract HH:MM:SS from a TIMESTAMP column.
 pub(crate) fn extract_time(dt: &Option<DateTime<Utc>>) -> Option<String> {
