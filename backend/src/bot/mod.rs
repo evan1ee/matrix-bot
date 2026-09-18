@@ -23,7 +23,9 @@ use crate::modules::todo::TodoModule;
 use crate::modules::webhook::WebhookModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
+pub mod attachments;
 pub mod client;
+pub mod command_flow;
 pub mod dispatcher;
 pub mod handler;
 pub mod handles;
@@ -34,6 +36,7 @@ pub mod notify;
 pub mod quote;
 pub mod reaction;
 pub mod reaction_targets;
+pub mod reply;
 pub mod self_verify;
 pub mod stage;
 pub mod verification;
