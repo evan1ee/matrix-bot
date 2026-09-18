@@ -12,18 +12,20 @@ use crate::modules::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
 pub async fn run_briefing_tick(ctx: &ModuleContext) {
-    let accounts: Vec<String> = match sqlx::query_scalar::<_, String>(
-        "SELECT id FROM accounts WHERE status = 'active'",
-    )
-    .fetch_all(&ctx.db.pool)
-    .await
-    {
-        Ok(list) => list,
-        Err(err) => {
-            error!("Error fetching active accounts for morning briefing: {:?}", err);
-            return;
-        }
-    };
+    let accounts: Vec<String> =
+        match sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE status = 'active'")
+            .fetch_all(&ctx.db.pool)
+            .await
+        {
+            Ok(list) => list,
+            Err(err) => {
+                error!(
+                    "Error fetching active accounts for morning briefing: {:?}",
+                    err
+                );
+                return;
+            }
+        };
 
     let now_utc = Utc::now();
 
@@ -43,7 +45,9 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let today_local_str = now_local.format("%Y-%m-%d").to_string();
 
         // 1. Check if already delivered today
-        if let Some(last_date) = SettingsRepository::get_last_briefing_date(&ctx.db.pool, &owner_id).await {
+        if let Some(last_date) =
+            SettingsRepository::get_last_briefing_date(&ctx.db.pool, &owner_id).await
+        {
             if last_date == today_local_str {
                 continue;
             }
@@ -59,13 +63,20 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
         info!(
             "Generating scheduled morning briefing for {} (time: {:02}:{:02}, local: {:02}:{:02})",
-            owner_id, target_h, target_m, now_local.hour(), now_local.minute()
+            owner_id,
+            target_h,
+            target_m,
+            now_local.hour(),
+            now_local.minute()
         );
 
         let payload = match generate_briefing(&ctx.db.pool, &owner_id, &settings).await {
             Ok(p) => p,
             Err(err) => {
-                error!("Failed generating morning briefing for {}: {:?}", owner_id, err);
+                error!(
+                    "Failed generating morning briefing for {}: {:?}",
+                    owner_id, err
+                );
                 continue;
             }
         };
@@ -73,12 +84,18 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let mut delivered = false;
 
         // 3. Deliver to user's direct or default Matrix room
-        if let Some(target_room) = RoomRepository::resolve_user_default_room(&ctx.db.pool, &owner_id).await {
+        if let Some(target_room) =
+            RoomRepository::resolve_user_default_room(&ctx.db.pool, &owner_id).await
+        {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
-                let content = RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);
+                let content =
+                    RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);
                 if let Some(room) = ctx.client.get_room(room_id) {
                     if let Err(err) = room.send(content.clone()).await {
-                        warn!("Failed sending briefing to room {}: {:?}. Retrying join...", room_id, err);
+                        warn!(
+                            "Failed sending briefing to room {}: {:?}. Retrying join...",
+                            room_id, err
+                        );
                         if let Ok(joined) = ctx.client.join_room_by_id(room_id).await {
                             let _ = joined.send(content).await;
                             delivered = true;
@@ -94,7 +111,12 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         }
 
         // 4. Update last briefing date so it cannot re-trigger today
-        let _ = SettingsRepository::update_last_briefing_date(&ctx.db.pool, &owner_id, &today_local_str).await;
+        let _ = SettingsRepository::update_last_briefing_date(
+            &ctx.db.pool,
+            &owner_id,
+            &today_local_str,
+        )
+        .await;
 
         // 5. Broadcast SSE event
         if let Some(ref broadcaster) = ctx.broadcaster {

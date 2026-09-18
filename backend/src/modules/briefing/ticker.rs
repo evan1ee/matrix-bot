@@ -43,7 +43,9 @@ pub fn compute_ticker_performance(
 
     // 1-Week change: find the closest point <= 7 calendar days ago
     let change_1w_pct = if let Some(latest_d) = latest_date {
-        let target_date = (latest_d - Duration::days(7)).format("%Y-%m-%d").to_string();
+        let target_date = (latest_d - Duration::days(7))
+            .format("%Y-%m-%d")
+            .to_string();
         let price_1w = points
             .iter()
             .rev()
@@ -65,7 +67,9 @@ pub fn compute_ticker_performance(
 
     // 1-Month change: find the earliest point in the 1-month window or closest to 30 days ago
     let change_1m_pct = if let Some(latest_d) = latest_date {
-        let target_date = (latest_d - Duration::days(30)).format("%Y-%m-%d").to_string();
+        let target_date = (latest_d - Duration::days(30))
+            .format("%Y-%m-%d")
+            .to_string();
         let price_1m = points
             .iter()
             .find(|(date, _)| date >= &target_date)
@@ -74,7 +78,9 @@ pub fn compute_ticker_performance(
 
         price_1m.and_then(|p| calc_pct_change(current_price, p))
     } else {
-        points.first().and_then(|(_, p)| calc_pct_change(current_price, *p))
+        points
+            .first()
+            .and_then(|(_, p)| calc_pct_change(current_price, *p))
     };
 
     TickerPerformance {

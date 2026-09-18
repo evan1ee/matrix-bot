@@ -282,7 +282,11 @@ mod tests {
         let mut rx = broadcaster.subscribe();
 
         let reply = FinanceModule::new()
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!expense add 15.50 EUR lunch"),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Logged"), "unexpected reply: {reply}");

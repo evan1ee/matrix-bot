@@ -35,10 +35,8 @@ pub async fn trigger_briefing(
             RoomRepository::resolve_user_default_room(&state.db.pool, &user.owner_id()).await
         {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
-                let content = RoomMessageEventContent::text_html(
-                    &payload.plain_text,
-                    &payload.html_content,
-                );
+                let content =
+                    RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);
                 if let Some(room) = client.get_room(room_id) {
                     let _ = room.send(content).await;
                 } else if let Ok(joined) = client.join_room_by_id(room_id).await {

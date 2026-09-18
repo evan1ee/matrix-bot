@@ -103,7 +103,8 @@ pub async fn get_rates(client: &reqwest::Client) -> HashMap<String, f64> {
         let guard = FX_CACHE.read().await;
         if let Some(cache) = &*guard {
             let elapsed = Utc::now().signed_duration_since(cache.fetched_at);
-            if elapsed < chrono::Duration::from_std(CACHE_TTL).unwrap_or(chrono::Duration::hours(6)) {
+            if elapsed < chrono::Duration::from_std(CACHE_TTL).unwrap_or(chrono::Duration::hours(6))
+            {
                 return cache.rates_eur_base.clone();
             }
         }
@@ -111,7 +112,10 @@ pub async fn get_rates(client: &reqwest::Client) -> HashMap<String, f64> {
 
     match fetch_ecb_rates(client).await {
         Ok(rates) => {
-            info!("Updated FX reference rates from ECB ({} currencies)", rates.len());
+            info!(
+                "Updated FX reference rates from ECB ({} currencies)",
+                rates.len()
+            );
             let mut guard = FX_CACHE.write().await;
             *guard = Some(FxCache {
                 rates_eur_base: rates.clone(),
@@ -120,7 +124,10 @@ pub async fn get_rates(client: &reqwest::Client) -> HashMap<String, f64> {
             rates
         }
         Err(err) => {
-            warn!("Could not refresh ECB FX rates ({}); using cached or baseline rates", err);
+            warn!(
+                "Could not refresh ECB FX rates ({}); using cached or baseline rates",
+                err
+            );
             let guard = FX_CACHE.read().await;
             if let Some(cache) = &*guard {
                 cache.rates_eur_base.clone()
@@ -134,7 +141,11 @@ pub async fn get_rates(client: &reqwest::Client) -> HashMap<String, f64> {
 /// Computes the cross rate from `from` currency to `to` currency.
 ///
 /// Returns how many units of `to` equal 1 unit of `from`.
-pub fn get_rate_between(rates_eur_base: &HashMap<String, f64>, from: &str, to: &str) -> Option<f64> {
+pub fn get_rate_between(
+    rates_eur_base: &HashMap<String, f64>,
+    from: &str,
+    to: &str,
+) -> Option<f64> {
     if from.eq_ignore_ascii_case(to) {
         return Some(1.0);
     }

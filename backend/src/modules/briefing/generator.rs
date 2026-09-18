@@ -3,7 +3,9 @@ use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
-use crate::modules::briefing::ticker::{fetch_all_tickers_performance, format_ticker_html, format_ticker_plain};
+use crate::modules::briefing::ticker::{
+    fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
+};
 use crate::modules::habits::models::HabitWithStatus;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::portfolio::repository::PortfolioRepository;
@@ -18,11 +20,7 @@ use crate::utils::html_escape;
 pub fn format_briefing_header(now_utc: DateTime<Utc>, settings: &UserSettings) -> String {
     let tz = settings.tz();
     let local = now_utc.with_timezone(&tz);
-    format!(
-        "{} ({})",
-        local.format("%Y-%m-%d %H:%M"),
-        settings.timezone
-    )
+    format!("{} ({})", local.format("%Y-%m-%d %H:%M"), settings.timezone)
 }
 
 /// Gathers all productivity and market data to construct the Morning Briefing.
@@ -48,9 +46,10 @@ pub async fn generate_briefing(
         .unwrap_or_default();
 
     // 3. Today's habits
-    let habits: Vec<HabitWithStatus> = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
-        .await
-        .unwrap_or_default();
+    let habits: Vec<HabitWithStatus> =
+        HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+            .await
+            .unwrap_or_default();
 
     // 4. Upcoming bills due in the next 3 days
     let bills = RecurringBillRepository::list_by_owner(pool, owner_id)
@@ -94,11 +93,16 @@ fn filter_upcoming_bills(bills: &[RecurringBill], now: DateTime<Utc>) -> Vec<&Re
         .iter()
         .filter(|b| b.status == "active")
         .filter(|b| {
-            if let Ok(due) = chrono::NaiveDateTime::parse_from_str(&b.next_due_at, "%Y-%m-%d %H:%M:%S") {
+            if let Ok(due) =
+                chrono::NaiveDateTime::parse_from_str(&b.next_due_at, "%Y-%m-%d %H:%M:%S")
+            {
                 let due_utc = Utc.from_utc_datetime(&due);
                 due_utc <= cutoff
-            } else if let Ok(due_d) = chrono::NaiveDate::parse_from_str(&b.next_due_at, "%Y-%m-%d") {
-                if let LocalResult::Single(due_utc) = Utc.from_local_datetime(&due_d.and_hms_opt(23, 59, 59).unwrap()) {
+            } else if let Ok(due_d) = chrono::NaiveDate::parse_from_str(&b.next_due_at, "%Y-%m-%d")
+            {
+                if let LocalResult::Single(due_utc) =
+                    Utc.from_local_datetime(&due_d.and_hms_opt(23, 59, 59).unwrap())
+                {
                     due_utc <= cutoff
                 } else {
                     false
@@ -124,7 +128,10 @@ fn format_briefing_content(
 
     // Title & timestamp
     html.push_str("🌅 <b>早安简报 · Morning Briefing</b><br/>");
-    html.push_str(&format!("<font color=\"#888888\">{}</font><br/>", html_escape(header_date)));
+    html.push_str(&format!(
+        "<font color=\"#888888\">{}</font><br/>",
+        html_escape(header_date)
+    ));
 
     plain.push_str("🌅 早安简报 · Morning Briefing\n");
     plain.push_str(&format!("{}\n", header_date));
@@ -143,8 +150,14 @@ fn format_briefing_content(
 
     // Section: Tasks
     if !todos.is_empty() {
-        html.push_str(&format!("<br/>📋 <b>今日待办 · Tasks ({} 项待处理)</b><br/>", todos.len()));
-        plain.push_str(&format!("\n📋 今日待办 · Tasks ({} 项待处理)\n", todos.len()));
+        html.push_str(&format!(
+            "<br/>📋 <b>今日待办 · Tasks ({} 项待处理)</b><br/>",
+            todos.len()
+        ));
+        plain.push_str(&format!(
+            "\n📋 今日待办 · Tasks ({} 项待处理)\n",
+            todos.len()
+        ));
 
         // Display up to 6 prioritized tasks
         for item in todos.iter().take(6) {
@@ -169,12 +182,20 @@ fn format_briefing_content(
                 ""
             };
 
-            html.push_str(&format!("• {}{}{}<br/>", pri_badge, html_escape(&item.text), due_suffix));
+            html.push_str(&format!(
+                "• {}{}{}<br/>",
+                pri_badge,
+                html_escape(&item.text),
+                due_suffix
+            ));
             plain.push_str(&format!("• {}{}\n", pri_plain, item.text));
         }
 
         if todos.len() > 6 {
-            html.push_str(&format!("<font color=\"#888888\">... 还有 {} 项待办</font><br/>", todos.len() - 6));
+            html.push_str(&format!(
+                "<font color=\"#888888\">... 还有 {} 项待办</font><br/>",
+                todos.len() - 6
+            ));
             plain.push_str(&format!("... 还有 {} 项待办\n", todos.len() - 6));
         }
     }
@@ -182,8 +203,16 @@ fn format_briefing_content(
     // Section: Habits
     if !habits.is_empty() {
         let completed_count = habits.iter().filter(|h| h.completed_today).count();
-        html.push_str(&format!("<br/>🔁 <b>习惯打卡 · Habits ({}/{} 已完成)</b><br/>", completed_count, habits.len()));
-        plain.push_str(&format!("\n🔁 习惯打卡 · Habits ({}/{} 已完成)\n", completed_count, habits.len()));
+        html.push_str(&format!(
+            "<br/>🔁 <b>习惯打卡 · Habits ({}/{} 已完成)</b><br/>",
+            completed_count,
+            habits.len()
+        ));
+        plain.push_str(&format!(
+            "\n🔁 习惯打卡 · Habits ({}/{} 已完成)\n",
+            completed_count,
+            habits.len()
+        ));
 
         for h in habits.iter().take(6) {
             let icon = if h.completed_today { "✅" } else { "⬜" };
@@ -193,7 +222,12 @@ fn format_briefing_content(
                 String::new()
             };
 
-            html.push_str(&format!("• {} {}{}<br/>", icon, html_escape(&h.habit.name), streak_str));
+            html.push_str(&format!(
+                "• {} {}{}<br/>",
+                icon,
+                html_escape(&h.habit.name),
+                streak_str
+            ));
             plain.push_str(&format!("• {} {}{}\n", icon, h.habit.name, streak_str));
         }
     }

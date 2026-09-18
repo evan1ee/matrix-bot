@@ -5,8 +5,8 @@ use tracing::{debug, warn};
 use super::adapter;
 use super::prompts;
 use super::protocol::{
-    error_codes, CallToolParams, GetPromptParams, Implementation, InitializeResult,
-    JsonRpcRequest, JsonRpcResponse, PromptsCapability, ReadResourceParams, ResourcesCapability,
+    error_codes, CallToolParams, GetPromptParams, Implementation, InitializeResult, JsonRpcRequest,
+    JsonRpcResponse, PromptsCapability, ReadResourceParams, ResourcesCapability,
     ServerCapabilities, ToolsCapability, MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION,
 };
 use super::resources;
@@ -93,8 +93,9 @@ impl<'a> McpService<'a> {
                     }
                 };
 
-                let res = adapter::call_mcp_tool(self.pool, self.broadcaster, self.owner_id, params)
-                    .await;
+                let res =
+                    adapter::call_mcp_tool(self.pool, self.broadcaster, self.owner_id, params)
+                        .await;
                 Some(JsonRpcResponse::success(id, json!(res)))
             }
 
@@ -249,7 +250,10 @@ mod tests {
             params: None,
         };
         let resp_res = service.handle_request(req_res).await.unwrap();
-        let resources = resp_res.result.unwrap()["resources"].as_array().unwrap().clone();
+        let resources = resp_res.result.unwrap()["resources"]
+            .as_array()
+            .unwrap()
+            .clone();
         assert_eq!(resources.len(), 5);
 
         let req_prompt = JsonRpcRequest {
@@ -259,7 +263,10 @@ mod tests {
             params: None,
         };
         let resp_prompt = service.handle_request(req_prompt).await.unwrap();
-        let prompts = resp_prompt.result.unwrap()["prompts"].as_array().unwrap().clone();
+        let prompts = resp_prompt.result.unwrap()["prompts"]
+            .as_array()
+            .unwrap()
+            .clone();
         assert_eq!(prompts.len(), 3);
     }
 }

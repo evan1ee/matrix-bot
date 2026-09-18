@@ -16,10 +16,9 @@ impl McpTokenRepository {
         name: &str,
         expires_in_days: Option<i64>,
     ) -> Result<(String, McpToken), sqlx::Error> {
-        let random_hex: String =
-            sqlx::query_scalar("SELECT lower(hex(randomblob(20)))")
-                .fetch_one(pool)
-                .await?;
+        let random_hex: String = sqlx::query_scalar("SELECT lower(hex(randomblob(20)))")
+            .fetch_one(pool)
+            .await?;
 
         let token = format!("mb_mcp_{}", random_hex);
         let token_hash = hash_token(&token);
@@ -75,12 +74,11 @@ impl McpTokenRepository {
         plaintext_token: &str,
     ) -> Result<Option<McpToken>, sqlx::Error> {
         let token_hash = hash_token(plaintext_token);
-        let token: Option<McpToken> = sqlx::query_as::<_, McpToken>(
-            "SELECT * FROM mcp_tokens WHERE token_hash = ?",
-        )
-        .bind(&token_hash)
-        .fetch_optional(pool)
-        .await?;
+        let token: Option<McpToken> =
+            sqlx::query_as::<_, McpToken>("SELECT * FROM mcp_tokens WHERE token_hash = ?")
+                .bind(&token_hash)
+                .fetch_optional(pool)
+                .await?;
 
         if let Some(tok) = token {
             if tok.is_expired(Utc::now()) {

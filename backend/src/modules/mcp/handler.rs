@@ -102,7 +102,8 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
                     last_used
                 ));
             }
-            list_html.push_str("</ul><p>Use <code>!mcp revoke &lt;ID&gt;</code> to revoke a token.</p>");
+            list_html
+                .push_str("</ul><p>Use <code>!mcp revoke &lt;ID&gt;</code> to revoke a token.</p>");
 
             Some(list_html)
         }
@@ -112,9 +113,12 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
                 return Some("⚠️ Please provide a token ID or prefix to revoke: <code>!mcp revoke &lt;ID&gt;</code>".to_string());
             }
 
-            match McpTokenRepository::revoke_by_id_or_prefix(&db.pool, &ctx.owner_id, target).await {
+            match McpTokenRepository::revoke_by_id_or_prefix(&db.pool, &ctx.owner_id, target).await
+            {
                 Ok(true) => Some("✅ MCP token revoked successfully.".to_string()),
-                Ok(false) => Some("❌ No active MCP token found matching that ID or prefix.".to_string()),
+                Ok(false) => {
+                    Some("❌ No active MCP token found matching that ID or prefix.".to_string())
+                }
                 Err(err) => Some(format!("❌ Failed to revoke token: {}", err)),
             }
         }
