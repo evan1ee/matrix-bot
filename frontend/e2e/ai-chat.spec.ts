@@ -226,3 +226,11 @@ test('configures AI model and endpoint via dropdowns in settings', async ({ app 
   await expect(app.getByText('AI Assistant Settings')).not.toBeVisible();
   await expect(app.getByText('grok-4.6')).toBeVisible();
 });
+
+test('renders voice dictation button in AI chat', async ({ app }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+
+  const voiceBtn = app.getByTestId('voice-dictate-button');
+  await expect(voiceBtn).toBeVisible();
+});

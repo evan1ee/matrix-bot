@@ -290,4 +290,34 @@ mod tests {
         };
         assert!(lapsed.may_perform_sensitive_action(later));
     }
+
+    /// An MCP token authenticates, but it is a machine credential: there is
+    /// nobody at the far end to confirm anything with a passkey. It used to
+    /// report its creation time as the last verification, so for the first five
+    /// minutes of its life it opened every step-up-gated route.
+    #[tokio::test]
+    async fn test_an_mcp_token_never_satisfies_step_up() {
+        let state = state().await;
+        let account = AccountRepository::create(&state.db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let (raw, _token) = crate::modules::mcp::repository::McpTokenRepository::create(
+            &state.db.pool,
+            &account,
+            "a machine",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let user = extract_bearer(&state, Method::GET, Some(&raw), None)
+            .await
+            .expect("a fresh MCP token must still authenticate");
+        assert_eq!(user.owner_id(), account);
+
+        assert!(
+            !user.may_perform_sensitive_action(chrono::Utc::now()),
+            "a token minted a moment ago must still not reach a sensitive action"
+        );
+    }
 }

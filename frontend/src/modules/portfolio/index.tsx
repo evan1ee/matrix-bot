@@ -30,6 +30,7 @@ import { PerformanceChart } from './PerformanceChart';
 import { AlertsModal } from './AlertsModal';
 import { ActivitySection } from './ActivitySection';
 import { TickerSearchInput } from './TickerSearchInput';
+import { NetWorthStatStrip } from '../finance/components/NetWorthStatStrip';
 import {
   Holding,
   PortfolioCurrencySummary,
@@ -607,6 +608,9 @@ export const PortfolioMainView: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Unified cross-currency net worth header widget */}
+      <NetWorthStatStrip />
+
       {/* Per-currency summary — currencies are never added together. */}
       {summary && summary.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="portfolio-summary">
@@ -1230,12 +1234,14 @@ export const portfolioModule: FrontendModule = {
       queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-alerts'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-history'] });
+      queryClient.invalidateQueries({ queryKey: ['net-worth'] });
     }
     if (event.type === 'PortfolioCashUpdated') {
       queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', 'activity'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-history'] });
+      queryClient.invalidateQueries({ queryKey: ['net-worth'] });
     }
   },
 };

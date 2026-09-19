@@ -2,13 +2,19 @@ use chrono::{Duration as ChronoDuration, Utc};
 use sqlx::SqlitePool;
 use tracing::error;
 
+use crate::events::EventBroadcaster;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
+use crate::modules::reminder::service::{self, NewReminder, ReminderError};
 use crate::modules::settings::SettingsRepository;
 use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder_args};
 
+// `MAX_MESSAGE_LEN` lives in `service` now — this module owns the reply
+// wording, not the limit.
+
 pub async fn handle_reminder_command(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -215,12 +221,6 @@ pub async fn handle_reminder_command(
             if (msg == "Reminder!" || msg.is_empty()) && quoted.is_some() {
                 msg = quoted.unwrap().body.clone();
             }
-            // Security: Message length limit (300 chars)
-            if msg.len() > 300 {
-                return Some(
-                    "⚠️ Reminder message too long! Maximum limit is 300 characters.".to_string(),
-                );
-            }
 
             // Quota check: max 100 pending reminders per user
             match ReminderRepository::count_user_pending(pool, owner_id).await {
@@ -242,15 +242,17 @@ pub async fn handle_reminder_command(
 
             let trigger_at = Utc::now() + dur_chrono;
 
-            match ReminderRepository::create(
+            match service::create(
                 pool,
-                room_id,
+                broadcaster,
                 owner_id,
-                sender_name,
-                &msg,
-                trigger_at,
-                recurrence.clone(),
-                None,
+                NewReminder {
+                    message: &msg,
+                    trigger_at,
+                    room_id,
+                    owner_name: sender_name,
+                    recurrence: recurrence.clone(),
+                },
             )
             .await
             {
@@ -271,7 +273,21 @@ pub async fn handle_reminder_command(
                         rec_note
                     ))
                 }
-                Err(err) => {
+                Err(ReminderError::EmptyMessage) => {
+                    Some("⚠️ Reminder message required.".to_string())
+                }
+                Err(ReminderError::MessageTooLong { max }) => Some(format!(
+                    "⚠️ Reminder message too long! Maximum limit is {} characters.",
+                    max
+                )),
+                Err(ReminderError::TriggerInPast) => {
+                    Some("⚠️ Duration is too large or out of range!".to_string())
+                }
+                Err(ReminderError::NotFound) => {
+                    // Unreachable from `create`, kept for exhaustiveness.
+                    Some("❌ Database error creating reminder.".to_string())
+                }
+                Err(ReminderError::Db(err)) => {
                     error!("Failed to create reminder: {:?}", err);
                     Some("❌ Database error creating reminder.".to_string())
                 }
@@ -304,6 +320,7 @@ mod tests {
 
         let res_set = handle_reminder_command(
             &pool,
+            None,
             "!room:1",
             "@bob:1",
             "bob",
@@ -314,26 +331,41 @@ mod tests {
         .unwrap();
         assert!(res_set.contains("Reminder #1 set!"));
 
-        let res_list =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind list", None)
-                .await
-                .unwrap();
+        let res_list = handle_reminder_command(
+            &pool,
+            None,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind list",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_list.contains("Pending Reminders for bob"));
         assert!(res_list.contains("Check oven"));
 
-        let res_cancel =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind cancel 1", None)
-                .await
-                .unwrap();
+        let res_cancel = handle_reminder_command(
+            &pool,
+            None,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind cancel 1",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_cancel.contains("Cancelled reminder"));
 
-        let res_bare = handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind", None)
-            .await
-            .unwrap();
+        let res_bare =
+            handle_reminder_command(&pool, None, "!room:1", "@bob:1", "bob", "!remind", None)
+                .await
+                .unwrap();
         assert!(res_bare.contains("no pending reminders"));
 
         let res_reminders =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!reminders", None)
+            handle_reminder_command(&pool, None, "!room:1", "@bob:1", "bob", "!reminders", None)
                 .await
                 .unwrap();
         assert!(res_reminders.contains("no pending reminders"));
@@ -341,6 +373,7 @@ mod tests {
         // Add a reminder and cancel via rm
         handle_reminder_command(
             &pool,
+            None,
             "!room:1",
             "@bob:1",
             "bob",
@@ -348,17 +381,31 @@ mod tests {
             None,
         )
         .await;
-        let res_rm =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind rm 2", None)
-                .await
-                .unwrap();
+        let res_rm = handle_reminder_command(
+            &pool,
+            None,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind rm 2",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_rm.contains("Cancelled reminder"));
 
         // Check history command
-        let res_hist =
-            handle_reminder_command(&pool, "!room:1", "@bob:1", "bob", "!remind history", None)
-                .await
-                .unwrap();
+        let res_hist = handle_reminder_command(
+            &pool,
+            None,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!remind history",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_hist.contains("Reminder History for bob"));
         assert!(res_hist.contains("Check oven"));
         assert!(res_hist.contains("[Cancelled 🗑️]"));
@@ -375,6 +422,7 @@ mod tests {
 
         let res = handle_reminder_command(
             &pool,
+            None,
             "!room:1",
             "@bob:1",
             "bob",

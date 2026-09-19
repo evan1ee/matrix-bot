@@ -11,11 +11,15 @@ pub fn format_error(msg: &str) -> String {
     format!("⚠️ <b>AI Assistant Error:</b> {}", html_escape(msg))
 }
 
-pub async fn handle_show_config(pool: &SqlitePool, owner_id: &str) -> String {
+pub async fn handle_show_config(
+    pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
+    owner_id: &str,
+) -> String {
     let user_config = AiRepository::get_user_config(pool, owner_id)
         .await
         .unwrap_or(None);
-    let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
+    let resolved = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
     let settings =
         crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
             .await;
@@ -143,8 +147,10 @@ pub fn format_help() -> String {
      • <code>!ai config</code> — View active AI endpoint & model".to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_subcommand(
     pool: &SqlitePool,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -160,12 +166,12 @@ pub async fn handle_ai_subcommand(
         return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
     }
     if trimmed.eq_ignore_ascii_case("config") {
-        return Some(handle_show_config(pool, owner_id).await);
+        return Some(handle_show_config(pool, ai, owner_id).await);
     }
     if let Some(rest) = trimmed.strip_prefix("model") {
         let model_arg = rest.trim();
         if model_arg.is_empty() {
-            return Some(handle_show_config(pool, owner_id).await);
+            return Some(handle_show_config(pool, ai, owner_id).await);
         }
         if model_arg.len() > 500 {
             return Some(format_error(
@@ -180,7 +186,7 @@ pub async fn handle_ai_subcommand(
     {
         let num_arg = rest.trim();
         if num_arg.is_empty() {
-            return Some(handle_show_config(pool, owner_id).await);
+            return Some(handle_show_config(pool, ai, owner_id).await);
         }
         return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
     }

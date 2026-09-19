@@ -53,7 +53,7 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 47);
+        assert_eq!(defs.len(), 48);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));

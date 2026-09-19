@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Clock, Coins, MessageSquare, Search, Terminal, X } from 'lucide-react';
+import { Check, Clock, Coins, MessageSquare, Search, Sun, Terminal, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { CustomSelect } from './CustomSelect';
 import { RoomsPanel } from './RoomsPanel';
 import { SecurityPanel } from './SecurityPanel';
+import { McpPanel } from './McpPanel';
 import { fetchApi } from '../core/apiClient';
 import {
   browserTimezone,
@@ -34,13 +35,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const saved = useSettings();
   const { mutateAsync, isPending } = useUpdateSettings();
 
-  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security'>('preferences');
+  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security' | 'mcp'>('preferences');
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
   const [devRoomId, setDevRoomId] = useState(saved.dev_room_id ?? '');
   const [maxHistoryTurns, setMaxHistoryTurns] = useState(saved.max_history_turns ?? 10);
+  const [briefingEnabled, setBriefingEnabled] = useState(saved.briefing_enabled ?? true);
+  const [briefingTime, setBriefingTime] = useState(saved.briefing_time ?? '07:00');
   const [filter, setFilter] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [testBriefingMsg, setTestBriefingMsg] = useState<string | null>(null);
+  const [isTestingBriefing, setIsTestingBriefing] = useState(false);
 
   const { data: rooms = [] } = useQuery<JoinedRoom[]>({
     queryKey: ['rooms'],
@@ -56,10 +61,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setCurrency(saved.currency);
       setDevRoomId(saved.dev_room_id ?? '');
       setMaxHistoryTurns(saved.max_history_turns ?? 10);
+      setBriefingEnabled(saved.briefing_enabled ?? true);
+      setBriefingTime(saved.briefing_time ?? '07:00');
       setFilter('');
       setErrorMsg(null);
+      setTestBriefingMsg(null);
     }
-  }, [isOpen, saved.timezone, saved.currency, saved.dev_room_id, saved.max_history_turns]);
+  }, [
+    isOpen,
+    saved.timezone,
+    saved.currency,
+    saved.dev_room_id,
+    saved.max_history_turns,
+    saved.briefing_enabled,
+    saved.briefing_time,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -102,7 +118,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     timezone !== saved.timezone ||
     currency !== saved.currency ||
     (devRoomId.trim() || null) !== (saved.dev_room_id ?? null) ||
-    maxHistoryTurns !== (saved.max_history_turns ?? 10);
+    maxHistoryTurns !== (saved.max_history_turns ?? 10) ||
+    briefingEnabled !== (saved.briefing_enabled ?? true) ||
+    briefingTime !== (saved.briefing_time ?? '07:00');
 
   const handleSave = async () => {
     setErrorMsg(null);
@@ -112,10 +130,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         currency,
         dev_room_id: devRoomId.trim() || null,
         max_history_turns: maxHistoryTurns,
+        briefing_enabled: briefingEnabled,
+        briefing_time: briefingTime,
       });
       onClose();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Could not save settings');
+    }
+  };
+
+  const handleTestBriefing = async () => {
+    setTestBriefingMsg(null);
+    setIsTestingBriefing(true);
+    try {
+      await fetchApi('/briefing/trigger', { method: 'POST' });
+      setTestBriefingMsg('✅ Test briefing sent to your Matrix direct room!');
+    } catch (err: unknown) {
+      setTestBriefingMsg(
+        err instanceof Error ? `❌ ${err.message}` : '❌ Failed to send test briefing'
+      );
+    } finally {
+      setIsTestingBriefing(false);
     }
   };
 
@@ -132,19 +167,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <h3 id="settings-modal-title" className="sr-only">
               Settings
             </h3>
-            {(['preferences', 'rooms', 'security'] as const).map((t) => (
+            {(['preferences', 'rooms', 'security', 'mcp'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
                 aria-current={tab === t}
-                className={`text-sm font-semibold capitalize transition ${
+                className={`text-sm font-semibold uppercase font-mono transition ${
                   tab === t
-                    ? 'text-neutral-900 dark:text-neutral-100'
-                    : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'
+                    ? 'text-neutral-900 dark:text-neutral-100 border-b-2 border-neutral-900 dark:border-neutral-100 pb-1'
+                    : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 pb-1'
                 }`}
               >
-                {t}
+                {t === 'mcp' ? 'MCP' : t}
               </button>
             ))}
           </div>
@@ -161,6 +196,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <SecurityPanel />
         ) : tab === 'rooms' ? (
           <RoomsPanel />
+        ) : tab === 'mcp' ? (
+          <McpPanel />
         ) : (
         <>
         {errorMsg && (
@@ -309,6 +346,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <p className="text-[11px] font-mono text-neutral-500">
             Number of recent room or conversation messages included as context when chatting or mentioning the bot.
           </p>
+        </div>
+
+        {/* Morning Briefing */}
+        <div className="space-y-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-mono text-neutral-900 dark:text-neutral-100 font-medium">
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                Morning Briefing
+              </label>
+              <p className="text-[11px] font-mono text-neutral-500 mt-0.5">
+                Proactive daily overview of your tasks, habits, bills, and portfolio ticker snapshot (1D, 1W, 1M).
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+              <input
+                type="checkbox"
+                checked={briefingEnabled}
+                onChange={(e) => setBriefingEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-neutral-200 peer-focus:outline-none rounded-full peer dark:bg-neutral-800 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-neutral-900 dark:peer-checked:bg-neutral-100 dark:peer-checked:after:bg-neutral-900" />
+            </label>
+          </div>
+
+          {briefingEnabled && (
+            <div className="flex items-center justify-between gap-4 p-3 bg-neutral-50 dark:bg-neutral-900/60 rounded-lg border border-neutral-200 dark:border-neutral-800">
+              <div className="space-y-0.5">
+                <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300">
+                  Delivery Time
+                </span>
+                <p className="text-[10px] font-mono text-neutral-500">
+                  Local time in {timezone}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={briefingTime}
+                  onChange={(e) => setBriefingTime(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs font-mono rounded bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestBriefing}
+                  disabled={isTestingBriefing}
+                  className="px-2.5 py-1.5 text-[11px] font-mono rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition disabled:opacity-50"
+                >
+                  {isTestingBriefing ? 'Sending...' : 'Send test'}
+                </button>
+              </div>
+            </div>
+          )}
+          {testBriefingMsg && (
+            <p className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+              {testBriefingMsg}
+            </p>
+          )}
         </div>
 
         <div className="pt-2 flex items-center justify-end gap-3 border-t border-neutral-200 dark:border-neutral-800">

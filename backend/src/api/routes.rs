@@ -4,9 +4,10 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, finance, finance_analytics, footprints, habits, health, life,
-    life_activity, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
-    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, todos, webhooks,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
+    footprints, habits, health, life, life_activity, mcp, ocr, openapi, portfolio,
+    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
+    reminders, rooms, settings, sse, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -120,6 +121,7 @@ fn routes_account() -> Router<auth::ApiState> {
 
 fn routes_productivity() -> Router<auth::ApiState> {
     Router::new()
+        .route("/briefing/trigger", post(briefing::trigger_briefing))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         .route(
             "/todos/:id",
@@ -180,6 +182,7 @@ fn routes_finance() -> Router<auth::ApiState> {
             put(finance::update_transaction).delete(finance::delete_transaction),
         )
         .route("/finance/summary", get(finance::summary))
+        .route("/finance/net-worth", get(finance_net_worth::get_net_worth))
         .route("/finance/analytics", get(finance_analytics::get_analytics))
         .route(
             "/finance/share",
@@ -346,4 +349,7 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
             get(ai::get_ai_config).put(ai::update_ai_config),
         )
         .route("/ai/retrospective", get(ai::get_retrospective))
+        .route("/ocr/scan", post(ocr::scan_image))
+        .route("/voice/transcribe", post(voice::transcribe_voice))
+        .nest("/mcp", mcp::mcp_routes())
 }

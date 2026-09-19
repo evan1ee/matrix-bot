@@ -365,3 +365,52 @@ test('renders unauthenticated public transparency report via token', async ({ an
   await expect(anonApp.getByRole('img', { name: 'Expense breakdown donut chart' })).toBeVisible();
 });
 
+test('renders cross-currency net worth stat strip in ledger view', async ({ app, api }) => {
+  api.seedTransaction({
+    direction: 'income',
+    amount_minor: 125000,
+    currency: 'USD',
+    currency_exponent: 2,
+    note: 'Consulting',
+  });
+
+  await gotoApp(app, TAB.finance);
+
+  // Unified net worth widget
+  const strip = app.getByTestId('net-worth-stat-strip');
+  await expect(strip).toBeVisible();
+  await expect(strip.getByText('ESTIMATED NET WORTH')).toBeVisible();
+  await expect(strip.getByText('LEDGER CASH')).toBeVisible();
+  await expect(strip.getByText('INVESTMENTS')).toBeVisible();
+  await expect(strip.getByText('PORTFOLIO CASH')).toBeVisible();
+});
+
+test('scans receipt image and populates entry form', async ({ app, api }) => {
+  api.categories.push({
+    id: 1,
+    owner_id: 'alice',
+    name: 'Dining',
+    created_at: new Date().toISOString(),
+  });
+
+  await gotoApp(app, TAB.finance);
+
+  const dropzone = app.getByTestId('receipt-dropzone');
+  await expect(dropzone).toBeVisible();
+
+  // Upload mock receipt image via file input
+  const fileChooserPromise = app.waitForEvent('filechooser');
+  await dropzone.click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    name: 'receipt.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('fake image content'),
+  });
+
+  // Verify form is populated from OCR results
+  await expect(app.getByPlaceholder('15.50')).toHaveValue('9.99');
+  await expect(app.getByPlaceholder('What was it for?')).toHaveValue('STARBUCKS COFFEE');
+});
+
+

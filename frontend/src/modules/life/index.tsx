@@ -8,6 +8,7 @@ import type {
   LifeProfileResponse,
   LifeProfileStats,
   LifeHorizonDay,
+  LifeHorizonCalendarDay,
   LifeDayItem,
   UpsertProfilePayload,
 } from './types';
@@ -125,17 +126,18 @@ export const LifeView: React.FC = () => {
   const profile = profileData?.profile || null;
   const stats = useMemo<LifeProfileStats | null>(() => {
     if (!profile || !profileData) return null;
-    const ageInDays = profileData.age_days ?? profileData.stats?.age_in_days ?? 0;
+    // The server response is flat (age_days, total_expected_days, ...) and
+    // never carries a nested `stats` object — the old `?? profileData.stats?.…`
+    // fallbacks here read a field that has never existed on the wire.
+    const ageInDays = profileData.age_days ?? 0;
     const totalDays =
       profileData.total_expected_days ??
-      profileData.stats?.total_life_days ??
       Math.floor((profile.expected_lifespan_years || 80) * 365.25);
     const lifeLived =
       profileData.days_lived_percent ??
-      profileData.stats?.life_lived_percentage ??
       (totalDays > 0 ? (ageInDays / totalDays) * 100 : 0);
-    const loggedCount = profileData.total_logged_days ?? profileData.stats?.days_logged ?? 0;
-    const dominantMood = profileData.dominant_mood ?? profileData.stats?.dominant_mood ?? null;
+    const loggedCount = profileData.total_logged_days ?? 0;
+    const dominantMood = profileData.dominant_mood ?? null;
 
     return {
       birth_date: profile.birth_date,
@@ -145,12 +147,12 @@ export const LifeView: React.FC = () => {
       life_lived_percentage: lifeLived,
       days_logged: loggedCount,
       dominant_mood: dominantMood,
-      total_deep_work_hours: profileData.total_deep_work_hours ?? profileData.stats?.total_deep_work_hours ?? 0,
-      average_sleep_hours: profileData.average_sleep_hours ?? profileData.stats?.average_sleep_hours ?? 0,
+      total_deep_work_hours: profileData.total_deep_work_hours ?? 0,
+      average_sleep_hours: profileData.average_sleep_hours ?? 0,
     };
   }, [profileData, profile]);
 
-  const allLifespanDays = useMemo<LifeHorizonDay[]>(() => {
+  const allLifespanDays = useMemo<LifeHorizonCalendarDay[]>(() => {
     if (!profile?.birth_date) return [];
     const birthParts = profile.birth_date.split('-').map(Number);
     if (birthParts.length < 3 || isNaN(birthParts[0])) return [];
@@ -179,7 +181,7 @@ export const LifeView: React.FC = () => {
       }
     }
 
-    const result: LifeHorizonDay[] = [];
+    const result: LifeHorizonCalendarDay[] = [];
     let idx = 0;
     for (let yr = birthYear; yr <= endYear; yr++) {
       const isLeap = (yr % 4 === 0 && yr % 100 !== 0) || (yr % 400 === 0);

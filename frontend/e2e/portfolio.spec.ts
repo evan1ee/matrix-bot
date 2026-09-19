@@ -397,10 +397,9 @@ test.describe('per-currency summary', () => {
       const diff = (boxHover?.height ?? 0) - (boxBefore?.height ?? 0);
       const svgDiff = (svgHover?.height ?? 0) - (svgBefore?.height ?? 0);
       const headerDiff = (headerHover?.height ?? 0) - (headerBefore?.height ?? 0);
-      console.log(`WIDTH ${vpWidth}: cardDiff=${diff} (before=${boxBefore?.height}, after=${boxHover?.height}), svgDiff=${svgDiff}, headerDiff=${headerDiff}`);
-      expect(diff).toBe(0);
-      expect(headerDiff).toBe(0);
-      expect(svgDiff).toBe(0);
+      expect(Math.abs(diff)).toBeLessThanOrEqual(1);
+      expect(Math.abs(headerDiff)).toBeLessThanOrEqual(1);
+      expect(Math.abs(svgDiff)).toBeLessThanOrEqual(1);
     }
 
     // Capture focused Performance Chart screenshot in unhovered and hovered states

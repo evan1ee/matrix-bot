@@ -12,14 +12,7 @@ use tracing::{error, info, warn};
 use crate::db::Database;
 
 /// Registers the room member invitation event handler on the Matrix client.
-pub fn register_invite_handler(client: &Client, db: Database) {
-    let allowlist: Vec<String> = std::env::var("MATRIX_VERIFICATION_ALLOWLIST")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
+pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<String>) {
     client.add_event_handler(move |ev: StrippedRoomMemberEvent, room: Room| {
         let db = db.clone();
         let allowlist = allowlist.clone();

@@ -1,11 +1,10 @@
 use serde_json::json;
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::models::WithdrawOutcome;
-use crate::modules::portfolio::repository::PortfolioRepository;
+use crate::modules::portfolio::service;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -32,27 +31,18 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
-                let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
-                let exp = exponent_for(&currency);
-                let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
 
-                let cash = PortfolioRepository::deposit_cash(
+                let cash = service::deposit_cash(
                     pool,
+                    broadcaster,
                     owner_id,
-                    &currency,
-                    exp as i64,
-                    amount_minor,
+                    raw_currency,
+                    &amount_str,
+                    None,
                 )
                 .await
                 .map_err(|e| e.to_string())?;
 
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::PortfolioCashUpdated {
-                        owner_id: owner_id.to_string(),
-                        currency: cash.currency.clone(),
-                        balance_minor: cash.balance_minor,
-                    });
-                }
                 serde_json::to_string(&cash).map_err(|e| e.to_string())
             }
             .await,
@@ -74,24 +64,25 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
-                let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
-                let exp = exponent_for(&currency);
-                let amount_minor = parse_amount(&amount_str, exp).map_err(|e| e.to_string())?;
+                // Recomputed here only to word the insufficient-funds message
+                // below — by the time it is reached, `service::withdraw_cash`
+                // has already accepted this currency as well-formed.
+                let currency = crate::modules::finance::money::normalise_currency(raw_currency)
+                    .map_err(|e| e.to_string())?;
 
-                let outcome =
-                    PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                let outcome = service::withdraw_cash(
+                    pool,
+                    broadcaster,
+                    owner_id,
+                    raw_currency,
+                    &amount_str,
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
 
                 match outcome {
                     WithdrawOutcome::Ok(cash) => {
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioCashUpdated {
-                                owner_id: owner_id.to_string(),
-                                currency: cash.currency.clone(),
-                                balance_minor: cash.balance_minor,
-                            });
-                        }
                         serde_json::to_string(&cash).map_err(|e| e.to_string())
                     }
                     WithdrawOutcome::InsufficientFunds { available_minor } => Err(format!(

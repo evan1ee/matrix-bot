@@ -16,9 +16,19 @@ pub const DEFAULT_CURRENCY: &str = "USD";
 pub const DEFAULT_MAX_HISTORY_TURNS: i64 = 10;
 pub const MIN_MAX_HISTORY_TURNS: i64 = 1;
 pub const MAX_MAX_HISTORY_TURNS: i64 = 100;
+pub const DEFAULT_BRIEFING_ENABLED: bool = true;
+pub const DEFAULT_BRIEFING_TIME: &str = "07:00";
 
 fn default_max_history_turns() -> i64 {
     DEFAULT_MAX_HISTORY_TURNS
+}
+
+fn default_briefing_enabled() -> bool {
+    DEFAULT_BRIEFING_ENABLED
+}
+
+fn default_briefing_time() -> String {
+    DEFAULT_BRIEFING_TIME.to_string()
 }
 
 /// One user's display preferences, keyed by the same `owner_id` every other
@@ -40,6 +50,12 @@ pub struct UserSettings {
     /// Number of recent conversation messages included as context for AI turns.
     #[serde(default = "default_max_history_turns")]
     pub max_history_turns: i64,
+    /// Whether automated morning briefing is enabled.
+    #[serde(default = "default_briefing_enabled")]
+    pub briefing_enabled: bool,
+    /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
+    #[serde(default = "default_briefing_time")]
+    pub briefing_time: String,
 }
 
 impl Default for UserSettings {
@@ -49,6 +65,8 @@ impl Default for UserSettings {
             currency: DEFAULT_CURRENCY.to_string(),
             dev_room_id: None,
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
+            briefing_enabled: DEFAULT_BRIEFING_ENABLED,
+            briefing_time: DEFAULT_BRIEFING_TIME.to_string(),
         }
     }
 }
@@ -74,6 +92,27 @@ pub fn parse_timezone(raw: &str) -> Option<Tz> {
     raw.trim().parse().ok()
 }
 
+/// Validates and parses a 24-hour time string "HH:MM" -> (hour, minute).
+pub fn parse_briefing_time(raw: &str) -> Result<(u32, u32), String> {
+    let trimmed = raw.trim();
+    let parts: Vec<&str> = trimmed.split(':').collect();
+    if parts.len() != 2 {
+        return Err("Time must be in HH:MM format (e.g. 07:00)".to_string());
+    }
+    let hour = parts[0]
+        .parse::<u32>()
+        .map_err(|_| "Hour must be a valid number between 00 and 23".to_string())?;
+    let minute = parts[1]
+        .parse::<u32>()
+        .map_err(|_| "Minute must be a valid number between 00 and 59".to_string())?;
+
+    if hour > 23 || minute > 59 {
+        return Err("Time out of 24-hour range (00:00 - 23:59)".to_string());
+    }
+
+    Ok((hour, minute))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,7 +124,20 @@ mod tests {
         assert_eq!(settings.currency, "USD");
         assert_eq!(settings.dev_room_id, None);
         assert_eq!(settings.max_history_turns, DEFAULT_MAX_HISTORY_TURNS);
+        assert!(settings.briefing_enabled);
+        assert_eq!(settings.briefing_time, "07:00");
         assert_eq!(settings.tz(), Tz::UTC);
+    }
+
+    #[test]
+    fn test_parses_briefing_time() {
+        assert_eq!(parse_briefing_time("07:00"), Ok((7, 0)));
+        assert_eq!(parse_briefing_time("7:00"), Ok((7, 0)));
+        assert_eq!(parse_briefing_time("23:59"), Ok((23, 59)));
+        assert_eq!(parse_briefing_time("00:00"), Ok((0, 0)));
+        assert!(parse_briefing_time("24:00").is_err());
+        assert!(parse_briefing_time("07:60").is_err());
+        assert!(parse_briefing_time("invalid").is_err());
     }
 
     #[test]
@@ -114,6 +166,8 @@ mod tests {
             currency: "USD".to_string(),
             dev_room_id: None,
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
+            briefing_enabled: true,
+            briefing_time: "07:00".to_string(),
         };
         assert_eq!(settings.tz(), Tz::UTC);
     }

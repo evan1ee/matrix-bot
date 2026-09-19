@@ -13,6 +13,7 @@ import {
   Filter,
   AlertCircle,
   Hash,
+  GitMerge,
 } from 'lucide-react';
 
 interface ActivitySectionProps {
@@ -124,6 +125,13 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700">
             <BookmarkPlus className="w-3 h-3" />
             RECORD
+          </span>
+        );
+      case 'merge':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700">
+            <GitMerge className="w-3 h-3" />
+            MERGE
           </span>
         );
       default:
@@ -275,27 +283,37 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
                       </div>
                     ) : (
                       <span className="text-neutral-600 dark:text-neutral-400 capitalize">
-                        Cash {entry.action}
+                        {entry.action === 'merge' ? 'Account merge' : `Cash ${entry.action}`}
                       </span>
                     )}
                   </td>
 
                   {/* Execution Price */}
                   <td className="py-2.5 px-3 text-right align-middle text-neutral-600 dark:text-neutral-400">
-                    {entry.price_minor != null
+                    {entry.action === 'merge'
+                      ? '—'
+                      : entry.price_minor != null
                       ? `${formatAmount(entry.price_minor, entry.currency_exponent)} ${entry.currency}`
                       : '—'}
                   </td>
 
                   {/* Total Amount / Cash Impact */}
                   <td className="py-2.5 px-3 text-right align-middle font-medium text-neutral-900 dark:text-neutral-100">
-                    {entry.action === 'withdraw' ? '-' : ''}
-                    {formatAmount(entry.amount_minor, entry.currency_exponent)} {entry.currency}
+                    {entry.action === 'merge' ? (
+                      <span className="text-neutral-400">—</span>
+                    ) : (
+                      <>
+                        {entry.action === 'withdraw' ? '-' : ''}
+                        {formatAmount(entry.amount_minor, entry.currency_exponent)} {entry.currency}
+                      </>
+                    )}
                   </td>
 
                   {/* Realized P&L */}
                   <td className="py-2.5 px-3 text-right align-middle">
-                    {entry.realized_pl_minor != null ? (
+                    {entry.action === 'merge' ? (
+                      <span className="text-neutral-400">—</span>
+                    ) : entry.realized_pl_minor != null ? (
                       <span
                         className={`font-semibold ${
                           entry.realized_pl_minor > 0

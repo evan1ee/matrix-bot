@@ -1,5 +1,6 @@
 use sqlx::SqlitePool;
 
+use crate::events::EventBroadcaster;
 use crate::modules::settings::SettingsRepository;
 use crate::modules::todo::mutate::{
     handle_add, handle_clear, handle_delete, handle_done, handle_due, handle_edit, handle_priority,
@@ -12,6 +13,7 @@ pub use crate::modules::todo::mutate::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
 pub async fn handle_todo_command(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -53,19 +55,28 @@ pub async fn handle_todo_command(
     let args_lower = args_body.to_lowercase();
 
     if args_lower.starts_with("add") {
-        handle_add(pool, room_id, owner_id, sender_name, args_body, quoted).await
+        handle_add(
+            pool,
+            broadcaster,
+            room_id,
+            owner_id,
+            sender_name,
+            args_body,
+            quoted,
+        )
+        .await
     } else if args_lower.starts_with("done") {
-        handle_done(pool, room_id, args_body).await
+        handle_done(pool, broadcaster, owner_id, args_body).await
     } else if args_lower.starts_with("edit") {
-        handle_edit(pool, args_body).await
+        handle_edit(pool, broadcaster, owner_id, args_body).await
     } else if args_lower.starts_with("priority") {
-        handle_priority(pool, args_body).await
+        handle_priority(pool, broadcaster, owner_id, args_body).await
     } else if args_lower.starts_with("due") {
-        handle_due(pool, room_id, args_body, &tz).await
+        handle_due(pool, broadcaster, room_id, owner_id, args_body, &tz).await
     } else if args_lower.starts_with("clear") {
-        handle_clear(pool, room_id, owner_id, sender_name, args_body).await
+        handle_clear(pool, broadcaster, room_id, owner_id, sender_name, args_body).await
     } else if args_lower.starts_with("delete") || args_lower.starts_with("rm") {
-        handle_delete(pool, owner_id, args_body).await
+        handle_delete(pool, broadcaster, owner_id, args_body).await
     } else if args_lower.starts_with("room") {
         handle_list_room(pool, room_id, args_body, &tz).await
     } else if args_lower.starts_with("list")
@@ -99,6 +110,7 @@ mod tests {
 
         let res = handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -111,17 +123,31 @@ mod tests {
         assert!(res.contains("Buy apples"));
         assert!(res.contains("HIGH"));
 
-        let res_done =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None)
-                .await
-                .unwrap();
+        let res_done = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo done 1",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_done.contains("Marked Task"));
         assert!(!res_done.contains("not found"));
 
-        let res_empty_add =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo add", None)
-                .await
-                .unwrap();
+        let res_empty_add = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo add",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_empty_add.contains("Usage:"));
     }
 
@@ -131,6 +157,7 @@ mod tests {
 
         handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -141,6 +168,7 @@ mod tests {
 
         let res_edit = handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -153,6 +181,7 @@ mod tests {
 
         let res_prio = handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -171,6 +200,7 @@ mod tests {
 
         handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -178,18 +208,41 @@ mod tests {
             None,
         )
         .await;
-        handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo done 1", None).await;
+        handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo done 1",
+            None,
+        )
+        .await;
 
-        let res_list =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
-                .await
-                .unwrap();
+        let res_list = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo list",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_list.contains("Your Tasks"));
 
-        let res_clear =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo clear", None)
-                .await
-                .unwrap();
+        let res_clear = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo clear",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_clear.contains("Cleared"));
     }
 
@@ -197,9 +250,17 @@ mod tests {
     async fn test_handle_unknown_command() {
         let pool = setup_test_db().await;
 
-        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo foobar", None)
-            .await
-            .unwrap();
+        let res = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo foobar",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res.contains("Unknown todo command"));
     }
 
@@ -209,7 +270,7 @@ mod tests {
 
         let long_text = "x".repeat(501);
         let cmd = format!("!todo add {}", long_text);
-        let res = handle_todo_command(&pool, "!room:1", "@alice:1", "alice", &cmd, None)
+        let res = handle_todo_command(&pool, None, "!room:1", "@alice:1", "alice", &cmd, None)
             .await
             .unwrap();
         assert!(res.contains("too long"));
@@ -221,6 +282,7 @@ mod tests {
 
         handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -230,6 +292,7 @@ mod tests {
         .await;
         let res_del = handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -241,10 +304,17 @@ mod tests {
         assert!(res_del.contains("Deleted Task"));
 
         // Alice tries to delete non-existent task
-        let res_notfound =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo rm 1", None)
-                .await
-                .unwrap();
+        let res_notfound = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo rm 1",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_notfound.contains("not found"));
     }
 
@@ -260,6 +330,7 @@ mod tests {
         // !todo add without description, should take quoted body
         let res = handle_todo_command(
             &pool,
+            None,
             "!room:1",
             "@alice:1",
             "alice",
@@ -272,10 +343,17 @@ mod tests {
         assert!(res.contains("Added Task"));
         assert!(res.contains("Remember to review PR 42"));
 
-        let res_list =
-            handle_todo_command(&pool, "!room:1", "@alice:1", "alice", "!todo list", None)
-                .await
-                .unwrap();
+        let res_list = handle_todo_command(
+            &pool,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!todo list",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_list.contains("Remember to review PR 42"));
     }
 }

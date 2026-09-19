@@ -71,19 +71,21 @@ pub struct SessionResponse {
     pub display_name: String,
 }
 
-/// Rejects a registration that did not present the configured invite secret.
+/// Rejects a registration if closed, or if it does not match the invite secret.
 ///
-/// Deliberately checked before anything is minted, so a wrong secret cannot
+/// Deliberately checked before anything is minted, so a rejected registration cannot
 /// leave a ceremony or an account id behind.
 fn check_invite(state: &ApiState, provided: Option<&str>) -> Result<(), ApiError> {
-    let Some(required) = state.registration_secret.as_deref() else {
-        return Ok(());
-    };
-
-    if provided.unwrap_or("") == required {
+    if let Some(required) = state.registration_secret.as_deref() {
+        if provided.unwrap_or("") == required {
+            Ok(())
+        } else {
+            Err(ApiError::unauthorized("Invalid registration secret"))
+        }
+    } else if state.registration_open {
         Ok(())
     } else {
-        Err(ApiError::unauthorized("Invalid registration secret"))
+        Err(ApiError::forbidden("Registration is closed on this server"))
     }
 }
 
@@ -93,7 +95,8 @@ fn check_invite(state: &ApiState, provided: Option<&str>) -> Result<(), ApiError
     request_body = RegisterStartRequest,
     responses(
         (status = 200, description = "Challenge to pass to navigator.credentials.create", body = CeremonyStart),
-        (status = 401, description = "Invalid invite secret", body = ApiErrorResponse)
+        (status = 401, description = "Invalid invite secret", body = ApiErrorResponse),
+        (status = 403, description = "Registration is closed", body = ApiErrorResponse)
     )
 )]
 pub async fn register_start(
@@ -422,10 +425,9 @@ async fn issue_session(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) = crate::api::auth::extractor::cookie_value(
-            cookies,
-            crate::accounts::session::COOKIE_NAME,
-        ) {
+        if let Some(old_token) =
+            crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
+        {
             let old_id_hash = crate::accounts::session::hash_token(old_token);
             let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
         }
@@ -548,6 +550,61 @@ mod tests {
         .await
         .unwrap();
         assert!(!started.ceremony_id.is_empty());
+    }
+
+    /// When registration is closed (e.g. production default without invite secret or open flag),
+    /// any registration attempt is rejected with 403 Forbidden.
+    #[tokio::test]
+    async fn test_registration_is_rejected_when_closed() {
+        let state = state_with_secret(None).await.with_registration_open(false);
+        let err = register_start(
+            State(state.clone()),
+            Json(RegisterStartRequest {
+                display_name: "scanner".to_string(),
+                invite: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(err.message, "Registration is closed on this server");
+        assert!(
+            state.webauthn_ceremonies.read().await.is_empty(),
+            "closed registration must not leave any ceremony in memory"
+        );
+    }
+
+    /// When registration is invite-only, the invite secret works even if open registration is false.
+    #[tokio::test]
+    async fn test_registration_invite_secret_works_when_open_is_false() {
+        let state = state_with_secret(Some("supersecret"))
+            .await
+            .with_registration_open(false);
+
+        // Missing invite is rejected with 401
+        let err = register_start(
+            State(state.clone()),
+            Json(RegisterStartRequest {
+                display_name: "newuser".to_string(),
+                invite: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
+
+        // Valid invite succeeds
+        let ok = register_start(
+            State(state.clone()),
+            Json(RegisterStartRequest {
+                display_name: "newuser".to_string(),
+                invite: Some("supersecret".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!ok.ceremony_id.is_empty());
     }
 
     /// Starting registration must not write an account: an abandoned ceremony

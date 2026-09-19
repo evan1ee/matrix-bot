@@ -7,6 +7,11 @@ use utoipa::ToSchema;
 use crate::db::Database;
 use crate::error::ApiError;
 
+/// Ceiling on a single outbound homeserver request, start to finish.
+const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Ceiling on establishing the TCP/TLS connection alone.
+const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// An authenticated caller, resolved from the session cookie.
 ///
 /// There is one identity space now. Callers used to arrive as either a Matrix
@@ -81,6 +86,7 @@ pub struct ApiState {
     pub db: Database,
     pub broadcaster: crate::events::EventBroadcaster,
     pub registration_secret: Option<String>,
+    pub registration_open: bool,
     pub homeserver: String,
     pub http_client: reqwest::Client,
     /// The **bot's** own Matrix access token, shared with the bot bootstrap.
@@ -107,6 +113,11 @@ pub struct ApiState {
     pub webauthn_ceremonies: std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,
     /// Whether the session cookie is marked `Secure`. False only in development.
     pub cookie_secure: bool,
+    /// Whether to believe `X-Forwarded-For` from a trusted private peer.
+    ///
+    /// Read from configuration rather than from the environment at the point of
+    /// use, so it cannot disagree with anything else and `Config` can see it.
+    pub trust_forwarded_for: bool,
     /// The origin the SPA is served from, compared against `Origin` on every
     /// state-changing request.
     pub webauthn_origin: String,
@@ -118,6 +129,10 @@ pub struct ApiState {
     /// two halves of one flow: a stale entry should evaporate on restart rather
     /// than linger as a standing authorisation to absorb an account.
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
+    pub ocr_config: crate::modules::ocr::OcrConfig,
+    pub voice_config: crate::modules::voice::VoiceConfig,
+    /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
+    pub ai: crate::config::AiEnvConfig,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -151,6 +166,8 @@ pub struct PendingCeremony {
 pub const CEREMONY_TTL: Duration = Duration::from_secs(300);
 
 impl ApiState {
+    /// Test fixture. Production builds its state with [`Self::from_config`].
+    #[cfg(test)]
     pub fn new(
         db: Database,
         broadcaster: crate::events::EventBroadcaster,
@@ -162,6 +179,7 @@ impl ApiState {
             db,
             broadcaster,
             registration_secret,
+            registration_open: true,
             homeserver,
             http_client,
             bot_access_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
@@ -173,15 +191,99 @@ impl ApiState {
             ),
             webauthn_ceremonies: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cookie_secure: false,
+            trust_forwarded_for: false,
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            ocr_config: crate::modules::ocr::OcrConfig::default(),
+            voice_config: crate::modules::voice::VoiceConfig::default(),
+            ai: crate::config::AiEnvConfig::default(),
         }
+    }
+
+    /// Builds the state a running server uses, from configuration.
+    ///
+    /// The only constructor production has. [`Self::new`] is a test fixture and
+    /// carries development defaults — an open registration policy and a
+    /// `localhost` Relying Party — that a caller then had to remember to
+    /// override. Deriving every one of those from `Config` here means a missed
+    /// builder call is no longer a way to ship them.
+    pub fn from_config(
+        config: &crate::config::Config,
+        db: Database,
+        broadcaster: crate::events::EventBroadcaster,
+        handles: crate::bot::handles::BotHandles,
+    ) -> anyhow::Result<Self> {
+        // Bound outbound calls so a stalled homeserver cannot pin a request task
+        // indefinitely -- but generously. Reaching a homeserver through a VPN or
+        // proxy can take several seconds just to establish the TCP connection
+        // (measured at ~6s against one such setup), and a connect timeout tighter
+        // than that silently breaks profile and media lookups.
+        let http_client = reqwest::Client::builder()
+            .use_rustls_tls()
+            .timeout(HTTP_TOTAL_TIMEOUT)
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        // The Relying Party is a boot-time decision: an RP ID that does not
+        // match the origin the browser loads mints credentials no browser will
+        // return, so a bad pair must stop the process rather than surface as
+        // failed sign-ins.
+        let webauthn = build_webauthn(&config.webauthn_rp_id, &config.webauthn_origin)?;
+
+        Ok(Self {
+            db,
+            broadcaster,
+            registration_secret: config.registration_secret.clone(),
+            registration_open: config.registration_open,
+            homeserver: config.homeserver.clone(),
+            http_client,
+            bot_access_token: handles.access_token,
+            bot_client: handles.client,
+            resolved_homeserver: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            webauthn: std::sync::Arc::new(webauthn),
+            webauthn_ceremonies: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            cookie_secure: config.cookie_secure,
+            trust_forwarded_for: config.trust_forwarded_for,
+            webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
+            pending_merges: handles.pending_merges,
+            ocr_config: crate::modules::ocr::OcrConfig {
+                enabled: config.ocr_enabled,
+                model_dir: config.ocr_model_dir.clone(),
+            },
+            voice_config: crate::modules::voice::VoiceConfig {
+                enabled: config.voice_enabled,
+                model_dir: config.voice_model_dir.clone(),
+                language: config.voice_language.clone(),
+            },
+            ai: config.ai.clone(),
+        })
+    }
+
+    /// Configures whether open registration without an invite secret is permitted.
+    #[cfg(test)]
+    pub fn with_registration_open(mut self, open: bool) -> Self {
+        self.registration_open = open;
+        self
+    }
+
+    /// Configures OCR and voice transcription module settings.
+    #[cfg(test)]
+    pub fn with_ocr_and_voice(
+        mut self,
+        ocr_config: crate::modules::ocr::OcrConfig,
+        voice_config: crate::modules::voice::VoiceConfig,
+    ) -> Self {
+        self.ocr_config = ocr_config;
+        self.voice_config = voice_config;
+        self
     }
 
     /// Points this state at the configured Relying Party.
     ///
     /// Separate from `new` so the many test call sites keep working against the
     /// localhost default, exactly as `with_matrix_identity` does.
+    #[cfg(test)]
     pub fn with_webauthn(
         mut self,
         rp_id: &str,
@@ -283,14 +385,6 @@ impl FromRef<ApiState> for Database {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SseTicketResponse {
-    /// Present this as `?ticket=` when opening `/api/v1/events`.
-    pub ticket: String,
-    /// Seconds until the ticket expires.
-    pub expires_in: i64,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
 pub struct UserProfileResponse {
     /// The signed-in account. The frontend keys its caches on this.
     pub account_id: String,
@@ -306,4 +400,106 @@ pub struct UserProfileResponse {
 pub struct MediaProxyQuery {
     pub server: String,
     pub media_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    /// A `Config` a production deployment would actually run with, spelled out
+    /// field by field. Deliberately not `..Default::default()`: a field added
+    /// to `Config` later must be decided here, not silently inherited.
+    fn production_config() -> Config {
+        Config {
+            homeserver: "https://matrix.example.com".to_string(),
+            username: "bot".to_string(),
+            password: "secretpassword".to_string(),
+            recovery_key: None,
+            verification_allowlist: Vec::new(),
+            database_url: "sqlite::memory:".to_string(),
+            api_host: "0.0.0.0".to_string(),
+            api_port: 8080,
+            registration_secret: None,
+            registration_open: false,
+            db_max_connections: 10,
+            cors_allowed_origins: Vec::new(),
+            webauthn_rp_id: "bot.example.com".to_string(),
+            webauthn_origin: "https://bot.example.com".to_string(),
+            cookie_secure: true,
+            web_url: "https://bot.example.com".to_string(),
+            ocr_enabled: false,
+            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            voice_enabled: false,
+            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
+            voice_language: "auto".to_string(),
+            trust_forwarded_for: true,
+            ai: crate::config::AiEnvConfig::default(),
+        }
+    }
+
+    /// `new` is a test fixture whose defaults are deliberately permissive:
+    /// registration open, a `localhost` Relying Party, an insecure cookie.
+    /// Production used to start from those and undo them with builder calls, so
+    /// a forgotten call was a way to ship them. This asserts `from_config`
+    /// derives every one of them instead.
+    #[tokio::test]
+    async fn test_from_config_takes_every_security_default_from_config() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let config = production_config();
+
+        let state = ApiState::from_config(
+            &config,
+            crate::db::Database { pool },
+            crate::events::EventBroadcaster::default(),
+            crate::bot::handles::BotHandles::default(),
+        )
+        .expect("a valid Relying Party must build");
+
+        assert!(!state.registration_open, "registration must stay closed");
+        assert!(
+            state.cookie_secure,
+            "the session cookie must be marked Secure"
+        );
+        assert!(state.trust_forwarded_for);
+        assert_eq!(state.webauthn_origin, "https://bot.example.com");
+        assert!(
+            !state.is_allowed_origin("http://localhost:5173"),
+            "a production Relying Party must not accept the dev origins"
+        );
+
+        // The Relying Party object itself, not just the origin string. Its RP
+        // ID is baked into every credential, and `build_webauthn` widens the
+        // allowed origins when the RP is `localhost`. Asserting the string
+        // field alone let a hard-coded localhost Relying Party through.
+        let origins: Vec<String> = state
+            .webauthn
+            .get_allowed_origins()
+            .iter()
+            .map(|url| url.to_string())
+            .collect();
+        assert!(
+            origins.iter().all(|origin| !origin.contains("localhost")),
+            "the Relying Party must come from config, not the localhost default: {origins:?}"
+        );
+    }
+
+    /// A malformed origin must stop the process rather than surface later as
+    /// every passkey login failing.
+    #[tokio::test]
+    async fn test_from_config_refuses_a_malformed_origin() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let config = Config {
+            webauthn_origin: "not-a-url".to_string(),
+            ..production_config()
+        };
+
+        assert!(ApiState::from_config(
+            &config,
+            crate::db::Database { pool },
+            crate::events::EventBroadcaster::default(),
+            crate::bot::handles::BotHandles::default(),
+        )
+        .is_err());
+    }
 }

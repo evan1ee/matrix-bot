@@ -25,9 +25,7 @@ async fn run_bot_loop(
     config: Config,
     db: Database,
     broadcaster: EventBroadcaster,
-    bot_token_handle: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
-    bot_client_handle: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
-    pending_merges: std::sync::Arc<matrix_bot::bot::linking::PendingMerges>,
+    handles: matrix_bot::bot::handles::BotHandles,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut backoff = RECONNECT_MIN;
@@ -39,9 +37,7 @@ async fn run_bot_loop(
             &config,
             db.clone(),
             Some(broadcaster.clone()),
-            Some(bot_token_handle.clone()),
-            Some(bot_client_handle.clone()),
-            Some(pending_merges.clone()),
+            handles.clone(),
         );
 
         let bot = tokio::select! {
@@ -92,6 +88,43 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     dotenvy::from_filename("../.env").ok();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "mcp" {
+        // Direct logs to stderr so stdout is purely reserved for JSON-RPC messages
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn,matrix_bot=info")),
+            )
+            .init();
+
+        let database_url = matrix_bot::config::database_url_from_env();
+        let db = Database::connect(&database_url, 5).await?;
+
+        let mut owner_id = String::new();
+        let mut i = 2;
+        while i < args.len() {
+            if (args[i] == "--owner" || args[i] == "--account") && i + 1 < args.len() {
+                owner_id = args[i + 1].clone();
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        if owner_id.is_empty() {
+            anyhow::bail!(
+                "MCP mode needs an explicit account: pass --owner <account id>. \
+                 It used to default to the oldest account in the database, which made \
+                 an authorisation decision by accident."
+            );
+        }
+
+        matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -103,23 +136,36 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env()?;
     config.validate()?;
+
+    if config.registration_secret.is_some() {
+        info!("Registration mode: INVITE-ONLY (invite secret configured)");
+    } else if config.registration_open {
+        info!("Registration mode: OPEN (open registration enabled)");
+    } else {
+        info!("Registration mode: CLOSED (release default: open internet scanners cannot register accounts)");
+    }
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
+    let handles = matrix_bot::bot::handles::BotHandles::default();
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     // 1. Start background Axum REST API & Web Server with graceful shutdown
-    let (bot_token_handle, bot_client_handle, pending_merges) =
-        api::start_api_server(&config, db.clone(), broadcaster.clone(), shutdown_rx).await;
+    api::start_api_server(
+        &config,
+        db.clone(),
+        broadcaster.clone(),
+        handles.clone(),
+        shutdown_rx,
+    )
+    .await?;
 
     // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
     let bot_task = tokio::spawn(run_bot_loop(
         config.clone(),
         db.clone(),
         broadcaster.clone(),
-        bot_token_handle,
-        bot_client_handle,
-        pending_merges,
+        handles,
         shutdown_tx.subscribe(),
     ));
 

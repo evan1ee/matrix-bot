@@ -14,6 +14,113 @@ fn is_production() -> bool {
     }
 }
 
+/// Resolves the registration policy based on release/debug mode, invite secret, and open flags.
+///
+/// In release / production builds, open registration is disabled by default to protect
+/// self-hosted instances against automated open-internet scanning.
+pub fn resolve_registration_policy(
+    is_prod: bool,
+    invite_secret: Option<String>,
+    registration_open_env: Option<String>,
+    allow_open_flag: bool,
+) -> (Option<String>, bool) {
+    let secret = invite_secret
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let open = if allow_open_flag {
+        true
+    } else if let Some(env_val) = registration_open_env {
+        let v = env_val.trim();
+        v.eq_ignore_ascii_case("true")
+            || v == "1"
+            || v.eq_ignore_ascii_case("yes")
+            || v.eq_ignore_ascii_case("on")
+    } else if is_prod {
+        false
+    } else {
+        secret.is_none()
+    };
+
+    (secret, open)
+}
+
+/// The database URL, with the default every entry point shares.
+///
+/// MCP mode does not build a full `Config` — it needs no Matrix credentials —
+/// but it must not carry its own copy of this default either, or the two
+/// silently diverge.
+pub fn database_url_from_env() -> String {
+    env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string())
+}
+
+/// AI provider settings that come from the environment.
+///
+/// The endpoint, key and model each resolve through a chain of aliases kept for
+/// compatibility with whichever provider's variable names an operator already
+/// has set. Resolved once at boot so every caller sees the same answer, rather
+/// than each re-walking the chain at the point of use.
+#[derive(Debug, Clone, Default)]
+pub struct AiEnvConfig {
+    /// First of AI_ENDPOINT, AI_API_BASE, AI_BASE_URL, OPENAI_API_BASE, OPENAI_BASE_URL.
+    pub base_url: Option<String>,
+    /// First of AI_API_KEY, XAI_API_KEY, OPENAI_API_KEY, ignoring blanks.
+    pub api_key: Option<String>,
+    /// First of AI_MODEL, XAI_MODEL, OPENAI_MODEL.
+    pub model: Option<String>,
+    /// First of AI_PROXY, HTTPS_PROXY, https_proxy, ALL_PROXY, all_proxy,
+    /// HTTP_PROXY, http_proxy.
+    pub proxy: Option<String>,
+    /// Whether an AI base URL may point at a private or loopback address.
+    ///
+    /// Off by default: a user-supplied base URL is a server-side request this
+    /// process will make, so an unguarded one reaches anything the host can.
+    pub allow_private_base_url: bool,
+}
+
+impl AiEnvConfig {
+    pub fn from_env() -> Self {
+        let base_url = env::var("AI_ENDPOINT")
+            .or_else(|_| env::var("AI_API_BASE"))
+            .or_else(|_| env::var("AI_BASE_URL"))
+            .or_else(|_| env::var("OPENAI_API_BASE"))
+            .or_else(|_| env::var("OPENAI_BASE_URL"))
+            .ok();
+
+        let api_key = env::var("AI_API_KEY")
+            .or_else(|_| env::var("XAI_API_KEY"))
+            .or_else(|_| env::var("OPENAI_API_KEY"))
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
+        let model = env::var("AI_MODEL")
+            .or_else(|_| env::var("XAI_MODEL"))
+            .or_else(|_| env::var("OPENAI_MODEL"))
+            .ok();
+
+        let proxy = env::var("AI_PROXY")
+            .or_else(|_| env::var("HTTPS_PROXY"))
+            .or_else(|_| env::var("https_proxy"))
+            .or_else(|_| env::var("ALL_PROXY"))
+            .or_else(|_| env::var("all_proxy"))
+            .or_else(|_| env::var("HTTP_PROXY"))
+            .or_else(|_| env::var("http_proxy"))
+            .ok();
+
+        let allow_private_base_url = env::var("AI_ALLOW_PRIVATE_BASE_URL")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        Self {
+            base_url,
+            api_key,
+            model,
+            proxy,
+            allow_private_base_url,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -27,6 +134,7 @@ pub struct Config {
     pub api_host: String,
     pub api_port: u16,
     pub registration_secret: Option<String>,
+    pub registration_open: bool,
     pub db_max_connections: u32,
     /// Origins permitted to call the API cross-origin.
     ///
@@ -68,6 +176,14 @@ pub struct Config {
     pub voice_model_dir: std::path::PathBuf,
     /// Default speech recognition language (e.g. "auto", "zh", "en", "ja", "ko", "yue").
     pub voice_language: String,
+    /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
+    ///
+    /// Forwarded headers are believed only when this is on *and* the connecting
+    /// peer is itself a private/loopback address (a reverse proxy on the same
+    /// host or LAN) — so it defaults off and is safe to leave off behind a
+    /// setup that does not put a trusted proxy in front of the bot.
+    pub trust_forwarded_for: bool,
+    pub ai: AiEnvConfig,
 }
 
 impl Config {
@@ -92,8 +208,7 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
+        let database_url = database_url_from_env();
 
         let api_host = env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
@@ -102,7 +217,22 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(8080);
 
-        let registration_secret = env::var("API_REGISTRATION_SECRET").ok();
+        let invite_secret = env::var("INVITE_SECRET")
+            .or_else(|_| env::var("API_REGISTRATION_SECRET"))
+            .ok();
+
+        let registration_open_env = env::var("REGISTRATION_OPEN")
+            .or_else(|_| env::var("ALLOW_OPEN_REGISTRATION"))
+            .ok();
+
+        let allow_open_flag = env::args().any(|a| a == "--allow-open-registration");
+
+        let (registration_secret, registration_open) = resolve_registration_policy(
+            is_production(),
+            invite_secret,
+            registration_open_env,
+            allow_open_flag,
+        );
 
         let db_max_connections: u32 = env::var("DATABASE_MAX_CONNECTIONS")
             .ok()
@@ -143,6 +273,12 @@ impl Config {
 
         let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
 
+        let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        let ai = AiEnvConfig::from_env();
+
         Ok(Self {
             homeserver,
             username,
@@ -153,6 +289,7 @@ impl Config {
             api_host,
             api_port,
             registration_secret,
+            registration_open,
             db_max_connections,
             cors_allowed_origins,
             webauthn_rp_id,
@@ -164,6 +301,8 @@ impl Config {
             voice_enabled,
             voice_model_dir,
             voice_language,
+            trust_forwarded_for,
+            ai,
         })
     }
 
@@ -228,6 +367,7 @@ mod tests {
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
+            registration_open: true,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
@@ -239,6 +379,8 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            trust_forwarded_for: false,
+            ai: AiEnvConfig::default(),
         };
         assert!(valid_cfg.validate().is_ok());
 
@@ -264,6 +406,7 @@ mod tests {
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
+            registration_open: true,
             db_max_connections: 5,
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
@@ -275,6 +418,8 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            trust_forwarded_for: false,
+            ai: AiEnvConfig::default(),
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {
@@ -304,6 +449,123 @@ mod tests {
         assert!(
             cfg.validate().is_err(),
             "an origin without a scheme must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_resolve_registration_policy_matrix() {
+        // 1. Release / production mode defaults to closed without secrets or flags
+        let (secret, open) = resolve_registration_policy(true, None, None, false);
+        assert_eq!(secret, None);
+        assert!(!open, "release build must default to registration closed");
+
+        // 2. Release / production mode with invite secret enables invite-only
+        let (secret, open) =
+            resolve_registration_policy(true, Some("my_secret".to_string()), None, false);
+        assert_eq!(secret.as_deref(), Some("my_secret"));
+        assert!(
+            !open,
+            "invite secret means invite-only, not open registration"
+        );
+
+        // 3. Release / production mode with CLI flag --allow-open-registration
+        let (secret, open) = resolve_registration_policy(true, None, None, true);
+        assert_eq!(secret, None);
+        assert!(
+            open,
+            "CLI flag --allow-open-registration opens registration"
+        );
+
+        // 4. Release / production mode with REGISTRATION_OPEN=true env var
+        let (secret, open) =
+            resolve_registration_policy(true, None, Some("true".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(open, "REGISTRATION_OPEN=true opens registration in release");
+
+        // 5. Release / production mode with REGISTRATION_OPEN=false env var
+        let (secret, open) =
+            resolve_registration_policy(true, None, Some("false".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(!open, "REGISTRATION_OPEN=false keeps registration closed");
+
+        // 6. Debug / local mode defaults to open when no secret is configured
+        let (secret, open) = resolve_registration_policy(false, None, None, false);
+        assert_eq!(secret, None);
+        assert!(open, "debug/local mode defaults to open registration");
+
+        // 7. Debug / local mode with explicit secret is invite-only
+        let (secret, open) =
+            resolve_registration_policy(false, Some("dev_secret".to_string()), None, false);
+        assert_eq!(secret.as_deref(), Some("dev_secret"));
+        assert!(!open, "debug mode with secret is invite-only");
+
+        // 8. Debug / local mode with REGISTRATION_OPEN=false explicitly closes it
+        let (secret, open) =
+            resolve_registration_policy(false, None, Some("false".to_string()), false);
+        assert_eq!(secret, None);
+        assert!(
+            !open,
+            "debug mode with REGISTRATION_OPEN=false closes registration"
+        );
+    }
+
+    /// Configuration is read in one place. Everything else is handed values.
+    ///
+    /// The bot half used to re-read `OCR_MODEL_DIR`, `VOICE_*` and the
+    /// verification allowlist at the point of use, so it could disagree with
+    /// the copy the API server was given and `validate` could not check what it
+    /// did not own. The files below still read the environment directly and are
+    /// listed rather than ignored: `search.rs` sits behind the AI tool executor,
+    /// whose signature chain reaches MCP stdio mode where no `Config` exists,
+    /// and is tracked separately; the two test files only read in `#[ignore]`d
+    /// live tests. Shrink this list; do not grow it.
+    #[test]
+    fn test_only_config_reads_the_environment() {
+        const ALLOWED: &[&str] = &[
+            "config.rs",
+            "search.rs",
+            // Read only inside #[ignore]d live tests.
+            "self_verify.rs",
+            "backfill.rs",
+        ];
+
+        fn walk(dir: &std::path::Path, offenders: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("src/ must be readable") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    walk(&path, offenders);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if ALLOWED.contains(&name.as_str()) {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path).expect("a readable source file");
+                for (number, line) in source.lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    if line.contains(&["env", "var"].join("::")) {
+                        offenders.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        walk(&src, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "only config.rs may read the environment; found: {offenders:#?}"
         );
     }
 }

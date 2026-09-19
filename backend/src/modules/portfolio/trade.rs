@@ -171,6 +171,32 @@ pub async fn buy_at(
     Ok(BuyOutcome::Ok { holding, cash })
 }
 
+/// A buy executed now. See [`buy_at`] to backdate one.
+#[allow(clippy::too_many_arguments)]
+pub async fn buy(
+    pool: &SqlitePool,
+    owner_id: &str,
+    symbol: &str,
+    quantity_minor: i64,
+    price_minor: i64,
+    currency: &str,
+    currency_exponent: i64,
+    note: Option<&str>,
+) -> Result<BuyOutcome> {
+    buy_at(
+        pool,
+        owner_id,
+        symbol,
+        quantity_minor,
+        price_minor,
+        currency,
+        currency_exponent,
+        note,
+        None,
+    )
+    .await
+}
+
 pub async fn sell_at(
     pool: &SqlitePool,
     owner_id: &str,
@@ -276,6 +302,25 @@ pub async fn sell_at(
     .await;
 
     Ok(outcome)
+}
+
+/// A sale executed now. See [`sell_at`] to backdate one.
+pub async fn sell(
+    pool: &SqlitePool,
+    owner_id: &str,
+    symbol: &str,
+    quantity_minor: i64,
+    sell_price_minor: i64,
+) -> Result<SellOutcome> {
+    sell_at(
+        pool,
+        owner_id,
+        symbol,
+        quantity_minor,
+        sell_price_minor,
+        None,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -394,4 +439,34 @@ pub async fn record_holding_action(
     .await;
 
     Ok(Ok(holding))
+}
+
+/// Records an existing position without checking or debiting cash.
+///
+/// The audit action is `"record"` rather than `"buy"`: no money moved, so
+/// calling it a purchase would put a trade in the ledger that never happened.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_holding(
+    pool: &SqlitePool,
+    owner_id: &str,
+    symbol: &str,
+    quantity_minor: i64,
+    price_minor: i64,
+    currency: &str,
+    currency_exponent: i64,
+    note: Option<&str>,
+) -> Result<Result<Holding, String>> {
+    record_holding_action(
+        pool,
+        owner_id,
+        symbol,
+        quantity_minor,
+        price_minor,
+        currency,
+        currency_exponent,
+        note,
+        "record",
+        None,
+    )
+    .await
 }

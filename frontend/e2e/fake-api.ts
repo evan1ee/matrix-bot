@@ -939,11 +939,18 @@ export class FakeApi {
 
     // --- todos ---
     if (path === '/todos' && method === 'GET') {
+      const completedParam = url?.searchParams?.get('completed');
+      let items = this.todos;
+      if (completedParam === 'true') {
+        items = items.filter((t) => t.completed);
+      } else if (completedParam === 'false') {
+        items = items.filter((t) => !t.completed);
+      }
       return json(route, 200, {
-        items: this.todos,
+        items,
         page: 1,
         limit: 100,
-        total: this.todos.length,
+        total: items.length,
       });
     }
 
@@ -1069,11 +1076,15 @@ export class FakeApi {
     }
 
     if (path === '/finance/transactions' && method === 'GET') {
+      const direction = url?.searchParams?.get('direction');
+      const items = direction
+        ? this.transactions.filter((t) => t.direction === direction)
+        : this.transactions;
       return json(route, 200, {
-        items: this.transactions,
+        items,
         page: 1,
         limit: 200,
-        total: this.transactions.length,
+        total: items.length,
       });
     }
     if (path === '/finance/transactions' && method === 'POST') {
@@ -1129,6 +1140,57 @@ export class FakeApi {
       }
       this.transactions = this.transactions.filter((t) => t.id !== id);
       return route.fulfill({ status: 204, body: '' });
+    }
+
+    if (path === '/finance/net-worth' && method === 'GET') {
+      const primaryCurrency = this.settings.currency || 'USD';
+      const primaryExponent = primaryCurrency === 'JPY' ? 0 : 2;
+
+      let totalLedgerMinor = 0;
+      for (const tx of this.transactions) {
+        if (tx.direction === 'income') totalLedgerMinor += tx.amount_minor;
+        else totalLedgerMinor -= tx.amount_minor;
+      }
+
+      let totalPortfolioCashMinor = 0;
+      for (const c of this.cash) {
+        totalPortfolioCashMinor += c.balance_minor;
+      }
+
+      let totalMarketValueMinor = 0;
+      for (const h of this.holdings) {
+        const p = h.current_price_minor ?? h.avg_cost_minor;
+        totalMarketValueMinor += Math.round((h.quantity_minor * p) / 10 ** 8);
+      }
+
+      const totalNetWorth = totalLedgerMinor + totalPortfolioCashMinor + totalMarketValueMinor;
+
+      // Shape matches the real server response
+      // (backend/src/modules/finance/net_worth.rs::NetWorthResponse /
+      // CurrencyNetWorthBreakdown), not the earlier hand-written frontend
+      // type this mock used to mirror.
+      return json(route, 200, {
+        primary_currency: primaryCurrency,
+        primary_currency_exponent: primaryExponent,
+        total_net_worth_minor: totalNetWorth,
+        ledger_cash_minor: totalLedgerMinor,
+        portfolio_market_value_minor: totalMarketValueMinor,
+        cash_deposits_minor: totalPortfolioCashMinor,
+        fx_rates: { [primaryCurrency]: 1.0 },
+        updated_at: new Date().toISOString(),
+        currencies: [
+          {
+            currency: primaryCurrency,
+            currency_exponent: primaryExponent,
+            ledger_cash_minor: totalLedgerMinor,
+            portfolio_market_value_minor: totalMarketValueMinor,
+            cash_deposits_minor: totalPortfolioCashMinor,
+            fx_rate_to_primary: 1.0,
+            converted_minor: totalNetWorth,
+            total_minor: totalNetWorth,
+          },
+        ],
+      });
     }
 
     if (path === '/finance/summary') {
@@ -2689,6 +2751,33 @@ export class FakeApi {
       if (idx === -1) return json(route, 404, { error: 'Bookmark not found', code: 404 });
       this.bookmarks.splice(idx, 1);
       return json(route, 200, { success: true, id });
+    }
+
+    // --- ocr scan ---
+    if (path === '/ocr/scan' && method === 'POST') {
+      return json(route, 200, {
+        raw_text: 'STARBUCKS COFFEE\n123 MAIN ST\nTOTAL $9.99\nDATE 2026-09-15',
+        blocks: [
+          { text: 'STARBUCKS COFFEE', score: 0.98 },
+          { text: '123 MAIN ST', score: 0.95 },
+          { text: 'TOTAL $9.99', score: 0.99 },
+          { text: 'DATE 2026-09-15', score: 0.97 },
+        ],
+        structured: {
+          merchant: 'STARBUCKS COFFEE',
+          amount: '9.99',
+          currency: 'USD',
+          date: '2026-09-15',
+          category_suggestion: 'Dining',
+        },
+      });
+    }
+
+    // --- voice transcribe ---
+    if (path === '/voice/transcribe' && method === 'POST') {
+      return json(route, 200, {
+        text: 'Spent $15 on lunch at Subway',
+      });
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

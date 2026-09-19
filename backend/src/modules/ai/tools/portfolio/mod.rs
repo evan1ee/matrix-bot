@@ -1,15 +1,17 @@
 pub mod alerts;
 pub mod cash;
+pub mod net_worth;
 
 use serde_json::json;
 use sqlx::SqlitePool;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::modules::finance::money::{normalise_currency, parse_amount};
 use crate::modules::portfolio::history::HistoryRepository;
 use crate::modules::portfolio::models::{cost_of, normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
+use crate::modules::portfolio::service;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
@@ -26,6 +28,11 @@ pub async fn execute_tool(
 
     // 2. Check alert operations
     if let Some(res) = alerts::execute_tool(pool, broadcaster, owner_id, name, args).await {
+        return Some(res);
+    }
+
+    // 3. Check net worth operations
+    if let Some(res) = net_worth::execute_tool(pool, owner_id, name, args).await {
         return Some(res);
     }
 
@@ -98,7 +105,6 @@ pub async fn execute_tool(
                     .get("symbol")
                     .and_then(|v| v.as_str())
                     .ok_or("Field 'symbol' is required")?;
-                let symbol = normalise_symbol(raw_symbol)?;
 
                 let qty_str = if let Some(num) = args.get("quantity").and_then(|v| v.as_f64()) {
                     num.to_string()
@@ -124,43 +130,34 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
+                // Recomputed here only to word the two failure branches below
+                // — by the time either is reached, `service::buy` has already
+                // accepted this as well-formed.
                 let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
-                let exp = exponent_for(&currency);
 
-                let quantity_minor =
-                    parse_amount(&qty_str, QUANTITY_EXPONENT).map_err(|e| e.to_string())?;
-                let price_minor = parse_amount(&price_str, exp).map_err(|e| e.to_string())?;
-
-                let outcome = PortfolioRepository::buy(
+                let outcome = service::buy(
                     pool,
+                    broadcaster,
                     owner_id,
-                    &symbol,
-                    quantity_minor,
-                    price_minor,
-                    &currency,
-                    exp as i64,
-                    note,
+                    service::TradeRequest {
+                        symbol: raw_symbol,
+                        quantity: &qty_str,
+                        price: &price_str,
+                        currency: raw_currency,
+                        note,
+                        executed_at: None,
+                    },
                 )
                 .await
                 .map_err(|e| e.to_string())?;
 
                 match outcome {
-                    BuyOutcome::Ok { holding, cash } => {
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-                            b.send(SystemEvent::PortfolioCashUpdated {
-                                owner_id: owner_id.to_string(),
-                                currency: cash.currency.clone(),
-                                balance_minor: cash.balance_minor,
-                            });
-                        }
-                        serde_json::to_string(&json!({
-                            "status": "bought",
-                            "holding": holding,
-                            "cash": cash,
-                        }))
-                        .map_err(|e| e.to_string())
-                    }
+                    BuyOutcome::Ok { holding, cash } => serde_json::to_string(&json!({
+                        "status": "bought",
+                        "holding": holding,
+                        "cash": cash,
+                    }))
+                    .map_err(|e| e.to_string()),
                     BuyOutcome::InsufficientCash {
                         needed_minor,
                         available_minor,
@@ -201,22 +198,21 @@ pub async fn execute_tool(
                     return Err("Field 'price' is required".to_string());
                 };
 
-                let existing = PortfolioRepository::find(pool, owner_id, &symbol)
+                // Ownership check only, for this tool's own "not found" wording — the
+                // service re-fetches the holding itself for the write.
+                PortfolioRepository::find(pool, owner_id, &symbol)
                     .await
                     .map_err(|e| e.to_string())?
                     .ok_or_else(|| format!("Position '{}' not found in portfolio", symbol))?;
 
-                let exp = exponent_for(&existing.currency);
-                let quantity_minor =
-                    parse_amount(&qty_str, QUANTITY_EXPONENT).map_err(|e| e.to_string())?;
-                let price_minor = parse_amount(&price_str, exp).map_err(|e| e.to_string())?;
-
-                let outcome = PortfolioRepository::sell(
+                let outcome = service::sell(
                     pool,
+                    broadcaster,
                     owner_id,
                     &symbol,
-                    quantity_minor,
-                    price_minor,
+                    &qty_str,
+                    &price_str,
+                    None,
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -225,52 +221,36 @@ pub async fn execute_tool(
                     SellOutcome::Closed {
                         realized_pl_minor,
                         cash,
-                    } => {
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioHoldingDeleted {
-                                id: existing.id,
-                                owner_id: owner_id.to_string(),
-                            });
-                            b.send(SystemEvent::PortfolioCashUpdated {
-                                owner_id: owner_id.to_string(),
-                                currency: cash.currency.clone(),
-                                balance_minor: cash.balance_minor,
-                            });
-                        }
-                        Ok(json!({
-                            "status": "closed",
-                            "symbol": symbol,
-                            "realized_pl_minor": realized_pl_minor,
-                            "cash": cash,
-                            "message": format!("Fully closed {} position; proceeds credited to cash.", symbol)
-                        }).to_string())
-                    }
+                    } => Ok(json!({
+                        "status": "closed",
+                        "symbol": symbol,
+                        "realized_pl_minor": realized_pl_minor,
+                        "cash": cash,
+                        "message": format!("Fully closed {} position; proceeds credited to cash.", symbol)
+                    }).to_string()),
                     SellOutcome::Reduced {
                         holding,
                         realized_pl_minor,
                         cash,
-                    } => {
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-                            b.send(SystemEvent::PortfolioCashUpdated {
-                                owner_id: owner_id.to_string(),
-                                currency: cash.currency.clone(),
-                                balance_minor: cash.balance_minor,
-                            });
-                        }
-                        Ok(json!({
-                            "status": "reduced",
-                            "holding": holding,
-                            "realized_pl_minor": realized_pl_minor,
-                            "cash": cash,
-                            "message": format!("Partially sold {} position; proceeds credited to cash.", symbol)
-                        }).to_string())
-                    }
+                    } => Ok(json!({
+                        "status": "reduced",
+                        "holding": holding,
+                        "realized_pl_minor": realized_pl_minor,
+                        "cash": cash,
+                        "message": format!("Partially sold {} position; proceeds credited to cash.", symbol)
+                    }).to_string()),
                     SellOutcome::NotFound => Err(format!("Position '{}' not found", symbol)),
-                    SellOutcome::ExceedsHolding { held_minor } => Err(format!(
-                        "Cannot sell more than held: you hold {} minor units, tried to sell {}",
-                        held_minor, quantity_minor
-                    )),
+                    SellOutcome::ExceedsHolding { held_minor } => {
+                        // The service has already parsed `qty_str` successfully
+                        // (that's how this outcome exists at all), so
+                        // re-parsing it here for the message cannot fail.
+                        let attempted = parse_amount(&qty_str, QUANTITY_EXPONENT)
+                            .expect("quantity already validated by the service");
+                        Err(format!(
+                            "Cannot sell more than held: you hold {} minor units, tried to sell {}",
+                            held_minor, attempted
+                        ))
+                    }
                 }
             }
             .await,
@@ -409,5 +389,43 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     ];
     defs.extend(cash::tool_definitions());
     defs.extend(alerts::tool_definitions());
+    defs.extend(net_worth::tool_definitions());
     defs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::run_migrations;
+
+    async fn setup() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    /// The defect this migration fixes for the AI path: before routing
+    /// through `service::buy`, a note of any length reached the database.
+    #[tokio::test]
+    async fn test_the_ai_tool_enforces_the_note_limit() {
+        let pool = setup().await;
+        let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
+
+        let args = json!({
+            "symbol": "AAPL",
+            "quantity": 10,
+            "price": 150.00,
+            "currency": "USD",
+            "note": over_limit_note,
+        });
+
+        let result = execute_tool(&pool, None, "@alice:a", "buy_portfolio_holding", &args).await;
+        let err = result
+            .expect("the tool must handle this call")
+            .expect_err("an over-long note must be rejected");
+        assert!(
+            err.contains(&service::MAX_NOTE_LEN.to_string()),
+            "the error must report the character limit: {err}"
+        );
+    }
 }

@@ -3,6 +3,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -10,12 +11,12 @@ use crate::events::SystemEvent;
 use crate::modules::habits::models::{Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay};
 use crate::modules::habits::repository::HabitsRepository;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ListHabitsQuery {
     pub today: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateHabitRequest {
     pub name: String,
     pub description: Option<String>,
@@ -24,7 +25,7 @@ pub struct CreateHabitRequest {
     pub target_days_per_week: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateHabitRequest {
     pub name: String,
     pub description: Option<String>,
@@ -33,7 +34,7 @@ pub struct UpdateHabitRequest {
     pub target_days_per_week: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ToggleHabitRequest {
     pub date: Option<String>,
     pub note: Option<String>,
@@ -49,6 +50,17 @@ fn get_today_string(override_today: Option<&str>) -> String {
     })
 }
 
+#[utoipa::path(
+    get,
+    tag = "habits",
+    path = "/api/v1/habits",
+    params(ListHabitsQuery),
+    responses(
+        (status = 200, description = "List habits with today's status", body = Vec<HabitWithStatus>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn list_habits(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -62,6 +74,18 @@ pub async fn list_habits(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    post,
+    tag = "habits",
+    path = "/api/v1/habits",
+    request_body = CreateHabitRequest,
+    responses(
+        (status = 200, description = "Habit created", body = Habit),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn create_habit(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -96,6 +120,20 @@ pub async fn create_habit(
     Ok(Json(habit))
 }
 
+#[utoipa::path(
+    put,
+    tag = "habits",
+    path = "/api/v1/habits/{id}",
+    params(("id" = i64, Path, description = "Habit ID")),
+    request_body = UpdateHabitRequest,
+    responses(
+        (status = 200, description = "Habit updated", body = Habit),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 404, description = "Habit not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn update_habit(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -133,6 +171,18 @@ pub async fn update_habit(
     Ok(Json(habit))
 }
 
+#[utoipa::path(
+    delete,
+    tag = "habits",
+    path = "/api/v1/habits/{id}",
+    params(("id" = i64, Path, description = "Habit ID")),
+    responses(
+        (status = 200, description = "Habit deleted"),
+        (status = 404, description = "Habit not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn delete_habit(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -154,6 +204,19 @@ pub async fn delete_habit(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
+#[utoipa::path(
+    post,
+    tag = "habits",
+    path = "/api/v1/habits/{id}/toggle",
+    params(("id" = i64, Path, description = "Habit ID")),
+    request_body = ToggleHabitRequest,
+    responses(
+        (status = 200, description = "Habit log toggled for the given date"),
+        (status = 404, description = "Habit not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn toggle_habit_log(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -191,6 +254,16 @@ pub async fn toggle_habit_log(
     })))
 }
 
+#[utoipa::path(
+    get,
+    tag = "habits",
+    path = "/api/v1/habits/heatmap",
+    responses(
+        (status = 200, description = "Daily completion counts for the heatmap", body = Vec<HeatmapDay>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_heatmap(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -202,6 +275,22 @@ pub async fn get_heatmap(
     Ok(Json(days))
 }
 
+#[utoipa::path(
+    get,
+    tag = "habits",
+    path = "/api/v1/habits/stats",
+    // `utoipa::path` defaults the operation id to the function name, and
+    // `bookmarks::get_stats` already claims plain "get_stats" — an explicit id
+    // keeps the generated OpenAPI operations (and so the TS client) from
+    // colliding. See `portfolio::summary` for the same pattern.
+    operation_id = "habits_get_stats",
+    params(ListHabitsQuery),
+    responses(
+        (status = 200, description = "Habit completion stats summary", body = HabitStatsSummary),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_stats(
     user: AuthUser,
     State(state): State<ApiState>,

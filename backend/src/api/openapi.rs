@@ -3,13 +3,26 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::api::{
-    account, ai, auth, bookmarks, finance, finance_analytics, health, portfolio, portfolio_alerts,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
+    footprints, habits, health, life, life_activity, mcp, ocr, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, todos, webhooks,
+    settings, sse, todos, voice, webhooks, webhooks_telegram,
 };
 use crate::error::ApiErrorResponse;
 use crate::modules::finance::models::{
     Category, CategoryTotal, CurrencySummary, Direction, Transaction,
+};
+use crate::modules::footprints::models::{
+    CreateFootprintRequest, Footprint, FootprintCurrencySpend, FootprintsSummary,
+    UpdateFootprintRequest,
+};
+use crate::modules::habits::models::{
+    DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
+};
+use crate::modules::life::activity::{ActivityEvent, ActivityStats, DayActivityResponse};
+use crate::modules::life::models::{
+    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
+    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
 };
 use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
 use crate::modules::recurring_bills::models::{
@@ -18,6 +31,7 @@ use crate::modules::recurring_bills::models::{
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::settings::UserSettings;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
+use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -30,6 +44,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         auth::webauthn::login_start,
         auth::webauthn::login_finish,
         auth::matrix::login_with_matrix,
+        auth::recovery::redeem_recovery,
         auth::logout,
         account::passkeys::list_passkeys,
         account::passkeys::add_passkey_start,
@@ -53,6 +68,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         rooms::sync_rooms,
         settings::get_settings,
         settings::update_settings,
+        briefing::trigger_briefing,
         todos::list_todos,
         todos::create_todo,
         todos::update_todo,
@@ -67,6 +83,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         finance::update_transaction,
         finance::delete_transaction,
         finance::summary,
+        finance_net_worth::get_net_worth,
         finance::list_categories,
         finance::create_category,
         finance::delete_category,
@@ -126,7 +143,37 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
         bookmarks::update_bookmark,
         bookmarks::toggle_favorite,
         bookmarks::toggle_archive,
-        bookmarks::delete_bookmark
+        bookmarks::delete_bookmark,
+        mcp::list_mcp_tokens,
+        mcp::create_mcp_token,
+        mcp::delete_mcp_token,
+        ocr::scan_image,
+        voice::transcribe_voice,
+        footprints::list_footprints,
+        footprints::create_footprint,
+        footprints::get_footprint,
+        footprints::update_footprint,
+        footprints::delete_footprint,
+        footprints::get_summary_stats,
+        footprints::geocode_proxy,
+        habits::list_habits,
+        habits::create_habit,
+        habits::update_habit,
+        habits::delete_habit,
+        habits::toggle_habit_log,
+        habits::get_heatmap,
+        habits::get_stats,
+        life::get_profile_and_stats,
+        life::upsert_profile,
+        life::get_year_view,
+        life::get_horizon,
+        life::upsert_day,
+        life::update_time_allocation,
+        life::get_day,
+        life::delete_day,
+        life_activity::get_day_activity,
+        webhooks_telegram::telegram_send_message_get,
+        webhooks_telegram::telegram_send_message_post
     ),
     components(
         schemas(
@@ -140,6 +187,7 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             auth::webauthn::SessionResponse,
             auth::matrix::MatrixLoginRequest,
             auth::matrix::MatrixLoginResponse,
+            auth::recovery::RedeemRecoveryRequest,
             account::PasskeySummary,
             account::SessionSummary,
             account::LinkCodeResponse,
@@ -155,6 +203,9 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             rooms::JoinedRoomInfo,
             UserSettings,
             settings::UpdateSettingsRequest,
+            crate::modules::briefing::models::BriefingPayload,
+            crate::modules::briefing::models::BriefingSummary,
+            crate::modules::briefing::models::TickerPerformance,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,
@@ -179,6 +230,8 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
+            crate::modules::finance::net_worth::NetWorthResponse,
+            crate::modules::finance::net_worth::CurrencyNetWorthBreakdown,
             crate::modules::finance::analytics::MonthlyCashflowBucket,
             crate::modules::finance::analytics::ExpenseCategorySlice,
             crate::modules::finance::analytics::FinanceAnalyticsReport,
@@ -236,7 +289,42 @@ use crate::modules::todo::models::{TodoItem, TodoPriority};
             crate::modules::bookmarks::models::CreateBookmarkInput,
             crate::modules::bookmarks::models::UpdateBookmarkInput,
             crate::modules::bookmarks::models::BookmarkStats,
-            crate::modules::bookmarks::models::DomainCount
+            crate::modules::bookmarks::models::DomainCount,
+            crate::modules::mcp::models::CreateMcpTokenRequest,
+            crate::modules::mcp::models::CreateMcpTokenResponse,
+            crate::modules::mcp::models::McpTokenSummary,
+            ocr::OcrScanResponse,
+            ocr::OcrBlockDto,
+            ocr::ReceiptExtractionDto,
+            voice::VoiceTranscribeResponse,
+            Footprint,
+            CreateFootprintRequest,
+            UpdateFootprintRequest,
+            FootprintsSummary,
+            FootprintCurrencySpend,
+            Habit,
+            HabitWithStatus,
+            DayStatus,
+            HeatmapDay,
+            HabitStatsSummary,
+            habits::CreateHabitRequest,
+            habits::UpdateHabitRequest,
+            habits::ToggleHabitRequest,
+            LifeProfile,
+            LifeDayLog,
+            LifeHorizonDay,
+            LifeProfileStats,
+            LifeYearView,
+            UpsertLifeProfileInput,
+            UpsertLifeDayLogInput,
+            UpdateTimeAllocationInput,
+            life::DeleteDayResponse,
+            ActivityEvent,
+            ActivityStats,
+            DayActivityResponse,
+            TelegramQuery,
+            TelegramResponse,
+            TelegramMessageResult
         )
     ),
     modifiers(&SecurityAddon),
@@ -304,5 +392,129 @@ mod tests {
             schemes["session_cookie"].is_object(),
             "paths reference `bearer_auth`, so it must be declared"
         );
+    }
+
+    /// Every route the server serves must appear in the document CI diffs.
+    ///
+    /// Six API files carried no annotations at all, so their endpoints were
+    /// absent from `openapi.json` and from the generated frontend client, and
+    /// the CI check that diffs that document could not see them. Routes are
+    /// read out of `routes.rs` rather than listed here, because a hand-kept
+    /// second copy is the thing that drifts.
+    #[test]
+    fn test_every_route_is_documented() {
+        // Routes that genuinely should not be in the document, each with why.
+        const UNDOCUMENTED: &[&str] = &[
+            // Serves the OpenAPI document itself; documenting the endpoint
+            // that serves the documentation would be circular.
+            "/api/v1/api-docs/openapi.json",
+            // MCP SSE transport handshake: an `event-stream` response with no
+            // JSON request or response body to describe.
+            "/api/v1/mcp/sse",
+            // MCP JSON-RPC messages (SSE session mode): a generic JSON-RPC
+            // 2.0 envelope whose real shape depends on the method being
+            // called, so one schema would misdescribe every method but one.
+            "/api/v1/mcp/messages",
+            // MCP direct JSON-RPC endpoint: same reasoning as `/mcp/messages`.
+            "/api/v1/mcp/",
+            // This handler is nested here too (`routes_ai_and_webhooks`
+            // mounts it under `/api/v1`), but it is documented at the one
+            // path it is *meant* to be reached at: `/bot{token}/sendMessage`,
+            // mounted outside `/api/v1` in `api/mod.rs` to mirror Telegram's
+            // own unprefixed Bot API URL shape. The `/api/v1`-nested mount is
+            // an incidental duplicate of that same handler, not a second
+            // documented surface.
+            "/api/v1/bot{token}/sendMessage",
+        ];
+
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        let routes_src = std::fs::read_to_string(manifest_dir.join("src/api/routes.rs"))
+            .expect("src/api/routes.rs must be readable");
+        let mut routes: Vec<String> = extract_route_paths(&routes_src)
+            .iter()
+            .map(|path| format!("/api/v1{}", axum_path_to_openapi(path)))
+            .collect();
+
+        // `.nest("/mcp", mcp::mcp_routes())` mounts a whole other route table
+        // defined in `mcp.rs`; `routes.rs` only names the mount point, not
+        // the routes underneath it, so that file is parsed separately.
+        let mcp_src = std::fs::read_to_string(manifest_dir.join("src/api/mcp.rs"))
+            .expect("src/api/mcp.rs must be readable");
+        routes.extend(
+            extract_route_paths(&mcp_src)
+                .iter()
+                .map(|path| format!("/api/v1/mcp{}", axum_path_to_openapi(path))),
+        );
+
+        let doc = ApiDoc::openapi();
+        let documented: std::collections::HashSet<&str> =
+            doc.paths.paths.keys().map(String::as_str).collect();
+
+        let mut missing: Vec<&str> = routes
+            .iter()
+            .map(String::as_str)
+            .filter(|route| !documented.contains(route) && !UNDOCUMENTED.contains(route))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+
+        assert!(
+            missing.is_empty(),
+            "routes missing from the OpenAPI document (add a #[utoipa::path], \
+             or if it genuinely should not be documented add it to \
+             UNDOCUMENTED with a reason): {missing:#?}"
+        );
+    }
+
+    /// Every `.route("<path>"` string literal in an axum route-table source
+    /// file, in source order. Duplicates are kept; callers only need set
+    /// membership.
+    fn extract_route_paths(source: &str) -> Vec<String> {
+        const NEEDLE: &str = ".route(";
+        let mut paths = Vec::new();
+        let mut rest = source;
+        while let Some(idx) = rest.find(NEEDLE) {
+            rest = &rest[idx + NEEDLE.len()..];
+            if let Some(path) = next_string_literal(rest) {
+                paths.push(path);
+            }
+        }
+        paths
+    }
+
+    /// The contents of the next `"..."` literal in `s`, if any.
+    fn next_string_literal(s: &str) -> Option<String> {
+        let start = s.find('"')?;
+        let after = &s[start + 1..];
+        let end = after.find('"')?;
+        Some(after[..end].to_string())
+    }
+
+    /// Converts axum's path-parameter syntax (`:id`) to OpenAPI's (`{id}`).
+    ///
+    /// Applied wherever `:name` appears rather than only on whole segments,
+    /// because one route embeds its parameter mid-segment:
+    /// `/bot:token/sendMessage`.
+    fn axum_path_to_openapi(path: &str) -> String {
+        let mut out = String::with_capacity(path.len());
+        let mut chars = path.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != ':' {
+                out.push(c);
+                continue;
+            }
+            out.push('{');
+            while let Some(&next) = chars.peek() {
+                if next.is_ascii_alphanumeric() || next == '_' {
+                    out.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            out.push('}');
+        }
+        out
     }
 }

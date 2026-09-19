@@ -175,13 +175,12 @@ pub async fn execute_tool(
                 };
 
                 let (updated_bill, tx) =
-                    RecurringBillRepository::mark_paid(pool, bill_id, owner_id)
+                    RecurringBillRepository::mark_paid(pool, bill_id, owner_id, broadcaster)
                         .await
                         .map_err(|e| e.to_string())?;
 
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::RecurringBillUpdated(updated_bill.clone()));
-                    b.send(SystemEvent::TransactionCreated(tx.clone()));
                 }
 
                 serde_json::to_string(&json!({

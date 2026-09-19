@@ -39,7 +39,7 @@ pub struct VerifyAiKeyInput {
     pub model_name: Option<String>,
 }
 
-pub fn validate_ai_base_url(url_str: &str) -> Result<(), &'static str> {
+pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'static str> {
     let trimmed = url_str.trim();
     if trimmed.is_empty() {
         return Ok(());
@@ -64,10 +64,6 @@ pub fn validate_ai_base_url(url_str: &str) -> Result<(), &'static str> {
     {
         return Err("API base URL cannot target link-local metadata addresses");
     }
-
-    let allow_private = std::env::var("AI_ALLOW_PRIVATE_BASE_URL")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false);
 
     if !allow_private {
         if host_lower.ends_with(".internal")
@@ -155,9 +151,9 @@ fn is_disallowed_ip(ip: std::net::IpAddr) -> bool {
 }
 
 impl VerifyAiKeyInput {
-    pub fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self, allow_private: bool) -> Result<(), &'static str> {
         if let Some(ref url_str) = self.api_base_url {
-            validate_ai_base_url(url_str)?;
+            validate_ai_base_url(url_str, allow_private)?;
         }
         if let Some(ref key) = self.api_key {
             if key.len() > 500 {
@@ -191,9 +187,9 @@ pub struct UpdateAiConfigInput {
 }
 
 impl UpdateAiConfigInput {
-    pub fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self, allow_private: bool) -> Result<(), &'static str> {
         if let Some(ref url_str) = self.api_base_url {
-            validate_ai_base_url(url_str)?;
+            validate_ai_base_url(url_str, allow_private)?;
         }
         if let Some(ref key) = self.api_key {
             if key.len() > 500 {
@@ -405,14 +401,14 @@ mod tests {
             api_base_url: Some("https://api.openai.com/v1".to_string()),
             ..Default::default()
         };
-        assert!(valid.validate().is_ok());
+        assert!(valid.validate(false).is_ok());
 
         let invalid_scheme = UpdateAiConfigInput {
             api_base_url: Some("ftp://example.com".to_string()),
             ..Default::default()
         };
         assert_eq!(
-            invalid_scheme.validate().unwrap_err(),
+            invalid_scheme.validate(false).unwrap_err(),
             "API base URL must use http or https scheme"
         );
 
@@ -421,7 +417,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            ssrf_metadata.validate().unwrap_err(),
+            ssrf_metadata.validate(false).unwrap_err(),
             "API base URL cannot target link-local metadata addresses"
         );
 
@@ -430,7 +426,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            ssrf_loopback.validate().unwrap_err(),
+            ssrf_loopback.validate(false).unwrap_err(),
             "API base URL cannot target private or loopback IP addresses"
         );
 
@@ -439,7 +435,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            ssrf_localhost.validate().unwrap_err(),
+            ssrf_localhost.validate(false).unwrap_err(),
             "API base URL cannot target internal or local domain names"
         );
 
@@ -448,7 +444,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            ssrf_internal.validate().unwrap_err(),
+            ssrf_internal.validate(false).unwrap_err(),
             "API base URL cannot target internal or local domain names"
         );
 
@@ -458,7 +454,7 @@ mod tests {
             ..Default::default()
         };
         assert!(ssrf_dns
-            .validate()
+            .validate(false)
             .unwrap_err()
             .contains("private or loopback IP address"));
 
@@ -467,7 +463,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            ssrf_localtest.validate().unwrap_err(),
+            ssrf_localtest.validate(false).unwrap_err(),
             "API base URL cannot target internal or local domain names"
         );
     }
@@ -478,14 +474,14 @@ mod tests {
             max_history_turns: Some(10),
             ..Default::default()
         };
-        assert!(valid.validate().is_ok());
+        assert!(valid.validate(false).is_ok());
 
         let too_low = UpdateAiConfigInput {
             max_history_turns: Some(0),
             ..Default::default()
         };
         assert_eq!(
-            too_low.validate().unwrap_err(),
+            too_low.validate(false).unwrap_err(),
             "Max history turns must be between 1 and 100"
         );
 
@@ -494,7 +490,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            too_high.validate().unwrap_err(),
+            too_high.validate(false).unwrap_err(),
             "Max history turns must be between 1 and 100"
         );
     }

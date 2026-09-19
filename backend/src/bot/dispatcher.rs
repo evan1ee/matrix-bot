@@ -97,6 +97,44 @@ impl CommandParser {
         })
     }
 
+    /// Parses a message, falling back to treating a direct message as an AI
+    /// prompt.
+    ///
+    /// Every other rule about what counts as a command lives here; this one was
+    /// written inline at the call site, so the parser could not be asked "is
+    /// this a command?" and give the right answer.
+    pub fn parse_or_dm_prompt(
+        body: &str,
+        formatted_body: Option<&str>,
+        own_id: &UserId,
+        room_id: &str,
+        sender_localpart: &str,
+        is_direct: bool,
+    ) -> Option<ParsedCommand> {
+        if let Some(parsed) =
+            Self::parse_message(body, formatted_body, own_id, room_id, sender_localpart)
+        {
+            return Some(parsed);
+        }
+
+        let trimmed = body.trim();
+        if is_direct && !trimmed.is_empty() {
+            let (quoted, prompt) =
+                crate::bot::quote::extract_quote_and_prompt(trimmed, formatted_body);
+            Some(ParsedCommand {
+                room_id: room_id.to_string(),
+                sender_name: sender_localpart.to_string(),
+                command: "ai".to_string(),
+                raw_args: prompt.clone(),
+                full_body: prompt,
+                is_mentioned: false,
+                quoted,
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn is_ai_prompt_command(parsed: &ParsedCommand) -> bool {
         let cmd = parsed.command.to_ascii_lowercase();
         if cmd == "ai" || cmd == "ask" {
@@ -251,6 +289,71 @@ mod tests {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Quoted chat\n\nI disagree with your point.";
         let res = CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice");
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_parse_or_dm_prompt_command_in_dm_stays_a_command() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let ctx = CommandParser::parse_or_dm_prompt(
+            "!todo add Buy milk",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "todo");
+        assert_eq!(ctx.raw_args, "add Buy milk");
+    }
+
+    #[test]
+    fn test_parse_or_dm_prompt_plain_text_in_dm_becomes_ai_prompt() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let ctx = CommandParser::parse_or_dm_prompt(
+            "What's the weather like tomorrow?",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "ai");
+        assert_eq!(ctx.raw_args, "What's the weather like tomorrow?");
+        assert_eq!(ctx.full_body, "What's the weather like tomorrow?");
+        assert!(!ctx.is_mentioned);
+        assert!(ctx.quoted.is_none());
+    }
+
+    #[test]
+    fn test_parse_or_dm_prompt_plain_text_outside_dm_is_ignored() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let res = CommandParser::parse_or_dm_prompt(
+            "Just a random chatter message without bot mention",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "charlie",
+            false,
+        );
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_parse_or_dm_prompt_whitespace_only_in_dm_is_ignored() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let res = CommandParser::parse_or_dm_prompt(
+            "   \n\t  ",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            "alice",
+            true,
+        );
         assert!(res.is_none());
     }
 }

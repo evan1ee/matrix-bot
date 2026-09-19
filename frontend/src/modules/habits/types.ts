@@ -1,46 +1,14 @@
-export interface Habit {
-  id: number;
-  owner_id: string;
-  name: string;
-  description?: string | null;
-  frequency: string;
-  category: string;
-  target_days_per_week: number;
-  archived: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+import type { components } from '../../types/api';
 
-export interface DayStatus {
-  date: string;
-  completed: boolean;
-}
+export type Habit = components['schemas']['Habit'];
 
-export interface HabitWithStatus extends Habit {
-  completed_today: boolean;
-  current_streak: number;
-  longest_streak: number;
-  total_completions: number;
-  last_7_days: DayStatus[];
-}
+export type DayStatus = components['schemas']['DayStatus'];
 
-export interface HeatmapDay {
-  date: string;
-  count: number;
-}
+export type HabitWithStatus = components['schemas']['HabitWithStatus'];
 
-export interface HabitStatsSummary {
-  total_active_habits: number;
-  completed_today: number;
-  completion_rate_today_percent: number;
-  best_streak: number;
-  total_all_time_completions: number;
-}
+export type HeatmapDay = components['schemas']['HeatmapDay'];
 
-export interface CreateHabitPayload {
-  name: string;
-  description?: string;
-  category?: string;
-  frequency?: string;
-  target_days_per_week?: number;
-}
+export type HabitStatsSummary = components['schemas']['HabitStatsSummary'];
+
+// Frontend-only name; server schema is CreateHabitRequest.
+export type CreateHabitPayload = components['schemas']['CreateHabitRequest'];

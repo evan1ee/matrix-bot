@@ -4,6 +4,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -14,7 +15,7 @@ use crate::modules::life::models::{
 };
 use crate::modules::life::repository::LifeRepository;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeleteDayResponse {
     pub success: bool,
     pub date: String,
@@ -28,6 +29,16 @@ fn get_today_string() -> String {
         .to_string()
 }
 
+#[utoipa::path(
+    get,
+    tag = "life",
+    path = "/api/v1/life/profile",
+    responses(
+        (status = 200, description = "Life profile and computed stats", body = LifeProfileStats),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_profile_and_stats(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -40,6 +51,20 @@ pub async fn get_profile_and_stats(
     Ok(Json(stats))
 }
 
+/// Also mounted as `POST /api/v1/life/profile` for the same handler — utoipa
+/// documents one method per function, so this covers the `PUT` form.
+#[utoipa::path(
+    put,
+    tag = "life",
+    path = "/api/v1/life/profile",
+    request_body = UpsertLifeProfileInput,
+    responses(
+        (status = 200, description = "Profile created or updated", body = LifeProfile),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn upsert_profile(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -66,6 +91,18 @@ pub async fn upsert_profile(
     Ok(Json(profile))
 }
 
+#[utoipa::path(
+    get,
+    tag = "life",
+    path = "/api/v1/life/year/{year}",
+    params(("year" = i64, Path, description = "Calendar year")),
+    responses(
+        (status = 200, description = "All logged days for the year", body = LifeYearView),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_year_view(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -82,6 +119,16 @@ pub async fn get_year_view(
     Ok(Json(view))
 }
 
+#[utoipa::path(
+    get,
+    tag = "life",
+    path = "/api/v1/life/horizon",
+    responses(
+        (status = 200, description = "Upcoming days on the life horizon", body = Vec<LifeHorizonDay>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_horizon(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -93,6 +140,18 @@ pub async fn get_horizon(
     Ok(Json(horizon))
 }
 
+#[utoipa::path(
+    post,
+    tag = "life",
+    path = "/api/v1/life/days",
+    request_body = UpsertLifeDayLogInput,
+    responses(
+        (status = 200, description = "Day logged", body = LifeDayLog),
+        (status = 400, description = "Bad request, or day already logged", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn upsert_day(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -175,6 +234,19 @@ pub async fn upsert_day(
     Ok(Json(log))
 }
 
+#[utoipa::path(
+    put,
+    tag = "life",
+    path = "/api/v1/life/days/{date}/time",
+    params(("date" = String, Path, description = "Day, as YYYY-MM-DD")),
+    request_body = UpdateTimeAllocationInput,
+    responses(
+        (status = 200, description = "Time allocation updated", body = LifeDayLog),
+        (status = 400, description = "Bad request, or day is sealed", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn update_time_allocation(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -225,6 +297,18 @@ pub async fn update_time_allocation(
     Ok(Json(log))
 }
 
+#[utoipa::path(
+    get,
+    tag = "life",
+    path = "/api/v1/life/days/{date}",
+    params(("date" = String, Path, description = "Day, as YYYY-MM-DD")),
+    responses(
+        (status = 200, description = "The day's log, if any", body = Option<LifeDayLog>),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_day(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -243,6 +327,18 @@ pub async fn get_day(
     Ok(Json(log))
 }
 
+#[utoipa::path(
+    delete,
+    tag = "life",
+    path = "/api/v1/life/days/{date}",
+    params(("date" = String, Path, description = "Day, as YYYY-MM-DD")),
+    responses(
+        (status = 200, description = "Day cleared, or was already empty", body = DeleteDayResponse),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn delete_day(
     user: AuthUser,
     State(state): State<ApiState>,

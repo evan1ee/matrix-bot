@@ -9,12 +9,19 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
-use crate::events::SystemEvent;
-use crate::modules::reminder::models::ReminderSource;
-use crate::modules::reminder::repository::ReminderRepository;
-use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
+use crate::modules::todo::service::{self, NewTodo, TodoError, TodoPatch};
+
+impl From<TodoError> for ApiError {
+    fn from(err: TodoError) -> Self {
+        match err {
+            TodoError::NotFound => ApiError::not_found(err.to_string()),
+            TodoError::Db(inner) => ApiError::internal(inner.to_string()),
+            other => ApiError::bad_request(other.to_string()),
+        }
+    }
+}
 
 #[derive(Deserialize, IntoParams, ToSchema)]
 pub struct TodoQuery {
@@ -71,37 +78,6 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
-}
-
-/// Resolves where a due reminder should be delivered.
-///
-/// A task created from the web carries the `web` sentinel rather than a room,
-/// so the caller must name one. Local accounts share no room with the bot
-/// (`api/rooms.rs` returns them an empty list by design), so they cannot.
-fn reminder_room<'a>(explicit: Option<&'a str>, todo_room: &'a str) -> Result<&'a str, ApiError> {
-    match explicit {
-        Some(room) if !room.trim().is_empty() => Ok(room),
-        _ if todo_room != "web" => Ok(todo_room),
-        _ => Err(ApiError::bad_request(
-            "remind_room_id is required for a reminder on a task that has no Matrix room",
-        )),
-    }
-}
-
-/// Rejects lead times that are zero, negative, or absurdly far out.
-fn validate_lead(minutes: i64) -> Result<(), ApiError> {
-    if minutes <= 0 {
-        return Err(ApiError::bad_request(
-            "remind_before_minutes must be greater than zero; send null to clear it",
-        ));
-    }
-    if minutes > due_reminder::MAX_LEAD_MINUTES {
-        return Err(ApiError::bad_request(format!(
-            "remind_before_minutes must be at most {} (30 days)",
-            due_reminder::MAX_LEAD_MINUTES
-        )));
-    }
-    Ok(())
 }
 
 #[derive(Serialize, ToSchema)]
@@ -190,16 +166,6 @@ pub async fn create_todo(
     user: AuthUser,
     Json(payload): Json<CreateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
-    if payload.text.trim().is_empty() {
-        return Err(ApiError::bad_request("Task text required"));
-    }
-
-    if payload.text.len() > 500 {
-        return Err(ApiError::bad_request(
-            "Task text exceeds 500 character limit",
-        ));
-    }
-
     let priority = payload
         .priority
         .as_deref()
@@ -221,46 +187,21 @@ pub async fn create_todo(
         None
     };
 
-    // Validate before writing, so a rejected reminder never leaves a task
-    // behind with a lead time that was silently dropped.
-    if let Some(minutes) = payload.remind_before_minutes {
-        validate_lead(minutes)?;
-        if payload.due_at.is_none() {
-            return Err(ApiError::bad_request(
-                "remind_before_minutes requires a due_at to count back from",
-            ));
-        }
-        reminder_room(remind_room.as_deref(), &room_id)?;
-    }
-
-    let item = TodoRepository::add(
-        &state.db.pool,
-        &room_id,
-        &user.owner_id(),
-        &user.display_name,
-        &payload.text,
-        priority,
-        payload.due_at,
-        payload.remind_before_minutes,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let remind_room = reminder_room(remind_room.as_deref(), &item.room_id)
-        .unwrap_or(&item.room_id)
-        .to_string();
-    due_reminder::sync(
+    let item = service::create(
         &state.db.pool,
         Some(&state.broadcaster),
-        &item,
-        &remind_room,
+        &user.owner_id(),
+        NewTodo {
+            text: &payload.text,
+            priority,
+            room_id: &room_id,
+            sender_name: &user.display_name,
+            due_at: payload.due_at,
+            remind_before_minutes: payload.remind_before_minutes,
+            remind_room_id: remind_room.as_deref(),
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::TodoCreated(item.clone()));
+    .await?;
 
     Ok(Json(item))
 }
@@ -283,89 +224,26 @@ pub async fn update_todo(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
-    let existing = TodoRepository::find_owned(&state.db.pool, id, &user.owner_id())
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Task not found or access denied"))?;
+    let priority = payload
+        .priority
+        .as_deref()
+        .map(TodoPriority::from_str_or_default);
 
-    if let Some(Some(minutes)) = payload.remind_before_minutes {
-        validate_lead(minutes)?;
-    }
-
-    if let Some(text) = payload.text {
-        TodoRepository::edit_text(&state.db.pool, id, &text)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    if let Some(prio) = payload.priority {
-        TodoRepository::set_priority(&state.db.pool, id, TodoPriority::from_str_or_default(&prio))
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    if let Some(completed) = payload.completed {
-        TodoRepository::set_completed(&state.db.pool, id, completed)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    if let Some(due) = payload.due_at {
-        TodoRepository::set_due_date(&state.db.pool, id, due)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    if let Some(minutes) = payload.remind_before_minutes {
-        TodoRepository::set_remind_before(&state.db.pool, id, minutes)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    // Re-read rather than patching the in-memory copy: the reminder is
-    // reconciled from stored state, so the two must agree.
-    let item = TodoRepository::find(&state.db.pool, id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Task not found or access denied"))?;
-
-    if due_reminder::wanted_trigger(&item).is_some() {
-        // Keep delivering wherever the existing reminder already goes unless the
-        // caller names a new room. Without this fallback, editing just the text
-        // of a web task that has a reminder would fail for want of a room the
-        // caller never intended to change.
-        let current_room =
-            ReminderRepository::find_pending_for_source(&state.db.pool, ReminderSource::Todo, id)
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?
-                .map(|r| r.room_id);
-
-        let remind_room = match payload.remind_room_id.as_deref() {
-            Some(room) if !room.trim().is_empty() => room.to_string(),
-            _ => match current_room {
-                Some(room) => room,
-                None => reminder_room(None, &item.room_id)?.to_string(),
-            },
-        };
-
-        due_reminder::sync(
-            &state.db.pool,
-            Some(&state.broadcaster),
-            &item,
-            &remind_room,
-        )
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    } else if due_reminder::wanted_trigger(&existing).is_some() {
-        // The task no longer wants a reminder but used to — tear the old one down.
-        due_reminder::tear_down(&state.db.pool, Some(&state.broadcaster), id)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    state
-        .broadcaster
-        .send(SystemEvent::TodoUpdated(item.clone()));
+    let item = service::update(
+        &state.db.pool,
+        Some(&state.broadcaster),
+        &user.owner_id(),
+        id,
+        TodoPatch {
+            text: payload.text.as_deref(),
+            priority,
+            completed: payload.completed,
+            due_at: payload.due_at,
+            remind_before_minutes: payload.remind_before_minutes,
+            remind_room_id: payload.remind_room_id.as_deref(),
+        },
+    )
+    .await?;
 
     Ok(Json(item))
 }
@@ -386,27 +264,13 @@ pub async fn delete_todo(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let owner_id = user.owner_id();
-    let item = TodoRepository::find_owned(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Task not found or access denied"))?;
-
-    // Cancel first: a reminder whose task no longer exists would fire pointing
-    // at nothing.
-    due_reminder::tear_down(&state.db.pool, Some(&state.broadcaster), id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    TodoRepository::delete(&state.db.pool, id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(SystemEvent::TodoDeleted {
+    service::delete(
+        &state.db.pool,
+        Some(&state.broadcaster),
+        &user.owner_id(),
         id,
-        room_id: item.room_id,
-        owner_id,
-    });
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -416,6 +280,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use crate::modules::reminder::models::ReminderSource;
+    use crate::modules::reminder::repository::ReminderRepository;
+    use crate::modules::todo::due_reminder;
     use sqlx::SqlitePool;
 
     /// `total` must count only the requested completion state.

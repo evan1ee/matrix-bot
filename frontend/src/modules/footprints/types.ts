@@ -1,56 +1,20 @@
-export interface Footprint {
-  id: number;
-  owner_id: string;
-  title: string;
-  latitude: number;
-  longitude: number;
-  country: string | null;
-  city: string | null;
-  address: string | null;
-  arrival_date: string;
-  departure_date: string | null;
-  stay_duration_days: number;
-  spend_amount_minor: number;
-  spend_currency: string;
-  spend_currency_exponent: number;
-  rating: number;
-  category: string;
-  note: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import type { components } from '../../types/api';
 
-export interface CreateFootprintInput {
-  title: string;
-  latitude: number;
-  longitude: number;
-  country?: string | null;
-  city?: string | null;
-  address?: string | null;
-  arrival_date: string;
-  departure_date?: string | null;
-  spend_amount?: string;
-  spend_currency?: string;
-  rating?: number;
-  category?: string;
-  note?: string | null;
-}
+export type Footprint = components['schemas']['Footprint'];
 
-export interface UpdateFootprintInput extends Partial<CreateFootprintInput> {}
+// Frontend-only name; server schema is CreateFootprintRequest.
+export type CreateFootprintInput = components['schemas']['CreateFootprintRequest'];
 
-export interface FootprintCurrencySpend {
-  currency: string;
-  currency_exponent: number;
-  total_spend_minor: number;
-}
+// Frontend-only name; server schema is UpdateFootprintRequest.
+export type UpdateFootprintInput = components['schemas']['UpdateFootprintRequest'];
 
-export interface FootprintsSummaryStats {
-  total_places: number;
-  total_countries: number;
-  total_days_traveled: number;
-  spend_by_currency: FootprintCurrencySpend[];
-}
+export type FootprintCurrencySpend = components['schemas']['FootprintCurrencySpend'];
 
+// Frontend-only name; server schema is FootprintsSummary.
+export type FootprintsSummaryStats = components['schemas']['FootprintsSummary'];
+
+// Frontend-only: shape of a Nominatim (OpenStreetMap) geocoding API result.
+// No server equivalent — this is an external third-party API response.
 export interface NominatimSearchResult {
   place_id: number;
   lat: string;

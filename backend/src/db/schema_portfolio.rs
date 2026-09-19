@@ -1,5 +1,18 @@
 use sqlx::SqlitePool;
 
+/// The statement that creates the audit-log immutability trigger.
+///
+/// Public because `modules::portfolio::audit::absorb_ledger` has to drop and
+/// restore this trigger to move a ledger between owners, and two copies of the
+/// text would drift.
+pub const AUDIT_UPDATE_TRIGGER: &str = r#"
+        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_update
+        BEFORE UPDATE ON portfolio_audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit log entries are immutable and cannot be updated');
+        END;
+        "#;
+
 pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Investment holdings. One row per (owner, symbol)
     sqlx::query(
@@ -84,17 +97,7 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        r#"
-        CREATE TRIGGER IF NOT EXISTS prevent_portfolio_audit_update
-        BEFORE UPDATE ON portfolio_audit_log
-        BEGIN
-            SELECT RAISE(ABORT, 'Audit log entries are immutable and cannot be updated');
-        END;
-        "#,
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query(AUDIT_UPDATE_TRIGGER).execute(pool).await?;
 
     sqlx::query(
         r#"

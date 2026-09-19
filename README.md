@@ -266,7 +266,9 @@ DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
 # Web & API Server
 API_HOST=0.0.0.0
 API_PORT=8080
-API_REGISTRATION_SECRET=optional_secret_gating_registration
+# Registration Security Guard (Production defaults to closed)
+INVITE_SECRET=optional_invite_secret_for_registration   # or API_REGISTRATION_SECRET
+REGISTRATION_OPEN=false                                  # set true or pass --allow-open-registration to allow open registration
 
 # WebAuthn / Passkeys
 # WEBAUTHN_RP_ID is a bare domain (no port or scheme).

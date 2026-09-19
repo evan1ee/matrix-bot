@@ -158,6 +158,114 @@ pub async fn record_audit_entry(
     Ok(entry)
 }
 
+/// Moves `from`'s ledger onto `into` and recomputes the surviving chain.
+///
+/// The ledger is immutable by trigger and its hashes are bound to `owner_id`,
+/// so a merge cannot re-point these rows the way it re-points every other
+/// owned table. It drops the immutability trigger for the length of the
+/// transaction, moves the rows, appends an entry recording the absorption, and
+/// rebuilds every hash for the surviving owner from the genesis hash.
+///
+/// Nothing a user entered is altered: action, symbol, quantity, price, amount,
+/// currency, realised P&L, note and timestamp all survive untouched. Only the
+/// chain linkage is recomputed, and it has to be, because `owner_id` is part
+/// of every digest. The rebuild is itself recorded in the ledger rather than
+/// being silent.
+///
+/// Returns how many rows moved. Zero means `from` had no ledger, in which case
+/// nothing is dropped, appended or rebuilt.
+///
+/// The caller must already be inside a transaction. If it rolls back, SQLite
+/// undoes the `DROP TRIGGER` with everything else, so the trigger cannot be
+/// left off.
+pub async fn absorb_ledger(
+    conn: &mut sqlx::SqliteConnection,
+    from: &str,
+    into: &str,
+) -> Result<i64, sqlx::Error> {
+    let moved: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
+            .bind(from)
+            .fetch_one(&mut *conn)
+            .await?;
+
+    if moved == 0 {
+        return Ok(0);
+    }
+
+    sqlx::query("DROP TRIGGER IF EXISTS prevent_portfolio_audit_update")
+        .execute(&mut *conn)
+        .await?;
+
+    sqlx::query("UPDATE portfolio_audit_log SET owner_id = ? WHERE owner_id = ?")
+        .bind(into)
+        .bind(from)
+        .execute(&mut *conn)
+        .await?;
+
+    // Placeholder hashes below are overwritten by the rebuild pass that
+    // follows; there is no INSERT trigger, so this row is allowed to land
+    // with them briefly incorrect.
+    sqlx::query(
+        "INSERT INTO portfolio_audit_log \
+         (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency, \
+          currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at) \
+         VALUES (?, 'merge', NULL, NULL, NULL, 0, '', 2, NULL, ?, ?, '', ?)",
+    )
+    .bind(into)
+    .bind(format!(
+        "Absorbed {moved} ledger entries from account {from}"
+    ))
+    .bind(GENESIS_HASH)
+    .bind(Utc::now())
+    .execute(&mut *conn)
+    .await?;
+
+    // Ordered by `id` ascending: ids come from a single global autoincrement,
+    // so id order is insertion order across both accounts, which gives a
+    // chronologically coherent merged history.
+    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
+        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
+    ))
+    .bind(into)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut prev = GENESIS_HASH.to_string();
+    for entry in &entries {
+        let epoch_ms = entry.created_at.map(|t| t.timestamp_millis()).unwrap_or(0);
+        let entry_hash = compute_entry_hash(
+            &prev,
+            into,
+            &entry.action,
+            entry.symbol.as_deref(),
+            entry.quantity_minor,
+            entry.price_minor,
+            entry.amount_minor,
+            &entry.currency,
+            entry.currency_exponent,
+            entry.realized_pl_minor,
+            entry.note.as_deref(),
+            epoch_ms,
+        );
+
+        sqlx::query("UPDATE portfolio_audit_log SET prev_hash = ?, entry_hash = ? WHERE id = ?")
+            .bind(&prev)
+            .bind(&entry_hash)
+            .bind(entry.id)
+            .execute(&mut *conn)
+            .await?;
+
+        prev = entry_hash;
+    }
+
+    sqlx::query(crate::db::schema_portfolio::AUDIT_UPDATE_TRIGGER)
+        .execute(&mut *conn)
+        .await?;
+
+    Ok(moved)
+}
+
 /// Retrieves the paginated audit activity log for an owner in reverse chronological order.
 pub async fn list_audit_entries(
     pool: &SqlitePool,

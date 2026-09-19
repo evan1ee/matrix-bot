@@ -88,18 +88,25 @@ async fn show(pool: &SqlitePool, owner_id: &str) -> String {
         .as_deref()
         .map(|r| format!("<code>{}</code>", html_escape(r)))
         .unwrap_or_else(|| "<i>Not configured</i>".to_string());
+    let briefing_display = if settings.briefing_enabled {
+        format!("Enabled at <b>{}</b>", html_escape(&settings.briefing_time))
+    } else {
+        "Disabled".to_string()
+    };
 
     format!(
         "⚙️ <b>Your settings</b><br/>\
          • Timezone: <b>{}</b> — it is currently {}<br/>\
          • Default currency: <b>{}</b><br/>\
          • Dev room: {}<br/>\
-         • Max AI history: <b>{} messages</b><br/><br/>{}",
+         • Max AI history: <b>{} messages</b><br/>\
+         • Morning briefing: {}<br/><br/>{}",
         html_escape(&settings.timezone),
         html_escape(&now),
         html_escape(&settings.currency),
         dev_room_display,
         settings.max_history_turns,
+        briefing_display,
         usage()
     )
 }
@@ -124,13 +131,8 @@ async fn set_history(
         }
     };
 
-    let current = SettingsRepository::get_or_default(pool, owner_id).await;
-    let updated = UserSettings {
-        timezone: current.timezone,
-        currency: current.currency,
-        dev_room_id: current.dev_room_id,
-        max_history_turns: turns,
-    };
+    let mut updated = SettingsRepository::get_or_default(pool, owner_id).await;
+    updated.max_history_turns = turns;
 
     match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
@@ -159,13 +161,8 @@ async fn set_timezone(
         );
     };
 
-    let current = SettingsRepository::get_or_default(pool, owner_id).await;
-    let updated = UserSettings {
-        timezone: tz.name().to_string(),
-        currency: current.currency,
-        dev_room_id: current.dev_room_id,
-        max_history_turns: current.max_history_turns,
-    };
+    let mut updated = SettingsRepository::get_or_default(pool, owner_id).await;
+    updated.timezone = tz.name().to_string();
 
     match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
@@ -197,13 +194,8 @@ async fn set_currency(
         }
     };
 
-    let current = SettingsRepository::get_or_default(pool, owner_id).await;
-    let updated = UserSettings {
-        timezone: current.timezone,
-        currency,
-        dev_room_id: current.dev_room_id,
-        max_history_turns: current.max_history_turns,
-    };
+    let mut updated = SettingsRepository::get_or_default(pool, owner_id).await;
+    updated.currency = currency;
 
     match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => format!(
@@ -232,12 +224,8 @@ async fn set_dev_room(
         Some(value.to_string())
     };
 
-    let updated = UserSettings {
-        timezone: current.timezone,
-        currency: current.currency,
-        dev_room_id,
-        max_history_turns: current.max_history_turns,
-    };
+    let mut updated = current;
+    updated.dev_room_id = dev_room_id;
 
     match save(pool, owner_id, updated, broadcaster).await {
         Ok(saved) => match saved.dev_room_id {

@@ -10,6 +10,7 @@ import { AiConversation, AiMessage, AiChatResponse, AiUserConfig } from './types
 import { AiSettingsModal } from './SettingsModal';
 import { RetrospectiveModal } from './RetrospectiveModal';
 import { MarkdownRenderer } from '../../components/MarkdownRenderer';
+import { VoiceDictateButton } from '../../components/VoiceDictateButton';
 import { useSettings, formatShortTimeInZone, browserTimezone } from '../../core/settings';
 
 export * from './types';
@@ -486,15 +487,24 @@ const AiAssistantView: React.FC<{
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask AI assistant... (Enter to send, Shift+Enter for newline)"
-          className="w-full px-3.5 py-2.5 pr-12 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 rounded-lg text-sm focus:outline-none focus:border-neutral-500 font-sans resize-none shadow-2xs"
+          className="w-full px-3.5 py-2.5 pr-20 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 rounded-lg text-sm focus:outline-none focus:border-neutral-500 font-sans resize-none shadow-2xs"
         />
-        <button
-          type="submit"
-          disabled={!prompt.trim() || chatMutation.isPending}
-          className="absolute right-2.5 bottom-2.5 p-1.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-40 cursor-pointer"
-        >
-          <Send className="w-3.5 h-3.5" />
-        </button>
+        <div className="absolute right-2.5 bottom-2.5 flex items-center gap-1.5">
+          <VoiceDictateButton
+            onTranscript={(text) =>
+              setPrompt((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+            }
+            disabled={chatMutation.isPending}
+          />
+          <button
+            type="submit"
+            disabled={!prompt.trim() || chatMutation.isPending}
+            className="p-1.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-40 cursor-pointer"
+            title="Send message"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </form>
 
       {/* Settings Modal */}

@@ -598,6 +598,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/recovery/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["redeem_recovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookmarks": {
         parameters: {
             query?: never;
@@ -678,6 +694,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/briefing/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["trigger_briefing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -750,6 +782,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/net-worth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_net_worth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/share": {
         parameters: {
             query?: never;
@@ -814,6 +862,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/footprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_footprints"];
+        put?: never;
+        post: operations["create_footprint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/footprints/geocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reverse or forward geocoding proxy using OpenStreetMap Nominatim. */
+        get: operations["geocode_proxy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/footprints/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_summary_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/footprints/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_footprint"];
+        put: operations["update_footprint"];
+        post?: never;
+        delete: operations["delete_footprint"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/habits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_habits"];
+        put?: never;
+        post: operations["create_habit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/habits/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_heatmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/habits/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["habits_get_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/habits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_habit"];
+        post?: never;
+        delete: operations["delete_habit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/habits/{id}/toggle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["toggle_habit_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -824,6 +1017,174 @@ export interface paths {
         get: operations["health_check"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["upsert_day"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/days/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_day"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_day"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/days/{date}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_day_activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/days/{date}/time": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_time_allocation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/horizon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_horizon"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_profile_and_stats"];
+        /**
+         * Also mounted as `POST /api/v1/life/profile` for the same handler — utoipa
+         * @description documents one method per function, so this covers the `PUT` form.
+         */
+        put: operations["upsert_profile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/life/year/{year}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_year_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/mcp/tokens — Lists active personal access tokens for the authenticated user. */
+        get: operations["list_mcp_tokens"];
+        put?: never;
+        /** POST /api/v1/mcp/tokens — Generates a new personal access token and returns client JSON. */
+        post: operations["create_mcp_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** DELETE /api/v1/mcp/tokens/:id — Revokes an MCP personal access token. */
+        delete: operations["delete_mcp_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ocr/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Scans an uploaded receipt image using local PaddleOCR, extracting text and receipt fields. */
+        post: operations["scan_image"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1343,6 +1704,23 @@ export interface paths {
         patch: operations["update_todo"];
         trace?: never;
     };
+    "/api/v1/voice/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference. */
+        post: operations["transcribe_voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/webhooks/{token}": {
         parameters: {
             query?: never;
@@ -1359,10 +1737,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/bot{token}/sendMessage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mounted outside `/api/v1` — see `telegram_send_message_post`. */
+        get: operations["telegram_send_message_get"];
+        put?: never;
+        /**
+         * Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of
+         * @description Telegram's own Bot API (`https://api.telegram.org/bot<token>/sendMessage`)
+         *     so existing Telegram integrations can point at this host unmodified. It is
+         *     unauthenticated in the session-cookie sense — the token in the URL path is
+         *     the credential — so it carries no `security(...)` requirement.
+         */
+        post: operations["telegram_send_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A single event from any module that happened on a given date. */
+        ActivityEvent: {
+            /** @description Verb: "created", "completed", "expense", "income", "buy", "sell", etc. */
+            action: string;
+            /** @description Optional secondary detail */
+            detail?: string | null;
+            /** @description Visual emoji for the event type */
+            emoji: string;
+            /** @description Source module identifier */
+            module: string;
+            /** @description One-line human summary */
+            summary: string;
+            /** @description ISO time within the day, e.g. "09:15:00" (or null if date-only) */
+            time?: string | null;
+        };
+        /** @description Summary counts per module. */
+        ActivityStats: {
+            bills_paid: number;
+            bookmarks_saved: number;
+            expenses: number;
+            footprints: number;
+            habits_done: number;
+            income: number;
+            portfolio_trades: number;
+            reminders_fired: number;
+            todos_completed: number;
+            todos_created: number;
+            todos_due: number;
+            total_events: number;
+        };
         AiChatRequest: {
             conversation_id?: string | null;
             prompt: string;
@@ -1460,6 +1892,22 @@ export interface components {
             total_count: number;
             /** Format: int64 */
             unread_count: number;
+        };
+        /** @description Formatted briefing payload ready for Matrix delivery and REST preview. */
+        BriefingPayload: {
+            html_content: string;
+            owner_id: string;
+            plain_text: string;
+            summary: components["schemas"]["BriefingSummary"];
+            tickers: components["schemas"]["TickerPerformance"][];
+        };
+        /** @description Key statistics summarizing a generated morning briefing. */
+        BriefingSummary: {
+            habits_completed_count: number;
+            habits_total_count: number;
+            holdings_count: number;
+            pending_tasks_count: number;
+            upcoming_bills_count: number;
         };
         /**
          * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
@@ -1592,6 +2040,49 @@ export interface components {
             title?: string | null;
             url: string;
         };
+        CreateFootprintRequest: {
+            address?: string | null;
+            arrival_date: string;
+            category?: string | null;
+            city?: string | null;
+            country?: string | null;
+            departure_date?: string | null;
+            /** Format: double */
+            latitude: number;
+            /** Format: double */
+            longitude: number;
+            note?: string | null;
+            /** Format: int64 */
+            rating?: number | null;
+            spend_amount?: string | null;
+            spend_currency?: string | null;
+            title: string;
+        };
+        CreateHabitRequest: {
+            category?: string | null;
+            description?: string | null;
+            frequency?: string | null;
+            name: string;
+            /** Format: int64 */
+            target_days_per_week?: number | null;
+        };
+        CreateMcpTokenRequest: {
+            /** Format: int64 */
+            expires_in_days?: number | null;
+            name: string;
+        };
+        CreateMcpTokenResponse: {
+            claude_config: unknown;
+            /** Format: date-time */
+            created_at: string;
+            cursor_config: unknown;
+            /** Format: date-time */
+            expires_at?: string | null;
+            id: string;
+            name: string;
+            prefix: string;
+            token: string;
+        };
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
@@ -1629,6 +2120,23 @@ export interface components {
             raw_token: string;
             webhook: components["schemas"]["Webhook"];
         };
+        CurrencyNetWorthBreakdown: {
+            /** Format: int64 */
+            cash_deposits_minor: number;
+            /** Format: int64 */
+            converted_minor: number;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: double */
+            fx_rate_to_primary: number;
+            /** Format: int64 */
+            ledger_cash_minor: number;
+            /** Format: int64 */
+            portfolio_market_value_minor: number;
+            /** Format: int64 */
+            total_minor: number;
+        };
         CurrencySpendSummary: {
             currency: string;
             /** Format: int64 */
@@ -1658,6 +2166,19 @@ export interface components {
              * @description `income - expense`. May legitimately be negative.
              */
             net_minor: number;
+        };
+        DayActivityResponse: {
+            date: string;
+            events: components["schemas"]["ActivityEvent"][];
+            stats: components["schemas"]["ActivityStats"];
+        };
+        DayStatus: {
+            completed: boolean;
+            date: string;
+        };
+        DeleteDayResponse: {
+            date: string;
+            success: boolean;
         };
         /**
          * @description Which way the money moved.
@@ -1713,11 +2234,98 @@ export interface components {
             /** Format: date-time */
             updated_at?: string | null;
         };
+        Footprint: {
+            address?: string | null;
+            arrival_date: string;
+            category: string;
+            city?: string | null;
+            country?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            departure_date?: string | null;
+            /** Format: int64 */
+            id: number;
+            /** Format: double */
+            latitude: number;
+            /** Format: double */
+            longitude: number;
+            note?: string | null;
+            owner_id: string;
+            /** Format: int64 */
+            rating: number;
+            /** Format: int64 */
+            spend_amount_minor: number;
+            spend_currency: string;
+            /** Format: int64 */
+            spend_currency_exponent: number;
+            /** Format: int64 */
+            stay_duration_days: number;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FootprintCurrencySpend: {
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            total_spend_minor: number;
+        };
+        FootprintsSummary: {
+            spend_by_currency: components["schemas"]["FootprintCurrencySpend"][];
+            /** Format: int64 */
+            total_countries: number;
+            /** Format: int64 */
+            total_days_traveled: number;
+            /** Format: int64 */
+            total_places: number;
+        };
+        Habit: {
+            archived: boolean;
+            category: string;
+            created_at?: string | null;
+            description?: string | null;
+            frequency: string;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            owner_id: string;
+            /** Format: int64 */
+            target_days_per_week: number;
+            updated_at?: string | null;
+        };
+        HabitStatsSummary: {
+            /** Format: int64 */
+            best_streak: number;
+            /** Format: int64 */
+            completed_today: number;
+            /** Format: int64 */
+            completion_rate_today_percent: number;
+            /** Format: int64 */
+            total_active_habits: number;
+            /** Format: int64 */
+            total_all_time_completions: number;
+        };
+        HabitWithStatus: components["schemas"]["Habit"] & {
+            completed_today: boolean;
+            /** Format: int64 */
+            current_streak: number;
+            last_7_days: components["schemas"]["DayStatus"][];
+            /** Format: int64 */
+            longest_streak: number;
+            /** Format: int64 */
+            total_completions: number;
+        };
         HealthResponse: {
             db_status: string;
             service: string;
             status: string;
             version: string;
+        };
+        HeatmapDay: {
+            /** Format: int64 */
+            count: number;
+            date: string;
         };
         /**
          * @description One investment position: symbol, quantity, and weighted-average cost basis.
@@ -1791,6 +2399,59 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LifeDayLog: {
+            activities?: string | null;
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            log_date: string;
+            mood: string;
+            note?: string | null;
+            owner_id: string;
+            time_allocation?: string | null;
+            updated_at: string;
+            weather?: string | null;
+        };
+        LifeHorizonDay: {
+            /** Format: int64 */
+            activity_count: number;
+            date: string;
+            has_activity: boolean;
+            mood: string;
+            time_allocation?: string | null;
+        };
+        LifeProfile: {
+            birth_date: string;
+            created_at: string;
+            /** Format: int64 */
+            expected_lifespan_years: number;
+            owner_id: string;
+            updated_at: string;
+        };
+        LifeProfileStats: {
+            /** Format: int64 */
+            age_days: number;
+            /** Format: double */
+            average_sleep_hours: number;
+            /** Format: double */
+            days_lived_percent: number;
+            dominant_mood?: string | null;
+            profile?: components["schemas"]["LifeProfile"] | null;
+            today_date: string;
+            /** Format: double */
+            total_deep_work_hours: number;
+            /** Format: int64 */
+            total_expected_days: number;
+            /** Format: int64 */
+            total_logged_days: number;
+        };
+        LifeYearView: {
+            logs: components["schemas"]["LifeDayLog"][];
+            /** Format: int64 */
+            total_logged_days: number;
+            /** Format: int64 */
+            year: number;
+        };
         LinkCodeResponse: {
             code: string;
             /** Format: int64 */
@@ -1816,6 +2477,17 @@ export interface components {
             display_name: string;
             mxid: string;
             session_token: string;
+        };
+        McpTokenSummary: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string | null;
+            id: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            name: string;
+            prefix: string;
         };
         MediaProxyQuery: {
             media_id: string;
@@ -1875,6 +2547,35 @@ export interface components {
             month: string;
             /** Format: int64 */
             net_minor: number;
+        };
+        NetWorthResponse: {
+            /** Format: int64 */
+            cash_deposits_minor: number;
+            currencies: components["schemas"]["CurrencyNetWorthBreakdown"][];
+            fx_rates: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            ledger_cash_minor: number;
+            /** Format: int64 */
+            portfolio_market_value_minor: number;
+            primary_currency: string;
+            /** Format: int64 */
+            primary_currency_exponent: number;
+            /** Format: int64 */
+            total_net_worth_minor: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        OcrBlockDto: {
+            /** Format: float */
+            score: number;
+            text: string;
+        };
+        OcrScanResponse: {
+            blocks: components["schemas"]["OcrBlockDto"][];
+            raw_text: string;
+            structured?: components["schemas"]["ReceiptExtractionDto"] | null;
         };
         PasskeySummary: {
             /** Format: date-time */
@@ -2022,6 +2723,13 @@ export interface components {
             /** Format: date-time */
             occurred_at: string;
         };
+        ReceiptExtractionDto: {
+            amount?: string | null;
+            category_suggestion?: string | null;
+            currency?: string | null;
+            date?: string | null;
+            merchant?: string | null;
+        };
         RecoveryCodesResponse: {
             /** @description Shown exactly once. The server keeps only hashes. */
             codes: string[];
@@ -2069,6 +2777,9 @@ export interface components {
             /** Format: int32 */
             total_installments?: number | null;
             updated_at?: string | null;
+        };
+        RedeemRecoveryRequest: {
+            code: string;
         };
         RefreshSummary: {
             failed: string[];
@@ -2218,6 +2929,35 @@ export interface components {
             price: number;
             symbol: string;
         };
+        TelegramMessageResult: {
+            /** Format: int64 */
+            date: number;
+            /** Format: int64 */
+            message_id: number;
+            text: string;
+        };
+        TelegramQuery: {
+            chat_id?: string | null;
+            parse_mode?: string | null;
+            text?: string | null;
+        };
+        TelegramResponse: {
+            ok: boolean;
+            result: components["schemas"]["TelegramMessageResult"];
+        };
+        /** @description Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes. */
+        TickerPerformance: {
+            /** Format: double */
+            change_1d_pct?: number | null;
+            /** Format: double */
+            change_1m_pct?: number | null;
+            /** Format: double */
+            change_1w_pct?: number | null;
+            currency: string;
+            /** Format: double */
+            current_price: number;
+            symbol: string;
+        };
         TickerSearchResult: {
             exchange?: string | null;
             name: string;
@@ -2273,6 +3013,10 @@ export interface components {
             /** Format: int64 */
             page?: number | null;
             room_id?: string | null;
+        };
+        ToggleHabitRequest: {
+            date?: string | null;
+            note?: string | null;
         };
         /** @description A single ledger entry. */
         Transaction: {
@@ -2395,6 +3139,32 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
         };
+        UpdateFootprintRequest: {
+            address?: string | null;
+            arrival_date?: string | null;
+            category?: string | null;
+            city?: string | null;
+            country?: string | null;
+            departure_date?: string | null;
+            /** Format: double */
+            latitude?: number | null;
+            /** Format: double */
+            longitude?: number | null;
+            note?: string | null;
+            /** Format: int64 */
+            rating?: number | null;
+            spend_amount?: string | null;
+            spend_currency?: string | null;
+            title?: string | null;
+        };
+        UpdateHabitRequest: {
+            category?: string | null;
+            description?: string | null;
+            frequency?: string | null;
+            name: string;
+            /** Format: int64 */
+            target_days_per_week?: number | null;
+        };
         /**
          * @description Mirrors `CreateReminderRequest` rather than patching individual fields: the
          *     fire time is expressed as a delay from now, exactly as at creation, so an
@@ -2411,6 +3181,10 @@ export interface components {
          *     row, so there is no partial-update path to get wrong.
          */
         UpdateSettingsRequest: {
+            /** @description Optional toggle for morning briefing. */
+            briefing_enabled?: boolean | null;
+            /** @description Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00). */
+            briefing_time?: string | null;
             /** @description ISO 4217 code, e.g. `CNY`. */
             currency: string;
             /** @description Optional Matrix room ID for development and error notifications. */
@@ -2425,6 +3199,9 @@ export interface components {
         };
         UpdateSymbolRequest: {
             symbol: string;
+        };
+        UpdateTimeAllocationInput: {
+            time_allocation: (string | null)[];
         };
         /**
          * @description A PATCH body.
@@ -2449,6 +3226,19 @@ export interface components {
             is_active?: boolean | null;
             name?: string | null;
         };
+        UpsertLifeDayLogInput: {
+            activities?: string[] | null;
+            log_date: string;
+            mood: string;
+            note?: string | null;
+            time_allocation?: (string | null)[] | null;
+            weather?: string | null;
+        };
+        UpsertLifeProfileInput: {
+            birth_date: string;
+            /** Format: int64 */
+            expected_lifespan_years?: number | null;
+        };
         UserProfileResponse: {
             /** @description The signed-in account. The frontend keys its caches on this. */
             account_id: string;
@@ -2471,6 +3261,10 @@ export interface components {
          *     answer no matter which door they came through.
          */
         UserSettings: {
+            /** @description Whether automated morning briefing is enabled. */
+            briefing_enabled?: boolean;
+            /** @description Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00). */
+            briefing_time?: string;
             /** @description ISO 4217 code, e.g. `CNY`. Validated on write. */
             currency: string;
             /** @description Matrix room ID where development errors and alerts are sent. */
@@ -2491,6 +3285,12 @@ export interface components {
         VerifyAiKeyResponse: {
             message: string;
             valid: boolean;
+        };
+        VoiceTranscribeResponse: {
+            /** Format: float */
+            duration_secs: number;
+            language?: string | null;
+            text: string;
         };
         Webhook: {
             /** Format: date-time */
@@ -3515,6 +4315,57 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
+            /** @description Registration is closed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    redeem_recovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RedeemRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Recovery code accepted; restricted session opened */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Invalid or expired recovery code */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
         };
     };
     list_bookmarks: {
@@ -3705,6 +4556,35 @@ export interface operations {
             };
         };
     };
+    trigger_briefing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Generated morning briefing snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BriefingPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     sse_handler: {
         parameters: {
             query?: never;
@@ -3874,6 +4754,35 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_net_worth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unified estimated net worth across ledger, portfolio, and cash deposits */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetWorthResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4162,6 +5071,562 @@ export interface operations {
             };
         };
     };
+    list_footprints: {
+        parameters: {
+            query?: {
+                country?: string | null;
+                category?: string | null;
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List footprints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Footprint"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_footprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFootprintRequest"];
+            };
+        };
+        responses: {
+            /** @description Footprint created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Footprint"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    geocode_proxy: {
+        parameters: {
+            query?: {
+                query?: string | null;
+                lat?: number | null;
+                lon?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Geocoding result, proxied verbatim from Nominatim */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_summary_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Footprint travel stats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootprintsSummary"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_footprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Footprint ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Footprint found */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Footprint"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Footprint not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_footprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Footprint ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateFootprintRequest"];
+            };
+        };
+        responses: {
+            /** @description Footprint updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Footprint"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Footprint not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_footprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Footprint ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Footprint deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Footprint not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_habits: {
+        parameters: {
+            query?: {
+                today?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List habits with today's status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitWithStatus"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_habit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateHabitRequest"];
+            };
+        };
+        responses: {
+            /** @description Habit created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Habit"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_heatmap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daily completion counts for the heatmap */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeatmapDay"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    habits_get_stats: {
+        parameters: {
+            query?: {
+                today?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Habit completion stats summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HabitStatsSummary"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_habit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Habit ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateHabitRequest"];
+            };
+        };
+        responses: {
+            /** @description Habit updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Habit"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Habit not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_habit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Habit ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Habit deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Habit not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    toggle_habit_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Habit ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToggleHabitRequest"];
+            };
+        };
+        responses: {
+            /** @description Habit log toggled for the given date */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Habit not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     health_check: {
         parameters: {
             query?: never;
@@ -4188,6 +5653,501 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
+            };
+        };
+    };
+    upsert_day: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertLifeDayLogInput"];
+            };
+        };
+        responses: {
+            /** @description Day logged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeDayLog"];
+                };
+            };
+            /** @description Bad request, or day already logged */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_day: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Day, as YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day's log, if any */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeDayLog"] | null;
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_day: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Day, as YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Day cleared, or was already empty */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteDayResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_day_activity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Day, as YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Everything that happened across every module on that day */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DayActivityResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_time_allocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Day, as YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTimeAllocationInput"];
+            };
+        };
+        responses: {
+            /** @description Time allocation updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeDayLog"];
+                };
+            };
+            /** @description Bad request, or day is sealed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_horizon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Upcoming days on the life horizon */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeHorizonDay"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_profile_and_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Life profile and computed stats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeProfileStats"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    upsert_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertLifeProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Profile created or updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeProfile"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_year_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Calendar year */
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All logged days for the year */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifeYearView"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_mcp_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active personal access tokens for the caller */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenSummary"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_mcp_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMcpTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Token created; the raw token is returned once */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateMcpTokenResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_mcp_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Token ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Token not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    scan_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image OCR scan succeeded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OcrScanResponse"];
+                };
+            };
+            /** @description Invalid or empty image uploaded */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description OCR engine is disabled or models missing */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5819,6 +7779,40 @@ export interface operations {
             };
         };
     };
+    transcribe_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio transcribed successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceTranscribeResponse"];
+                };
+            };
+            /** @description Invalid or empty audio payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Voice transcription engine is disabled */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     inbound_webhook: {
         parameters: {
             query?: never;
@@ -5850,6 +7844,115 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    telegram_send_message_get: {
+        parameters: {
+            query?: {
+                chat_id?: string | null;
+                text?: string | null;
+                parse_mode?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Webhook token */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Message accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid or inactive webhook token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    telegram_send_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Webhook token */
+                token: string;
+            };
+            cookie?: never;
+        };
+        /** @description Accepts this shape as JSON, as `application/x-www-form-urlencoded`, or as a bare text body */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelegramQuery"];
+            };
+        };
+        responses: {
+            /** @description Message accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid or inactive webhook token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
             429: {
                 headers: {
                     [name: string]: unknown;

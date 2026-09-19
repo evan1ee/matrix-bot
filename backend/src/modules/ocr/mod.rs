@@ -17,8 +17,10 @@ pub use models::{OcrConfig, OcrError, OcrResult, OcrTextBlock};
 /// 2. If text is extracted, synthesizes a structured semantic prompt with the text and user caption.
 /// 3. Executes an AI turn with all domain tools enabled (add_expense, add_todo, create_reminder).
 /// 4. Returns an HTML reply summarizing the actions taken and persisting to SQLite.
+#[allow(clippy::too_many_arguments)]
 pub async fn process_image_event(
     db: &Database,
+    ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
     owner_id: &str,
@@ -80,6 +82,7 @@ pub async fn process_image_event(
 
     match crate::modules::ai::handler::run_ai_turn_with_stage(
         &db.pool,
+        ai,
         broadcaster,
         owner_id,
         room.room_id().as_str(),
@@ -98,7 +101,7 @@ pub async fn process_image_event(
                  • <b>原因:</b> {}<br/>\
                  • <b>建议:</b> 请稍后重试，或直接发送文字指令。",
                 html_escape(&ocr_result.combined_text),
-                html_escape(&err)
+                html_escape(&err.to_string())
             )
         }
     }

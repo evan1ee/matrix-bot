@@ -2,8 +2,9 @@ use chrono::{Months, NaiveDateTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 
 use super::models::{CreateBillPayload, RecurringBill, UpdateBillPayload};
+use crate::events::EventBroadcaster;
 use crate::modules::finance::models::{Transaction, TransactionSource};
-use crate::modules::finance::repository::FinanceRepository;
+use crate::modules::finance::service as finance_service;
 
 pub struct RecurringBillRepository;
 
@@ -160,6 +161,7 @@ impl RecurringBillRepository {
         pool: &SqlitePool,
         id: i64,
         owner_id: &str,
+        broadcaster: Option<&EventBroadcaster>,
     ) -> Result<(RecurringBill, Transaction), sqlx::Error> {
         let bill = Self::get_by_id(pool, id)
             .await?
@@ -200,28 +202,27 @@ impl RecurringBillRepository {
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
 
-        let category_id =
-            FinanceRepository::find_or_create_category(pool, &bill.owner_id, &bill.category)
-                .await
-                .ok()
-                .flatten()
-                .map(|c| c.id);
-
         let note = format!("Recurring bill: {}", bill.name);
-        let tx = FinanceRepository::create_transaction(
+        let tx = finance_service::create_transaction(
             pool,
-            &bill.room_id,
+            broadcaster,
             &bill.owner_id,
-            &bill.sender_name,
-            "expense",
-            bill.amount_minor,
-            &bill.currency,
-            bill.currency_exponent as i64,
-            category_id,
-            Some(&note),
-            Some(TransactionSource::RecurringBill.as_str()),
-            Some(bill.id),
-            Utc::now(),
+            finance_service::NewTransaction {
+                direction: "expense",
+                amount_minor: bill.amount_minor,
+                currency: &bill.currency,
+                currency_exponent: bill.currency_exponent as i64,
+                category: Some(&bill.category),
+                note: Some(&note),
+                room_id: &bill.room_id,
+                sender_name: &bill.sender_name,
+                occurred_at: Utc::now(),
+                source: Some((TransactionSource::RecurringBill.as_str(), bill.id)),
+                // The bill's category was typed once when the bill was
+                // created, not re-typed on every payment, and the pre-service
+                // code here called `find_or_create_category` — preserve that.
+                create_missing_category: true,
+            },
         )
         .await
         .map_err(|e| sqlx::Error::Protocol(format!("Failed to record bill transaction: {}", e)))?;
@@ -294,7 +295,7 @@ mod tests {
             .unwrap();
         assert_eq!(list.len(), 1);
 
-        let (paid, tx) = RecurringBillRepository::mark_paid(&pool, created.id, "@alice:a")
+        let (paid, tx) = RecurringBillRepository::mark_paid(&pool, created.id, "@alice:a", None)
             .await
             .unwrap();
         assert_eq!(paid.paid_installments, 1);

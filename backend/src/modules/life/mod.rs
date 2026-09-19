@@ -4,6 +4,8 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
+pub mod activity;
+pub mod activity_collectors;
 pub mod handler;
 pub mod models;
 pub mod repository;

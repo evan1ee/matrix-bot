@@ -190,7 +190,7 @@ mod tests {
         let bill = bill_with(&pool, due_in(4), Some(60)).await;
         sync(&pool, None, &bill).await.unwrap();
 
-        let (paid, _) = RecurringBillRepository::mark_paid(&pool, bill.id, "@alice:a")
+        let (paid, _) = RecurringBillRepository::mark_paid(&pool, bill.id, "@alice:a", None)
             .await
             .unwrap();
         let outcome = sync(&pool, None, &paid).await.unwrap();
@@ -228,7 +228,7 @@ mod tests {
         .unwrap();
         sync(&pool, None, &bill).await.unwrap();
 
-        let (paid, _) = RecurringBillRepository::mark_paid(&pool, bill.id, "@alice:a")
+        let (paid, _) = RecurringBillRepository::mark_paid(&pool, bill.id, "@alice:a", None)
             .await
             .unwrap();
         assert_eq!(paid.status, "completed");

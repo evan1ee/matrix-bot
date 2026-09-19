@@ -23,9 +23,12 @@ use crate::modules::todo::TodoModule;
 use crate::modules::webhook::WebhookModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
+pub mod attachments;
 pub mod client;
+pub mod command_flow;
 pub mod dispatcher;
 pub mod handler;
+pub mod handles;
 pub mod invite;
 pub mod linking;
 pub mod media;
@@ -33,6 +36,7 @@ pub mod notify;
 pub mod quote;
 pub mod reaction;
 pub mod reaction_targets;
+pub mod reply;
 pub mod self_verify;
 pub mod stage;
 pub mod verification;
@@ -44,7 +48,8 @@ pub struct MatrixBot {
     broadcaster: Option<EventBroadcaster>,
     /// Shared with the API, so a merge confirmed in the web UI is the same one
     /// `!link` recorded.
-    pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
+    handles: crate::bot::handles::BotHandles,
+    config: Config,
 }
 
 impl MatrixBot {
@@ -52,20 +57,16 @@ impl MatrixBot {
         config: &Config,
         db: Database,
         broadcaster: Option<EventBroadcaster>,
-        token_handle: Option<Arc<RwLock<Option<String>>>>,
-        client_handle: Option<Arc<RwLock<Option<Client>>>>,
-        pending_merges: Option<Arc<crate::bot::linking::PendingMerges>>,
+        handles: crate::bot::handles::BotHandles,
     ) -> Result<Self> {
         let client = BotClient::build_and_login_with_token_handles(
             config,
-            token_handle,
-            client_handle.clone(),
+            Some(handles.access_token.clone()),
+            Some(handles.client.clone()),
         )
         .await?;
 
-        if let Some(ref handle) = client_handle {
-            *handle.write().await = Some(client.clone());
-        }
+        *handles.client.write().await = Some(client.clone());
 
         // Answer verification requests so the bot's session can be signed into
         // another user's trust; without this its sessions stay Unverified.
@@ -93,12 +94,15 @@ impl MatrixBot {
         registry.register(crate::modules::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
+        registry.register(crate::modules::briefing::BriefingModule::new());
         registry.register(WebhookModule::new());
+        registry.register(crate::modules::mcp::McpModule::new());
         registry.register(crate::modules::ai::AiModule::new(
-            client_handle.clone().unwrap_or_default(),
+            handles.client.clone(),
+            config.ai.clone(),
         ));
         registry.register(crate::modules::account::AccountModule::new(
-            client_handle.clone().unwrap_or_default(),
+            handles.client.clone(),
             config.web_url.clone(),
         ));
 
@@ -110,7 +114,8 @@ impl MatrixBot {
             db,
             registry: registry_arc,
             broadcaster,
-            pending_merges,
+            handles,
+            config: config.clone(),
         })
     }
 
@@ -124,10 +129,11 @@ impl MatrixBot {
         // Register Matrix event handlers
         register_handlers(
             &self.client,
+            &self.config,
             self.registry.clone(),
             self.db.clone(),
             self.broadcaster.clone(),
-            self.pending_merges.clone(),
+            Some(self.handles.pending_merges.clone()),
         );
 
         // Start background workers for all modules (e.g., reminder scheduler).

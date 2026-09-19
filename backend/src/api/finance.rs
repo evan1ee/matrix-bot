@@ -9,13 +9,23 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::modules::finance::models::{Category, CurrencySummary, Direction, Transaction};
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
+use crate::modules::finance::service::{self, FinanceError, NewTransaction, TransactionPatch};
 
-const MAX_NOTE_LEN: usize = 500;
-const MAX_CATEGORY_LEN: usize = 64;
+impl From<FinanceError> for ApiError {
+    fn from(err: FinanceError) -> Self {
+        match err {
+            FinanceError::TransactionNotFound | FinanceError::CategoryNotFound => {
+                ApiError::not_found(err.to_string())
+            }
+            FinanceError::CategoryExists => ApiError::conflict(err.to_string()),
+            FinanceError::Db(inner) => ApiError::internal(inner.to_string()),
+            other => ApiError::bad_request(other.to_string()),
+        }
+    }
+}
 
 #[derive(Deserialize, IntoParams, ToSchema)]
 pub struct LedgerQuery {
@@ -73,7 +83,8 @@ pub struct CategoryDeletedResponse {
     pub uncategorised: i64,
 }
 
-/// Validates a request and converts the amount into minor units.
+/// Validates the amount and currency, converting the amount into minor units.
+/// Note-length validation now lives in `service` — every transport shares it.
 fn prepare(payload: &TransactionRequest) -> Result<(i64, String, i64), ApiError> {
     let currency =
         normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -81,24 +92,20 @@ fn prepare(payload: &TransactionRequest) -> Result<(i64, String, i64), ApiError>
     let amount_minor = parse_amount(&payload.amount, exponent)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    if let Some(note) = &payload.note {
-        if note.len() > MAX_NOTE_LEN {
-            return Err(ApiError::bad_request(format!(
-                "Note exceeds {} character limit",
-                MAX_NOTE_LEN
-            )));
-        }
-    }
-
     Ok((amount_minor, currency, exponent as i64))
 }
 
-/// Confirms a category belongs to the caller before it is referenced.
+/// Confirms a category belongs to the caller before it is referenced, and
+/// hands back its name — `service::create_transaction`/`update_transaction`
+/// resolve a category by name, so this is what lets the REST transport keep
+/// its own ownership check (an id from another account must be rejected here,
+/// before the service ever sees it) while still funnelling the write through
+/// the shared resolution path.
 async fn owned_category(
     state: &ApiState,
     owner_id: &str,
     category_id: Option<i64>,
-) -> Result<Option<i64>, ApiError> {
+) -> Result<Option<String>, ApiError> {
     let Some(id) = category_id else {
         return Ok(None);
     };
@@ -107,10 +114,9 @@ async fn owned_category(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    if categories.iter().any(|c| c.id == id) {
-        Ok(Some(id))
-    } else {
-        Err(ApiError::bad_request("Unknown category"))
+    match categories.into_iter().find(|c| c.id == id) {
+        Some(cat) => Ok(Some(cat.name)),
+        None => Err(ApiError::bad_request("Unknown category")),
     }
 }
 
@@ -176,29 +182,31 @@ pub async fn create_transaction(
 ) -> Result<Json<Transaction>, ApiError> {
     let owner_id = user.owner_id();
     let (amount_minor, currency, exponent) = prepare(&payload)?;
-    let category_id = owned_category(&state, &owner_id, payload.category_id).await?;
+    let category = owned_category(&state, &owner_id, payload.category_id).await?;
+    let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
 
-    let tx = FinanceRepository::create_transaction(
+    let tx = service::create_transaction(
         &state.db.pool,
-        &payload.room_id.unwrap_or_else(|| "web".to_string()),
+        Some(&state.broadcaster),
         &owner_id,
-        &user.display_name,
-        payload.direction.as_str(),
-        amount_minor,
-        &currency,
-        exponent,
-        category_id,
-        payload.note.as_deref(),
-        None,
-        None,
-        payload.occurred_at.unwrap_or_else(Utc::now),
+        NewTransaction {
+            direction: payload.direction.as_str(),
+            amount_minor,
+            currency: &currency,
+            currency_exponent: exponent,
+            category: category.as_deref(),
+            note: payload.note.as_deref(),
+            room_id: &room_id,
+            sender_name: &user.display_name,
+            occurred_at: payload.occurred_at.unwrap_or_else(Utc::now),
+            source: None,
+            // `owned_category` already resolved the category by id, so it is
+            // known to exist — never create on this path.
+            create_missing_category: false,
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::TransactionCreated(tx.clone()));
     Ok(Json(tx))
 }
 
@@ -221,34 +229,28 @@ pub async fn update_transaction(
     Json(payload): Json<TransactionRequest>,
 ) -> Result<Json<Transaction>, ApiError> {
     let owner_id = user.owner_id();
-
-    // Ownership is established before anything is written.
-    FinanceRepository::find_owned(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Entry not found or access denied"))?;
-
     let (amount_minor, currency, exponent) = prepare(&payload)?;
-    let category_id = owned_category(&state, &owner_id, payload.category_id).await?;
+    // Ownership of the category, like ownership of the transaction, is
+    // resolved here — the id came off the wire and is not authority on its own.
+    let category = owned_category(&state, &owner_id, payload.category_id).await?;
 
-    let tx = FinanceRepository::update(
+    let tx = service::update_transaction(
         &state.db.pool,
+        Some(&state.broadcaster),
+        &owner_id,
         id,
-        payload.direction.as_str(),
-        amount_minor,
-        &currency,
-        exponent,
-        category_id,
-        payload.note.as_deref(),
-        payload.occurred_at.unwrap_or_else(Utc::now),
+        TransactionPatch {
+            direction: Some(payload.direction.as_str()),
+            amount_minor: Some(amount_minor),
+            currency: Some(&currency),
+            currency_exponent: Some(exponent),
+            category: Some(category.as_deref()),
+            note: Some(payload.note.as_deref()),
+            occurred_at: Some(payload.occurred_at.unwrap_or_else(Utc::now)),
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found("Entry not found or access denied"))?;
+    .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::TransactionUpdated(tx.clone()));
     Ok(Json(tx))
 }
 
@@ -269,20 +271,7 @@ pub async fn delete_transaction(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    let tx = FinanceRepository::find_owned(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Entry not found or access denied"))?;
-
-    FinanceRepository::delete(&state.db.pool, id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(SystemEvent::TransactionDeleted {
-        id,
-        room_id: tx.room_id,
-        owner_id,
-    });
+    service::delete_transaction(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -350,22 +339,14 @@ pub async fn create_category(
     user: AuthUser,
     Json(payload): Json<CategoryRequest>,
 ) -> Result<Json<Category>, ApiError> {
-    let name = payload.name.trim();
-    if name.is_empty() || name.len() > MAX_CATEGORY_LEN {
-        return Err(ApiError::bad_request(format!(
-            "Category name must be 1–{} characters",
-            MAX_CATEGORY_LEN
-        )));
-    }
+    let category = service::create_category(
+        &state.db.pool,
+        Some(&state.broadcaster),
+        &user.owner_id(),
+        &payload.name,
+    )
+    .await?;
 
-    let category = FinanceRepository::create_category(&state.db.pool, &user.owner_id(), name)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::conflict("You already have a category with that name"))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::CategoryCreated(category.clone()));
     Ok(Json(category))
 }
 
@@ -387,14 +368,8 @@ pub async fn delete_category(
 ) -> Result<Json<CategoryDeletedResponse>, ApiError> {
     let owner_id = user.owner_id();
 
-    let uncategorised = FinanceRepository::delete_category(&state.db.pool, &owner_id, id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Category not found or access denied"))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::CategoryDeleted { id, owner_id });
+    let uncategorised =
+        service::delete_category(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
 
     Ok(Json(CategoryDeletedResponse {
         id,
