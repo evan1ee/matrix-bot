@@ -1322,6 +1322,56 @@
         }
       }
     },
+    "/api/v1/auth/recovery/redeem": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "redeem_recovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery code accepted; restricted session opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired recovery code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/bookmarks": {
       "get": {
         "tags": [
@@ -2338,6 +2388,792 @@
         ]
       }
     },
+    "/api/v1/footprints": {
+      "get": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "list_footprints",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List footprints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Footprint"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "create_footprint",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFootprintRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Footprint created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Footprint"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/footprints/geocode": {
+      "get": {
+        "tags": [
+          "footprints"
+        ],
+        "summary": "Reverse or forward geocoding proxy using OpenStreetMap Nominatim.",
+        "operationId": "geocode_proxy",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double",
+              "nullable": true
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Geocoding result, proxied verbatim from Nominatim"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/footprints/stats": {
+      "get": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "get_summary_stats",
+        "responses": {
+          "200": {
+            "description": "Footprint travel stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FootprintsSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/footprints/{id}": {
+      "get": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "get_footprint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Footprint ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Footprint found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Footprint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Footprint not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "update_footprint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Footprint ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFootprintRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Footprint updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Footprint"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Footprint not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "footprints"
+        ],
+        "operationId": "delete_footprint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Footprint ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Footprint deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Footprint not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/habits": {
+      "get": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "list_habits",
+        "parameters": [
+          {
+            "name": "today",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List habits with today's status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HabitWithStatus"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "create_habit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHabitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Habit created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Habit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/habits/heatmap": {
+      "get": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "get_heatmap",
+        "responses": {
+          "200": {
+            "description": "Daily completion counts for the heatmap",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeatmapDay"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/habits/stats": {
+      "get": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "habits_get_stats",
+        "parameters": [
+          {
+            "name": "today",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Habit completion stats summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HabitStatsSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/habits/{id}": {
+      "put": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "update_habit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Habit ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateHabitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Habit updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Habit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Habit not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "delete_habit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Habit ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Habit deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Habit not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/habits/{id}/toggle": {
+      "post": {
+        "tags": [
+          "habits"
+        ],
+        "operationId": "toggle_habit_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Habit ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleHabitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Habit log toggled for the given date"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Habit not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -2366,6 +3202,626 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/life/days": {
+      "post": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "upsert_day",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertLifeDayLogInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Day logged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifeDayLog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request, or day already logged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/days/{date}": {
+      "get": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "get_day",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "Day, as YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day's log, if any",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/LifeDayLog"
+                    }
+                  ],
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "delete_day",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "Day, as YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Day cleared, or was already empty",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDayResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/days/{date}/activity": {
+      "get": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "get_day_activity",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "Day, as YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Everything that happened across every module on that day",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DayActivityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/days/{date}/time": {
+      "put": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "update_time_allocation",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "Day, as YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTimeAllocationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Time allocation updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifeDayLog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request, or day is sealed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/horizon": {
+      "get": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "get_horizon",
+        "responses": {
+          "200": {
+            "description": "Upcoming days on the life horizon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LifeHorizonDay"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/profile": {
+      "get": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "get_profile_and_stats",
+        "responses": {
+          "200": {
+            "description": "Life profile and computed stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifeProfileStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "life"
+        ],
+        "summary": "Also mounted as `POST /api/v1/life/profile` for the same handler — utoipa",
+        "description": "documents one method per function, so this covers the `PUT` form.",
+        "operationId": "upsert_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertLifeProfileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Profile created or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifeProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/life/year/{year}": {
+      "get": {
+        "tags": [
+          "life"
+        ],
+        "operationId": "get_year_view",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "path",
+            "description": "Calendar year",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All logged days for the year",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifeYearView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp/tokens": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "GET /api/v1/mcp/tokens — Lists active personal access tokens for the authenticated user.",
+        "operationId": "list_mcp_tokens",
+        "responses": {
+          "200": {
+            "description": "Active personal access tokens for the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpTokenSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "POST /api/v1/mcp/tokens — Generates a new personal access token and returns client JSON.",
+        "operationId": "create_mcp_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMcpTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token created; the raw token is returned once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMcpTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "DELETE /api/v1/mcp/tokens/:id — Revokes an MCP personal access token.",
+        "operationId": "delete_mcp_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Token ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token revoked"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Token not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
       }
     },
     "/api/v1/ocr/scan": {
@@ -4724,10 +6180,277 @@
           }
         }
       }
+    },
+    "/bot{token}/sendMessage": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Mounted outside `/api/v1` — see `telegram_send_message_post`.",
+        "operationId": "telegram_send_message_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "description": "Webhook token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "text",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "parse_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or inactive webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of",
+        "description": "Telegram's own Bot API (`https://api.telegram.org/bot<token>/sendMessage`)\nso existing Telegram integrations can point at this host unmodified. It is\nunauthenticated in the session-cookie sense — the token in the URL path is\nthe credential — so it carries no `security(...)` requirement.",
+        "operationId": "telegram_send_message_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "description": "Webhook token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Accepts this shape as JSON, as `application/x-www-form-urlencoded`, or as a bare text body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Message accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or inactive webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActivityEvent": {
+        "type": "object",
+        "description": "A single event from any module that happened on a given date.",
+        "required": [
+          "module",
+          "action",
+          "emoji",
+          "summary"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Verb: \"created\", \"completed\", \"expense\", \"income\", \"buy\", \"sell\", etc."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Optional secondary detail",
+            "nullable": true
+          },
+          "emoji": {
+            "type": "string",
+            "description": "Visual emoji for the event type"
+          },
+          "module": {
+            "type": "string",
+            "description": "Source module identifier"
+          },
+          "summary": {
+            "type": "string",
+            "description": "One-line human summary"
+          },
+          "time": {
+            "type": "string",
+            "description": "ISO time within the day, e.g. \"09:15:00\" (or null if date-only)",
+            "nullable": true
+          }
+        }
+      },
+      "ActivityStats": {
+        "type": "object",
+        "description": "Summary counts per module.",
+        "required": [
+          "total_events",
+          "todos_created",
+          "todos_completed",
+          "todos_due",
+          "expenses",
+          "income",
+          "portfolio_trades",
+          "habits_done",
+          "reminders_fired",
+          "bookmarks_saved",
+          "bills_paid",
+          "footprints"
+        ],
+        "properties": {
+          "bills_paid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bookmarks_saved": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expenses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "footprints": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "habits_done": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "income": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "portfolio_trades": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reminders_fired": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "todos_completed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "todos_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "todos_due": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_events": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "AiChatRequest": {
         "type": "object",
         "required": [
@@ -5451,6 +7174,96 @@
           }
         }
       },
+      "CreateFootprintRequest": {
+        "type": "object",
+        "required": [
+          "title",
+          "latitude",
+          "longitude",
+          "arrival_date"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "arrival_date": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "departure_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "spend_amount": {
+            "type": "string",
+            "nullable": true
+          },
+          "spend_currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateHabitRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_days_per_week": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
       "CreateMcpTokenRequest": {
         "type": "object",
         "required": [
@@ -5720,6 +7533,58 @@
           }
         }
       },
+      "DayActivityResponse": {
+        "type": "object",
+        "required": [
+          "date",
+          "events",
+          "stats"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            }
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ActivityStats"
+          }
+        }
+      },
+      "DayStatus": {
+        "type": "object",
+        "required": [
+          "date",
+          "completed"
+        ],
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "date": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteDayResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "date"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
       "Direction": {
         "type": "string",
         "description": "Which way the money moved.\n\n`amount_minor` is always positive; this is what carries the sign, so a row\ncannot contradict itself.",
@@ -5874,6 +7739,269 @@
           }
         }
       },
+      "Footprint": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "title",
+          "latitude",
+          "longitude",
+          "arrival_date",
+          "stay_duration_days",
+          "spend_amount_minor",
+          "spend_currency",
+          "spend_currency_exponent",
+          "rating",
+          "category",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "arrival_date": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "departure_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "spend_amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "spend_currency": {
+            "type": "string"
+          },
+          "spend_currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stay_duration_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FootprintCurrencySpend": {
+        "type": "object",
+        "required": [
+          "currency",
+          "currency_exponent",
+          "total_spend_minor"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_spend_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FootprintsSummary": {
+        "type": "object",
+        "required": [
+          "total_places",
+          "total_countries",
+          "total_days_traveled",
+          "spend_by_currency"
+        ],
+        "properties": {
+          "spend_by_currency": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FootprintCurrencySpend"
+            }
+          },
+          "total_countries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_days_traveled": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_places": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Habit": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "frequency",
+          "category",
+          "target_days_per_week",
+          "archived"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "target_days_per_week": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HabitStatsSummary": {
+        "type": "object",
+        "required": [
+          "total_active_habits",
+          "completed_today",
+          "completion_rate_today_percent",
+          "best_streak",
+          "total_all_time_completions"
+        ],
+        "properties": {
+          "best_streak": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "completed_today": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "completion_rate_today_percent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_active_habits": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_all_time_completions": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "HabitWithStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Habit"
+          },
+          {
+            "type": "object",
+            "required": [
+              "completed_today",
+              "current_streak",
+              "longest_streak",
+              "total_completions",
+              "last_7_days"
+            ],
+            "properties": {
+              "completed_today": {
+                "type": "boolean"
+              },
+              "current_streak": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_7_days": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DayStatus"
+                }
+              },
+              "longest_streak": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "total_completions": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          }
+        ]
+      },
       "HealthResponse": {
         "type": "object",
         "required": [
@@ -5893,6 +8021,22 @@
             "type": "string"
           },
           "version": {
+            "type": "string"
+          }
+        }
+      },
+      "HeatmapDay": {
+        "type": "object",
+        "required": [
+          "date",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "date": {
             "type": "string"
           }
         }
@@ -6079,6 +8223,187 @@
             "format": "int64"
           },
           "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "LifeDayLog": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner_id",
+          "log_date",
+          "mood",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "activities": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "log_date": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "time_allocation": {
+            "type": "string",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "weather": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "LifeHorizonDay": {
+        "type": "object",
+        "required": [
+          "date",
+          "mood",
+          "has_activity",
+          "activity_count"
+        ],
+        "properties": {
+          "activity_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "date": {
+            "type": "string"
+          },
+          "has_activity": {
+            "type": "boolean"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "time_allocation": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "LifeProfile": {
+        "type": "object",
+        "required": [
+          "owner_id",
+          "birth_date",
+          "expected_lifespan_years",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "birth_date": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expected_lifespan_years": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "LifeProfileStats": {
+        "type": "object",
+        "required": [
+          "age_days",
+          "total_expected_days",
+          "days_lived_percent",
+          "total_logged_days",
+          "total_deep_work_hours",
+          "average_sleep_hours",
+          "today_date"
+        ],
+        "properties": {
+          "age_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "average_sleep_hours": {
+            "type": "number",
+            "format": "double"
+          },
+          "days_lived_percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "dominant_mood": {
+            "type": "string",
+            "nullable": true
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LifeProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "today_date": {
+            "type": "string"
+          },
+          "total_deep_work_hours": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_expected_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_logged_days": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "LifeYearView": {
+        "type": "object",
+        "required": [
+          "year",
+          "logs",
+          "total_logged_days"
+        ],
+        "properties": {
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LifeDayLog"
+            }
+          },
+          "total_logged_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "year": {
             "type": "integer",
             "format": "int64"
           }
@@ -6981,6 +9306,17 @@
           }
         }
       },
+      "RedeemRecoveryRequest": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      },
       "RefreshSummary": {
         "type": "object",
         "required": [
@@ -7381,6 +9717,59 @@
           }
         }
       },
+      "TelegramMessageResult": {
+        "type": "object",
+        "required": [
+          "message_id",
+          "date",
+          "text"
+        ],
+        "properties": {
+          "date": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "message_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramQuery": {
+        "type": "object",
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "parse_mode": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "TelegramResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "result"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "result": {
+            "$ref": "#/components/schemas/TelegramMessageResult"
+          }
+        }
+      },
       "TickerPerformance": {
         "type": "object",
         "description": "Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.",
@@ -7550,6 +9939,19 @@
             "nullable": true
           },
           "room_id": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ToggleHabitRequest": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "nullable": true
+          },
+          "note": {
             "type": "string",
             "nullable": true
           }
@@ -7843,6 +10245,94 @@
           }
         }
       },
+      "UpdateFootprintRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "arrival_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "departure_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "spend_amount": {
+            "type": "string",
+            "nullable": true
+          },
+          "spend_currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateHabitRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "frequency": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_days_per_week": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
       "UpdateReminderRequest": {
         "type": "object",
         "description": "Mirrors `CreateReminderRequest` rather than patching individual fields: the\nfire time is expressed as a delay from now, exactly as at creation, so an\nedit and a create mean the same thing by the same arithmetic.",
@@ -7915,6 +10405,21 @@
           }
         }
       },
+      "UpdateTimeAllocationInput": {
+        "type": "object",
+        "required": [
+          "time_allocation"
+        ],
+        "properties": {
+          "time_allocation": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        }
+      },
       "UpdateTodoRequest": {
         "type": "object",
         "description": "A PATCH body.\n\nThe nullable fields are `Option<Option<T>>` so the three cases stay\ndistinguishable on the wire: absent leaves the value alone, `null` clears it,\nand a value sets it. A plain `Option<T>` would make \"clear the due date\"\nunexpressible.",
@@ -7960,6 +10465,60 @@
           },
           "name": {
             "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpsertLifeDayLogInput": {
+        "type": "object",
+        "required": [
+          "log_date",
+          "mood"
+        ],
+        "properties": {
+          "activities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "log_date": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "time_allocation": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "nullable": true
+            },
+            "nullable": true
+          },
+          "weather": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpsertLifeProfileInput": {
+        "type": "object",
+        "required": [
+          "birth_date"
+        ],
+        "properties": {
+          "birth_date": {
+            "type": "string"
+          },
+          "expected_lifespan_years": {
+            "type": "integer",
+            "format": "int64",
             "nullable": true
           }
         }

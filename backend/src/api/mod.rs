@@ -14,11 +14,6 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
-/// Ceiling on a single outbound homeserver request, start to finish.
-const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-/// Ceiling on establishing the TCP/TLS connection alone.
-const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
 pub mod account;
 pub mod ai;
 pub mod auth;
@@ -32,7 +27,6 @@ pub mod habits;
 pub mod health;
 pub mod life;
 pub mod life_activity;
-pub mod life_activity_collectors;
 pub mod mcp;
 pub mod ocr;
 pub mod openapi;
@@ -60,56 +54,10 @@ pub async fn start_api_server(
     config: &Config,
     db: Database,
     broadcaster: EventBroadcaster,
+    handles: crate::bot::handles::BotHandles,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> (
-    std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
-    std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
-    std::sync::Arc<crate::bot::linking::PendingMerges>,
-) {
-    let state = auth::ApiState::new(
-        db,
-        broadcaster,
-        config.registration_secret.clone(),
-        config.homeserver.clone(),
-        // Bound outbound calls so a stalled homeserver cannot pin a request task
-        // indefinitely -- but generously. Reaching a homeserver through a VPN or
-        // proxy can take several seconds just to establish the TCP connection
-        // (measured at ~6s against one such setup), and a connect timeout tighter
-        // than that silently breaks profile and media lookups.
-        reqwest::Client::builder()
-            .use_rustls_tls()
-            .timeout(HTTP_TOTAL_TIMEOUT)
-            .connect_timeout(HTTP_CONNECT_TIMEOUT)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new()),
-    )
-    .with_registration_open(config.registration_open)
-    .with_ocr_and_voice(
-        crate::modules::ocr::OcrConfig {
-            enabled: config.ocr_enabled,
-            model_dir: config.ocr_model_dir.clone(),
-        },
-        crate::modules::voice::VoiceConfig {
-            enabled: config.voice_enabled,
-            model_dir: config.voice_model_dir.clone(),
-            language: "auto".to_string(),
-        },
-    );
-
-    // The Relying Party is a boot-time decision: an RP ID that does not match
-    // the origin the browser loads mints credentials no browser will return, so
-    // a bad pair must stop the process rather than surface as failed sign-ins.
-    let state = state
-        .with_webauthn(
-            &config.webauthn_rp_id,
-            &config.webauthn_origin,
-            config.cookie_secure,
-        )
-        .expect("WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN must form a valid Relying Party");
-
-    let bot_access_token = state.bot_access_token.clone();
-    let pending_merges = state.pending_merges.clone();
-    let bot_client_handle = state.bot_client.clone();
+) -> anyhow::Result<()> {
+    let state = auth::ApiState::from_config(config, db, broadcaster, handles)?;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -197,7 +145,7 @@ pub async fn start_api_server(
         }
     });
 
-    (bot_access_token, bot_client_handle, pending_merges)
+    Ok(())
 }
 
 #[cfg(test)]

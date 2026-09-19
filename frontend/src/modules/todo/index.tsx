@@ -26,32 +26,13 @@ import {
   utcIsoToZonedInput,
   zonedInputToUtcIso,
 } from '../../core/settings';
+import type { components } from '../../types/api';
 
-export interface TodoItem {
-  id: number;
-  room_id: string;
-  owner_id: string;
-  sender_name: string;
-  text: string;
-  priority: string;
-  due_at?: string | null;
-  remind_before_minutes?: number | null;
-  completed: boolean;
-  created_at?: string | null;
-}
+export type TodoItem = components['schemas']['TodoItem'];
 
-export interface TodoListResponse {
-  items: TodoItem[];
-  page: number;
-  limit: number;
-  total: number;
-}
+export type TodoListResponse = components['schemas']['TodoListResponse'];
 
-interface JoinedRoomInfo {
-  room_id: string;
-  name: string;
-  is_direct?: boolean;
-}
+type JoinedRoomInfo = components['schemas']['JoinedRoomInfo'];
 
 /** Lead-time presets, in minutes. `''` means no reminder. */
 const LEAD_OPTIONS = [

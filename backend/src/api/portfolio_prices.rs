@@ -89,48 +89,27 @@ pub async fn record_holding_position(
     user: AuthUser,
     Json(payload): Json<crate::api::portfolio::BuyHoldingRequest>,
 ) -> Result<Json<Holding>, ApiError> {
-    use crate::events::SystemEvent;
-    use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
-    use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
+    use crate::modules::portfolio::service::{self, TradeRequest};
 
     let owner_id = user.owner_id();
-    let symbol =
-        normalise_symbol(&payload.symbol).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let currency =
-        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let exponent = exponent_for(&currency);
 
-    let quantity_minor = parse_amount(&payload.quantity, QUANTITY_EXPONENT)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let price_minor =
-        parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-    let note = match payload.note {
-        Some(ref n) if n.trim().is_empty() => None,
-        Some(ref n) => Some(n.as_str()),
-        None => None,
-    };
-
-    match PortfolioRepository::record_holding_at(
+    let result = service::record(
         &state.db.pool,
+        Some(&state.broadcaster),
         &owner_id,
-        &symbol,
-        quantity_minor,
-        price_minor,
-        &currency,
-        exponent as i64,
-        note,
-        payload.executed_at,
+        TradeRequest {
+            symbol: &payload.symbol,
+            quantity: &payload.quantity,
+            price: &payload.price,
+            currency: &payload.currency,
+            note: payload.note.as_deref(),
+            executed_at: payload.executed_at,
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    {
-        Ok(holding) => {
-            state
-                .broadcaster
-                .send(SystemEvent::PortfolioHoldingCreated(holding.clone()));
-            Ok(Json(holding))
-        }
+    .await?;
+
+    match result {
+        Ok(holding) => Ok(Json(holding)),
         Err(err) => Err(ApiError::bad_request(err)),
     }
 }

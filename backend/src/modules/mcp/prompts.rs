@@ -24,7 +24,10 @@ pub fn list_prompts() -> Vec<McpPrompt> {
 }
 
 /// Formulates the prompt messages for a requested prompt template.
-pub fn get_prompt(name: &str, _arguments: Option<HashMap<String, String>>) -> Result<GetPromptResult, String> {
+pub fn get_prompt(
+    name: &str,
+    _arguments: Option<HashMap<String, String>>,
+) -> Result<GetPromptResult, String> {
     match name {
         "daily-briefing" => Ok(GetPromptResult {
             description: Some("Daily Morning Executive Briefing".to_string()),

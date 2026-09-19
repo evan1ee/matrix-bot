@@ -32,7 +32,7 @@ export const NetWorthStatStrip: React.FC = () => {
     return null;
   }
 
-  const hasMultipleCurrencies = data.native_breakdowns.length > 1;
+  const hasMultipleCurrencies = data.currencies.length > 1;
 
   return (
     <div className="space-y-2" data-testid="net-worth-stat-strip">
@@ -55,10 +55,6 @@ export const NetWorthStatStrip: React.FC = () => {
             <span className="text-xs font-mono font-normal ml-1.5 text-neutral-500 dark:text-neutral-400">
               {data.primary_currency}
             </span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] font-mono text-neutral-500 dark:text-neutral-500">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span>FX: {data.fx_source}</span>
           </div>
         </div>
 
@@ -103,7 +99,7 @@ export const NetWorthStatStrip: React.FC = () => {
             <Coins className="w-3.5 h-3.5 text-neutral-400" />
           </div>
           <div className="text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100">
-            {formatMinor(data.portfolio_cash_minor, data.primary_currency_exponent)}
+            {formatMinor(data.cash_deposits_minor, data.primary_currency_exponent)}
             <span className="text-xs font-mono font-normal ml-1.5 text-neutral-500 dark:text-neutral-400">
               {data.primary_currency}
             </span>
@@ -120,21 +116,18 @@ export const NetWorthStatStrip: React.FC = () => {
           <span className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
             Currencies:
           </span>
-          {data.native_breakdowns.map((b) => (
+          {data.currencies.map((b) => (
             <span
               key={b.currency}
               className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800"
             >
               <span className="font-semibold text-neutral-700 dark:text-neutral-300">{b.currency}</span>
               <span>
-                {formatMinor(
-                  b.ledger_cash_minor + b.portfolio_market_value_minor + b.portfolio_cash_minor,
-                  b.currency_exponent,
-                )}
+                {formatMinor(b.total_minor, b.currency_exponent)}
               </span>
               {b.currency !== data.primary_currency && (
                 <span className="text-neutral-400 dark:text-neutral-500">
-                  ≈ {formatMinor(b.converted_total_minor, data.primary_currency_exponent)} {data.primary_currency}
+                  ≈ {formatMinor(b.converted_minor, data.primary_currency_exponent)} {data.primary_currency}
                 </span>
               )}
             </span>

@@ -1,3 +1,8 @@
+import type { components } from '../../types/api';
+
+// Frontend-only presentation unions: the server types mood/weather as plain
+// `string` (validated server-side by normalize_mood, not a schema enum), so
+// these narrow rather than widen. They drive MOOD_CONFIG/WEATHER_CONFIG below.
 export type MoodType = 'amazing' | 'good' | 'neutral' | 'low' | 'rough';
 
 export type WeatherType = 'sunny' | 'cloudy' | 'rainy' | 'snowy' | 'windy';
@@ -12,15 +17,18 @@ export type TimeCategoryId =
 
 export type TimeAllocation = Array<string | null>;
 
-export interface LifeProfile {
-  id: number;
-  owner_id: string;
-  birth_date: string;
-  expected_lifespan_years: number;
-  created_at: string;
-  updated_at: string;
-}
+// Server schema also declares an `id` field which this endpoint's payload
+// never actually carries in frontend usage (unused here); dropped by using
+// the real server type directly.
+export type LifeProfile = components['schemas']['LifeProfile'];
 
+// Frontend-only view model: `LifeProfileView` (below, imported as
+// `LifeProfileResponse`) is the real `/life/profile` response. This is a
+// derived, renamed projection of it (age_in_days, total_life_days,
+// life_lived_percentage, days_logged) built in index.tsx for LifeStatStrip.
+// It happens to share a name with the server's own `LifeProfileStats`
+// schema, but the two are NOT the same shape — kept hand-written to avoid
+// pretending otherwise.
 export interface LifeProfileStats {
   birth_date: string;
   expected_lifespan_years: number;
@@ -33,22 +41,30 @@ export interface LifeProfileStats {
   average_sleep_hours?: number;
 }
 
-export interface LifeProfileResponse {
-  profile: LifeProfile | null;
-  age_days?: number;
-  total_expected_days?: number;
-  days_lived_percent?: number;
-  total_logged_days?: number;
-  dominant_mood?: string | null;
-  total_deep_work_hours?: number;
-  average_sleep_hours?: number;
-  today_date?: string;
-  stats?: LifeProfileStats | null;
-}
+// This is the real `/life/profile` response; the server names this schema
+// `LifeProfileStats` (see LifeProfileStats above for the naming collision
+// with a frontend-only type of the same name). The old hand-written version
+// of this interface also declared a nested `stats?: LifeProfileStats | null`
+// field that the server has never returned — index.tsx read through it as a
+// dead fallback (`profileData.stats?.age_in_days` etc.), which is now
+// removed there.
+export type LifeProfileResponse = components['schemas']['LifeProfileStats'];
 
 export const ACTIVITY_COLOR = '#6366f1'; // Indigo-500
 
-export interface LifeHorizonDay {
+// This is the real `/life/horizon` wire shape: a sparse list of only the
+// dates that have a log or activity. The old hand-written type also carried
+// `index`, `year` and `status`, none of which the server has ever sent —
+// those are computed client-side in index.tsx into a full calendar array
+// (see LifeHorizonCalendarDay below), which is what LifeHorizonMinimap and
+// LifeOverview actually render.
+export type LifeHorizonDay = components['schemas']['LifeHorizonDay'];
+
+// Frontend-only: one full-lifespan calendar day, computed in index.tsx by
+// walking every day from birth to end-of-life and enriching it with data
+// looked up from the sparse LifeHorizonDay[] response above. No server
+// equivalent — the server never returns "empty" days.
+export interface LifeHorizonCalendarDay {
   index: number;
   year: number;
   date: string;
@@ -59,6 +75,10 @@ export interface LifeHorizonDay {
   activity_count?: number;
 }
 
+// Frontend-only view model for the day-detail modal, assembled in index.tsx
+// from the raw `/life/days/:date` response (a LifeDayLog, whose
+// `activities`/`time_allocation` fields are JSON-encoded strings on the
+// wire) plus a locally computed `day_type`.
 export interface LifeDayItem {
   date: string;
   day_type: 'past' | 'present' | 'future';
@@ -71,12 +91,13 @@ export interface LifeDayItem {
   activity_count?: number;
 }
 
-export interface LifeYearView {
-  year: number;
-  birth_date: string | null;
-  days: LifeDayItem[];
-}
+// Unused in the frontend today; aliased directly since there is a real
+// server equivalent and nothing to preserve compatibility with.
+export type LifeYearView = components['schemas']['LifeYearView'];
 
+// Frontend-only form draft for the mood/day editor: keyed by `date` rather
+// than the wire request's `log_date` (mapped at the call site in
+// modules/mood/index.tsx).
 export interface UpsertDayPayload {
   date: string;
   log_date?: string;
@@ -87,10 +108,7 @@ export interface UpsertDayPayload {
   time_allocation?: TimeAllocation | null;
 }
 
-export interface UpsertProfilePayload {
-  birth_date: string;
-  expected_lifespan_years?: number;
-}
+export type UpsertProfilePayload = components['schemas']['UpsertLifeProfileInput'];
 
 export const TIME_CATEGORIES: Record<
   TimeCategoryId,

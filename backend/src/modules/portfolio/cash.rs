@@ -2,22 +2,23 @@
 //!
 //! Separated from `handler.rs` for size, along the seam the module already
 //! had. Cash is a hard precondition for buying and never for selling, and
-//! `PortfolioRepository::buy` performs its own funding check — nothing here
-//! gates a purchase, so this file is only the commands a user runs to move
-//! money in and out.
+//! `trade::buy` performs its own funding check — nothing here gates a
+//! purchase, so this file is only the commands a user runs to move money in
+//! and out.
 
 use sqlx::SqlitePool;
 use tracing::error;
 
+use super::cash_repo;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::models::{Transaction, TransactionSource};
 use crate::modules::finance::money::{
     exponent_for, format_amount, normalise_currency, parse_amount,
 };
-use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::portfolio::handler::broadcast;
+use crate::modules::finance::service as finance_service;
 use crate::modules::portfolio::models::CashBalance;
-use crate::modules::portfolio::repository::{PortfolioRepository, WithdrawOutcome};
+use crate::modules::portfolio::repository::WithdrawOutcome;
+use crate::modules::portfolio::service;
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
@@ -29,10 +30,15 @@ pub fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
     }
 }
 
-/// Posts a cash deposit or withdrawal to the finance ledger so portfolio funding
-/// reflects accurately in liquid cash balances.
+/// Posts a cash deposit or withdrawal to the finance ledger through the
+/// shared finance service, so portfolio funding reflects in liquid cash
+/// balances and, like every other write through the service, broadcasts
+/// `TransactionCreated` itself rather than leaving each call site to do it —
+/// a portfolio deposit or withdrawal used to write straight to
+/// `FinanceRepository` and never announce itself to an open browser.
 pub async fn record_portfolio_cash_transaction(
     pool: &SqlitePool,
+    broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     action: &str,
     amount_minor: i64,
@@ -47,28 +53,30 @@ pub async fn record_portfolio_cash_transaction(
         _ => return None,
     };
 
-    let category_id = FinanceRepository::find_or_create_category(pool, owner_id, "Investments")
-        .await
-        .ok()
-        .flatten()
-        .map(|c| c.id);
-
-    FinanceRepository::create_transaction(
+    finance_service::create_transaction(
         pool,
-        "web",
+        broadcaster,
         owner_id,
-        "Portfolio",
-        direction,
-        amount_minor,
-        currency,
-        exponent,
-        category_id,
-        Some(note),
-        Some(TransactionSource::PortfolioCash.as_str()),
-        Some(cash_id),
-        executed_at.unwrap_or_else(chrono::Utc::now),
+        finance_service::NewTransaction {
+            direction,
+            amount_minor,
+            currency,
+            currency_exponent: exponent,
+            // The category is inferred from the action, not typed by a user,
+            // so an unknown name is created rather than refused — matching
+            // what `find_or_create_category` did here before this call was
+            // routed through the shared service.
+            category: Some("Investments"),
+            note: Some(note),
+            room_id: "web",
+            sender_name: "Portfolio",
+            occurred_at: executed_at.unwrap_or_else(chrono::Utc::now),
+            source: Some((TransactionSource::PortfolioCash.as_str(), cash_id)),
+            create_missing_category: true,
+        },
     )
     .await
+    .map_err(|err| error!("Failed to record portfolio cash transaction: {:?}", err))
     .ok()
 }
 
@@ -112,7 +120,7 @@ pub async fn handle_cash(
 }
 
 async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
-    match PortfolioRepository::list_cash(pool, owner_id).await {
+    match cash_repo::list_cash(pool, owner_id).await {
         Ok(balances) if balances.is_empty() => {
             "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>."
                 .to_string()
@@ -153,20 +161,18 @@ async fn handle_cash_deposit(
             )
         }
     };
+    // `parse_cash_amount`'s own tests destructure its tuple return, so it
+    // cannot also hand back the raw amount string — re-render it instead of
+    // widening that signature.
+    let amount_str = format_amount(amount_minor, exponent);
 
-    match PortfolioRepository::deposit_cash(
-        pool,
-        owner_id,
-        &currency,
-        exponent as i64,
-        amount_minor,
-    )
-    .await
-    {
+    match service::deposit_cash(pool, broadcaster, owner_id, &currency, &amount_str, None).await {
         Ok(cash) => {
-            broadcast(broadcaster, cash_event(owner_id, &cash));
-            if let Some(tx) = record_portfolio_cash_transaction(
+            // The service broadcasts `PortfolioCashUpdated` itself; this call
+            // site only needs to post the finance-ledger transaction below.
+            record_portfolio_cash_transaction(
                 pool,
+                broadcaster,
                 owner_id,
                 "deposit",
                 amount_minor,
@@ -175,10 +181,7 @@ async fn handle_cash_deposit(
                 cash.id,
                 None,
             )
-            .await
-            {
-                broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
-            }
+            .await;
             format!(
                 "✅ Deposited <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),
@@ -212,12 +215,15 @@ async fn handle_cash_withdraw(
             )
         }
     };
+    let amount_str = format_amount(amount_minor, exponent);
 
-    match PortfolioRepository::withdraw_cash(pool, owner_id, &currency, amount_minor).await {
+    match service::withdraw_cash(pool, broadcaster, owner_id, &currency, &amount_str, None).await {
         Ok(WithdrawOutcome::Ok(cash)) => {
-            broadcast(broadcaster, cash_event(owner_id, &cash));
-            if let Some(tx) = record_portfolio_cash_transaction(
+            // The service broadcasts `PortfolioCashUpdated` itself; this call
+            // site only needs to post the finance-ledger transaction below.
+            record_portfolio_cash_transaction(
                 pool,
+                broadcaster,
                 owner_id,
                 "withdraw",
                 amount_minor,
@@ -226,10 +232,7 @@ async fn handle_cash_withdraw(
                 cash.id,
                 None,
             )
-            .await
-            {
-                broadcast(broadcaster, SystemEvent::TransactionCreated(tx));
-            }
+            .await;
             format!(
                 "✅ Withdrew <b>{} {}</b>. Cash balance: {} {}.",
                 html_escape(&format_amount(amount_minor, exponent)),
@@ -273,5 +276,33 @@ mod tests {
         assert!(parse_cash_amount("", "USD").is_err());
         assert!(parse_cash_amount("-100", "USD").is_err());
         assert!(parse_cash_amount("100 EURO", "USD").is_err());
+    }
+
+    /// The bug this fix exists to close: a portfolio deposit wrote straight to
+    /// `FinanceRepository` and never announced itself, so the resulting
+    /// finance transaction was invisible to an open browser until reload.
+    /// Routing it through `finance::service::create_transaction` must
+    /// broadcast `TransactionCreated` like every other write through the
+    /// service.
+    #[tokio::test]
+    async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let broadcaster = EventBroadcaster::default();
+        let mut rx = broadcaster.subscribe();
+
+        let reply = handle_cash(&pool, "@alice:a", "deposit 1000 USD", Some(&broadcaster)).await;
+        assert!(reply.contains("Deposited"), "unexpected reply: {reply}");
+
+        let mut saw_transaction_created = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, SystemEvent::TransactionCreated(_)) {
+                saw_transaction_created = true;
+            }
+        }
+        assert!(
+            saw_transaction_created,
+            "a portfolio cash deposit must broadcast TransactionCreated"
+        );
     }
 }

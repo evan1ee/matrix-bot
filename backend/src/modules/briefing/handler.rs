@@ -136,7 +136,8 @@ async fn toggle(
                     html_escape(&saved.timezone)
                 )
             } else {
-                "ℹ️ 每日早安简报已<b>关闭</b>。随时可输入 <code>!briefing on</code> 重新开启。".to_string()
+                "ℹ️ 每日早安简报已<b>关闭</b>。随时可输入 <code>!briefing on</code> 重新开启。"
+                    .to_string()
             }
         }
         Err(err) => format!("❌ 保存失败: {}", html_escape(&err.to_string())),
@@ -191,7 +192,10 @@ mod tests {
     #[tokio::test]
     async fn test_strip_command() {
         assert_eq!(strip_command("!briefing", "!briefing"), Some(""));
-        assert_eq!(strip_command("!briefing time 08:00", "!briefing time 08:00"), Some("time 08:00"));
+        assert_eq!(
+            strip_command("!briefing time 08:00", "!briefing time 08:00"),
+            Some("time 08:00")
+        );
         assert_eq!(strip_command("!morning", "!morning"), Some(""));
         assert_eq!(strip_command("!todo list", "!todo list"), None);
     }
@@ -201,14 +205,20 @@ mod tests {
         let pool = pool().await;
         let owner = "@alice:example.org";
 
-        let res = handle_briefing_command(&pool, owner, "!briefing status", None).await.unwrap();
+        let res = handle_briefing_command(&pool, owner, "!briefing status", None)
+            .await
+            .unwrap();
         assert!(res.contains("早安简报设置状态"));
         assert!(res.contains("07:00"));
 
-        let res_time = handle_briefing_command(&pool, owner, "!briefing time 08:30", None).await.unwrap();
+        let res_time = handle_briefing_command(&pool, owner, "!briefing time 08:30", None)
+            .await
+            .unwrap();
         assert!(res_time.contains("08:30"));
 
-        let res_off = handle_briefing_command(&pool, owner, "!briefing off", None).await.unwrap();
+        let res_off = handle_briefing_command(&pool, owner, "!briefing off", None)
+            .await
+            .unwrap();
         assert!(res_off.contains("关闭"));
     }
 }

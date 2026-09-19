@@ -4,6 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 use tracing::warn;
+use utoipa::IntoParams;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -15,20 +16,31 @@ use crate::modules::footprints::models::{
 use crate::modules::footprints::repository::FootprintRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ListFootprintsQuery {
     pub country: Option<String>,
     pub category: Option<String>,
     pub search: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct GeocodeQuery {
     pub query: Option<String>,
     pub lat: Option<f64>,
     pub lon: Option<f64>,
 }
 
+#[utoipa::path(
+    get,
+    tag = "footprints",
+    path = "/api/v1/footprints",
+    params(ListFootprintsQuery),
+    responses(
+        (status = 200, description = "List footprints", body = Vec<Footprint>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn list_footprints(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -47,6 +59,18 @@ pub async fn list_footprints(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    get,
+    tag = "footprints",
+    path = "/api/v1/footprints/{id}",
+    params(("id" = i64, Path, description = "Footprint ID")),
+    responses(
+        (status = 200, description = "Footprint found", body = Footprint),
+        (status = 404, description = "Footprint not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_footprint(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -60,6 +84,18 @@ pub async fn get_footprint(
     Ok(Json(fp))
 }
 
+#[utoipa::path(
+    post,
+    tag = "footprints",
+    path = "/api/v1/footprints",
+    request_body = CreateFootprintRequest,
+    responses(
+        (status = 200, description = "Footprint created", body = Footprint),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn create_footprint(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -129,6 +165,20 @@ pub async fn create_footprint(
     Ok(Json(created))
 }
 
+#[utoipa::path(
+    put,
+    tag = "footprints",
+    path = "/api/v1/footprints/{id}",
+    params(("id" = i64, Path, description = "Footprint ID")),
+    request_body = UpdateFootprintRequest,
+    responses(
+        (status = 200, description = "Footprint updated", body = Footprint),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 404, description = "Footprint not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn update_footprint(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -213,6 +263,18 @@ pub async fn update_footprint(
     Ok(Json(updated))
 }
 
+#[utoipa::path(
+    delete,
+    tag = "footprints",
+    path = "/api/v1/footprints/{id}",
+    params(("id" = i64, Path, description = "Footprint ID")),
+    responses(
+        (status = 200, description = "Footprint deleted"),
+        (status = 404, description = "Footprint not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn delete_footprint(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -234,6 +296,16 @@ pub async fn delete_footprint(
     Ok(Json(serde_json::json!({ "success": true, "id": id })))
 }
 
+#[utoipa::path(
+    get,
+    tag = "footprints",
+    path = "/api/v1/footprints/stats",
+    responses(
+        (status = 200, description = "Footprint travel stats", body = FootprintsSummary),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn get_summary_stats(
     user: AuthUser,
     State(state): State<ApiState>,
@@ -246,6 +318,19 @@ pub async fn get_summary_stats(
 }
 
 /// Reverse or forward geocoding proxy using OpenStreetMap Nominatim.
+#[utoipa::path(
+    get,
+    tag = "footprints",
+    path = "/api/v1/footprints/geocode",
+    params(GeocodeQuery),
+    responses(
+        (status = 200, description = "Geocoding result, proxied verbatim from Nominatim"),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse),
+        (status = 429, description = "Rate limit exceeded", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn geocode_proxy(
     user: AuthUser,
     State(state): State<ApiState>,

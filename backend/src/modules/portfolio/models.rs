@@ -153,6 +153,7 @@ pub struct CashBalance {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum BuyOutcome {
     Ok {
@@ -168,6 +169,7 @@ pub enum BuyOutcome {
     },
 }
 
+#[derive(Debug)]
 pub enum SellOutcome {
     NotFound,
     ExceedsHolding {
@@ -184,6 +186,7 @@ pub enum SellOutcome {
     },
 }
 
+#[derive(Debug)]
 pub enum WithdrawOutcome {
     Ok(CashBalance),
     InsufficientFunds { available_minor: i64 },

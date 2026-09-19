@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import type { LifeHorizonDay } from './types';
+import type { LifeHorizonCalendarDay } from './types';
 import { MOOD_CONFIG } from './types';
 
 interface LifeOverviewProps {
-  days: LifeHorizonDay[];
+  days: LifeHorizonCalendarDay[];
   isDark?: boolean;
 }
 
@@ -219,7 +219,7 @@ export const LifeOverview: React.FC<LifeOverviewProps> = ({
   }, [updateSize]);
 
   // Update tooltip content directly in DOM (zero React re-render)
-  const updateTooltipDOM = useCallback((d: LifeHorizonDay) => {
+  const updateTooltipDOM = useCallback((d: LifeHorizonCalendarDay) => {
     if (tooltipDateRef.current) tooltipDateRef.current.textContent = d.date;
     if (tooltipBadgeRef.current) {
       const el = tooltipBadgeRef.current;

@@ -25,9 +25,7 @@ async fn run_bot_loop(
     config: Config,
     db: Database,
     broadcaster: EventBroadcaster,
-    bot_token_handle: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
-    bot_client_handle: std::sync::Arc<tokio::sync::RwLock<Option<matrix_sdk::Client>>>,
-    pending_merges: std::sync::Arc<matrix_bot::bot::linking::PendingMerges>,
+    handles: matrix_bot::bot::handles::BotHandles,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut backoff = RECONNECT_MIN;
@@ -39,9 +37,7 @@ async fn run_bot_loop(
             &config,
             db.clone(),
             Some(broadcaster.clone()),
-            Some(bot_token_handle.clone()),
-            Some(bot_client_handle.clone()),
-            Some(pending_merges.clone()),
+            handles.clone(),
         );
 
         let bot = tokio::select! {
@@ -103,8 +99,7 @@ async fn main() -> Result<()> {
             )
             .init();
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string());
+        let database_url = matrix_bot::config::database_url_from_env();
         let db = Database::connect(&database_url, 5).await?;
 
         let mut owner_id = String::new();
@@ -119,12 +114,11 @@ async fn main() -> Result<()> {
         }
 
         if owner_id.is_empty() {
-            let resolved: Option<String> =
-                sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1")
-                    .fetch_optional(&db.pool)
-                    .await
-                    .unwrap_or(None);
-            owner_id = resolved.unwrap_or_else(|| "default_owner".to_string());
+            anyhow::bail!(
+                "MCP mode needs an explicit account: pass --owner <account id>. \
+                 It used to default to the oldest account in the database, which made \
+                 an authorisation decision by accident."
+            );
         }
 
         matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;
@@ -152,21 +146,26 @@ async fn main() -> Result<()> {
     }
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
+    let handles = matrix_bot::bot::handles::BotHandles::default();
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     // 1. Start background Axum REST API & Web Server with graceful shutdown
-    let (bot_token_handle, bot_client_handle, pending_merges) =
-        api::start_api_server(&config, db.clone(), broadcaster.clone(), shutdown_rx).await;
+    api::start_api_server(
+        &config,
+        db.clone(),
+        broadcaster.clone(),
+        handles.clone(),
+        shutdown_rx,
+    )
+    .await?;
 
     // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
     let bot_task = tokio::spawn(run_bot_loop(
         config.clone(),
         db.clone(),
         broadcaster.clone(),
-        bot_token_handle,
-        bot_client_handle,
-        pending_merges,
+        handles,
         shutdown_tx.subscribe(),
     ));
 

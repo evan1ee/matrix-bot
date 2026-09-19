@@ -9,6 +9,7 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::ai::client::ResolvedAiConfig;
+use crate::modules::ai::error::AiError;
 use crate::modules::ai::handler::{get_ai_client, run_ai_turn};
 use crate::modules::ai::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
@@ -16,6 +17,22 @@ use crate::modules::ai::models::{
 };
 use crate::modules::ai::repository::AiRepository;
 use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
+
+/// It used to be a bare `String`, so this always answered 400 — a provider
+/// outage and a bad prompt looked identical to the caller. Each variant now
+/// gets the status it actually deserves.
+impl From<AiError> for ApiError {
+    fn from(err: AiError) -> Self {
+        match err {
+            AiError::Validation(msg) => ApiError::bad_request(msg),
+            AiError::Provider(msg) => ApiError::service_unavailable(msg),
+            AiError::Timeout => {
+                ApiError::gateway_timeout("The AI provider did not respond in time")
+            }
+            AiError::Db(msg) => ApiError::internal(msg),
+        }
+    }
+}
 
 #[utoipa::path(
     post,
@@ -49,6 +66,7 @@ pub async fn chat(
         std::time::Duration::from_secs(180),
         run_ai_turn(
             &state.db.pool,
+            &state.ai,
             Some(&state.broadcaster),
             owner_id,
             &room_id,
@@ -63,7 +81,7 @@ pub async fn chat(
     })?
     .map_err(|e| {
         error!("AI chat execution error for {}: {}", owner_id, e);
-        ApiError::bad_request(e)
+        ApiError::from(e)
     })?;
 
     Ok(Json(AiChatResponse {
@@ -155,7 +173,7 @@ pub async fn get_ai_config(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
-    let resolved = ResolvedAiConfig::from_user_config(None);
+    let resolved = ResolvedAiConfig::from_user_config(&state.ai, None);
     let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
         &state.db.pool,
         &user.account_id,
@@ -217,7 +235,9 @@ pub async fn update_ai_config(
     user: AuthUser,
     Json(input): Json<UpdateAiConfigInput>,
 ) -> Result<Json<AiUserConfig>, ApiError> {
-    input.validate().map_err(ApiError::bad_request)?;
+    input
+        .validate(state.ai.allow_private_base_url)
+        .map_err(ApiError::bad_request)?;
 
     if let Some(turns) = input.max_history_turns {
         let mut settings =
@@ -271,13 +291,15 @@ pub async fn verify_ai_config(
     user: AuthUser,
     Json(input): Json<VerifyAiKeyInput>,
 ) -> Result<Json<VerifyAiKeyResponse>, ApiError> {
-    input.validate().map_err(ApiError::bad_request)?;
+    input
+        .validate(state.ai.allow_private_base_url)
+        .map_err(ApiError::bad_request)?;
 
     let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
-    let resolved = ResolvedAiConfig::from_user_config(user_config.as_ref());
+    let resolved = ResolvedAiConfig::from_user_config(&state.ai, user_config.as_ref());
 
     let target_base_url = input
         .api_base_url
@@ -295,7 +317,7 @@ pub async fn verify_ai_config(
         .filter(|m| !m.trim().is_empty())
         .unwrap_or(resolved.model_name);
 
-    match get_ai_client()
+    match get_ai_client(&state.ai)
         .verify_api_key(&target_base_url, target_key.as_deref(), Some(&target_model))
         .await
     {
@@ -428,5 +450,70 @@ mod tests {
         assert!(retro_res
             .formatted_markdown
             .contains("Weekly Executive Retrospective"));
+    }
+
+    /// The bug this whole type exists to fix: a provider outage used to reach
+    /// the browser as 400 Bad Request, indistinguishable from a prompt the
+    /// caller should not have sent. An unreachable base URL (the same
+    /// `http://127.0.0.1:1` pattern `ai::handler`'s own tests use) gives a
+    /// real `AiError::Provider` without depending on the network.
+    #[tokio::test]
+    async fn test_a_provider_failure_is_not_reported_as_a_bad_request() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(&owner);
+
+        let input = UpdateAiConfigInput {
+            api_base_url: Some("http://127.0.0.1:1".to_string()),
+            api_key: Some("invalid-key".to_string()),
+            model_name: Some("test-model".to_string()),
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+            max_history_turns: None,
+        };
+        AiRepository::upsert_user_config(&state.db.pool, &owner, &input)
+            .await
+            .unwrap();
+
+        let err = chat(
+            State(state),
+            user,
+            Json(AiChatRequest {
+                room_id: None,
+                conversation_id: None,
+                prompt: "hello".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_ne!(
+            err.status,
+            StatusCode::BAD_REQUEST,
+            "a provider outage must not look like a bad request"
+        );
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Covers the four-way mapping directly, since the test above only
+    /// exercises the `Provider` arm end to end.
+    #[test]
+    fn test_ai_error_maps_to_the_status_it_deserves() {
+        assert_eq!(
+            ApiError::from(AiError::Validation("bad prompt".to_string())).status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiError::from(AiError::Provider("provider down".to_string())).status,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            ApiError::from(AiError::Timeout).status,
+            StatusCode::GATEWAY_TIMEOUT
+        );
+        assert_eq!(
+            ApiError::from(AiError::Db("db exploded".to_string())).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

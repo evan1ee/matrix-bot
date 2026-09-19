@@ -184,7 +184,10 @@ mod tests {
         let pool = pool().await;
         let owner = "@evan:mbm.one";
 
-        assert_eq!(SettingsRepository::get_last_briefing_date(&pool, owner).await, None);
+        assert_eq!(
+            SettingsRepository::get_last_briefing_date(&pool, owner).await,
+            None
+        );
 
         SettingsRepository::update_last_briefing_date(&pool, owner, "2026-09-18")
             .await

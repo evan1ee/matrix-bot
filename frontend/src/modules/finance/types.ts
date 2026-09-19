@@ -1,102 +1,34 @@
-export interface MonthlyCashflowBucket {
-  month: string; // "YYYY-MM"
-  income_minor: number;
-  expense_minor: number;
-  net_minor: number;
-  currency: string;
-  currency_exponent: number;
-}
+import type { components } from '../../types/api';
 
-export interface ExpenseCategorySlice {
-  category_name: string;
-  amount_minor: number;
-  percentage: number;
-  tx_count: number;
-  currency: string;
-  currency_exponent: number;
-}
+export type MonthlyCashflowBucket = components['schemas']['MonthlyCashflowBucket'];
 
-export interface FinanceAnalyticsReport {
-  currency: string;
-  currency_exponent: number;
-  months_requested: number;
-  total_income_minor: number;
-  total_expense_minor: number;
-  net_savings_minor: number;
-  monthly_cashflow: MonthlyCashflowBucket[];
-  expense_categories: ExpenseCategorySlice[];
-}
+export type ExpenseCategorySlice = components['schemas']['ExpenseCategorySlice'];
 
-export interface FinanceShare {
-  owner_id: string;
-  token: string;
-  is_enabled: boolean;
-  title: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
+export type FinanceAnalyticsReport = components['schemas']['FinanceAnalyticsReport'];
 
-export interface PublicTransaction {
-  id: number;
-  direction: string;
-  amount_minor: number;
-  currency: string;
-  currency_exponent: number;
-  category_name: string | null;
-  note: string | null;
-  occurred_at: string;
-}
+export type FinanceShare = components['schemas']['FinanceShare'];
 
-export interface PublicFinanceReport {
-  title: string;
-  currency: string;
-  currency_exponent: number;
-  total_income_minor: number;
-  total_expense_minor: number;
-  net_savings_minor: number;
-  monthly_cashflow: MonthlyCashflowBucket[];
-  expense_categories: ExpenseCategorySlice[];
-  recent_transactions: PublicTransaction[];
-}
+export type PublicTransaction = components['schemas']['PublicTransaction'];
 
-export interface CurrencyNetWorthBreakdown {
-  currency: string;
-  currency_exponent: number;
-  ledger_cash_minor: number;
-  portfolio_market_value_minor: number;
-  portfolio_cash_minor: number;
-  converted_total_minor: number;
-}
+export type PublicFinanceReport = components['schemas']['PublicFinanceReport'];
 
-export interface NetWorthResponse {
-  primary_currency: string;
-  primary_currency_exponent: number;
-  total_net_worth_minor: number;
-  ledger_cash_minor: number;
-  portfolio_market_value_minor: number;
-  portfolio_cash_minor: number;
-  fx_source: string;
-  native_breakdowns: CurrencyNetWorthBreakdown[];
-}
+// Server field names: cash_deposits_minor, fx_rate_to_primary, converted_minor,
+// total_minor (see backend/src/modules/finance/net_worth.rs). The old
+// hand-written type used portfolio_cash_minor/converted_total_minor, which
+// never existed on the server — NetWorthStatStrip was reading undefined at
+// runtime. Fixed on the frontend below to use the real field names.
+export type CurrencyNetWorthBreakdown = components['schemas']['CurrencyNetWorthBreakdown'];
 
-export interface ReceiptExtraction {
-  merchant?: string | null;
-  amount?: string | null;
-  currency?: string | null;
-  date?: string | null;
-  category_suggestion?: string | null;
-}
+// Server field names: cash_deposits_minor, fx_rates (a currency->rate map),
+// currencies (the per-currency breakdown list). The old hand-written type had
+// portfolio_cash_minor, fx_source (string) and native_breakdowns, none of
+// which the server has ever returned. Fixed on the frontend below.
+export type NetWorthResponse = components['schemas']['NetWorthResponse'];
 
-export interface OcrTextBlock {
-  text: string;
-  score: number;
-}
+// Frontend-only name; server schema is ReceiptExtractionDto.
+export type ReceiptExtraction = components['schemas']['ReceiptExtractionDto'];
 
-export interface OcrScanResponse {
-  raw_text: string;
-  blocks: OcrTextBlock[];
-  structured?: ReceiptExtraction | null;
-}
+// Frontend-only name; server schema is OcrBlockDto.
+export type OcrTextBlock = components['schemas']['OcrBlockDto'];
 
-
-
+export type OcrScanResponse = components['schemas']['OcrScanResponse'];

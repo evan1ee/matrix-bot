@@ -16,14 +16,10 @@ pub async fn execute_tool(
             async {
                 let settings = SettingsRepository::get_or_default(pool, owner_id).await;
                 let client = reqwest::Client::new();
-                let report = NetWorthService::compute_net_worth(
-                    pool,
-                    &client,
-                    owner_id,
-                    &settings.currency,
-                )
-                .await
-                .map_err(|e| format!("Failed to compute net worth: {}", e))?;
+                let report =
+                    NetWorthService::compute_net_worth(pool, &client, owner_id, &settings.currency)
+                        .await
+                        .map_err(|e| format!("Failed to compute net worth: {}", e))?;
                 serde_json::to_string(&report).map_err(|e| e.to_string())
             }
             .await,

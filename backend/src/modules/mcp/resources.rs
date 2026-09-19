@@ -5,6 +5,7 @@ use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
+use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::todo::repository::TodoRepository;
 
@@ -90,7 +91,7 @@ pub async fn read_resource(
             let holdings = PortfolioRepository::list(pool, owner_id)
                 .await
                 .map_err(|e| e.to_string())?;
-            let cash = PortfolioRepository::list_cash(pool, owner_id)
+            let cash = cash_repo::list_cash(pool, owner_id)
                 .await
                 .map_err(|e| e.to_string())?;
             let payload = serde_json::json!({

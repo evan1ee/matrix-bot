@@ -83,7 +83,10 @@ pub async fn scan_image(
         Ok(res) => res,
         Err(err) => {
             warn!("PaddleOCR extraction failed: {:?}", err);
-            return Err(ApiError::internal(format!("OCR extraction failed: {}", err)));
+            return Err(ApiError::internal(format!(
+                "OCR extraction failed: {}",
+                err
+            )));
         }
     };
 
@@ -135,7 +138,9 @@ pub fn extract_receipt_fields(raw_text: &str) -> ReceiptExtractionDto {
             || lower.contains("invoice")
             || lower.contains("cashier")
             || lower.contains("order #")
-            || lower.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ':')
+            || lower
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '-' || c == ':')
         {
             continue;
         }
@@ -267,7 +272,13 @@ pub fn extract_receipt_fields(raw_text: &str) -> ReceiptExtractionDto {
 fn find_decimal_in_line(line: &str) -> Option<f64> {
     let clean: String = line
         .chars()
-        .map(|c| if c.is_ascii_digit() || c == '.' || c == ',' { c } else { ' ' })
+        .map(|c| {
+            if c.is_ascii_digit() || c == '.' || c == ',' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
 
     let mut last_decimal = None;
@@ -297,7 +308,8 @@ fn find_date_in_line(line: &str) -> Option<String> {
                     segments[1].parse::<u32>(),
                     segments[2].parse::<u32>(),
                 ) {
-                    if (2000..=2099).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d) {
+                    if (2000..=2099).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d)
+                    {
                         return Some(format!("{:04}-{:02}-{:02}", y, m, d));
                     }
                 }

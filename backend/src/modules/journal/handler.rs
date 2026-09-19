@@ -2,8 +2,8 @@ use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use tracing::error;
 
-use crate::api::life_activity::collect_day_activity;
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::modules::life::activity::collect_day_activity;
 use crate::modules::life::models::normalize_mood;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::settings::SettingsRepository;

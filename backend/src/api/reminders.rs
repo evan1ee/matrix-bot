@@ -12,6 +12,17 @@ use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::reminder::models::{RecurrencePattern, Reminder};
 use crate::modules::reminder::repository::ReminderRepository;
+use crate::modules::reminder::service::{self, NewReminder, ReminderError};
+
+impl From<ReminderError> for ApiError {
+    fn from(err: ReminderError) -> Self {
+        match err {
+            ReminderError::NotFound => ApiError::not_found(err.to_string()),
+            ReminderError::Db(inner) => ApiError::internal(inner.to_string()),
+            other => ApiError::bad_request(other.to_string()),
+        }
+    }
+}
 
 #[derive(Deserialize, IntoParams, ToSchema)]
 pub struct ReminderQuery {
@@ -109,16 +120,6 @@ pub async fn create_reminder(
     user: AuthUser,
     Json(payload): Json<CreateReminderRequest>,
 ) -> Result<Json<Reminder>, ApiError> {
-    if payload.message.trim().is_empty() {
-        return Err(ApiError::bad_request("Message required"));
-    }
-    if payload.seconds == 0 {
-        return Err(ApiError::bad_request("Seconds must be greater than 0"));
-    }
-    if payload.message.len() > 500 {
-        return Err(ApiError::bad_request("Message exceeds 500 character limit"));
-    }
-
     let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
     let recurrence = payload
         .recurrence
@@ -133,23 +134,19 @@ pub async fn create_reminder(
     )
     .await;
 
-    let reminder = ReminderRepository::create(
+    let reminder = service::create(
         &state.db.pool,
-        &room_id,
+        Some(&state.broadcaster),
         &user.owner_id(),
-        &user.display_name,
-        &payload.message,
-        trigger_at,
-        recurrence,
-        // Standalone reminder: not scheduled from a todo's due date.
-        None,
+        NewReminder {
+            message: &payload.message,
+            trigger_at,
+            room_id: &room_id,
+            owner_name: &user.display_name,
+            recurrence,
+        },
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::ReminderCreated(reminder.clone()));
+    .await?;
 
     Ok(Json(reminder))
 }
@@ -189,8 +186,11 @@ pub async fn update_reminder(
     if payload.seconds == 0 {
         return Err(ApiError::bad_request("Seconds must be greater than 0"));
     }
-    if payload.message.len() > 500 {
-        return Err(ApiError::bad_request("Message exceeds 500 character limit"));
+    if payload.message.len() > service::MAX_MESSAGE_LEN {
+        return Err(ApiError::bad_request(format!(
+            "Message exceeds {} character limit",
+            service::MAX_MESSAGE_LEN
+        )));
     }
 
     let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
@@ -250,17 +250,7 @@ pub async fn delete_reminder(
     };
 
     if status == "pending" {
-        sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
-            .bind(id)
-            .execute(&state.db.pool)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        state.broadcaster.send(SystemEvent::ReminderCancelled {
-            id,
-            room_id,
-            owner_id,
-        });
+        service::cancel(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
     } else {
         sqlx::query("DELETE FROM reminders WHERE id = ?")
             .bind(id)
@@ -292,13 +282,7 @@ pub async fn clear_reminder_history(
     user: AuthUser,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    ReminderRepository::clear_user_history(&state.db.pool, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::ReminderHistoryCleared { owner_id });
+    service::clear_history(&state.db.pool, Some(&state.broadcaster), &owner_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

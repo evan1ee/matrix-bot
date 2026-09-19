@@ -38,7 +38,9 @@ impl BotModule for McpModule {
         vec![CommandHelp {
             name: "mcp".to_string(),
             usage: "!mcp [token|list|revoke]".to_string(),
-            description: "Manage Model Context Protocol (MCP) server status and personal access tokens".to_string(),
+            description:
+                "Manage Model Context Protocol (MCP) server status and personal access tokens"
+                    .to_string(),
         }]
     }
 

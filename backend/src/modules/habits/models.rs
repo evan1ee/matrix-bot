@@ -2,8 +2,9 @@ use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::collections::HashSet;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
 pub struct Habit {
     pub id: i64,
     pub owner_id: String,
@@ -28,7 +29,7 @@ pub struct HabitLog {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct HabitWithStatus {
     #[serde(flatten)]
     pub habit: Habit,
@@ -39,19 +40,19 @@ pub struct HabitWithStatus {
     pub last_7_days: Vec<DayStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct DayStatus {
     pub date: String,
     pub completed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
 pub struct HeatmapDay {
     pub date: String,
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct HabitStatsSummary {
     pub total_active_habits: i64,
     pub completed_today: i64,

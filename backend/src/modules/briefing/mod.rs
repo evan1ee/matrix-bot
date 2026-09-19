@@ -35,12 +35,14 @@ impl BotModule for BriefingModule {
             CommandHelp {
                 name: "briefing".to_string(),
                 usage: "!briefing / !morning".to_string(),
-                description: "Generate and send your daily morning briefing snapshot immediately".to_string(),
+                description: "Generate and send your daily morning briefing snapshot immediately"
+                    .to_string(),
             },
             CommandHelp {
                 name: "briefing time".to_string(),
                 usage: "!briefing time <HH:MM>".to_string(),
-                description: "Set your daily morning briefing delivery time (e.g. 07:00)".to_string(),
+                description: "Set your daily morning briefing delivery time (e.g. 07:00)"
+                    .to_string(),
             },
             CommandHelp {
                 name: "briefing on/off".to_string(),
@@ -56,13 +58,7 @@ impl BotModule for BriefingModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_briefing_command(
-            &db.pool,
-            &ctx.owner_id,
-            &ctx.full_body,
-            broadcaster,
-        )
-        .await
+        handler::handle_briefing_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
     }
 
     async fn spawn_background_workers(

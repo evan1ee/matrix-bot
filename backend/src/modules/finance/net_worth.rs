@@ -4,11 +4,11 @@
 //! units without modification, and converts totals dynamically into the user's primary
 //! target currency using daily ECB / Yahoo FX reference rates.
 
-use std::collections::HashMap;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 use crate::modules::finance::fx::{convert_minor_units, get_rate_between, get_rates};
@@ -103,22 +103,28 @@ impl NetWorthService {
         let mut per_currency: HashMap<String, PillarAccumulator> = HashMap::new();
 
         for (curr, exp, net_opt) in tx_rows {
-            let entry = per_currency.entry(curr.to_ascii_uppercase()).or_insert(PillarAccumulator {
-                exponent: exp,
-                ledger_cash: 0,
-                portfolio_market_val: 0,
-                cash_deposits: 0,
-            });
+            let entry =
+                per_currency
+                    .entry(curr.to_ascii_uppercase())
+                    .or_insert(PillarAccumulator {
+                        exponent: exp,
+                        ledger_cash: 0,
+                        portfolio_market_val: 0,
+                        cash_deposits: 0,
+                    });
             entry.ledger_cash += net_opt.unwrap_or(0);
         }
 
         for (curr, exp, bal) in cash_rows {
-            let entry = per_currency.entry(curr.to_ascii_uppercase()).or_insert(PillarAccumulator {
-                exponent: exp,
-                ledger_cash: 0,
-                portfolio_market_val: 0,
-                cash_deposits: 0,
-            });
+            let entry =
+                per_currency
+                    .entry(curr.to_ascii_uppercase())
+                    .or_insert(PillarAccumulator {
+                        exponent: exp,
+                        ledger_cash: 0,
+                        portfolio_market_val: 0,
+                        cash_deposits: 0,
+                    });
             entry.cash_deposits += bal;
         }
 
@@ -130,12 +136,15 @@ impl NetWorthService {
             } else {
                 0
             };
-            let entry = per_currency.entry(curr.to_ascii_uppercase()).or_insert(PillarAccumulator {
-                exponent: exp,
-                ledger_cash: 0,
-                portfolio_market_val: 0,
-                cash_deposits: 0,
-            });
+            let entry =
+                per_currency
+                    .entry(curr.to_ascii_uppercase())
+                    .or_insert(PillarAccumulator {
+                        exponent: exp,
+                        ledger_cash: 0,
+                        portfolio_market_val: 0,
+                        cash_deposits: 0,
+                    });
             entry.portfolio_market_val += market_val;
         }
 

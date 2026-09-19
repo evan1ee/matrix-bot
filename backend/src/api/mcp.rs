@@ -36,6 +36,11 @@ pub fn mcp_routes() -> Router<ApiState> {
 }
 
 /// GET /api/v1/mcp/sse — Establishes the MCP SSE transport connection.
+///
+/// Deliberately not `#[utoipa::path]`-annotated: this is an `event-stream`
+/// handshake with no JSON request or response body to describe, so an
+/// OpenAPI operation would misdescribe it. Allowlisted in
+/// `openapi::tests::UNDOCUMENTED` for the same reason.
 pub async fn mcp_sse_handler(
     State(_state): State<ApiState>,
     user: AuthUser,
@@ -57,6 +62,12 @@ pub async fn mcp_sse_handler(
 }
 
 /// POST /api/v1/mcp/messages — Receives JSON-RPC messages from MCP clients in SSE session mode.
+///
+/// Deliberately not `#[utoipa::path]`-annotated: the body is a generic
+/// JSON-RPC 2.0 envelope (`JsonRpcRequest`/`JsonRpcResponse`) whose actual
+/// shape depends on the MCP method being called, so a single schema would
+/// misdescribe every method but one. Allowlisted in
+/// `openapi::tests::UNDOCUMENTED`.
 pub async fn mcp_message_handler(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -70,6 +81,10 @@ pub async fn mcp_message_handler(
 }
 
 /// POST /api/v1/mcp — Direct single-endpoint JSON-RPC handler (no SSE required).
+///
+/// Deliberately not `#[utoipa::path]`-annotated, for the same reason as
+/// [`mcp_message_handler`]: a generic JSON-RPC envelope, not one fixed shape.
+/// Allowlisted in `openapi::tests::UNDOCUMENTED`.
 pub async fn mcp_direct_handler(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -82,6 +97,16 @@ pub async fn mcp_direct_handler(
 }
 
 /// GET /api/v1/mcp/tokens — Lists active personal access tokens for the authenticated user.
+#[utoipa::path(
+    get,
+    tag = "mcp",
+    path = "/api/v1/mcp/tokens",
+    responses(
+        (status = 200, description = "Active personal access tokens for the caller", body = Vec<McpTokenSummary>),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn list_mcp_tokens(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -98,6 +123,18 @@ pub async fn list_mcp_tokens(
 }
 
 /// POST /api/v1/mcp/tokens — Generates a new personal access token and returns client JSON.
+#[utoipa::path(
+    post,
+    tag = "mcp",
+    path = "/api/v1/mcp/tokens",
+    request_body = CreateMcpTokenRequest,
+    responses(
+        (status = 200, description = "Token created; the raw token is returned once", body = CreateMcpTokenResponse),
+        (status = 400, description = "Bad request", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn create_mcp_token(
     State(state): State<ApiState>,
     user: AuthUser,
@@ -108,7 +145,9 @@ pub async fn create_mcp_token(
         return Err(ApiError::bad_request("Token name cannot be empty"));
     }
     if name.len() > 100 {
-        return Err(ApiError::bad_request("Token name cannot exceed 100 characters"));
+        return Err(ApiError::bad_request(
+            "Token name cannot exceed 100 characters",
+        ));
     }
 
     let (raw_token, token) = McpTokenRepository::create(
@@ -140,6 +179,18 @@ pub async fn create_mcp_token(
 }
 
 /// DELETE /api/v1/mcp/tokens/:id — Revokes an MCP personal access token.
+#[utoipa::path(
+    delete,
+    tag = "mcp",
+    path = "/api/v1/mcp/tokens/{id}",
+    params(("id" = String, Path, description = "Token ID")),
+    responses(
+        (status = 200, description = "Token revoked"),
+        (status = 404, description = "Token not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
 pub async fn delete_mcp_token(
     State(state): State<ApiState>,
     user: AuthUser,
