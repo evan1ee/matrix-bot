@@ -433,6 +433,9 @@ mod tests {
             voice_enabled: false,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            tts_enabled: false,
+            tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
+            tts_speaker_id: 0,
             trust_forwarded_for: true,
             ai: crate::config::AiEnvConfig::default(),
         }

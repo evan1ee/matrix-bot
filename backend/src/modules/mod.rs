@@ -26,6 +26,7 @@ pub mod reminder;
 pub mod rooms;
 pub mod settings;
 pub mod todo;
+pub mod tts;
 pub mod voice;
 pub mod webhook;
 
@@ -374,6 +375,7 @@ mod tests {
         use crate::modules::reminder::ReminderModule;
         use crate::modules::settings::SettingsModule;
         use crate::modules::todo::TodoModule;
+        use crate::modules::tts::TtsModule;
 
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
 
@@ -385,6 +387,12 @@ mod tests {
         registry.register(FinanceModule::new());
         registry.register(PortfolioModule::new());
         registry.register(SettingsModule::new());
+        // Must precede anything that claims arbitrary direct-message text
+        // (AiModule) — see `test_tts_must_be_registered_before_a_direct_message_catch_all`.
+        registry.register(TtsModule::new(
+            Arc::new(tokio::sync::RwLock::new(None)),
+            crate::modules::tts::TtsConfig::default(),
+        ));
 
         for body in [
             "!help",
@@ -396,6 +404,7 @@ mod tests {
             "!settings",
             "!settings timezone Asia/Tokyo",
             "!settings currency CNY",
+            "!say hello",
         ] {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
@@ -421,6 +430,79 @@ mod tests {
             );
         }
     }
+
+    /// `AiModule::handle_command` claims any non-empty text sent in a direct
+    /// message, not just `!ai` — see
+    /// `modules/ai/handler.rs::handle_ai_command_with_stage`. Registered ahead
+    /// of `TtsModule`, that swallows `!say` in a DM before TTS ever sees it.
+    /// `bot/mod.rs` registers `TtsModule` first specifically to avoid this.
+    ///
+    /// A real `AiModule` would make this test call a live HTTP endpoint (it
+    /// has no offline short-circuit before that point), so its claiming rule
+    /// — "answer any direct-message text" — is reproduced here instead,
+    /// keeping the test fast and deterministic while still catching a swap of
+    /// the two registrations in `bot/mod.rs`.
+    #[tokio::test]
+    async fn test_tts_must_be_registered_before_a_direct_message_catch_all() {
+        use crate::modules::tts::{TtsConfig, TtsModule};
+
+        struct DirectMessageCatchAll;
+
+        #[async_trait]
+        impl BotModule for DirectMessageCatchAll {
+            fn name(&self) -> &str {
+                "catch-all"
+            }
+
+            fn commands(&self) -> Vec<CommandHelp> {
+                Vec::new()
+            }
+
+            async fn handle_command(
+                &self,
+                ctx: &CommandContext,
+                _db: &Database,
+                _broadcaster: Option<&EventBroadcaster>,
+            ) -> Option<String> {
+                ctx.is_direct.then(|| "answered by the catch-all".to_string())
+            }
+        }
+
+        let db = memory_db().await;
+        let tts_module = || {
+            TtsModule::new(
+                Arc::new(tokio::sync::RwLock::new(None)),
+                TtsConfig::default(),
+            )
+        };
+
+        // Correct order (matches `bot/mod.rs`): TTS answers `!say` itself.
+        let mut correct = ModuleRegistry::new();
+        correct.register(tts_module());
+        correct.register(DirectMessageCatchAll);
+        let reply = correct
+            .dispatch(&ctx_for("say"), &db, None)
+            .await
+            .expect("TTS claims `say`");
+        assert!(
+            !reply.contains("catch-all"),
+            "TTS must answer `!say` before a direct-message catch-all gets a chance"
+        );
+
+        // Swapped order: exactly the bug this test exists to catch.
+        let mut swapped = ModuleRegistry::new();
+        swapped.register(DirectMessageCatchAll);
+        swapped.register(tts_module());
+        let reply = swapped
+            .dispatch(&ctx_for("say"), &db, None)
+            .await
+            .expect("the catch-all claims every direct message");
+        assert!(
+            reply.contains("catch-all"),
+            "sanity check: misordering really does let the catch-all swallow `!say`"
+        );
+    }
+
     use crate::events::EventBroadcaster;
 
     /// A module that claims only the command it was told to claim.
