@@ -18,6 +18,10 @@ pub const MIN_MAX_HISTORY_TURNS: i64 = 1;
 pub const MAX_MAX_HISTORY_TURNS: i64 = 100;
 pub const DEFAULT_BRIEFING_ENABLED: bool = true;
 pub const DEFAULT_BRIEFING_TIME: &str = "07:00";
+/// A sanity ceiling, not a model fact: how many voices actually exist depends
+/// on which Kokoro model directory is installed. This just keeps a stray
+/// input from being stored as something absurd.
+pub const MAX_TTS_SPEAKER_ID: i64 = 1023;
 
 fn default_max_history_turns() -> i64 {
     DEFAULT_MAX_HISTORY_TURNS
@@ -56,6 +60,17 @@ pub struct UserSettings {
     /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     #[serde(default = "default_briefing_time")]
     pub briefing_time: String,
+    /// Kokoro TTS speaker index `!say` uses to speak a reply. `None` means no
+    /// preference — `modules::tts` then falls back to the operator's
+    /// `TTS_SPEAKER_ID` — exactly the same "no row until you change
+    /// something" convention `dev_room_id` uses; `Some(0)` is a real,
+    /// selectable voice, not a stand-in for "unset". The Kokoro model this
+    /// project ships bundles 103 speakers (English and Mandarin, mixed);
+    /// validated against `MAX_TTS_SPEAKER_ID` on write, and clamped again in
+    /// `modules::tts::engine` against however many the currently loaded model
+    /// actually reports.
+    #[serde(default)]
+    pub tts_speaker_id: Option<i64>,
 }
 
 impl Default for UserSettings {
@@ -67,6 +82,7 @@ impl Default for UserSettings {
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
             briefing_enabled: DEFAULT_BRIEFING_ENABLED,
             briefing_time: DEFAULT_BRIEFING_TIME.to_string(),
+            tts_speaker_id: None,
         }
     }
 }
@@ -126,6 +142,7 @@ mod tests {
         assert_eq!(settings.max_history_turns, DEFAULT_MAX_HISTORY_TURNS);
         assert!(settings.briefing_enabled);
         assert_eq!(settings.briefing_time, "07:00");
+        assert_eq!(settings.tts_speaker_id, None);
         assert_eq!(settings.tz(), Tz::UTC);
     }
 
@@ -168,6 +185,7 @@ mod tests {
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
             briefing_enabled: true,
             briefing_time: "07:00".to_string(),
+            tts_speaker_id: None,
         };
         assert_eq!(settings.tz(), Tz::UTC);
     }

@@ -15,6 +15,7 @@ use tracing::{error, warn};
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
+use crate::modules::settings::SettingsRepository;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
@@ -34,6 +35,12 @@ const WAVEFORM_BUCKETS: usize = 100;
 /// The largest value a waveform bucket may hold, per the Matrix spec.
 const WAVEFORM_MAX: f32 = 1024.0;
 
+/// Resolves which speaker id `!say` should use: the sender's own preference,
+/// or `env_fallback` (`TTS_SPEAKER_ID`) when they have never customised it.
+fn resolve_speaker_id(env_fallback: i32, saved: Option<i64>) -> i64 {
+    saved.unwrap_or(i64::from(env_fallback))
+}
+
 pub struct TtsModule {
     /// The shared handle to the bot's own Matrix client. `AiModule` and
     /// `AccountModule` reach Matrix the same way; see `modules/ai/mod.rs`.
@@ -46,7 +53,7 @@ impl TtsModule {
         Self { client, config }
     }
 
-    async fn handle_say(&self, ctx: &CommandContext) -> String {
+    async fn handle_say(&self, ctx: &CommandContext, db: &Database) -> String {
         if !self.config.enabled {
             return "⚠️ <b>语音合成未启用</b><br/>\
                     • <b>原因:</b> 管理员尚未开启文本转语音功能<br/>\
@@ -77,7 +84,14 @@ impl TtsModule {
             );
         }
 
-        let speech = match engine::synthesize(&self.config, &text).await {
+        // TTS_SPEAKER_ID (`self.config.speaker_id`) is the operator's house
+        // default — a sensible voice (e.g. Mandarin) for a room full of people
+        // who have never picked their own. `resolve_speaker_id` decides
+        // between it and the sender's saved `tts_speaker_id`.
+        let settings = SettingsRepository::get_or_default(&db.pool, &ctx.owner_id).await;
+        let speaker_id = resolve_speaker_id(self.config.speaker_id, settings.tts_speaker_id);
+
+        let speech = match engine::synthesize(&self.config, &text, speaker_id).await {
             Ok(speech) => speech,
             Err(err) => {
                 warn!("TTS synthesis failed: {:?}", err);
@@ -190,14 +204,14 @@ impl BotModule for TtsModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _db: &Database,
+        db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         if ctx.command != "say" {
             return None;
         }
 
-        Some(self.handle_say(ctx).await)
+        Some(self.handle_say(ctx, db).await)
     }
 }
 
@@ -304,6 +318,32 @@ mod tests {
         let waveform = compute_waveform(&samples);
         assert_eq!(waveform.len(), WAVEFORM_BUCKETS);
         assert!(waveform.iter().all(|&v| v == 0));
+    }
+
+    #[test]
+    fn test_resolve_speaker_id_falls_back_to_env_when_unset() {
+        assert_eq!(resolve_speaker_id(5, None), 5);
+    }
+
+    #[test]
+    fn test_resolve_speaker_id_prefers_the_saved_preference() {
+        assert_eq!(resolve_speaker_id(5, Some(77)), 77);
+    }
+
+    /// The bug this type change fixes: speaker 0 is a real, selectable voice.
+    /// An explicit `Some(0)` must win over a non-zero environment fallback —
+    /// the earlier `i64`-with-a-sentinel design collapsed `Some(0)` into
+    /// "unset" and silently overrode it with `TTS_SPEAKER_ID` instead.
+    #[test]
+    fn test_resolve_speaker_id_honours_an_explicit_zero_over_a_nonzero_fallback() {
+        assert_eq!(resolve_speaker_id(44, Some(0)), 0);
+    }
+
+    /// The companion case: with no saved preference at all, the non-zero
+    /// fallback must still apply.
+    #[test]
+    fn test_resolve_speaker_id_falls_back_to_a_nonzero_env_default_when_unset() {
+        assert_eq!(resolve_speaker_id(44, None), 44);
     }
 
     #[test]

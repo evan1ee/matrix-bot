@@ -464,7 +464,8 @@ mod tests {
                 _db: &Database,
                 _broadcaster: Option<&EventBroadcaster>,
             ) -> Option<String> {
-                ctx.is_direct.then(|| "answered by the catch-all".to_string())
+                ctx.is_direct
+                    .then(|| "answered by the catch-all".to_string())
             }
         }
 

@@ -13,6 +13,7 @@ use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
     OfflineTtsModelConfig,
 };
+use tracing::warn;
 
 use super::models::{Speech, TtsConfig, TtsError};
 
@@ -110,11 +111,45 @@ fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
         .ok_or_else(|| TtsError::ModelMissing(model_dir.to_path_buf()))
 }
 
-fn synthesize_sync(model_dir: &Path, speaker_id: i32, text: &str) -> Result<Speech, TtsError> {
+/// Clamps a requested speaker id into the range a loaded model actually
+/// supports, returning the id to use for generation.
+///
+/// A stored `tts_speaker_id` preference can outlive the model that was loaded
+/// when it was chosen — an operator can swap in a Kokoro model with fewer
+/// voices without revalidating everyone's saved preference. Rather than fail
+/// the whole `!say`, this degrades to the nearest valid voice: negative ids
+/// (should not occur past API/handler validation, but never trust a stored
+/// value) clamp to 0, and ids at or past `num_speakers` clamp to the last
+/// valid index. A model reporting zero speakers (unexpected, but the C API
+/// returns a plain `i32`) clamps to 0 rather than underflowing.
+fn clamp_speaker_id(requested: i64, num_speakers: i32) -> i32 {
+    if num_speakers <= 0 {
+        return 0;
+    }
+    let max_valid = num_speakers - 1;
+    if requested < 0 {
+        0
+    } else if requested > i64::from(max_valid) {
+        max_valid
+    } else {
+        requested as i32
+    }
+}
+
+fn synthesize_sync(model_dir: &Path, speaker_id: i64, text: &str) -> Result<Speech, TtsError> {
     let tts = engine(model_dir)?;
 
+    let num_speakers = tts.num_speakers();
+    let sid = clamp_speaker_id(speaker_id, num_speakers);
+    if i64::from(sid) != speaker_id {
+        warn!(
+            "TTS speaker id {} is out of range for this model ({} speakers); using {} instead",
+            speaker_id, num_speakers, sid
+        );
+    }
+
     let generation = GenerationConfig {
-        sid: speaker_id,
+        sid,
         ..Default::default()
     };
 
@@ -128,20 +163,28 @@ fn synthesize_sync(model_dir: &Path, speaker_id: i32, text: &str) -> Result<Spee
     })
 }
 
-/// Synthesises `text` into speech using the configured Kokoro model and
-/// speaker.
+/// Synthesises `text` into speech using the configured Kokoro model at
+/// `speaker_id`.
+///
+/// The caller resolves which speaker id to use (the sender's saved
+/// preference, or `config.speaker_id` as the operator's house default for
+/// someone who has never picked one) — this function only clamps that id
+/// against the model actually loaded.
 ///
 /// Runs on a blocking worker thread. Inference is synchronous and CPU-bound
 /// for seconds at a time; on the runtime thread it would stall the Matrix
 /// sync loop, exactly as `modules/voice/sherpa.rs::run_transcription` already
 /// avoids for speech-to-text.
-pub async fn synthesize(config: &TtsConfig, text: &str) -> Result<Speech, TtsError> {
+pub async fn synthesize(
+    config: &TtsConfig,
+    text: &str,
+    speaker_id: i64,
+) -> Result<Speech, TtsError> {
     if !config.enabled {
         return Err(TtsError::Disabled);
     }
 
     let model_dir: PathBuf = config.model_dir.clone();
-    let speaker_id = config.speaker_id;
     let text = text.to_string();
 
     tokio::task::spawn_blocking(move || synthesize_sync(&model_dir, speaker_id, &text))
@@ -164,6 +207,34 @@ mod tests {
     fn test_opt_returns_none_for_a_missing_file() {
         let dir = std::env::temp_dir();
         assert_eq!(opt(&dir, "definitely-not-a-real-file.onnx"), None);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_leaves_in_range_ids_untouched() {
+        assert_eq!(clamp_speaker_id(0, 103), 0);
+        assert_eq!(clamp_speaker_id(50, 103), 50);
+        assert_eq!(clamp_speaker_id(102, 103), 102);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_clamps_negative_to_zero() {
+        assert_eq!(clamp_speaker_id(-1, 103), 0);
+        assert_eq!(clamp_speaker_id(-999, 103), 0);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_clamps_too_large_to_the_last_valid_index() {
+        assert_eq!(clamp_speaker_id(103, 103), 102);
+        assert_eq!(clamp_speaker_id(9999, 103), 102);
+    }
+
+    /// A model reporting zero (or, defensively, a negative) speaker count
+    /// must not underflow `num_speakers - 1`.
+    #[test]
+    fn test_clamp_speaker_id_handles_a_model_with_no_reported_speakers() {
+        assert_eq!(clamp_speaker_id(5, 0), 0);
+        assert_eq!(clamp_speaker_id(0, 0), 0);
+        assert_eq!(clamp_speaker_id(5, -1), 0);
     }
 
     /// Requires a real Kokoro model on disk.
@@ -195,13 +266,13 @@ mod tests {
             speaker_id: 0,
         };
 
-        let english = synthesize(&config, "Good morning, this is a test.")
+        let english = synthesize(&config, "Good morning, this is a test.", 0)
             .await
             .expect("english synthesis should succeed with a real model present");
         assert!(!english.samples.is_empty());
         assert_eq!(english.sample_rate, 24000);
 
-        let chinese = synthesize(&config, "早安，这是一个测试。")
+        let chinese = synthesize(&config, "早安，这是一个测试。", 0)
             .await
             .expect("chinese synthesis should succeed with a real model present");
         assert!(!chinese.samples.is_empty());

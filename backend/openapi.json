@@ -10391,6 +10391,12 @@
           "timezone": {
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`."
+          },
+          "tts_speaker_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Kokoro TTS speaker index (0-1023), or `null`/absent to clear back to no\npreference — the same convention `dev_room_id` uses, and for the same\nreason: `0` is a real, selectable voice, so it cannot also mean \"unset\".",
+            "nullable": true
           }
         }
       },
@@ -10588,6 +10594,12 @@
           "timezone": {
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`. Validated on write."
+          },
+          "tts_speaker_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Kokoro TTS speaker index `!say` uses to speak a reply. `None` means no\npreference — `modules::tts` then falls back to the operator's\n`TTS_SPEAKER_ID` — exactly the same \"no row until you change\nsomething\" convention `dev_room_id` uses; `Some(0)` is a real,\nselectable voice, not a stand-in for \"unset\". The Kokoro model this\nproject ships bundles 103 speakers (English and Mandarin, mixed);\nvalidated against `MAX_TTS_SPEAKER_ID` on write, and clamped again in\n`modules::tts::engine` against however many the currently loaded model\nactually reports.",
+            "nullable": true
           }
         }
       },
