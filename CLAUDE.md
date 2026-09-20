@@ -240,6 +240,60 @@ Validation lives at the API boundary (`api/settings.rs`), not at render time: an
 
 On the frontend, `core/settings.ts` is the single source — `useSettings()` reads one shared React Query entry, so a change reformats the whole app from one cache write. Anything rendering an instant must pass the zone explicitly (`formatDateTimeInZone` and friends); a bare `toLocaleString` silently uses the browser's zone, which is exactly what the setting exists to override. The same applies in reverse for *input*: `zonedInputToUtcIso`/`utcIsoToZonedInput` convert the `DateTimePicker`'s naive `YYYY-MM-DDTHH:mm` against the chosen zone, applying the offset twice so a daylight-saving boundary cannot land the result an hour out. `DateTimePicker` itself stays zone-agnostic and takes a `now` prop purely so "today" and the "Now" button mean the right day.
 
+### Voice replies (`!say`, offline text-to-speech)
+
+`modules/tts/` speaks a reply into the room as a native Matrix voice message.
+One engine, one code path, no trait — matching `modules/ocr` (PaddleOCR only)
+and `modules/voice` (sherpa only). sherpa-onnx is already a dependency for
+speech *to* text, and the prebuilt C API it ships already contains Kokoro TTS
+with espeak-ng grapheme-to-phoneme and per-language lexicons, so text to speech
+needed no new dependency, no second ML runtime, and no hand-written phonemiser.
+The raw ONNX model would have forced one: it takes phoneme ids, not text.
+
+`engine.rs` loads the model **once** into a `static OnceLock`, deliberately
+unlike `modules/voice/sherpa.rs`, which rebuilds its recogniser on every call.
+That is right there — a small model loading in milliseconds — and wrong here:
+Kokoro is 311 MB and takes seconds. Synthesis itself runs in `spawn_blocking`
+for the same reason speech-to-text does; it is CPU-bound for seconds at a time
+and on the runtime thread it would stall the Matrix sync loop. The
+text-normalisation FSTs (`date-zh.fst`, `number-zh.fst`, `phone-zh.fst`) are
+easy to leave out and nothing fails without them — a number is simply read
+digit by digit, or in English.
+
+The reply is **Ogg Opus, not WAV**, and that is what makes a client draw a
+voice bubble instead of a file card. `opus.rs` frames the 24 kHz samples at
+20 ms and writes Ogg pages whose granule positions are in 48 kHz units per
+RFC 7845, with the encoder's own `get_lookahead()` as the pre-skip; `mod.rs`
+attaches `AttachmentInfo::Voice` with a duration and a 100-bucket waveform.
+Get the granule arithmetic wrong and the bubble still renders, with a wrong
+duration, so the check has to be external — `ffprobe` over the `.ogg` files
+`cargo run -p matrix-bot --example tts_spike` writes beside its `.wav`s.
+
+**Which voice speaks is per user, and `TTS_SPEAKER_ID` is only the house
+default** for someone who has never chosen. `user_settings.tts_speaker_id` is
+`Option<i64>` and `resolve_speaker_id` is `saved.unwrap_or(env_fallback)`. It
+is an `Option` rather than a plain integer because **speaker 0 is a real
+voice**: a bare `i64` makes "never customised" and "chose the first voice" the
+same value, so with a non-zero house default nobody can select voice 0 at all.
+This follows `dev_room_id: Option<String>` in the same struct. `!settings voice
+<id|none>` and the web Settings modal both write it, `none` clears it back to
+the house default, and `engine::clamp_speaker_id` still degrades a stored id
+that outlived its model to the nearest valid voice rather than failing `!say`.
+
+TTS is **off by default** (`TTS_ENABLED=false`): a 311 MB model should not load
+just because someone pulled the branch. A disabled module and a missing model
+both answer with a message saying which, never a panic — `engine::model_present`
+is checked before synthesis is attempted, and a failed load is cached as `None`
+so a missing directory is not re-probed on every `!say`.
+
+Two build facts follow from the encoder and the runtime. The Dockerfile's build
+stage needs `cmake`, because `opusic-sys` compiles a vendored libopus from
+source; it links statically, so the runtime stage needs no libopus package.
+And on a Windows development machine the model test needs sherpa's own
+`onnxruntime.dll` copied into `target/debug/deps/` — `engine.rs`'s test comment
+explains why, and why a version mismatch there dies with an access violation
+rather than a clean error.
+
 ### Portfolio (investment holdings)
 
 `modules/portfolio/` tracks investment positions — symbol, quantity, weighted-average cost basis — manually. There is no live price feed anywhere in this codebase; `!portfolio price` and the web UI's price field are the only way a holding's current value updates, and market value / unrealized P&L are `Option`, not zero, until a price has been set.

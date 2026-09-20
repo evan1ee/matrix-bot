@@ -15,11 +15,13 @@ RUN npm run build
 
 # ---- Stage 2: build the bot -------------------------------------------------
 # reqwest pulls in native-tls (openssl-sys is in Cargo.lock), so the build needs
-# the OpenSSL headers even though sqlx itself is on rustls.
+# the OpenSSL headers even though sqlx itself is on rustls. cmake is for
+# opusic-sys, which compiles a vendored libopus from source at build time —
+# the result is statically linked, so the runtime stage needs no libopus package.
 FROM rust:1-bookworm AS build
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev cmake \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

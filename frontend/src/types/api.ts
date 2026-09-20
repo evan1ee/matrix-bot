@@ -3196,6 +3196,13 @@ export interface components {
             max_history_turns?: number | null;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. */
             timezone: string;
+            /**
+             * Format: int64
+             * @description Kokoro TTS speaker index (0-1023), or `null`/absent to clear back to no
+             *     preference — the same convention `dev_room_id` uses, and for the same
+             *     reason: `0` is a real, selectable voice, so it cannot also mean "unset".
+             */
+            tts_speaker_id?: number | null;
         };
         UpdateSymbolRequest: {
             symbol: string;
@@ -3276,6 +3283,19 @@ export interface components {
             max_history_turns?: number;
             /** @description IANA zone name, e.g. `Asia/Shanghai`. Validated on write. */
             timezone: string;
+            /**
+             * Format: int64
+             * @description Kokoro TTS speaker index `!say` uses to speak a reply. `None` means no
+             *     preference — `modules::tts` then falls back to the operator's
+             *     `TTS_SPEAKER_ID` — exactly the same "no row until you change
+             *     something" convention `dev_room_id` uses; `Some(0)` is a real,
+             *     selectable voice, not a stand-in for "unset". The Kokoro model this
+             *     project ships bundles 103 speakers (English and Mandarin, mixed);
+             *     validated against `MAX_TTS_SPEAKER_ID` on write, and clamped again in
+             *     `modules::tts::engine` against however many the currently loaded model
+             *     actually reports.
+             */
+            tts_speaker_id?: number | null;
         };
         VerifyAiKeyInput: {
             api_base_url?: string | null;

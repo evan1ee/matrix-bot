@@ -176,6 +176,16 @@ pub struct Config {
     pub voice_model_dir: std::path::PathBuf,
     /// Default speech recognition language (e.g. "auto", "zh", "en", "ja", "ko", "yue").
     pub voice_language: String,
+    /// Whether local sherpa-onnx Kokoro text-to-speech is enabled.
+    ///
+    /// Unlike `ocr_enabled`/`voice_enabled`, this defaults to `false`: the
+    /// Kokoro model directory is 311 MB, and it should not start loading just
+    /// because someone pulled this branch.
+    pub tts_enabled: bool,
+    /// Path to directory containing the Kokoro TTS ONNX model and lexicons.
+    pub tts_model_dir: std::path::PathBuf,
+    /// The Kokoro speaker ID to synthesize with (the model ships 103 of them).
+    pub tts_speaker_id: i32,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -273,6 +283,19 @@ impl Config {
 
         let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
 
+        let tts_enabled = env::var("TTS_ENABLED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        let tts_model_dir = env::var("TTS_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"));
+
+        let tts_speaker_id: i32 = env::var("TTS_SPEAKER_ID")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false);
@@ -301,9 +324,23 @@ impl Config {
             voice_enabled,
             voice_model_dir,
             voice_language,
+            tts_enabled,
+            tts_model_dir,
+            tts_speaker_id,
             trust_forwarded_for,
             ai,
         })
+    }
+
+    /// Builds the text-to-speech module's configuration from this `Config`,
+    /// mirroring how `api/auth/types.rs::from_config` builds `OcrConfig` and
+    /// `VoiceConfig` from the same struct.
+    pub fn tts_config(&self) -> crate::modules::tts::TtsConfig {
+        crate::modules::tts::TtsConfig {
+            enabled: self.tts_enabled,
+            model_dir: self.tts_model_dir.clone(),
+            speaker_id: self.tts_speaker_id,
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -379,6 +416,9 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            tts_enabled: false,
+            tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
+            tts_speaker_id: 0,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };
@@ -418,6 +458,9 @@ mod tests {
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            tts_enabled: false,
+            tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
+            tts_speaker_id: 0,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };

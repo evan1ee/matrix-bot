@@ -60,6 +60,13 @@ impl BotModule for SettingsModule {
                               (e.g. !settings currency CNY)"
                     .to_string(),
             },
+            CommandHelp {
+                name: "settings voice".to_string(),
+                usage: "!settings voice <0-1023>".to_string(),
+                description: "Set the Kokoro TTS speaker index !say uses \
+                              (e.g. !settings voice 0)"
+                    .to_string(),
+            },
         ]
     }
 

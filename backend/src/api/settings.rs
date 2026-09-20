@@ -6,6 +6,7 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::finance::money::normalise_currency;
+use crate::modules::settings::models::MAX_TTS_SPEAKER_ID;
 use crate::modules::settings::{parse_timezone, SettingsRepository, UserSettings};
 
 /// Both preferences are always sent together — settings are saved as a whole
@@ -28,6 +29,11 @@ pub struct UpdateSettingsRequest {
     /// Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     #[serde(default)]
     pub briefing_time: Option<String>,
+    /// Kokoro TTS speaker index (0-1023), or `null`/absent to clear back to no
+    /// preference — the same convention `dev_room_id` uses, and for the same
+    /// reason: `0` is a real, selectable voice, so it cannot also mean "unset".
+    #[serde(default)]
+    pub tts_speaker_id: Option<i64>,
 }
 
 #[utoipa::path(
@@ -105,6 +111,22 @@ pub async fn update_settings(
         current.briefing_time
     };
 
+    // Unlike `max_history_turns` or `briefing_time`, a missing/null value here
+    // is not "leave the current value alone" — it directly clears the
+    // preference, the same as `dev_room_id` above. A present value is still
+    // validated: it is written straight into the row, never merged against
+    // `current`.
+    let tts_speaker_id = match payload.tts_speaker_id {
+        Some(id) if (0..=MAX_TTS_SPEAKER_ID).contains(&id) => Some(id),
+        Some(_) => {
+            return Err(ApiError::bad_request(format!(
+                "tts_speaker_id must be between 0 and {}",
+                MAX_TTS_SPEAKER_ID
+            )));
+        }
+        None => None,
+    };
+
     let settings = SettingsRepository::upsert(
         &state.db.pool,
         &user.owner_id(),
@@ -115,6 +137,7 @@ pub async fn update_settings(
             max_history_turns,
             briefing_enabled,
             briefing_time,
+            tts_speaker_id,
         },
     )
     .await
@@ -156,6 +179,7 @@ mod tests {
             max_history_turns: None,
             briefing_enabled: None,
             briefing_time: None,
+            tts_speaker_id: None,
         }
     }
 
@@ -171,6 +195,7 @@ mod tests {
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
         assert_eq!(settings.max_history_turns, 10);
+        assert_eq!(settings.tts_speaker_id, None);
     }
 
     #[tokio::test]
@@ -315,5 +340,82 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    /// A valid speaker id must be stored and read back unchanged; boundary
+    /// values 0 and `MAX_TTS_SPEAKER_ID` are both in range and must not be
+    /// rejected as if they were the "outside the ceiling" case. Speaker 0 in
+    /// particular must come back as `Some(0)`, never `None` — it is a real
+    /// voice, not the "unset" state.
+    #[tokio::test]
+    async fn test_update_stores_a_valid_tts_speaker_id() {
+        let state = state().await;
+        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+
+        let mut zero_req = body("UTC", "USD");
+        zero_req.tts_speaker_id = Some(0);
+        let saved_zero = update_settings(State(state.clone()), user.clone(), Json(zero_req))
+            .await
+            .unwrap();
+        assert_eq!(saved_zero.tts_speaker_id, Some(0));
+
+        let mut req = body("UTC", "USD");
+        req.tts_speaker_id = Some(42);
+        let saved = update_settings(State(state.clone()), user.clone(), Json(req))
+            .await
+            .unwrap();
+        assert_eq!(saved.tts_speaker_id, Some(42));
+
+        let mut boundary_req = body("UTC", "USD");
+        boundary_req.tts_speaker_id = Some(MAX_TTS_SPEAKER_ID);
+        let saved2 = update_settings(State(state), user, Json(boundary_req))
+            .await
+            .unwrap();
+        assert_eq!(saved2.tts_speaker_id, Some(MAX_TTS_SPEAKER_ID));
+    }
+
+    /// A negative id or one past the ceiling must be refused at the boundary,
+    /// the same way an unknown timezone is — accepting it would store a value
+    /// nothing downstream expects.
+    #[tokio::test]
+    async fn test_rejects_a_tts_speaker_id_outside_the_valid_range() {
+        let state = state().await;
+
+        for bad in [-1, MAX_TTS_SPEAKER_ID + 1] {
+            let mut req = body("UTC", "USD");
+            req.tts_speaker_id = Some(bad);
+            let err = update_settings(
+                State(state.clone()),
+                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+                Json(req),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                err.status,
+                StatusCode::BAD_REQUEST,
+                "{bad} must be rejected"
+            );
+        }
+    }
+
+    /// A saved preference clears back to "no preference" when the field comes
+    /// back `null`/absent — mirroring `dev_room_id`, not the "leave the
+    /// current value alone" behaviour `max_history_turns` uses.
+    #[tokio::test]
+    async fn test_omitting_tts_speaker_id_clears_a_previously_saved_one() {
+        let state = state().await;
+        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+
+        let mut req = body("UTC", "USD");
+        req.tts_speaker_id = Some(9);
+        let _ = update_settings(State(state.clone()), user.clone(), Json(req))
+            .await
+            .unwrap();
+
+        let cleared = update_settings(State(state), user, Json(body("UTC", "USD")))
+            .await
+            .unwrap();
+        assert_eq!(cleared.tts_speaker_id, None);
     }
 }
