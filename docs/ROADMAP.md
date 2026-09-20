@@ -47,6 +47,8 @@ Recorded so the next reader does not re-propose them.
 | Portfolio price feed | `modules/portfolio/price_feed.rs` |
 | Portfolio alerts / history / audit chain | `alerts.rs`, `history.rs`, `audit.rs` |
 | **Bill payment posts to the ledger** | `recurring_bills/repository.rs:205` |
+| Matrix reactions → complete / snooze / delete | `bot/reaction.rs`, `db/schema_reactions.rs` |
+| Voice replies (`!say`, offline Kokoro TTS) | `modules/tts/`, `opus.rs` writes the Ogg voice bubble |
 
 The last one closed the previous finding #2; the price feed closed #9.
 
@@ -115,14 +117,17 @@ composition, not new capability.
 invite, and room messages. Fourteen modules of chat commands and no way to do
 anything without typing.
 
-- `grep -ri "reaction"` — **zero hits**
 - `grep -ri "m\.location\|LocationMessageEvent"` — **zero hits**
 
-**Reactions (✅ ⏰ 🗑️).** Capture the `event_id` when the bot sends a todo or
-reminder, handle `OriginalSyncReactionEvent`, map the key to complete / snooze /
-delete. This is the highest quality-of-life return per line in the document —
-it makes the product usable one-handed on a phone, which is where life admin
-actually happens.
+**Reactions (✅ ⏰ 🗑️) — shipped.** `bot/reaction.rs` now captures the
+`event_id` when the bot sends a todo or reminder, handles
+`OriginalSyncReactionEvent`, and maps the key to complete / snooze / delete.
+What remains of this finding is the rest of the platform surface below.
+
+**Voice — partly shipped.** `!say` sends a real `m.audio` voice message
+(`modules/tts/`), and inbound voice notes are transcribed (`modules/voice/`).
+The bot can now be spoken to and answer out loud; it still cannot be driven
+without a typed command to start it.
 
 **`m.location` → footprints.** This was speculative when first proposed; it is
 not now. `modules/footprints/` has models, a repository and a Leaflet map all
@@ -282,7 +287,7 @@ independently — this is much cheaper to settle now than after either has users
 |---|---|:---:|---|
 | 1 | Server-side filters (§5) | XS | Backend already supports it; two frontend lines |
 | 2 | Notification trait + Web Push + PWA (§1) | M | Unblocks every module; nothing else competes |
-| 3 | Matrix reactions (§3) | S | Largest UX return per line in this document |
+| 3 | ~~Matrix reactions (§3)~~ — shipped | S | Largest UX return per line in this document |
 | 4 | Schedule the retrospective + digest (§2) | S | 555 lines already written and unreachable |
 | 5 | Budgets + recurring income (§4) | M | Turns the ledger from record into forecast |
 | 6 | Export (§6) | S | Closes an active falsehood in the UI |
