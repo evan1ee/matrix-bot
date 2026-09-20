@@ -225,12 +225,39 @@ fn run(dir: &Path, sids: &[i32]) {
             let seconds = audio.samples().len() as f32 / audio.sample_rate().max(1) as f32;
             let took = started.elapsed().as_secs_f32();
 
-            if audio.save(&out) {
-                let realtime = seconds / took.max(f32::EPSILON);
-                println!("  {tag:<6} sid{sid:<4} {seconds:>5.1}s audio in {took:>5.1}s ({realtime:.1}x realtime)");
-            } else {
+            if !audio.save(&out) {
                 println!("  {tag} sid{sid}: could not write {out}");
+                continue;
             }
+
+            // Also write what actually goes to Matrix. The WAV above is for
+            // auditioning in any player; this is the shipping format, and
+            // writing both here means the encoder is exercised against real
+            // speech rather than only the synthetic samples in its unit tests.
+            let ogg_note = match matrix_bot::modules::tts::opus::encode_ogg_opus(
+                audio.samples(),
+                audio.sample_rate(),
+            ) {
+                Ok(bytes) => {
+                    let ogg_path = out.replace(".wav", ".ogg");
+                    let wav_len = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+                    match std::fs::write(&ogg_path, &bytes) {
+                        Ok(()) => format!(
+                            "  ogg {:>6} B vs wav {:>7} B ({:.0}x smaller)",
+                            bytes.len(),
+                            wav_len,
+                            wav_len as f32 / bytes.len().max(1) as f32
+                        ),
+                        Err(err) => format!("  ogg write failed: {err}"),
+                    }
+                }
+                Err(err) => format!("  ogg encode failed: {err}"),
+            };
+
+            let realtime = seconds / took.max(f32::EPSILON);
+            println!(
+                "  {tag:<6} sid{sid:<4} {seconds:>5.1}s audio in {took:>5.1}s ({realtime:.1}x realtime){ogg_note}"
+            );
         }
     }
 }

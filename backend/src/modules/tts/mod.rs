@@ -20,8 +20,8 @@ use crate::utils::html::html_escape;
 
 pub mod engine;
 pub mod models;
+pub mod opus;
 pub mod text;
-pub mod wav;
 
 pub use models::{Speech, TtsConfig, TtsError};
 
@@ -104,12 +104,11 @@ impl TtsModule {
 
     /// Resolves the room the command arrived in from the bot's own client
     /// handle, exactly as `bot/notify.rs` and `modules/webhook/scheduler.rs`
-    /// do, then uploads and sends the WAV as a voice message.
+    /// do, then uploads and sends the Ogg Opus clip as a voice message.
     ///
-    /// WAV, not Opus/OGG: some Matrix clients will render this as a plain
-    /// audio attachment rather than a voice bubble. Opus-in-OGG is the known
-    /// next step; `hound` (already a dependency) has no encoder for it, and
-    /// this brief adds no new dependency.
+    /// Ogg Opus, per RFC 7845: combined with `AttachmentInfo::Voice` carrying
+    /// a duration and waveform, this is what makes Matrix clients render the
+    /// message as a voice bubble rather than a plain audio attachment.
     async fn send_voice_message(&self, room_id: &str, speech: &Speech) -> Result<(), String> {
         let client = self.client.read().await.clone();
         let client = client.ok_or_else(|| "Matrix client is not connected".to_string())?;
@@ -120,25 +119,25 @@ impl TtsModule {
             .get_room(parsed_room_id)
             .ok_or_else(|| format!("Bot is not joined to room {}", room_id))?;
 
-        let wav_bytes = wav::encode_wav(&speech.samples, speech.sample_rate)
-            .map_err(|e| format!("WAV encoding failed: {}", e))?;
+        let ogg_bytes = opus::encode_ogg_opus(&speech.samples, speech.sample_rate)
+            .map_err(|e| format!("Ogg Opus encoding failed: {}", e))?;
 
-        let content_type = "audio/wav"
+        let content_type = "audio/ogg"
             .parse::<mime_guess::mime::Mime>()
             .map_err(|e| format!("Invalid MIME type: {}", e))?;
 
         let info = AttachmentInfo::Voice {
             audio_info: BaseAudioInfo {
                 duration: Some(speech.duration()),
-                size: UInt::new(wav_bytes.len() as u64),
+                size: UInt::new(ogg_bytes.len() as u64),
             },
             waveform: Some(compute_waveform(&speech.samples)),
         };
 
         room.send_attachment(
-            "voice-message.wav",
+            "voice-message.ogg",
             &content_type,
-            wav_bytes,
+            ogg_bytes,
             AttachmentConfig::new().info(info),
         )
         .await
