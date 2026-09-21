@@ -3,6 +3,7 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures_util::stream::StreamExt;
+use sqlx::SqlitePool;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
@@ -64,15 +65,12 @@ mod tests {
     use crate::accounts::{AccountRepository, SessionRepository};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_sse_handler_creation() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -83,11 +81,9 @@ mod tests {
         let _sse = sse_handler(State(state), user).await.unwrap();
     }
 
-    fn test_state(pool: sqlx::SqlitePool) -> ApiState {
+    fn test_state(pool: crate::db::DbPool) -> ApiState {
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -103,10 +99,8 @@ mod tests {
     /// away rather than being carried forward.
     #[tokio::test]
     async fn test_the_stream_requires_a_session() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = test_state(pool.clone());
 
         let account = AccountRepository::create(&pool, "evan", "active")

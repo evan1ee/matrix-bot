@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
@@ -24,7 +25,7 @@ impl ReminderRepository {
     // build that struct inline at the call site instead. No clarity is gained.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         sender_name: &str,
@@ -35,30 +36,32 @@ impl ReminderRepository {
     ) -> Result<Reminder> {
         let rec_str = recurrence.as_str();
 
-        let res = sqlx::query(
+        let res = crate::db_scalar_one!(
+            pool,
+            i64,
             r#"
             INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id)
             VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+            RETURNING id
             "#,
-        )
-        .bind(room_id)
-        .bind(owner_id)
-        .bind(sender_name)
-        .bind(message)
-        .bind(trigger_at)
-        .bind(rec_str)
-        .bind(source.map(|(kind, _)| kind.as_str()))
-        .bind(source.map(|(_, id)| id))
-        .execute(pool)
-        .await?;
+            room_id,
+            owner_id,
+            sender_name,
+            message,
+            trigger_at,
+            rec_str,
+            source.map(|(kind, _)| kind.as_str()),
+            source.map(|(_, id)| id)
+        )?;
 
-        let id = res.last_insert_rowid();
+        let id = res;
 
-        let reminder =
-            sqlx::query_as::<_, Reminder>(&format!("SELECT {COLUMNS} FROM reminders WHERE id = ?"))
-                .bind(id)
-                .fetch_one(pool)
-                .await?;
+        let reminder = crate::db_fetch_one!(
+            pool,
+            Reminder,
+            &format!("SELECT {COLUMNS} FROM reminders WHERE id = ?"),
+            id
+        )?;
 
         Ok(reminder)
     }
@@ -68,18 +71,20 @@ impl ReminderRepository {
     /// At most one exists at a time: `sync` reschedules rather than stacking a
     /// second row.
     pub async fn find_pending_for_source(
-        pool: &SqlitePool,
+        pool: &DbPool,
         source: ReminderSource,
         source_id: i64,
     ) -> Result<Option<Reminder>> {
-        let reminder = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE source_kind = ? AND source_id = ? \
+        let reminder = crate::db_fetch_optional!(
+            pool,
+            Reminder,
+            &format!(
+                "SELECT {COLUMNS} FROM reminders WHERE source_kind = ? AND source_id = ? \
              AND status = 'pending' ORDER BY id DESC LIMIT 1"
-        ))
-        .bind(source.as_str())
-        .bind(source_id)
-        .fetch_optional(pool)
-        .await?;
+            ),
+            source.as_str(),
+            source_id
+        )?;
 
         Ok(reminder)
     }
@@ -91,7 +96,7 @@ impl ReminderRepository {
     /// through an owner-scoped lookup, and the link columns are not
     /// user-supplied.
     pub async fn cancel_for_source(
-        pool: &SqlitePool,
+        pool: &DbPool,
         source: ReminderSource,
         source_id: i64,
     ) -> Result<Option<Reminder>> {
@@ -99,116 +104,107 @@ impl ReminderRepository {
             return Ok(None);
         };
 
-        sqlx::query("UPDATE reminders SET status = 'cancelled' WHERE id = ?")
-            .bind(reminder.id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE reminders SET status = 'cancelled' WHERE id = ?",
+            reminder.id
+        )?;
 
         Ok(Some(reminder))
     }
 
-    pub async fn count_user_pending(pool: &SqlitePool, owner_id: &str) -> Result<i64> {
-        let count = sqlx::query_scalar::<_, i64>(
+    pub async fn count_user_pending(pool: &DbPool, owner_id: &str) -> Result<i64> {
+        let count = crate::db_scalar_one!(
+            pool,
+            i64,
             "SELECT COUNT(*) FROM reminders WHERE owner_id = ? AND status = 'pending'",
-        )
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            owner_id
+        )?;
 
         Ok(count)
     }
 
-    pub async fn get_due_reminders(pool: &SqlitePool) -> Result<Vec<Reminder>> {
+    pub async fn get_due_reminders(pool: &DbPool) -> Result<Vec<Reminder>> {
         let now = Utc::now();
-        let reminders = sqlx::query_as::<_, Reminder>(&format!(
+        let reminders = crate::db_fetch_all!(pool, Reminder, &format!(
             "SELECT {COLUMNS} FROM reminders WHERE status = 'pending' AND trigger_at <= ? AND retry_count < ?"
-        ))
-        .bind(now)
-        .bind(MAX_DELIVERY_ATTEMPTS)
-        .fetch_all(pool)
-        .await?;
+        ), now, MAX_DELIVERY_ATTEMPTS)?;
 
         Ok(reminders)
     }
 
-    pub async fn mark_triggered(pool: &SqlitePool, id: i64) -> Result<()> {
-        sqlx::query("UPDATE reminders SET status = 'triggered' WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn mark_triggered(pool: &DbPool, id: i64) -> Result<()> {
+        crate::db_execute!(
+            pool,
+            "UPDATE reminders SET status = 'triggered' WHERE id = ?",
+            id
+        )?;
         Ok(())
     }
 
-    pub async fn mark_failed(pool: &SqlitePool, id: i64) -> Result<()> {
-        sqlx::query("UPDATE reminders SET status = 'failed' WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn mark_failed(pool: &DbPool, id: i64) -> Result<()> {
+        crate::db_execute!(
+            pool,
+            "UPDATE reminders SET status = 'failed' WHERE id = ?",
+            id
+        )?;
         Ok(())
     }
 
     pub async fn increment_retry(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         new_trigger_at: DateTime<Utc>,
     ) -> Result<()> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "UPDATE reminders SET retry_count = retry_count + 1, trigger_at = ? WHERE id = ?",
-        )
-        .bind(new_trigger_at)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            new_trigger_at,
+            id
+        )?;
         Ok(())
     }
 
-    pub async fn reschedule(
-        pool: &SqlitePool,
-        id: i64,
-        new_trigger_at: DateTime<Utc>,
-    ) -> Result<()> {
-        sqlx::query(
+    pub async fn reschedule(pool: &DbPool, id: i64, new_trigger_at: DateTime<Utc>) -> Result<()> {
+        crate::db_execute!(
+            pool,
             "UPDATE reminders SET trigger_at = ?, status = 'pending', retry_count = 0 WHERE id = ?",
-        )
-        .bind(new_trigger_at)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            new_trigger_at,
+            id
+        )?;
         Ok(())
     }
 
     pub async fn list_user_pending(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Reminder>> {
-        let reminders = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? AND status = 'pending' \
+        let reminders = crate::db_fetch_all!(
+            pool,
+            Reminder,
+            &format!(
+                "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? AND status = 'pending' \
              ORDER BY trigger_at ASC LIMIT ? OFFSET ?"
-        ))
-        .bind(owner_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+            ),
+            owner_id,
+            limit,
+            offset
+        )?;
 
         Ok(reminders)
     }
 
     /// Looks up a reminder that `owner_id` owns.
-    pub async fn find_owned(
-        pool: &SqlitePool,
-        owner_id: &str,
-        id: i64,
-    ) -> Result<Option<Reminder>> {
-        let reminder = sqlx::query_as::<_, Reminder>(&format!(
-            "SELECT {COLUMNS} FROM reminders WHERE id = ? AND owner_id = ?"
-        ))
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+    pub async fn find_owned(pool: &DbPool, owner_id: &str, id: i64) -> Result<Option<Reminder>> {
+        let reminder = crate::db_fetch_optional!(
+            pool,
+            Reminder,
+            &format!("SELECT {COLUMNS} FROM reminders WHERE id = ? AND owner_id = ?"),
+            id,
+            owner_id
+        )?;
 
         Ok(reminder)
     }
@@ -221,26 +217,25 @@ impl ReminderRepository {
     /// or silently rewrite history. `retry_count` resets because a re-timed
     /// reminder is a fresh delivery, not a continuation of the failed one.
     pub async fn update_pending(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         id: i64,
         message: &str,
         trigger_at: DateTime<Utc>,
         recurrence: RecurrencePattern,
     ) -> Result<Option<Reminder>> {
-        let res = sqlx::query(
+        let res = crate::db_execute!(
+            pool,
             "UPDATE reminders SET message = ?, trigger_at = ?, recurrence = ?, retry_count = 0 \
              WHERE id = ? AND owner_id = ? AND status = 'pending'",
-        )
-        .bind(message)
-        .bind(trigger_at)
-        .bind(recurrence.as_str())
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            message,
+            trigger_at,
+            recurrence.as_str(),
+            id,
+            owner_id
+        )?;
 
-        if res.rows_affected() == 0 {
+        if res == 0 {
             return Ok(None);
         }
 
@@ -248,7 +243,7 @@ impl ReminderRepository {
     }
 
     pub async fn list_user_reminders(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         status: Option<&str>,
         room_id: Option<&str>,
@@ -278,30 +273,19 @@ impl ReminderRepository {
             let sql = format!(
                 "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? AND room_id = ? {status_filter} {order_clause} LIMIT ? OFFSET ?"
             );
-            sqlx::query_as::<_, Reminder>(&sql)
-                .bind(owner_id)
-                .bind(room)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await?
+            crate::db_fetch_all!(pool, Reminder, &sql, owner_id, room, limit, offset)?
         } else {
             let sql = format!(
                 "SELECT {COLUMNS} FROM reminders WHERE owner_id = ? {status_filter} {order_clause} LIMIT ? OFFSET ?"
             );
-            sqlx::query_as::<_, Reminder>(&sql)
-                .bind(owner_id)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await?
+            crate::db_fetch_all!(pool, Reminder, &sql, owner_id, limit, offset)?
         };
 
         Ok(reminders)
     }
 
     pub async fn count_user_reminders(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         status: Option<&str>,
         room_id: Option<&str>,
@@ -320,53 +304,40 @@ impl ReminderRepository {
             let sql = format!(
                 "SELECT COUNT(*) FROM reminders WHERE owner_id = ? AND room_id = ? {status_filter}"
             );
-            sqlx::query_scalar::<_, i64>(&sql)
-                .bind(owner_id)
-                .bind(room)
-                .fetch_one(pool)
-                .await?
+            crate::db_scalar_one!(pool, i64, &sql, owner_id, room)?
         } else {
             let sql = format!("SELECT COUNT(*) FROM reminders WHERE owner_id = ? {status_filter}");
-            sqlx::query_scalar::<_, i64>(&sql)
-                .bind(owner_id)
-                .fetch_one(pool)
-                .await?
+            crate::db_scalar_one!(pool, i64, &sql, owner_id)?
         };
 
         Ok(total)
     }
 
-    pub async fn delete_history_item(pool: &SqlitePool, owner_id: &str, id: i64) -> Result<bool> {
-        let res = sqlx::query(
+    pub async fn delete_history_item(pool: &DbPool, owner_id: &str, id: i64) -> Result<bool> {
+        let res = crate::db_execute!(
+            pool,
             "DELETE FROM reminders WHERE id = ? AND owner_id = ? AND status != 'pending'",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
-        Ok(res.rows_affected() > 0)
+        Ok(res > 0)
     }
 
-    pub async fn clear_user_history(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
-        let res = sqlx::query("DELETE FROM reminders WHERE owner_id = ? AND status != 'pending'")
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+    pub async fn clear_user_history(pool: &DbPool, owner_id: &str) -> Result<u64> {
+        let res = crate::db_execute!(
+            pool,
+            "DELETE FROM reminders WHERE owner_id = ? AND status != 'pending'",
+            owner_id
+        )?;
 
-        Ok(res.rows_affected())
+        Ok(res)
     }
 
-    pub async fn cancel(pool: &SqlitePool, owner_id: &str, id: i64) -> Result<bool> {
-        let res = sqlx::query(
-            "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ? AND status = 'pending'",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+    pub async fn cancel(pool: &DbPool, owner_id: &str, id: i64) -> Result<bool> {
+        let res = crate::db_execute!(pool, "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ? AND status = 'pending'", id, owner_id)?;
 
-        Ok(res.rows_affected() > 0)
+        Ok(res > 0)
     }
 }
 
@@ -376,11 +347,9 @@ mod tests {
     use crate::db::schema::run_migrations;
     use chrono::Duration;
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -525,11 +494,13 @@ mod tests {
         ReminderRepository::mark_failed(&pool, rem.id)
             .await
             .unwrap();
-        let status: (String,) = sqlx::query_as("SELECT status FROM reminders WHERE id = ?")
-            .bind(rem.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let status: (String,) = crate::db_fetch_one!(
+            &pool,
+            _,
+            "SELECT status FROM reminders WHERE id = ?",
+            rem.id
+        )
+        .unwrap();
         assert_eq!(status.0, "failed");
     }
 
@@ -563,12 +534,13 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (i64, String) =
-            sqlx::query_as("SELECT retry_count, status FROM reminders WHERE id = ?")
-                .bind(rem.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let row: (i64, String) = crate::db_fetch_one!(
+            &pool,
+            _,
+            "SELECT retry_count, status FROM reminders WHERE id = ?",
+            rem.id
+        )
+        .unwrap();
         assert_eq!(row.0, 0);
         assert_eq!(row.1, "pending");
     }

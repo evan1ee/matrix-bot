@@ -102,7 +102,7 @@ pub async fn process_audio_event(
 
     // 4. Run AI turn with full domain tool capabilities
     match crate::modules::ai::handler::run_ai_turn_with_stage(
-        db.sqlite_pool(),
+        &db.pool,
         ai,
         broadcaster,
         owner_id,

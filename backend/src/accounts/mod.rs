@@ -24,6 +24,8 @@
 //! It has no credential, so there is nothing to authenticate as, and nothing to
 //! steal by guessing its id.
 
+use crate::db::DbPool;
+use crate::db_scalar_all;
 pub mod credentials;
 pub mod linking;
 pub mod merge;
@@ -236,18 +238,20 @@ mod tests {
     }
 
     /// Every table in the schema that has `column`.
-    async fn tables_with_column(pool: &SqlitePool, column: &str) -> BTreeSet<String> {
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    async fn tables_with_column(pool: &DbPool, column: &str) -> BTreeSet<String> {
+        let tables: Vec<String> = crate::db_scalar_all!(
+            pool,
+            _,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         )
-        .fetch_all(pool)
-        .await
         .unwrap();
 
         let mut found = BTreeSet::new();
         for table in tables {
+            // `PRAGMA table_info` is SQLite-only introspection; this guard test
+            // runs on SQLite by construction.
             let has_column = sqlx::query(&format!("PRAGMA table_info({table})"))
-                .fetch_all(pool)
+                .fetch_all(pool.sqlite_or_err().unwrap())
                 .await
                 .unwrap()
                 .iter()
@@ -267,11 +271,9 @@ mod tests {
             .collect()
     }
 
-    async fn migrated_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn migrated_pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{Duration as ChronoDuration, Utc};
 use sqlx::SqlitePool;
 use tracing::error;
@@ -13,7 +14,7 @@ use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder
 // wording, not the limit.
 
 pub async fn handle_reminder_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -308,11 +309,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

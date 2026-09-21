@@ -75,7 +75,7 @@ async fn deliver_to_matrix(
                     ("reminder", reminder.id)
                 };
                 let _ = crate::bot::reaction_targets::record_target(
-                    ctx.db.sqlite_pool(),
+                    &ctx.db.pool,
                     resp.event_id.as_str(),
                     reminder.room_id.as_str(),
                     entity_type,
@@ -112,7 +112,7 @@ async fn deliver_to_matrix(
                     ("reminder", reminder.id)
                 };
                 let _ = crate::bot::reaction_targets::record_target(
-                    ctx.db.sqlite_pool(),
+                    &ctx.db.pool,
                     resp.event_id.as_str(),
                     reminder.room_id.as_str(),
                     entity_type,
@@ -144,16 +144,13 @@ async fn advance_after_delivery(ctx: &ModuleContext, reminder: &Reminder) {
     match next_occurrence(reminder.trigger_at, &reminder.recurrence, now) {
         Some(next_trigger) => {
             if let Err(err) =
-                ReminderRepository::reschedule(ctx.db.sqlite_pool(), reminder.id, next_trigger)
-                    .await
+                ReminderRepository::reschedule(&ctx.db.pool, reminder.id, next_trigger).await
             {
                 error!("Failed rescheduling reminder #{}: {:?}", reminder.id, err);
             }
         }
         None => {
-            if let Err(err) =
-                ReminderRepository::mark_triggered(ctx.db.sqlite_pool(), reminder.id).await
-            {
+            if let Err(err) = ReminderRepository::mark_triggered(&ctx.db.pool, reminder.id).await {
                 error!(
                     "Failed marking reminder #{} triggered: {:?}",
                     reminder.id, err
@@ -175,7 +172,7 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
             "Reminder #{} exhausted {} delivery attempts; marking failed",
             reminder.id, MAX_DELIVERY_ATTEMPTS
         );
-        if let Err(err) = ReminderRepository::mark_failed(ctx.db.sqlite_pool(), reminder.id).await {
+        if let Err(err) = ReminderRepository::mark_failed(&ctx.db.pool, reminder.id).await {
             error!("Failed marking reminder #{} failed: {:?}", reminder.id, err);
         }
         return;
@@ -187,7 +184,7 @@ async fn handle_failed_delivery(ctx: &ModuleContext, reminder: &Reminder) {
         reminder.id, attempts, MAX_DELIVERY_ATTEMPTS, next_attempt
     );
     if let Err(err) =
-        ReminderRepository::increment_retry(ctx.db.sqlite_pool(), reminder.id, next_attempt).await
+        ReminderRepository::increment_retry(&ctx.db.pool, reminder.id, next_attempt).await
     {
         error!(
             "Failed recording retry for reminder #{}: {:?}",
@@ -236,7 +233,7 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
         loop {
             interval.tick().await;
 
-            let due_list = match ReminderRepository::get_due_reminders(ctx.db.sqlite_pool()).await {
+            let due_list = match ReminderRepository::get_due_reminders(&ctx.db.pool).await {
                 Ok(list) => list,
                 Err(err) => {
                     error!("Error querying due reminders: {:?}", err);
@@ -250,10 +247,9 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
                     reminder.id, reminder.sender_name, reminder.room_id
                 );
 
-                let tz =
-                    SettingsRepository::get_or_default(ctx.db.sqlite_pool(), &reminder.owner_id)
-                        .await
-                        .tz();
+                let tz = SettingsRepository::get_or_default(&ctx.db.pool, &reminder.owner_id)
+                    .await
+                    .tz();
 
                 let alert_html = format_reminder_alert(
                     &reminder.message,

@@ -1,3 +1,5 @@
+use crate::db::DbPool;
+use crate::db_scalar_one;
 use axum::extract::FromRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -324,9 +326,7 @@ impl ApiState {
     /// Expired entries are swept here rather than by a timer: ceremonies only
     /// accumulate when someone starts one, so the work belongs on that path.
     pub async fn stash_ceremony(&self, ceremony: Ceremony) -> Result<String, ApiError> {
-        let id = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(16)))")
-            .fetch_one(self.db.sqlite_pool())
-            .await
+        let id = db_scalar_one!(&self.db.pool, String, "SELECT lower(hex(randomblob(16)))")
             .map_err(|err| ApiError::internal(format!("could not start a ceremony: {err}")))?;
 
         let now = Instant::now();
@@ -448,14 +448,13 @@ mod tests {
     /// derives every one of them instead.
     #[tokio::test]
     async fn test_from_config_takes_every_security_default_from_config() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
         let config = production_config();
 
         let state = ApiState::from_config(
             &config,
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )
@@ -493,7 +492,8 @@ mod tests {
     /// every passkey login failing.
     #[tokio::test]
     async fn test_from_config_refuses_a_malformed_origin() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
         let config = Config {
             webauthn_origin: "not-a-url".to_string(),
             ..production_config()
@@ -501,9 +501,7 @@ mod tests {
 
         assert!(ApiState::from_config(
             &config,
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool)
-            },
+            crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )

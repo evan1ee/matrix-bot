@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -9,7 +9,7 @@ use crate::modules::webhook::scheduler::notify_outbox;
 use crate::utils::html::html_escape;
 
 pub async fn handle_webhook_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     room_id: &str,
     owner_id: &str,
     sender_name: &str,
@@ -61,7 +61,7 @@ pub async fn handle_webhook_command(
     }
 }
 
-async fn handle_list(pool: &SqlitePool, owner_id: &str, sender_name: &str) -> Option<String> {
+async fn handle_list(pool: &DbPool, owner_id: &str, sender_name: &str) -> Option<String> {
     match WebhookRepository::list_by_owner(pool, owner_id).await {
         Ok(hooks) => {
             if hooks.is_empty() {
@@ -99,7 +99,7 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str, sender_name: &str) -> Op
 }
 
 async fn handle_create(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     name: &str,
     default_room_id: &str,
@@ -135,7 +135,7 @@ async fn handle_create(
 }
 
 async fn handle_revoke(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     id: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -165,7 +165,7 @@ async fn handle_revoke(
 }
 
 async fn handle_test(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     id: &str,
     broadcaster: Option<&EventBroadcaster>,

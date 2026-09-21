@@ -1,7 +1,7 @@
+use crate::db::DbPool;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk::Client;
-use sqlx::SqlitePool;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,7 +24,7 @@ pub fn is_ai_error_alerted() -> bool {
 
 /// Sends an outage notification to the DEV room, sending strictly once per incident.
 pub async fn notify_dev_room_ai_error(
-    pool: &SqlitePool,
+    pool: &DbPool,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     owner_id: &str,
     error_msg: &str,

@@ -237,7 +237,7 @@ pub async fn handle_attachment(
     let stage_indicator = StageIndicator::start(room, plain_stage, html_stage).await;
 
     let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-        db.sqlite_pool(),
+        &db.pool,
         ev.sender.as_str(),
     )
     .await
@@ -299,7 +299,7 @@ pub async fn handle_attachment(
         .finish_with_reply(&plain_text, &reply_html)
         .await;
     crate::bot::reaction_targets::link_turn_targets(
-        db.sqlite_pool(),
+        &db.pool,
         stage_indicator.event_id().map(|e| e.as_str()),
         sent_eid.as_deref().map(|e| e.as_str()),
         ev.event_id.as_str(),

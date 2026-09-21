@@ -12,25 +12,25 @@ use crate::modules::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
 pub async fn run_briefing_tick(ctx: &ModuleContext) {
-    let accounts: Vec<String> =
-        match sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE status = 'active'")
-            .fetch_all(ctx.db.sqlite_pool())
-            .await
-        {
-            Ok(list) => list,
-            Err(err) => {
-                error!(
-                    "Error fetching active accounts for morning briefing: {:?}",
-                    err
-                );
-                return;
-            }
-        };
+    let accounts: Vec<String> = match crate::db_scalar_all!(
+        &ctx.db.pool,
+        String,
+        "SELECT id FROM accounts WHERE status = 'active'"
+    ) {
+        Ok(list) => list,
+        Err(err) => {
+            error!(
+                "Error fetching active accounts for morning briefing: {:?}",
+                err
+            );
+            return;
+        }
+    };
 
     let now_utc = Utc::now();
 
     for owner_id in accounts {
-        let settings = SettingsRepository::get_or_default(ctx.db.sqlite_pool(), &owner_id).await;
+        let settings = SettingsRepository::get_or_default(&ctx.db.pool, &owner_id).await;
         if !settings.briefing_enabled {
             continue;
         }
@@ -46,7 +46,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
         // 1. Check if already delivered today
         if let Some(last_date) =
-            SettingsRepository::get_last_briefing_date(ctx.db.sqlite_pool(), &owner_id).await
+            SettingsRepository::get_last_briefing_date(&ctx.db.pool, &owner_id).await
         {
             if last_date == today_local_str {
                 continue;
@@ -70,7 +70,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
             now_local.minute()
         );
 
-        let payload = match generate_briefing(ctx.db.sqlite_pool(), &owner_id, &settings).await {
+        let payload = match generate_briefing(&ctx.db.pool, &owner_id, &settings).await {
             Ok(p) => p,
             Err(err) => {
                 error!(
@@ -85,7 +85,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
         // 3. Deliver to user's direct or default Matrix room
         if let Some(target_room) =
-            RoomRepository::resolve_user_default_room(ctx.db.sqlite_pool(), &owner_id).await
+            RoomRepository::resolve_user_default_room(&ctx.db.pool, &owner_id).await
         {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
                 let content =
@@ -112,7 +112,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
         // 4. Update last briefing date so it cannot re-trigger today
         let _ = SettingsRepository::update_last_briefing_date(
-            ctx.db.sqlite_pool(),
+            &ctx.db.pool,
             &owner_id,
             &today_local_str,
         )

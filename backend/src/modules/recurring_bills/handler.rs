@@ -30,7 +30,7 @@ pub async fn handle_bill_command(
 }
 
 async fn handle_list(ctx: &CommandContext, db: &Database) -> Option<String> {
-    let bills = RecurringBillRepository::list_by_owner(db.sqlite_pool(), &ctx.owner_id)
+    let bills = RecurringBillRepository::list_by_owner(&db.pool, &ctx.owner_id)
         .await
         .unwrap_or_default();
 
@@ -114,7 +114,7 @@ async fn handle_add(
     };
 
     match RecurringBillRepository::create(
-        db.sqlite_pool(),
+        &db.pool,
         &ctx.room_id,
         &ctx.owner_id,
         &ctx.sender_name,
@@ -153,11 +153,10 @@ async fn handle_pay(
         Err(_) => return Some("Invalid bill ID.".to_string()),
     };
 
-    match RecurringBillRepository::mark_paid(db.sqlite_pool(), id, &ctx.owner_id, broadcaster).await
-    {
+    match RecurringBillRepository::mark_paid(&db.pool, id, &ctx.owner_id, broadcaster).await {
         Ok((bill, _tx)) => {
             // Paying advanced `next_due_at`, so re-arm at the next period.
-            let _ = due_reminder::sync(db.sqlite_pool(), broadcaster, &bill).await;
+            let _ = due_reminder::sync(&db.pool, broadcaster, &bill).await;
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::RecurringBillPaid {
                     id: bill.id,
@@ -192,9 +191,9 @@ async fn handle_delete(
         Err(_) => return Some("Invalid bill ID.".to_string()),
     };
 
-    match RecurringBillRepository::delete(db.sqlite_pool(), id, &ctx.owner_id).await {
+    match RecurringBillRepository::delete(&db.pool, id, &ctx.owner_id).await {
         Ok(true) => {
-            let _ = due_reminder::tear_down(db.sqlite_pool(), broadcaster, id).await;
+            let _ = due_reminder::tear_down(&db.pool, broadcaster, id).await;
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::RecurringBillDeleted {
                     id,
@@ -245,9 +244,9 @@ async fn handle_remind(
         ..Default::default()
     };
 
-    match RecurringBillRepository::update(db.sqlite_pool(), id, &ctx.owner_id, payload).await {
+    match RecurringBillRepository::update(&db.pool, id, &ctx.owner_id, payload).await {
         Ok(bill) => {
-            let outcome = due_reminder::sync(db.sqlite_pool(), broadcaster, &bill).await;
+            let outcome = due_reminder::sync(&db.pool, broadcaster, &bill).await;
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::RecurringBillUpdated(bill.clone()));
             }

@@ -1,9 +1,11 @@
+use crate::db::DbPool;
 use axum::{
     extract::{Path, State},
     Json,
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -44,7 +46,7 @@ pub async fn get_profile_and_stats(
     State(state): State<ApiState>,
 ) -> Result<Json<LifeProfileStats>, ApiError> {
     let today = get_today_string();
-    let stats = LifeRepository::get_stats(state.db.sqlite_pool(), &user.account_id, &today)
+    let stats = LifeRepository::get_stats(&state.db.pool, &user.account_id, &today)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -79,10 +81,9 @@ pub async fn upsert_profile(
 
     let lifespan = payload.expected_lifespan_years.unwrap_or(80).clamp(40, 130);
 
-    let profile =
-        LifeRepository::upsert_profile(state.db.sqlite_pool(), &user.account_id, birth, lifespan)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let profile = LifeRepository::upsert_profile(&state.db.pool, &user.account_id, birth, lifespan)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(SystemEvent::LifeProfileUpdated {
         owner_id: user.account_id.clone(),
@@ -113,7 +114,7 @@ pub async fn get_year_view(
         return Err(ApiError::bad_request("Year must be between 1900 and 2200."));
     }
 
-    let view = LifeRepository::get_year_view(state.db.sqlite_pool(), &user.account_id, year)
+    let view = LifeRepository::get_year_view(&state.db.pool, &user.account_id, year)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -134,7 +135,7 @@ pub async fn get_horizon(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<LifeHorizonDay>>, ApiError> {
-    let horizon = LifeRepository::get_horizon_days(state.db.sqlite_pool(), &user.account_id)
+    let horizon = LifeRepository::get_horizon_days(&state.db.pool, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -169,7 +170,7 @@ pub async fn upsert_day(
         ApiError::bad_request("Invalid mood. Choose from amazing, good, neutral, low, rough.")
     })?;
 
-    let existing = LifeRepository::get_day_log(state.db.sqlite_pool(), &user.account_id, date_str)
+    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, date_str)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     if let Some(ref ex) = existing {
@@ -216,7 +217,7 @@ pub async fn upsert_day(
     };
 
     let log = LifeRepository::upsert_day_log(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         date_str,
         mood,
@@ -267,7 +268,7 @@ pub async fn update_time_allocation(
     }
 
     let today = get_today_string();
-    let existing = LifeRepository::get_day_log(state.db.sqlite_pool(), &user.account_id, &date)
+    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -283,7 +284,7 @@ pub async fn update_time_allocation(
         .map_err(|e| ApiError::bad_request(format!("Invalid time allocation format: {e}")))?;
 
     let log = LifeRepository::update_time_allocation(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         &date,
         &time_allocation_json,
@@ -321,7 +322,7 @@ pub async fn get_day(
         ));
     }
 
-    let log = LifeRepository::get_day_log(state.db.sqlite_pool(), &user.account_id, &date)
+    let log = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -351,7 +352,7 @@ pub async fn delete_day(
         ));
     }
 
-    let deleted = LifeRepository::delete_day_log(state.db.sqlite_pool(), &user.account_id, &date)
+    let deleted = LifeRepository::delete_day_log(&state.db.pool, &user.account_id, &date)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -374,16 +375,11 @@ mod tests {
     use crate::db::schema_life::run_life_schema;
     use crate::db::Database;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
-    async fn create_test_state() -> (ApiState, SqlitePool) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_life_schema(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        let db = Database {
-            pool: crate::db::DbPool::Sqlite(pool.clone()),
-        };
+    async fn create_test_state() -> (ApiState, DbPool) {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_life_schema(&pool).await.unwrap();
+        let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();
         let state = ApiState::new(

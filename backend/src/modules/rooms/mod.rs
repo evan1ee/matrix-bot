@@ -6,10 +6,10 @@
 //! of `db::rooms` deliberately — that layer has no `matrix_sdk` dependency and
 //! resolving a room needs one.
 
+use crate::db::DbPool;
 use matrix_sdk::room::Room;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::{OwnedUserId, UserId};
-use sqlx::SqlitePool;
 use tracing::warn;
 
 use crate::accounts::AccountRepository;
@@ -85,7 +85,7 @@ async fn describe_room(room: &Room, bot_id: &UserId) -> Option<JoinedRoomInfo> {
 
 /// Discovers Matrix rooms where both the bot and at least one linked Matrix account of the user are joined.
 pub async fn discover_rooms_for_account(
-    pool: &SqlitePool,
+    pool: &DbPool,
     client: &matrix_sdk::Client,
     account_id: &str,
 ) -> Vec<JoinedRoomInfo> {
@@ -152,20 +152,19 @@ pub async fn discover_rooms_for_account(
 
 /// Validates whether a room is joined by the account (checking cached rooms or discovering live).
 pub async fn is_room_authorized_for_account(
-    pool: &SqlitePool,
+    pool: &DbPool,
     client: Option<&matrix_sdk::Client>,
     account_id: &str,
     room_id: &str,
 ) -> bool {
     // 1. Fast path: check cached account_rooms
-    if let Ok(Some(_)) = sqlx::query_scalar::<_, i64>(
+    if let Ok(Some(_)) = crate::db_scalar_optional!(
+        pool,
+        i64,
         "SELECT 1 FROM account_rooms WHERE account_id = ? AND room_id = ? LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(room_id)
-    .fetch_optional(pool)
-    .await
-    {
+        account_id,
+        room_id
+    ) {
         return true;
     }
 
@@ -180,14 +179,7 @@ pub async fn is_room_authorized_for_account(
                     for mxid in linked {
                         if let Ok(uid) = UserId::parse(&mxid) {
                             if is_joined_member(&room, &uid).await {
-                                let _ = sqlx::query(
-                                    "INSERT OR IGNORE INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
-                                )
-                                .bind(account_id)
-                                .bind(room_id)
-                                .bind(room.name().unwrap_or_else(|| room_id.to_string()))
-                                .execute(pool)
-                                .await;
+                                let _ = crate::db_execute!(pool, "INSERT OR IGNORE INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)", account_id, room_id, room.name().unwrap_or_else(|| room_id.to_string()));
                                 return true;
                             }
                         }

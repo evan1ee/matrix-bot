@@ -12,14 +12,14 @@
 //! So the decisions live here and the transports parse and render. This module
 //! returns data and typed errors; it renders nothing.
 
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::reminder::models::ReminderSource;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
+use sqlx::SqlitePool;
 
 /// Maximum allowed length for task description text.
 pub const MAX_TASK_TEXT_LEN: usize = 500;
@@ -128,7 +128,7 @@ fn validate_lead(minutes: i64) -> Result<(), TodoError> {
 /// Validation happens before the insert, so a rejected reminder never leaves a
 /// task behind with a lead time that was silently dropped.
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     input: NewTodo<'_>,
@@ -191,7 +191,7 @@ pub async fn create(
 
 /// Applies a patch to an owned todo, reconciles its reminder, then broadcasts.
 pub async fn update(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -282,7 +282,7 @@ pub async fn update(
 /// Deletes an owned todo, tearing down its reminder first — a reminder whose
 /// task no longer exists would fire pointing at nothing.
 pub async fn delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -315,7 +315,7 @@ pub async fn delete(
 /// the owner across every room — broadcasting one `TodoDeleted` per row
 /// removed and returning the rows so a caller can name what went away.
 pub async fn clear_completed(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: Option<&str>,
@@ -361,11 +361,9 @@ mod tests {
     use crate::db::schema::run_migrations;
     use chrono::{Duration, Utc};
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

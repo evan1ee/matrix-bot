@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tracing::{debug, warn};
@@ -14,14 +15,14 @@ use crate::events::EventBroadcaster;
 
 /// Core service engine dispatching MCP JSON-RPC protocol requests.
 pub struct McpService<'a> {
-    pub pool: &'a SqlitePool,
+    pub pool: &'a DbPool,
     pub broadcaster: Option<&'a EventBroadcaster>,
     pub owner_id: &'a str,
 }
 
 impl<'a> McpService<'a> {
     pub fn new(
-        pool: &'a SqlitePool,
+        pool: &'a DbPool,
         broadcaster: Option<&'a EventBroadcaster>,
         owner_id: &'a str,
     ) -> Self {
@@ -192,10 +193,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_initialize() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -214,10 +217,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_tools_list() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -237,10 +242,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_resources_and_prompts() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         let service = McpService::new(&pool, None, "test_owner");
 
         let req_res = JsonRpcRequest {

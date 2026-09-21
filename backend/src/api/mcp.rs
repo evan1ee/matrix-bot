@@ -1,3 +1,5 @@
+use crate::db::DbPool;
+use crate::db_execute;
 use axum::{
     extract::{Query, State},
     response::sse::{Event, KeepAlive, Sse},
@@ -75,7 +77,7 @@ pub async fn mcp_message_handler(
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
     let owner_id = user.owner_id();
-    let service = McpService::new(state.db.sqlite_pool(), Some(&state.broadcaster), &owner_id);
+    let service = McpService::new(&state.db.pool, Some(&state.broadcaster), &owner_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -91,7 +93,7 @@ pub async fn mcp_direct_handler(
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
     let owner_id = user.owner_id();
-    let service = McpService::new(state.db.sqlite_pool(), Some(&state.broadcaster), &owner_id);
+    let service = McpService::new(&state.db.pool, Some(&state.broadcaster), &owner_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -111,7 +113,7 @@ pub async fn list_mcp_tokens(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<McpTokenSummary>>, ApiError> {
-    let tokens = McpTokenRepository::list_for_account(state.db.sqlite_pool(), &user.account_id)
+    let tokens = McpTokenRepository::list_for_account(&state.db.pool, &user.account_id)
         .await
         .map_err(|err| {
             tracing::error!("Failed to list MCP tokens: {:?}", err);
@@ -151,7 +153,7 @@ pub async fn create_mcp_token(
     }
 
     let (raw_token, token) = McpTokenRepository::create(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         name,
         payload.expires_in_days,
@@ -196,7 +198,7 @@ pub async fn delete_mcp_token(
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = McpTokenRepository::delete(state.db.sqlite_pool(), &user.account_id, &id)
+    let deleted = McpTokenRepository::delete(&state.db.pool, &user.account_id, &id)
         .await
         .map_err(|err| {
             tracing::error!("Failed to delete MCP token: {:?}", err);
@@ -217,10 +219,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_handler_ping() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -237,21 +241,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_tokens_api_flow() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        crate::db::schema_auth::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        crate::db::schema_mcp::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
+        crate::db::schema_auth::create_tables(&pool).await.unwrap();
+        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+        )
+        .unwrap();
 
         let (raw, token) = McpTokenRepository::create(&pool, "acct_test", "API Test", None)
             .await

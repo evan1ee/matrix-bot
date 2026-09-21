@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{Months, NaiveDateTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 
@@ -10,7 +11,7 @@ pub struct RecurringBillRepository;
 
 impl RecurringBillRepository {
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         sender_name: &str,
@@ -20,7 +21,9 @@ impl RecurringBillRepository {
         let frequency = payload.frequency.unwrap_or_else(|| "monthly".to_string());
         let auto_pay = payload.auto_pay.unwrap_or(false);
 
-        let res = sqlx::query(
+        let res = crate::db_scalar_one!(
+            pool,
+            i64,
             r#"
             INSERT INTO recurring_bills (
                 room_id, owner_id, sender_name, name, category,
@@ -28,59 +31,57 @@ impl RecurringBillRepository {
                 due_day, next_due_at, total_installments, auto_pay, notes,
                 remind_before_minutes, remind_room_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             "#,
-        )
-        .bind(room_id)
-        .bind(owner_id)
-        .bind(sender_name)
-        .bind(&payload.name)
-        .bind(&payload.category)
-        .bind(payload.amount_minor)
-        .bind(&payload.currency)
-        .bind(currency_exponent)
-        .bind(&frequency)
-        .bind(payload.due_day)
-        .bind(&payload.next_due_at)
-        .bind(payload.total_installments)
-        .bind(auto_pay)
-        .bind(&payload.notes)
-        .bind(payload.remind_before_minutes)
-        .bind(&payload.remind_room_id)
-        .execute(pool)
-        .await?;
+            room_id,
+            owner_id,
+            sender_name,
+            &payload.name,
+            &payload.category,
+            payload.amount_minor,
+            &payload.currency,
+            currency_exponent,
+            &frequency,
+            payload.due_day,
+            &payload.next_due_at,
+            payload.total_installments,
+            auto_pay,
+            &payload.notes,
+            payload.remind_before_minutes,
+            &payload.remind_room_id
+        )?;
 
-        let id = res.last_insert_rowid();
+        let id = res;
 
         Self::get_by_id(pool, id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)
     }
 
-    pub async fn get_by_id(
-        pool: &SqlitePool,
-        id: i64,
-    ) -> Result<Option<RecurringBill>, sqlx::Error> {
-        sqlx::query_as::<_, RecurringBill>("SELECT * FROM recurring_bills WHERE id = ?;")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
+    pub async fn get_by_id(pool: &DbPool, id: i64) -> Result<Option<RecurringBill>, sqlx::Error> {
+        crate::db_fetch_optional!(
+            pool,
+            RecurringBill,
+            "SELECT * FROM recurring_bills WHERE id = ?;",
+            id
+        )
     }
 
     pub async fn list_by_owner(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Vec<RecurringBill>, sqlx::Error> {
-        sqlx::query_as::<_, RecurringBill>(
+        crate::db_fetch_all!(
+            pool,
+            RecurringBill,
             "SELECT * FROM recurring_bills WHERE owner_id = ? ORDER BY next_due_at ASC;",
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn update(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
         payload: UpdateBillPayload,
@@ -113,7 +114,8 @@ impl RecurringBillRepository {
             .unwrap_or(existing.remind_before_minutes);
         let remind_room_id = payload.remind_room_id.or(existing.remind_room_id);
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE recurring_bills
             SET name = ?, category = ?, amount_minor = ?, currency = ?, frequency = ?,
@@ -122,43 +124,42 @@ impl RecurringBillRepository {
                 remind_room_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND owner_id = ?;
             "#,
-        )
-        .bind(&name)
-        .bind(&category)
-        .bind(amount_minor)
-        .bind(&currency)
-        .bind(&frequency)
-        .bind(due_day)
-        .bind(&next_due_at)
-        .bind(total_installments)
-        .bind(paid_installments)
-        .bind(auto_pay)
-        .bind(&status)
-        .bind(&notes)
-        .bind(remind_before_minutes)
-        .bind(&remind_room_id)
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            &name,
+            &category,
+            amount_minor,
+            &currency,
+            &frequency,
+            due_day,
+            &next_due_at,
+            total_installments,
+            paid_installments,
+            auto_pay,
+            &status,
+            &notes,
+            remind_before_minutes,
+            &remind_room_id,
+            id,
+            owner_id
+        )?;
 
         Self::get_by_id(pool, id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM recurring_bills WHERE id = ? AND owner_id = ?;")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+    pub async fn delete(pool: &DbPool, id: i64, owner_id: &str) -> Result<bool, sqlx::Error> {
+        let result = crate::db_execute!(
+            pool,
+            "DELETE FROM recurring_bills WHERE id = ? AND owner_id = ?;",
+            id,
+            owner_id
+        )?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
     pub async fn mark_paid(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
         broadcaster: Option<&EventBroadcaster>,
@@ -183,20 +184,19 @@ impl RecurringBillRepository {
 
         let next_due = advance_due_date(&bill.next_due_at, &bill.frequency);
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE recurring_bills
             SET paid_installments = ?, next_due_at = ?, status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND owner_id = ?;
             "#,
-        )
-        .bind(new_paid_installments)
-        .bind(&next_due)
-        .bind(&new_status)
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            new_paid_installments,
+            &next_due,
+            &new_status,
+            id,
+            owner_id
+        )?;
 
         let updated = Self::get_by_id(pool, id)
             .await?
@@ -263,10 +263,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_recurring_bill_crud() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let payload = CreateBillPayload {
             name: "Netflix Subscription".to_string(),

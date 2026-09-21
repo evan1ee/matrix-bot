@@ -8,6 +8,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
@@ -102,7 +103,7 @@ pub async fn redeem_recovery(
     }
 
     // 1. Try static backup recovery codes
-    let mut resolved_account_id = RecoveryRepository::redeem(state.db.sqlite_pool(), code)
+    let mut resolved_account_id = RecoveryRepository::redeem(&state.db.pool, code)
         .await
         .map_err(|e| ApiError::internal(format!("Database error during recovery check: {e}")))?;
 
@@ -118,7 +119,7 @@ pub async fn redeem_recovery(
     let account_id = resolved_account_id
         .ok_or_else(|| ApiError::unauthorized("Invalid or expired recovery code"))?;
 
-    let account = AccountRepository::find(state.db.sqlite_pool(), &account_id)
+    let account = AccountRepository::find(&state.db.pool, &account_id)
         .await
         .map_err(|err| ApiError::internal(format!("Could not read account: {err}")))?
         .ok_or_else(|| ApiError::unauthorized("Account not found"))?;
@@ -132,7 +133,7 @@ pub async fn redeem_recovery(
             crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
         {
             let old_id_hash = crate::accounts::session::hash_token(old_token);
-            let _ = SessionRepository::revoke(state.db.sqlite_pool(), &old_id_hash).await;
+            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
         }
     }
 
@@ -143,7 +144,7 @@ pub async fn redeem_recovery(
     // Mint a restricted session (restricted to registering a new passkey)
     let restricted_until = Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS);
     let token = SessionRepository::create(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &account_id,
         user_agent,
         Some(&client_ip),
@@ -154,7 +155,7 @@ pub async fn redeem_recovery(
 
     // Record security event
     SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &account_id,
         SecurityEventKind::RecoveryCompleted,
         None,
@@ -176,18 +177,13 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool.clone()),
-            },
+            crate::db::Database { pool: pool.clone() },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -243,14 +239,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery_rate_limit_cannot_be_bypassed_with_spoofed_headers() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

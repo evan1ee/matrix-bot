@@ -154,10 +154,7 @@ mod tests {
     async fn test_in_memory_connect_runs_migrations() {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
 
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos")
-            .fetch_one(db.sqlite_pool())
-            .await
-            .unwrap();
+        let count: i64 = crate::db_scalar_one!(&db.pool, _, "SELECT COUNT(*) FROM todos").unwrap();
         assert_eq!(count, 0, "migrations must have created the table");
     }
 
@@ -174,10 +171,11 @@ mod tests {
         assert!(nested.exists(), "the parent directory must be created");
 
         // Usable, not merely present.
-        sqlx::query("INSERT INTO web_users (username, password_hash) VALUES ('a', 'h')")
-            .execute(db.sqlite_pool())
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO web_users (username, password_hash) VALUES ('a', 'h')"
+        )
+        .unwrap();
 
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
@@ -238,7 +236,7 @@ mod tests {
 
         // `SELECT 1` is int4 on PostgreSQL and will not decode into i64 — the
         // same mismatch that made the schema use BIGINT everywhere.
-        let one: i64 = crate::db_fetch_scalar!(&pool, i64, "SELECT 1::bigint").unwrap();
+        let one: i64 = crate::db_scalar_one!(&pool, i64, "SELECT 1::bigint").unwrap();
         assert_eq!(one, 1, "the pool must actually answer a query");
     }
 }

@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -58,17 +59,14 @@ pub async fn chat(
     }
 
     let owner_id = &user.account_id;
-    let room_id = crate::db::rooms::resolve_target_room(
-        state.db.sqlite_pool(),
-        owner_id,
-        payload.room_id.as_deref(),
-    )
-    .await;
+    let room_id =
+        crate::db::rooms::resolve_target_room(&state.db.pool, owner_id, payload.room_id.as_deref())
+            .await;
 
     let turn_result = tokio::time::timeout(
         std::time::Duration::from_secs(180),
         run_ai_turn(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &state.ai,
             Some(&state.broadcaster),
             owner_id,
@@ -106,7 +104,7 @@ pub async fn list_conversations(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<AiConversation>>, ApiError> {
-    let convs = AiRepository::list_conversations(state.db.sqlite_pool(), &user.account_id, 20)
+    let convs = AiRepository::list_conversations(&state.db.pool, &user.account_id, 20)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(convs))
@@ -125,12 +123,12 @@ pub async fn get_conversation_messages(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<AiMessage>>, ApiError> {
-    let _conv = AiRepository::get_conversation(state.db.sqlite_pool(), &id, &user.account_id)
+    let _conv = AiRepository::get_conversation(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Conversation not found"))?;
 
-    let messages = AiRepository::get_recent_messages(state.db.sqlite_pool(), &id, 100)
+    let messages = AiRepository::get_recent_messages(&state.db.pool, &id, 100)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(messages))
@@ -149,7 +147,7 @@ pub async fn delete_conversation(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = AiRepository::delete_conversation(state.db.sqlite_pool(), &id, &user.account_id)
+    let deleted = AiRepository::delete_conversation(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -178,11 +176,11 @@ pub async fn get_ai_config(
 ) -> Result<Json<AiUserConfig>, ApiError> {
     let resolved = ResolvedAiConfig::from_user_config(&state.ai, None);
     let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
     )
     .await;
-    let config = AiRepository::get_user_config(state.db.sqlite_pool(), &user.account_id)
+    let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .map(|c| {
@@ -245,13 +243,13 @@ pub async fn update_ai_config(
     if let Some(turns) = input.max_history_turns {
         let mut settings =
             crate::modules::settings::repository::SettingsRepository::get_or_default(
-                state.db.sqlite_pool(),
+                &state.db.pool,
                 &user.account_id,
             )
             .await;
         settings.max_history_turns = turns.clamp(1, 100);
         let _ = crate::modules::settings::repository::SettingsRepository::upsert(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &user.account_id,
             &settings,
         )
@@ -262,17 +260,16 @@ pub async fn update_ai_config(
         });
     }
 
-    let updated =
-        AiRepository::upsert_user_config(state.db.sqlite_pool(), &user.account_id, &input)
-            .await
-            .map_err(ApiError::from)?;
+    let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)
+        .await
+        .map_err(ApiError::from)?;
 
     state.broadcaster.send(SystemEvent::AiConfigUpdated {
         owner_id: user.account_id.clone(),
     });
 
     let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
     )
     .await;
@@ -299,7 +296,7 @@ pub async fn verify_ai_config(
         .validate(state.ai.allow_private_base_url)
         .map_err(ApiError::bad_request)?;
 
-    let user_config = AiRepository::get_user_config(state.db.sqlite_pool(), &user.account_id)
+    let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -347,7 +344,7 @@ pub async fn get_retrospective(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<WeeklyRetrospective>, ApiError> {
-    let retro = generate_weekly_retrospective(state.db.sqlite_pool(), &user.account_id)
+    let retro = generate_weekly_retrospective(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(retro))
@@ -358,21 +355,16 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn setup_state() -> (ApiState, String) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
                 .await
                 .unwrap();
         let state = ApiState::new(
-            Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -479,7 +471,7 @@ mod tests {
             max_tokens: None,
             max_history_turns: None,
         };
-        AiRepository::upsert_user_config(state.db.sqlite_pool(), &owner, &input)
+        AiRepository::upsert_user_config(&state.db.pool, &owner, &input)
             .await
             .unwrap();
 

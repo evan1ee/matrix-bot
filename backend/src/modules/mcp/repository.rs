@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{Duration, Utc};
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -11,14 +12,13 @@ impl McpTokenRepository {
     /// Mints a new MCP personal access token and stores its hash in SQLite.
     /// Returns the plaintext token (only returned at creation time) and the model row.
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         name: &str,
         expires_in_days: Option<i64>,
     ) -> Result<(String, McpToken), sqlx::Error> {
-        let random_hex: String = sqlx::query_scalar("SELECT lower(hex(randomblob(20)))")
-            .fetch_one(pool)
-            .await?;
+        let random_hex: String =
+            crate::db_scalar_one!(pool, _, "SELECT lower(hex(randomblob(20)))")?;
 
         let token = format!("mb_mcp_{}", random_hex);
         let token_hash = hash_token(&token);
@@ -27,19 +27,8 @@ impl McpTokenRepository {
         let now = Utc::now();
         let expires_at = expires_in_days.map(|days| now + Duration::days(days));
 
-        sqlx::query(
-            "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix, created_at, expires_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(account_id)
-        .bind(name)
-        .bind(&token_hash)
-        .bind(&prefix)
-        .bind(now)
-        .bind(expires_at)
-        .execute(pool)
-        .await?;
+        crate::db_execute!(pool, "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix, created_at, expires_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)", &id, account_id, name, &token_hash, &prefix, now, expires_at)?;
 
         let row = McpToken {
             id,
@@ -57,28 +46,29 @@ impl McpTokenRepository {
 
     /// Lists all tokens belonging to an account.
     pub async fn list_for_account(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<McpToken>, sqlx::Error> {
-        sqlx::query_as::<_, McpToken>(
+        crate::db_fetch_all!(
+            pool,
+            McpToken,
             "SELECT * FROM mcp_tokens WHERE account_id = ? ORDER BY created_at DESC",
+            account_id
         )
-        .bind(account_id)
-        .fetch_all(pool)
-        .await
     }
 
     /// Resolves a plaintext Bearer token to a live, unexpired token model.
     pub async fn resolve(
-        pool: &SqlitePool,
+        pool: &DbPool,
         plaintext_token: &str,
     ) -> Result<Option<McpToken>, sqlx::Error> {
         let token_hash = hash_token(plaintext_token);
-        let token: Option<McpToken> =
-            sqlx::query_as::<_, McpToken>("SELECT * FROM mcp_tokens WHERE token_hash = ?")
-                .bind(&token_hash)
-                .fetch_optional(pool)
-                .await?;
+        let token: Option<McpToken> = crate::db_fetch_optional!(
+            pool,
+            McpToken,
+            "SELECT * FROM mcp_tokens WHERE token_hash = ?",
+            &token_hash
+        )?;
 
         if let Some(tok) = token {
             if tok.is_expired(Utc::now()) {
@@ -91,47 +81,41 @@ impl McpTokenRepository {
     }
 
     /// Asynchronously updates `last_used_at` timestamp.
-    pub async fn touch_last_used(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
+    pub async fn touch_last_used(pool: &DbPool, id: &str) -> Result<(), sqlx::Error> {
         let now = Utc::now();
-        sqlx::query("UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?")
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?",
+            now,
+            id
+        )?;
         Ok(())
     }
 
     /// Deletes a token by ID, scoped to owner.
     pub async fn delete(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         token_id: &str,
     ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM mcp_tokens WHERE account_id = ? AND id = ?")
-            .bind(account_id)
-            .bind(token_id)
-            .execute(pool)
-            .await?;
-        Ok(result.rows_affected() > 0)
+        let result = crate::db_execute!(
+            pool,
+            "DELETE FROM mcp_tokens WHERE account_id = ? AND id = ?",
+            account_id,
+            token_id
+        )?;
+        Ok(result > 0)
     }
 
     /// Revokes a token by exact ID or prefix match.
     pub async fn revoke_by_id_or_prefix(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         target: &str,
     ) -> Result<bool, sqlx::Error> {
         let prefix_query = format!("{}%", target.trim_end_matches('.'));
-        let result = sqlx::query(
-            "DELETE FROM mcp_tokens WHERE account_id = ? AND (id = ? OR prefix LIKE ? OR token_hash = ?)",
-        )
-        .bind(account_id)
-        .bind(target)
-        .bind(&prefix_query)
-        .bind(target)
-        .execute(pool)
-        .await?;
-        Ok(result.rows_affected() > 0)
+        let result = crate::db_execute!(pool, "DELETE FROM mcp_tokens WHERE account_id = ? AND (id = ? OR prefix LIKE ? OR token_hash = ?)", account_id, target, &prefix_query, target)?;
+        Ok(result > 0)
     }
 }
 
@@ -141,19 +125,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_lifecycle() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_auth::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        crate::db::schema_mcp::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema_auth::create_tables(&pool).await.unwrap();
+        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 
         // Create a test account
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_1', 'Alice')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO accounts (id, display_name) VALUES ('acct_1', 'Alice')"
+        )
+        .unwrap();
 
         // Mint token
         let (raw_token, token) = McpTokenRepository::create(&pool, "acct_1", "Claude Test", None)

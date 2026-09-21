@@ -4,6 +4,7 @@
 //! every other module that owns a due date. This module's job is only to say
 //! what a todo wants: when it should fire, and what it should say.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use sqlx::SqlitePool;
@@ -34,7 +35,7 @@ pub fn wanted_trigger(todo: &TodoItem) -> Option<DateTime<Utc>> {
 /// room, or the room the web caller picked. A todo carrying the `web` sentinel
 /// has no room of its own, so the caller supplies one.
 pub async fn sync(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     todo: &TodoItem,
     room_id: &str,
@@ -54,7 +55,7 @@ pub async fn sync(
 
 /// Cancels the todo's linked reminder if one is pending.
 pub async fn tear_down(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     todo_id: i64,
 ) -> Result<SyncOutcome> {
@@ -69,16 +70,14 @@ mod tests {
     use crate::modules::todo::models::TodoPriority;
     use crate::modules::todo::repository::TodoRepository;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
     async fn todo_with(
-        pool: &SqlitePool,
+        pool: &DbPool,
         due_at: Option<DateTime<Utc>>,
         lead: Option<i64>,
     ) -> TodoItem {
@@ -191,13 +190,13 @@ mod tests {
             SyncOutcome::Scheduled(moved_due - Duration::minutes(60))
         );
 
-        let pending: i64 = sqlx::query_scalar(
+        let pending: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ? \
                  AND status = 'pending'",
+            todo.id
         )
-        .bind(todo.id)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(pending, 1, "rescheduling must replace, not stack");
     }
@@ -229,12 +228,12 @@ mod tests {
         let second = sync(&pool, None, &todo, "!room:a").await.unwrap();
         assert_eq!(first, second);
 
-        let total: i64 = sqlx::query_scalar(
+        let total: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM reminders WHERE source_kind = 'todo' AND source_id = ?",
+            todo.id
         )
-        .bind(todo.id)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(total, 1);
     }

@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{Duration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -58,7 +59,7 @@ pub struct WeeklyRetrospective {
 }
 
 pub async fn generate_weekly_retrospective(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
 ) -> anyhow::Result<WeeklyRetrospective> {
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
@@ -349,7 +350,7 @@ pub async fn generate_weekly_retrospective(
     })
 }
 
-pub async fn handle_retrospective_command(pool: &SqlitePool, owner_id: &str) -> String {
+pub async fn handle_retrospective_command(pool: &DbPool, owner_id: &str) -> String {
     match generate_weekly_retrospective(pool, owner_id).await {
         Ok(retro) => {
             let top_cat = html_escape(retro.top_expense_category.as_deref().unwrap_or("None"));
@@ -421,11 +422,9 @@ mod tests {
     use crate::modules::settings::models::UserSettings;
     use crate::modules::settings::repository::SettingsRepository;
 
-    async fn test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn test_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
         pool
     }
 

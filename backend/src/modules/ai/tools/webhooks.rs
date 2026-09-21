@@ -1,11 +1,11 @@
+use crate::db::DbPool;
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::webhook::repository::WebhookRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,

@@ -1,5 +1,5 @@
 use crate::db::DbPool;
-use crate::db_ddl;
+use sqlx::SqlitePool;
 use tracing::info;
 
 pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::Error> {
@@ -10,9 +10,9 @@ pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::Error> {
     // One-shot data conversions, kept out of the DDL because they are a
     // different job: `create_schema` describes the shape of the database, and
     // `backfill` rewrites what is already in it. That distinction is also what
-    // lets the PostgreSQL migration be verified before `backfill` converts —
-    // it is still on `&SqlitePool` until stage 5.
-    crate::db::backfill::run(pool.sqlite_or_err()?).await?;
+    // lets the PostgreSQL migration be verified independently of the data
+    // conversions, which is what the live schema test does.
+    crate::db::backfill::run(pool).await?;
 
     info!("Database migrations applied successfully.");
     Ok(())
@@ -29,7 +29,7 @@ pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
     // lies about what is in it. Renamed first, before anything reads or indexes it.
     for table in ["todos", "reminders", "transactions", "recurring_bills"] {
         let rename = format!("ALTER TABLE {table} RENAME COLUMN sender_mxid TO owner_id;");
-        let _ = db_ddl!(pool, &rename);
+        let _ = crate::db_ddl!(pool, &rename);
     }
 
     crate::db::schema_auth::create_tables(pool).await?;
@@ -55,27 +55,19 @@ pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::DbPool;
-    use sqlx::SqlitePool;
 
     /// Reads `sqlite_master`, so it is SQLite-only on purpose. The PostgreSQL
     /// equivalent queries `information_schema` and arrives with the live
     /// migration test in stage 7.
-    async fn table_names(pool: &SqlitePool) -> Vec<String> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .fetch_all(pool)
-        .await
+    async fn table_names(pool: &DbPool) -> Vec<String> {
+        crate::db_scalar_all!(pool, String, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         .unwrap()
     }
 
     #[tokio::test]
     async fn test_creates_every_table() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
 
         let tables = table_names(&pool).await;
         for expected in [
@@ -102,19 +94,13 @@ mod tests {
     /// It must be safe to apply repeatedly to an already-migrated database.
     #[tokio::test]
     async fn test_migrations_are_idempotent() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
         let first = table_names(&pool).await;
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
         let third = table_names(&pool).await;
 
         assert_eq!(
@@ -126,27 +112,19 @@ mod tests {
     /// Re-running migrations must not disturb rows that already exist.
     #[tokio::test]
     async fn test_migrations_preserve_existing_data() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('web', '@a:x', 'a', 'keep me', 'medium', 0)",
+             VALUES ('web', '@a:x', 'a', 'keep me', 'medium', 0)"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
 
-        let text: String = sqlx::query_scalar("SELECT text FROM todos")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let text: String = crate::db_scalar_one!(&pool, _, "SELECT text FROM todos").unwrap();
         assert_eq!(text, "keep me");
     }
 
@@ -154,30 +132,30 @@ mod tests {
     /// the same name; the repository relies on it rather than a read-then-write.
     #[tokio::test]
     async fn test_category_name_uniqueness_is_enforced_by_the_schema() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
 
-        sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')"
+        )
+        .unwrap();
 
-        let duplicate =
-            sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
-                .execute(&pool)
-                .await;
+        let duplicate = crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')"
+        );
         assert!(
             duplicate.is_err(),
             "a duplicate name must be rejected by the index"
         );
 
         // A different owner may reuse the name.
-        sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')"
+        )
+        .unwrap();
     }
 
     /// The stage 4 acceptance test: every `CREATE TABLE` in this project, run
@@ -271,5 +249,50 @@ mod tests {
         );
 
         crate::db::pool::drop_pg_schema("trigger_check").await;
+    }
+
+    /// The stage 5 acceptance test: a real repository round-trip on PostgreSQL.
+    ///
+    /// Compiling proves the 553 converted call sites type-check; it proves
+    /// nothing about whether the SQL they now send is accepted. This exercises
+    /// the ordinary todo path — insert with `RETURNING id`, read back, filter,
+    /// update, count — against a live server, which is where placeholder
+    /// renumbering, `BIGINT` widening and `RETURNING` either work or do not.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_a_repository_round_trips_on_a_live_postgres() {
+        use crate::modules::todo::models::TodoPriority;
+        use crate::modules::todo::repository::TodoRepository;
+
+        let pool = crate::db::pool::connect_pg_schema("repo_check").await;
+        create_schema(&pool).await.unwrap();
+
+        let todo = TodoRepository::add(
+            &pool,
+            "!room:example.org",
+            "acct_roundtrip",
+            "Evan",
+            "buy milk",
+            TodoPriority::High,
+            None,
+            None,
+        )
+        .await
+        .expect("insert must work on PostgreSQL");
+        assert!(todo.id > 0, "RETURNING id must yield a real id");
+        assert_eq!(todo.text, "buy milk");
+
+        let listed = TodoRepository::list_all_user(&pool, "acct_roundtrip", None, 10, 0)
+            .await
+            .expect("list must work on PostgreSQL");
+        assert_eq!(listed.len(), 1, "the row must read back");
+        assert_eq!(listed[0].id, todo.id);
+
+        let updated = TodoRepository::set_completed(&pool, todo.id, true)
+            .await
+            .expect("update must work on PostgreSQL");
+        assert!(updated.is_some(), "rows_affected must be reported");
+
+        crate::db::pool::drop_pg_schema("repo_check").await;
     }
 }

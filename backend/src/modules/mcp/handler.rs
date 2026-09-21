@@ -2,6 +2,7 @@ use crate::db::Database;
 use crate::modules::mcp::{adapter, models, prompts, repository::McpTokenRepository, resources};
 use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
+use sqlx::SqlitePool;
 
 pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<String> {
     if ctx.command != "mcp" {
@@ -32,7 +33,7 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
             };
 
             let (raw_token, token) = match McpTokenRepository::create(
-                db.sqlite_pool(),
+                &db.pool,
                 &ctx.owner_id,
                 &token_name,
                 None,
@@ -73,11 +74,10 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
             Some(reply)
         }
         "list" | "ls" => {
-            let tokens =
-                match McpTokenRepository::list_for_account(db.sqlite_pool(), &ctx.owner_id).await {
-                    Ok(t) => t,
-                    Err(err) => return Some(format!("❌ Could not list MCP tokens: {}", err)),
-                };
+            let tokens = match McpTokenRepository::list_for_account(&db.pool, &ctx.owner_id).await {
+                Ok(t) => t,
+                Err(err) => return Some(format!("❌ Could not list MCP tokens: {}", err)),
+            };
 
             if tokens.is_empty() {
                 return Some(
@@ -114,12 +114,7 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
                 return Some("⚠️ Please provide a token ID or prefix to revoke: <code>!mcp revoke &lt;ID&gt;</code>".to_string());
             }
 
-            match McpTokenRepository::revoke_by_id_or_prefix(
-                db.sqlite_pool(),
-                &ctx.owner_id,
-                target,
-            )
-            .await
+            match McpTokenRepository::revoke_by_id_or_prefix(&db.pool, &ctx.owner_id, target).await
             {
                 Ok(true) => Some("✅ MCP token revoked successfully.".to_string()),
                 Ok(false) => {
@@ -158,7 +153,6 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
@@ -178,10 +172,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_refuses_public_room() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let db = Database {
-            pool: crate::db::DbPool::Sqlite(pool),
-        };
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let db = Database { pool: pool };
         let ctx = dummy_ctx("mcp", "token", false);
 
         let reply = handle_command(&ctx, &db).await.unwrap();
@@ -191,22 +183,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_auth::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        crate::db::schema_mcp::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema_auth::create_tables(&pool).await.unwrap();
+        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+        )
+        .unwrap();
 
-        let db = Database {
-            pool: crate::db::DbPool::Sqlite(pool),
-        };
+        let db = Database { pool: pool };
         let ctx = dummy_ctx("mcp", "token Claude Laptop", true);
 
         let reply = handle_command(&ctx, &db).await.unwrap();

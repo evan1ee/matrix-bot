@@ -58,7 +58,7 @@ design is unsound and every model would need a second driver-specific mapping.
 | 2 | `executor.rs`: `DbPool` enum + the five macros | **done** — `6e39bd3` |
 | 3 | `pool.rs`: connect either driver from `DATABASE_URL` | **done** — see below |
 | 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | **done** — see below |
-| 5 | Convert 553 query sites, module by module | todo |
+| 5 | Convert 553 query sites, module by module | **done** — see below |
 | 6 | Convert the 5 production transaction sites | todo |
 | 7 | Test harness runs both dialects; CI Postgres service | todo |
 | 8 | Docs, `.env.example`, `docker-compose.yml` | todo |
@@ -97,6 +97,8 @@ Baseline at stage 2: **697 passed, 0 failed, 8 ignored.**
 Baseline at stage 3: **699 passed, 0 failed, 9 ignored.**
 Baseline at stage 4: **709 passed, 0 failed, 11 ignored**, plus 3 live
 PostgreSQL tests passing against PostgreSQL 18.6.
+Baseline at stage 5: **711 passed, 0 failed, 12 ignored**, plus 4 live
+PostgreSQL tests including a real repository round-trip.
 
 ## Stage 3 notes
 
@@ -185,3 +187,47 @@ PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres cargo test --packag
 
 Each test works in a throwaway schema it creates and drops, so the tests neither
 depend on nor leave behind state.
+
+## Stage 5 notes
+
+All 553 query sites now go through the dual-dialect macros, and a **real
+repository round-trips on PostgreSQL** — insert with `RETURNING id`, read back,
+filter, update. Compiling only proved the call sites type-check; that test is
+what proves the SQL they send is accepted.
+
+The macro set grew to nine: `db_fetch_all/one/optional`,
+`db_scalar_all/one/optional`, `db_execute`, and `db_fetch_all_dyn`/
+`db_fetch_one_dyn` for the handful of list endpoints whose bind count depends on
+which optional filters a request carries. Passing `_` as the row type expands to
+`query_as::<_, _>`, which is how the 81 sites that never had a turbofish
+converted without inventing types for them.
+
+Two idioms had no portable form and were rewritten rather than translated:
+
+- `last_insert_rowid()` is SQLite-only. The five inserts that used it now use
+  `RETURNING id` with `db_scalar_one!`, which both databases support.
+- Raw `row.get::<T, _>("col")` cannot be written once, because `SqliteRow` and
+  `PgRow` are different types. `db/rooms.rs` selects a typed tuple instead.
+
+Transactions are deliberately **not** converted — `Transaction<Sqlite>` and
+`Transaction<Postgres>` are different types, and that is stage 6. The ten
+remaining `sqlite_or_err()` callers are exactly those sites (`accounts/merge.rs`,
+`modules/portfolio/trade.rs`, `db/rooms.rs`) plus one `PRAGMA table_info` guard
+test. That count reaching zero is still the completion signal.
+
+### Three more defects only the live server found
+
+1. **`completed = 0` is not a boolean on PostgreSQL.** SQLite accepts `0`/`1`
+   for a `BOOLEAN`; Postgres reports `column "completed" is of type boolean but
+   expression is of type integer`. Fixed across nine boolean columns, in both
+   comparisons and `INSERT` literals.
+2. **`TIMESTAMP` is "without time zone" on PostgreSQL** and will not decode into
+   `DateTime<Utc>`. The schema now says `TIMESTAMPTZ`, which SQLite gives the
+   same NUMERIC affinity, so existing databases are unaffected. Pinned by
+   `test_sqlite_round_trips_a_timestamptz_into_datetime_utc`.
+3. **A `sed` replacement corrupted the guard itself.** `DbPool::Sqlite(pool) =>
+   Ok(pool)` inside `sqlite_or_err` was rewritten to a catch-all arm `pool =>
+   Ok(pool)`, which would have made the Postgres refusal unreachable and
+   returned the wrong type. The compiler caught it; a looser signature would not
+   have. Two call sites were also corrupted into `api_&state.db.pool` by `sed`
+   treating `&` in the replacement as "the whole match".

@@ -1,7 +1,7 @@
 //! Portfolio trading operations (buy, sell, record) with atomic database transactions.
 
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use crate::modules::portfolio::models::{
     cost_of, realized_pl_minor, weighted_avg_cost_minor, BuyOutcome, CashBalance, Holding,
@@ -15,7 +15,7 @@ const CASH_COLUMNS: &str = "id, owner_id, currency, currency_exponent, balance_m
 
 #[allow(clippy::too_many_arguments)]
 pub async fn buy_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -25,7 +25,7 @@ pub async fn buy_at(
     note: Option<&str>,
     executed_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<BuyOutcome> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.sqlite_or_err()?.begin().await?;
 
     let existing = sqlx::query_as::<_, Holding>(&format!(
         "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
@@ -174,7 +174,7 @@ pub async fn buy_at(
 /// A buy executed now. See [`buy_at`] to backdate one.
 #[allow(clippy::too_many_arguments)]
 pub async fn buy(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -198,14 +198,14 @@ pub async fn buy(
 }
 
 pub async fn sell_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
     sell_price_minor: i64,
     executed_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<SellOutcome> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.sqlite_or_err()?.begin().await?;
 
     let existing = sqlx::query_as::<_, Holding>(&format!(
         "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
@@ -306,7 +306,7 @@ pub async fn sell_at(
 
 /// A sale executed now. See [`sell_at`] to backdate one.
 pub async fn sell(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -325,7 +325,7 @@ pub async fn sell(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding_action(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -336,7 +336,7 @@ pub async fn record_holding_action(
     action: &str,
     executed_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Result<Holding, String>> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.sqlite_or_err()?.begin().await?;
 
     let existing = sqlx::query_as::<_, Holding>(&format!(
         "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
@@ -447,7 +447,7 @@ pub async fn record_holding_action(
 /// calling it a purchase would put a trade in the ledger that never happened.
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,

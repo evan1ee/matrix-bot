@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::accounts::{AccountRepository, SessionRepository};
@@ -220,21 +221,21 @@ pub async fn issue_matrix_session(
     mxid: &str,
     user_agent: Option<&str>,
 ) -> Result<axum::response::Response, ApiError> {
-    let account_id = AccountRepository::resolve_or_provision(state.db.sqlite_pool(), mxid)
+    let account_id = AccountRepository::resolve_or_provision(&state.db.pool, mxid)
         .await
         .map_err(|err| {
             tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
             ApiError::internal("Failed to resolve user account")
         })?;
 
-    let display_name = AccountRepository::find(state.db.sqlite_pool(), &account_id)
+    let display_name = AccountRepository::find(&state.db.pool, &account_id)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?
         .map(|a| a.display_name)
         .unwrap_or_else(|| mxid.to_string());
 
     let session_token = SessionRepository::create(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &account_id,
         user_agent.or(Some("ElementX-iOS")),
         None,
@@ -263,17 +264,12 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -291,10 +287,9 @@ mod tests {
 
         assert!(res.headers().contains_key(header::SET_COOKIE));
 
-        let account_id =
-            AccountRepository::find_by_mxid(state.db.sqlite_pool(), "@alice:example.org")
-                .await
-                .unwrap();
+        let account_id = AccountRepository::find_by_mxid(&state.db.pool, "@alice:example.org")
+            .await
+            .unwrap();
         assert!(account_id.is_some());
     }
 

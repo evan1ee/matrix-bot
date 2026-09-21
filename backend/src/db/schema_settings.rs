@@ -1,9 +1,7 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // Per-user display preferences, keyed by owner_id.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS user_settings (
@@ -15,32 +13,32 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             briefing_enabled BIGINT NOT NULL DEFAULT 1,
             briefing_time TEXT NOT NULL DEFAULT '07:00',
             last_briefing_date TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN dev_room_id TEXT;"
     );
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN max_history_turns BIGINT NOT NULL DEFAULT 10;"
     );
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN briefing_enabled BIGINT NOT NULL DEFAULT 1;"
     );
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN briefing_time TEXT NOT NULL DEFAULT '07:00';"
     );
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN last_briefing_date TEXT;"
     );
@@ -57,7 +55,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // operator default silently stops applying for that row until the user
     // re-picks a voice. Acceptable on an unreleased branch; drop the affected
     // table (or the whole dev database) if this bites.
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE user_settings ADD COLUMN tts_speaker_id BIGINT;"
     );

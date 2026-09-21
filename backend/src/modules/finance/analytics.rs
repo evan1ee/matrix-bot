@@ -1,7 +1,8 @@
+use crate::db::DbPool;
+use crate::{db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, db_scalar_optional};
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -78,21 +79,21 @@ pub struct FinanceAnalyticsRepository;
 
 impl FinanceAnalyticsRepository {
     /// Discovers the primary currency for an owner, or falls back to "USD".
-    pub async fn primary_currency(pool: &SqlitePool, owner_id: &str) -> Result<String> {
-        let row = sqlx::query_scalar::<_, String>(
+    pub async fn primary_currency(pool: &DbPool, owner_id: &str) -> Result<String> {
+        let row = crate::db_scalar_optional!(
+            pool,
+            String,
             "SELECT currency FROM transactions WHERE owner_id = ? \
              GROUP BY currency ORDER BY COUNT(*) DESC LIMIT 1",
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            owner_id
+        )?;
 
         Ok(row.unwrap_or_else(|| "USD".to_string()))
     }
 
     /// Fetches monthly cashflow history and expense category breakdown.
     pub async fn get_analytics_report(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         currency_opt: Option<&str>,
         months_limit: i64,
@@ -124,7 +125,9 @@ impl FinanceAnalyticsRepository {
         let cutoff_start = format!("{earliest_month}-01 00:00:00");
 
         // Query transactions aggregated by month and direction
-        let rows = sqlx::query_as::<_, (String, String, i64)>(
+        let rows = crate::db_fetch_all!(
+            pool,
+            (String, String, i64),
             r#"
             SELECT substr(occurred_at, 1, 7) AS month_str,
                    direction,
@@ -134,12 +137,10 @@ impl FinanceAnalyticsRepository {
             GROUP BY month_str, direction
             ORDER BY month_str ASC
             "#,
-        )
-        .bind(owner_id)
-        .bind(&currency)
-        .bind(&cutoff_start)
-        .fetch_all(pool)
-        .await?;
+            owner_id,
+            &currency,
+            &cutoff_start
+        )?;
 
         let mut monthly_cashflow: Vec<MonthlyCashflowBucket> = month_keys
             .iter()
@@ -169,7 +170,9 @@ impl FinanceAnalyticsRepository {
         let net_savings = total_income - total_expense;
 
         // Query expense category breakdown for the period
-        let cat_rows = sqlx::query_as::<_, (Option<String>, i64, i64)>(
+        let cat_rows = crate::db_fetch_all!(
+            pool,
+            (Option<String>, i64, i64),
             r#"
             SELECT c.name,
                    COUNT(t.id) AS tx_cnt,
@@ -180,12 +183,10 @@ impl FinanceAnalyticsRepository {
             GROUP BY c.name
             ORDER BY sum_minor DESC
             "#,
-        )
-        .bind(owner_id)
-        .bind(&currency)
-        .bind(&cutoff_start)
-        .fetch_all(pool)
-        .await?;
+            owner_id,
+            &currency,
+            &cutoff_start
+        )?;
 
         let mut expense_categories = Vec::new();
         for (cat_name, tx_cnt, sum_minor) in cat_rows {
@@ -217,21 +218,21 @@ impl FinanceAnalyticsRepository {
     }
 
     /// Fetches public share status for an owner.
-    pub async fn get_share(pool: &SqlitePool, owner_id: &str) -> Result<Option<FinanceShare>> {
-        let share = sqlx::query_as::<_, FinanceShare>(
+    pub async fn get_share(pool: &DbPool, owner_id: &str) -> Result<Option<FinanceShare>> {
+        let share = crate::db_fetch_optional!(
+            pool,
+            FinanceShare,
             "SELECT owner_id, token, is_enabled, title, created_at, updated_at \
              FROM finance_shares WHERE owner_id = ?",
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            owner_id
+        )?;
 
         Ok(share)
     }
 
     /// Creates or updates a public share record with a secure token.
     pub async fn upsert_share(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         is_enabled: bool,
         title: Option<&str>,
@@ -241,7 +242,8 @@ impl FinanceAnalyticsRepository {
             .map(|s| s.token)
             .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO finance_shares (owner_id, token, is_enabled, title, updated_at)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -250,50 +252,43 @@ impl FinanceAnalyticsRepository {
                 title = excluded.title,
                 updated_at = CURRENT_TIMESTAMP
             "#,
-        )
-        .bind(owner_id)
-        .bind(&token)
-        .bind(is_enabled)
-        .bind(title)
-        .execute(pool)
-        .await?;
+            owner_id,
+            &token,
+            is_enabled,
+            title
+        )?;
 
-        let record = sqlx::query_as::<_, FinanceShare>(
+        let record = crate::db_fetch_one!(
+            pool,
+            FinanceShare,
             "SELECT owner_id, token, is_enabled, title, created_at, updated_at \
              FROM finance_shares WHERE owner_id = ?",
-        )
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            owner_id
+        )?;
 
         Ok(record)
     }
 
     /// Disables public sharing for an owner.
-    pub async fn disable_share(pool: &SqlitePool, owner_id: &str) -> Result<bool> {
-        let res = sqlx::query(
-            "UPDATE finance_shares SET is_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE owner_id = ?",
-        )
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+    pub async fn disable_share(pool: &DbPool, owner_id: &str) -> Result<bool> {
+        let res = crate::db_execute!(pool, "UPDATE finance_shares SET is_enabled = FALSE, updated_at = CURRENT_TIMESTAMP WHERE owner_id = ?", owner_id)?;
 
-        Ok(res.rows_affected() > 0)
+        Ok(res > 0)
     }
 
     /// Fetches public fiscal transparency report by token.
     pub async fn get_public_report(
-        pool: &SqlitePool,
+        pool: &DbPool,
         token: &str,
         months: i64,
     ) -> Result<Option<PublicFinanceReport>> {
-        let share = sqlx::query_as::<_, FinanceShare>(
+        let share = crate::db_fetch_optional!(
+            pool,
+            FinanceShare,
             "SELECT owner_id, token, is_enabled, title, created_at, updated_at \
-             FROM finance_shares WHERE token = ? AND is_enabled = 1",
-        )
-        .bind(token)
-        .fetch_optional(pool)
-        .await?;
+             FROM finance_shares WHERE token = ? AND is_enabled = TRUE",
+            token
+        )?;
 
         let share = match share {
             Some(s) => s,
@@ -303,19 +298,20 @@ impl FinanceAnalyticsRepository {
         let report = Self::get_analytics_report(pool, &share.owner_id, None, months).await?;
 
         // Query sanitized recent transactions for public audit ledger (max 50)
-        let tx_rows = sqlx::query_as::<
-            _,
-            (
-                i64,
-                String,
-                i64,
-                String,
-                i64,
-                Option<String>,
-                Option<String>,
-                DateTime<Utc>,
-            ),
-        >(
+        type LedgerRow = (
+            i64,
+            String,
+            i64,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            DateTime<Utc>,
+        );
+
+        let tx_rows: Vec<LedgerRow> = crate::db_fetch_all!(
+            pool,
+            LedgerRow,
             r#"
             SELECT t.id, t.direction, t.amount_minor, t.currency, t.currency_exponent,
                    c.name AS category_name, t.note, t.occurred_at
@@ -325,11 +321,9 @@ impl FinanceAnalyticsRepository {
             ORDER BY t.occurred_at DESC, t.id DESC
             LIMIT 50
             "#,
-        )
-        .bind(&share.owner_id)
-        .bind(&report.currency)
-        .fetch_all(pool)
-        .await?;
+            &share.owner_id,
+            &report.currency
+        )?;
 
         let recent_transactions = tx_rows
             .into_iter()
@@ -381,7 +375,7 @@ mod tests {
         // Insert some transactions
         let now = Utc::now();
         FinanceRepository::create_transaction(
-            db.sqlite_pool(),
+            &db.pool,
             "!room:x",
             owner,
             "Alice",
@@ -398,13 +392,13 @@ mod tests {
         .await
         .unwrap();
 
-        let cat = FinanceRepository::create_category(db.sqlite_pool(), owner, "Groceries")
+        let cat = FinanceRepository::create_category(&db.pool, owner, "Groceries")
             .await
             .unwrap()
             .unwrap();
 
         FinanceRepository::create_transaction(
-            db.sqlite_pool(),
+            &db.pool,
             "!room:x",
             owner,
             "Alice",
@@ -422,14 +416,10 @@ mod tests {
         .unwrap();
 
         // 1. Get analytics report
-        let report = FinanceAnalyticsRepository::get_analytics_report(
-            db.sqlite_pool(),
-            owner,
-            Some("USD"),
-            6,
-        )
-        .await
-        .unwrap();
+        let report =
+            FinanceAnalyticsRepository::get_analytics_report(&db.pool, owner, Some("USD"), 6)
+                .await
+                .unwrap();
 
         assert_eq!(report.currency, "USD");
         assert_eq!(report.total_income_minor, 500_000);
@@ -447,7 +437,7 @@ mod tests {
 
         // 2. Share lifecycle
         let share = FinanceAnalyticsRepository::upsert_share(
-            db.sqlite_pool(),
+            &db.pool,
             owner,
             true,
             Some("Alice's Public Budget"),
@@ -458,22 +448,20 @@ mod tests {
         assert_eq!(share.title.as_deref(), Some("Alice's Public Budget"));
 
         // Fetch public report by token
-        let pub_report =
-            FinanceAnalyticsRepository::get_public_report(db.sqlite_pool(), &share.token, 6)
-                .await
-                .unwrap()
-                .expect("public report should exist");
+        let pub_report = FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
+            .await
+            .unwrap()
+            .expect("public report should exist");
         assert_eq!(pub_report.title, "Alice's Public Budget");
         assert_eq!(pub_report.recent_transactions.len(), 2);
 
         // Disable share
-        FinanceAnalyticsRepository::disable_share(db.sqlite_pool(), owner)
+        FinanceAnalyticsRepository::disable_share(&db.pool, owner)
             .await
             .unwrap();
-        let disabled =
-            FinanceAnalyticsRepository::get_public_report(db.sqlite_pool(), &share.token, 6)
-                .await
-                .unwrap();
+        let disabled = FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
+            .await
+            .unwrap();
         assert!(disabled.is_none());
     }
 }

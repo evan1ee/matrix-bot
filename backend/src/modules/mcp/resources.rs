@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use chrono::{Duration, Utc};
-use sqlx::SqlitePool;
 
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
 use crate::modules::finance::repository::FinanceRepository;
@@ -47,7 +47,7 @@ pub fn list_resources() -> Vec<McpResource> {
 
 /// Reads a specific resource URI for an authenticated owner.
 pub async fn read_resource(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     uri: &str,
 ) -> Result<ReadResourceResult, String> {

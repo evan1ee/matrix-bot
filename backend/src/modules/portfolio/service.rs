@@ -21,6 +21,7 @@
 //! and the audit-log write — this module sits above them, not in place of
 //! them.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
@@ -133,7 +134,7 @@ fn parse_trade(req: &TradeRequest<'_>) -> Result<ParsedTrade, PortfolioError> {
 /// `buy_at` itself folds "opened" and "topped up" into one `BuyOutcome::Ok`
 /// and does not say which one it was.
 pub async fn buy(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     req: TradeRequest<'_>,
@@ -188,7 +189,7 @@ pub async fn buy(
 /// `PortfolioError`, the same "return the outcome enum" contract `buy` and
 /// `record` follow.
 pub async fn sell(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     symbol: &str,
@@ -248,7 +249,7 @@ pub async fn sell(
 /// "opened" and "topped up" together exactly like `buy_at` does), so it gets
 /// the same creation-vs-update event logic and for the same reason.
 pub async fn record(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     req: TradeRequest<'_>,
@@ -289,7 +290,7 @@ pub async fn record(
 
 /// Deposits cash, then broadcasts.
 pub async fn deposit_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     currency: &str,
@@ -322,7 +323,7 @@ pub async fn deposit_cash(
 
 /// Withdraws cash, then broadcasts.
 pub async fn withdraw_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     currency: &str,
@@ -353,11 +354,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

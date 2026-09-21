@@ -1,13 +1,13 @@
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::briefing::generator::generate_briefing;
 use crate::modules::settings::models::parse_briefing_time;
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
+use sqlx::SqlitePool;
 
 pub async fn handle_briefing_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -49,7 +49,7 @@ fn strip_command<'a>(lower: &str, body: &'a str) -> Option<&'a str> {
 }
 
 async fn generate_now(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -78,7 +78,7 @@ async fn generate_now(
 }
 
 async fn set_time(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     raw_time: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -113,7 +113,7 @@ async fn set_time(
 }
 
 async fn toggle(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     enabled: bool,
     broadcaster: Option<&EventBroadcaster>,
@@ -144,7 +144,7 @@ async fn toggle(
     }
 }
 
-async fn show_status(pool: &SqlitePool, owner_id: &str) -> String {
+async fn show_status(pool: &DbPool, owner_id: &str) -> String {
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
     let last_date = SettingsRepository::get_last_briefing_date(pool, owner_id)
         .await
@@ -183,11 +183,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

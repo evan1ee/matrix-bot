@@ -4,6 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use sqlx::SqlitePool;
 
 use crate::api::auth::extractor::VerifiedUser;
 use crate::api::auth::types::{ApiState, AuthUser};
@@ -37,7 +38,7 @@ pub(crate) async fn queue_and_broadcast(
     let target_room = if let Some(ref override_room) = room_override {
         let client_guard = state.bot_client.read().await;
         let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             client_guard.as_ref(),
             &webhook.owner_id,
             override_room,
@@ -56,7 +57,7 @@ pub(crate) async fn queue_and_broadcast(
     let (html, plain) = render_alert_message(&webhook.name, title, raw_message, severity, format);
 
     let outbox_item = WebhookRepository::enqueue_outbox(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &webhook.id,
         &webhook.owner_id,
         &target_room,
@@ -100,7 +101,7 @@ pub async fn inbound_webhook(
     body_bytes: Bytes,
 ) -> Result<(StatusCode, Json<InboundAcceptedResponse>), ApiError> {
     let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(state.db.sqlite_pool(), &token_hash)
+    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
@@ -189,7 +190,7 @@ pub async fn list_webhooks(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<Webhook>>, ApiError> {
-    let hooks = WebhookRepository::list_by_owner(state.db.sqlite_pool(), &user.account_id)
+    let hooks = WebhookRepository::list_by_owner(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(hooks))
@@ -218,7 +219,7 @@ pub async fn create_webhook(
 
     let client_guard = state.bot_client.read().await;
     let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         client_guard.as_ref(),
         &user.account_id,
         input.default_room_id.trim(),
@@ -231,7 +232,7 @@ pub async fn create_webhook(
     }
 
     let (webhook, raw_token) = WebhookRepository::create(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         input.name.trim(),
         input.default_room_id.trim(),
@@ -271,7 +272,7 @@ pub async fn update_webhook(
     if let Some(ref new_room) = input.default_room_id {
         let client_guard = state.bot_client.read().await;
         let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             client_guard.as_ref(),
             &user.account_id,
             new_room.trim(),
@@ -284,7 +285,7 @@ pub async fn update_webhook(
         }
     }
     let updated = WebhookRepository::update(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &id,
         &user.account_id,
         input.name.as_deref(),
@@ -314,7 +315,7 @@ pub async fn rotate_webhook_token(
     Path(id): Path<String>,
 ) -> Result<Json<CreatedWebhookResponse>, ApiError> {
     let (webhook, raw_token) =
-        WebhookRepository::rotate_token(state.db.sqlite_pool(), &id, &user.account_id)
+        WebhookRepository::rotate_token(&state.db.pool, &id, &user.account_id)
             .await
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
@@ -344,7 +345,7 @@ pub async fn test_webhook(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<InboundAcceptedResponse>), ApiError> {
-    let webhook = WebhookRepository::find_by_id(state.db.sqlite_pool(), &id, &user.account_id)
+    let webhook = WebhookRepository::find_by_id(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
@@ -381,7 +382,7 @@ pub async fn delete_webhook(
     user: VerifiedUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = WebhookRepository::delete(state.db.sqlite_pool(), &id, &user.account_id)
+    let deleted = WebhookRepository::delete(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -415,7 +416,7 @@ pub async fn get_webhook_logs(
     Path(id): Path<String>,
     Query(query): Query<WebhookLogsQuery>,
 ) -> Result<Json<WebhookLogsResponse>, ApiError> {
-    let _webhook = WebhookRepository::find_by_id(state.db.sqlite_pool(), &id, &user.account_id)
+    let _webhook = WebhookRepository::find_by_id(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
@@ -424,7 +425,7 @@ pub async fn get_webhook_logs(
     let offset = query.offset.unwrap_or(0).max(0);
 
     let items = WebhookRepository::list_outbox_by_webhook(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &id,
         &user.account_id,
         limit,
@@ -432,10 +433,9 @@ pub async fn get_webhook_logs(
     )
     .await
     .map_err(ApiError::from)?;
-    let total =
-        WebhookRepository::count_outbox_by_webhook(state.db.sqlite_pool(), &id, &user.account_id)
-            .await
-            .map_err(ApiError::from)?;
+    let total = WebhookRepository::count_outbox_by_webhook(&state.db.pool, &id, &user.account_id)
+        .await
+        .map_err(ApiError::from)?;
 
     Ok(Json(WebhookLogsResponse {
         items,
@@ -451,17 +451,12 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::new(32),
             None,
             "https://matrix.org".to_string(),
@@ -472,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_api_flow() {
         let state = test_state().await;
-        let acct = AccountRepository::create(state.db.sqlite_pool(), "alice", STATUS_ACTIVE)
+        let acct = AccountRepository::create(&state.db.pool, "alice", STATUS_ACTIVE)
             .await
             .unwrap();
         let user = AuthUser::for_account(&acct);
@@ -491,14 +486,13 @@ mod tests {
         assert!(unauth.is_err());
 
         // Pre-populate account_rooms for authorized room
-        sqlx::query(
+        crate::db_execute!(
+            &state.db.pool,
             "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
+            &acct,
+            "!ops:matrix.org",
+            "Ops Room"
         )
-        .bind(&acct)
-        .bind("!ops:matrix.org")
-        .bind("Ops Room")
-        .execute(state.db.sqlite_pool())
-        .await
         .unwrap();
 
         // 1. Create Webhook (authorized)

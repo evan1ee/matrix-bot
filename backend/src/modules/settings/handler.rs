@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use sqlx::SqlitePool;
 use tracing::error;
 
@@ -23,7 +24,7 @@ const SUGGESTED_ZONES: &[&str] = &[
 ];
 
 pub async fn handle_settings_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -83,7 +84,7 @@ fn usage() -> String {
     )
 }
 
-async fn show(pool: &SqlitePool, owner_id: &str) -> String {
+async fn show(pool: &DbPool, owner_id: &str) -> String {
     let settings = SettingsRepository::get_or_default(pool, owner_id).await;
     let now = format_datetime(&chrono::Utc::now(), &settings.tz());
     let dev_room_display = settings
@@ -115,7 +116,7 @@ async fn show(pool: &SqlitePool, owner_id: &str) -> String {
 }
 
 async fn set_history(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -147,7 +148,7 @@ async fn set_history(
 }
 
 async fn set_voice(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -192,7 +193,7 @@ async fn set_voice(
 }
 
 async fn set_timezone(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -223,7 +224,7 @@ async fn set_timezone(
 }
 
 async fn set_currency(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -257,7 +258,7 @@ async fn set_currency(
 }
 
 async fn set_dev_room(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     value: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -293,7 +294,7 @@ async fn set_dev_room(
 /// is formatted against these settings, so a change made over Matrix has to
 /// reach the SSE stream or the browser silently keeps rendering the old zone.
 async fn save(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     settings: UserSettings,
     broadcaster: Option<&EventBroadcaster>,
@@ -317,15 +318,13 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
-    async fn run(pool: &SqlitePool, body: &str) -> String {
+    async fn run(pool: &DbPool, body: &str) -> String {
         handle_settings_command(pool, "@alice:a", body, None)
             .await
             .expect("the handler must claim its own command")

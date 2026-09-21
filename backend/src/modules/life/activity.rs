@@ -5,8 +5,8 @@
 //! lived under `api/` and was imported back into a bot module, which is the
 //! dependency this file exists to remove.
 
+use crate::db::DbPool;
 use serde::Serialize;
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::modules::life::activity_collectors::*;
@@ -52,11 +52,7 @@ pub struct DayActivityResponse {
     pub stats: ActivityStats,
 }
 
-pub async fn collect_day_activity(
-    pool: &SqlitePool,
-    owner: &str,
-    date: &str,
-) -> DayActivityResponse {
+pub async fn collect_day_activity(pool: &DbPool, owner: &str, date: &str) -> DayActivityResponse {
     let mut events: Vec<ActivityEvent> = Vec::new();
     let mut stats = ActivityStats::default();
 

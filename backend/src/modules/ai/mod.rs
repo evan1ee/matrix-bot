@@ -84,7 +84,7 @@ impl BotModule for AiModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_ai_command_with_stage(
-            db.sqlite_pool(),
+            &db.pool,
             &self.ai,
             broadcaster,
             Some(&self.client_handle),

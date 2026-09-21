@@ -12,6 +12,7 @@
 //! installment is paid (`completed`), it is paused or cancelled, or it is
 //! deleted.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 use sqlx::SqlitePool;
@@ -64,7 +65,7 @@ pub fn reminder_room(bill: &RecurringBill) -> Option<&str> {
 
 /// Reconciles the linked reminder against the bill's current state.
 pub async fn sync(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     bill: &RecurringBill,
 ) -> Result<SyncOutcome> {
@@ -91,7 +92,7 @@ pub async fn sync(
 
 /// Cancels the bill's linked reminder if one is pending.
 pub async fn tear_down(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     bill_id: i64,
 ) -> Result<SyncOutcome> {
@@ -106,11 +107,9 @@ mod tests {
     use crate::modules::recurring_bills::repository::RecurringBillRepository;
     use crate::modules::reminder::repository::ReminderRepository;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -120,7 +119,7 @@ mod tests {
             .to_string()
     }
 
-    async fn bill_with(pool: &SqlitePool, next_due_at: String, lead: Option<i64>) -> RecurringBill {
+    async fn bill_with(pool: &DbPool, next_due_at: String, lead: Option<i64>) -> RecurringBill {
         RecurringBillRepository::create(
             pool,
             "!room:a",
@@ -200,13 +199,13 @@ mod tests {
         let expected = parse_due_at(&paid.next_due_at).unwrap() - Duration::minutes(60);
         assert_eq!(outcome, SyncOutcome::Scheduled(expected));
 
-        let pending: i64 = sqlx::query_scalar(
+        let pending: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM reminders WHERE source_kind = 'recurring_bill' \
              AND source_id = ? AND status = 'pending'",
+            bill.id
         )
-        .bind(bill.id)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(pending, 1, "re-arming must replace, not stack");
     }

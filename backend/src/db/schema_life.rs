@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn run_life_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS life_profiles (
@@ -32,7 +30,7 @@ pub async fn run_life_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
         "#
     )?;
 
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE life_day_logs ADD COLUMN time_allocation TEXT;"
     );

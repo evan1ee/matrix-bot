@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -11,7 +12,7 @@ use crate::modules::finance::service::{self, NewTransaction};
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -398,11 +399,9 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 mod tests {
     use super::*;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
         pool
     }
 

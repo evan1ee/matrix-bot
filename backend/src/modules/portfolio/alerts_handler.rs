@@ -1,5 +1,4 @@
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{
     exponent_for, looks_like_currency, normalise_currency, parse_amount,
@@ -10,7 +9,7 @@ use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 pub async fn handle_alert_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -34,7 +33,7 @@ pub async fn handle_alert_command(
     handle_create_alert(pool, owner_id, trimmed, broadcaster).await
 }
 
-async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
+async fn handle_list_alerts(pool: &DbPool, owner_id: &str) -> String {
     let alerts = match AlertsRepository::list_for_owner(pool, owner_id).await {
         Ok(list) => list,
         Err(err) => {
@@ -72,7 +71,7 @@ async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
 }
 
 async fn handle_cancel_alert(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     raw_id: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -101,7 +100,7 @@ async fn handle_cancel_alert(
 }
 
 async fn handle_create_alert(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,

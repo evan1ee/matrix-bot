@@ -5,6 +5,7 @@
 //! hash of the preceding entry (`prev_hash`), forming a tamper-evident blockchain-style
 //! ledger. SQLite triggers additionally enforce immutability at the database engine level.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -85,7 +86,7 @@ pub fn compute_entry_hash(
 /// Records a cryptographically hash-chained audit entry for a portfolio operation.
 #[allow(clippy::too_many_arguments)]
 pub async fn record_audit_entry(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     action: &str,
     symbol: Option<&str>,
@@ -101,12 +102,12 @@ pub async fn record_audit_entry(
     let now = custom_timestamp.unwrap_or_else(Utc::now);
     let epoch_ms = now.timestamp_millis();
 
-    let prev_hash = sqlx::query_scalar::<_, String>(
+    let prev_hash = crate::db_scalar_optional!(
+        pool,
+        String,
         "SELECT entry_hash FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1",
-    )
-    .bind(owner_id)
-    .fetch_optional(pool)
-    .await?
+        owner_id
+    )?
     .unwrap_or_else(|| GENESIS_HASH.to_string());
 
     let entry_hash = compute_entry_hash(
@@ -124,36 +125,36 @@ pub async fn record_audit_entry(
         epoch_ms,
     );
 
-    let result = sqlx::query(
+    let result = crate::db_scalar_one!(
+        pool,
+        i64,
         "INSERT INTO portfolio_audit_log \
          (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency, \
           currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(owner_id)
-    .bind(action)
-    .bind(symbol)
-    .bind(quantity_minor)
-    .bind(price_minor)
-    .bind(amount_minor)
-    .bind(currency)
-    .bind(currency_exponent)
-    .bind(realized_pl_minor)
-    .bind(note)
-    .bind(&prev_hash)
-    .bind(&entry_hash)
-    .bind(now)
-    .execute(pool)
-    .await?;
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        owner_id,
+        action,
+        symbol,
+        quantity_minor,
+        price_minor,
+        amount_minor,
+        currency,
+        currency_exponent,
+        realized_pl_minor,
+        note,
+        &prev_hash,
+        &entry_hash,
+        now
+    )?;
 
-    let inserted_id = result.last_insert_rowid();
+    let inserted_id = result;
 
-    let entry = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE id = ?"
-    ))
-    .bind(inserted_id)
-    .fetch_one(pool)
-    .await?;
+    let entry = crate::db_fetch_one!(
+        pool,
+        PortfolioAuditEntry,
+        &format!("SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE id = ?"),
+        inserted_id
+    )?;
 
     Ok(entry)
 }
@@ -274,7 +275,7 @@ pub async fn absorb_ledger(
 
 /// Retrieves the paginated audit activity log for an owner in reverse chronological order.
 pub async fn list_audit_entries(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     limit: i64,
     offset: i64,
@@ -282,17 +283,19 @@ pub async fn list_audit_entries(
     let limit = limit.clamp(1, 100);
     let offset = offset.max(0);
 
-    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log \
+    let entries = crate::db_fetch_all!(
+        pool,
+        PortfolioAuditEntry,
+        &format!(
+            "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log \
          WHERE owner_id = ? \
          ORDER BY id DESC \
          LIMIT ? OFFSET ?"
-    ))
-    .bind(owner_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+        ),
+        owner_id,
+        limit,
+        offset
+    )?;
 
     Ok(entries)
 }
@@ -308,16 +311,15 @@ pub struct AuditVerificationResult {
 }
 
 /// Verifies the cryptographic integrity of an owner's audit log from genesis to head.
-pub async fn verify_audit_chain(
-    pool: &SqlitePool,
-    owner_id: &str,
-) -> Result<AuditVerificationResult> {
-    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
-    ))
-    .bind(owner_id)
-    .fetch_all(pool)
-    .await?;
+pub async fn verify_audit_chain(pool: &DbPool, owner_id: &str) -> Result<AuditVerificationResult> {
+    let entries = crate::db_fetch_all!(
+        pool,
+        PortfolioAuditEntry,
+        &format!(
+            "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
+        ),
+        owner_id
+    )?;
 
     if entries.is_empty() {
         return Ok(AuditVerificationResult {
@@ -398,11 +400,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -498,18 +498,16 @@ mod tests {
         .unwrap();
 
         // Direct UPDATE must be rejected by trigger
-        let update_res =
-            sqlx::query("UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?")
-                .bind(e.id)
-                .execute(&pool)
-                .await;
+        let update_res = crate::db_execute!(
+            &pool,
+            "UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?",
+            e.id
+        );
         assert!(update_res.is_err(), "Trigger must abort UPDATE");
 
         // Direct DELETE must be rejected by trigger
-        let delete_res = sqlx::query("DELETE FROM portfolio_audit_log WHERE id = ?")
-            .bind(e.id)
-            .execute(&pool)
-            .await;
+        let delete_res =
+            crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log WHERE id = ?", e.id);
         assert!(delete_res.is_err(), "Trigger must abort DELETE");
     }
 

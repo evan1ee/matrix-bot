@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use super::alert::clear_ai_error_state;
@@ -12,7 +12,7 @@ pub fn format_error(msg: &str) -> String {
 }
 
 pub async fn handle_show_config(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     owner_id: &str,
 ) -> String {
@@ -46,7 +46,7 @@ pub async fn handle_show_config(
 }
 
 pub async fn handle_set_history(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     turns_str: &str,
@@ -86,7 +86,7 @@ pub async fn handle_set_history(
 }
 
 pub async fn handle_set_model(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     model_name: &str,
@@ -118,7 +118,7 @@ pub async fn handle_set_model(
 }
 
 pub async fn handle_reset(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -149,7 +149,7 @@ pub fn format_help() -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_subcommand(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,

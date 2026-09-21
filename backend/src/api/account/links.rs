@@ -25,7 +25,7 @@ pub async fn list_links(
     user: AuthUser,
 ) -> Result<Json<Vec<String>>, ApiError> {
     Ok(Json(
-        AccountRepository::linked_mxids(state.db.sqlite_pool(), &user.account_id)
+        AccountRepository::linked_mxids(&state.db.pool, &user.account_id)
             .await
             .map_err(ApiError::from)?,
     ))
@@ -42,7 +42,7 @@ pub async fn start_link(
     State(state): State<ApiState>,
     user: VerifiedUser,
 ) -> Result<Json<LinkCodeResponse>, ApiError> {
-    let code = LinkRepository::issue(state.db.sqlite_pool(), &user.account_id)
+    let code = LinkRepository::issue(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -79,7 +79,7 @@ pub async fn pending_merge(
         return Ok(Json(None));
     };
 
-    let preview = MergeRepository::preview(state.db.sqlite_pool(), &from_account)
+    let preview = MergeRepository::preview(&state.db.pool, &from_account)
         .await
         .map_err(ApiError::from)?;
 
@@ -115,18 +115,14 @@ pub async fn confirm_merge(
         return Err(ApiError::not_found("No merge is waiting for confirmation"));
     }
 
-    let outcome = MergeRepository::merge(
-        state.db.sqlite_pool(),
-        &payload.from_account,
-        &user.account_id,
-    )
-    .await
-    .map_err(ApiError::from)?;
+    let outcome = MergeRepository::merge(&state.db.pool, &payload.from_account, &user.account_id)
+        .await
+        .map_err(ApiError::from)?;
 
     state.pending_merges.write().await.remove(&user.account_id);
 
     SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         SecurityEventKind::AccountsMerged,
         Some(&format!("{} rows", outcome.moved.total())),
@@ -149,7 +145,7 @@ pub async fn unlink(
     user: VerifiedUser,
     Json(payload): Json<UnlinkRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    let removed = LinkRepository::unlink(state.db.sqlite_pool(), &user.account_id, &payload.mxid)
+    let removed = LinkRepository::unlink(&state.db.pool, &user.account_id, &payload.mxid)
         .await
         .map_err(ApiError::from)?;
 
@@ -160,7 +156,7 @@ pub async fn unlink(
     }
 
     SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         SecurityEventKind::MatrixUnlinked,
         Some(&payload.mxid),

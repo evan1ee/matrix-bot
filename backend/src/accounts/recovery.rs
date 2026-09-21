@@ -19,6 +19,7 @@
 //! the real owner's identities, remove their passkeys, or export their
 //! finances.
 
+use crate::db::DbPool;
 use bcrypt::{hash, verify};
 use chrono::{Duration, Utc};
 use sqlx::SqlitePool;
@@ -73,14 +74,12 @@ impl RecoveryRepository {
     ///
     /// Returns the plaintext, which is the only time it exists — the caller
     /// must show it once and never store it.
-    pub async fn issue_codes(
-        pool: &SqlitePool,
-        account_id: &str,
-    ) -> Result<Vec<String>, sqlx::Error> {
-        sqlx::query("DELETE FROM recovery_codes WHERE account_id = ?")
-            .bind(account_id)
-            .execute(pool)
-            .await?;
+    pub async fn issue_codes(pool: &DbPool, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
+        crate::db_execute!(
+            pool,
+            "DELETE FROM recovery_codes WHERE account_id = ?",
+            account_id
+        )?;
 
         let mut codes = Vec::with_capacity(RECOVERY_CODE_COUNT);
         for _ in 0..RECOVERY_CODE_COUNT {
@@ -88,11 +87,12 @@ impl RecoveryRepository {
             let hashed = hash(&code, RECOVERY_HASH_COST)
                 .map_err(|err| sqlx::Error::Protocol(format!("could not hash a code: {err}")))?;
 
-            sqlx::query("INSERT INTO recovery_codes (account_id, code_hash) VALUES (?, ?)")
-                .bind(account_id)
-                .bind(&hashed)
-                .execute(pool)
-                .await?;
+            crate::db_execute!(
+                pool,
+                "INSERT INTO recovery_codes (account_id, code_hash) VALUES (?, ?)",
+                account_id,
+                &hashed
+            )?;
 
             codes.push(code);
         }
@@ -102,13 +102,13 @@ impl RecoveryRepository {
 
     /// How many codes are still unused. Shown in the UI so someone can tell
     /// they are running low before they run out.
-    pub async fn remaining(pool: &SqlitePool, account_id: &str) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar(
+    pub async fn remaining(pool: &DbPool, account_id: &str) -> Result<i64, sqlx::Error> {
+        crate::db_scalar_one!(
+            pool,
+            _,
             "SELECT COUNT(*) FROM recovery_codes WHERE account_id = ? AND used_at IS NULL",
+            account_id
         )
-        .bind(account_id)
-        .fetch_one(pool)
-        .await
     }
 
     /// Checks a code against every account, since the user has no way to say
@@ -117,25 +117,23 @@ impl RecoveryRepository {
     /// Every unused hash is compared. There is no index to narrow this by, and
     /// deliberately so: a lookup keyed on anything derivable from the code
     /// would leak which codes exist.
-    pub async fn redeem(pool: &SqlitePool, code: &str) -> Result<Option<String>, sqlx::Error> {
+    pub async fn redeem(pool: &DbPool, code: &str) -> Result<Option<String>, sqlx::Error> {
         let normalised = normalise(code);
 
-        let candidates = sqlx::query_as::<_, (i64, String, String)>(
-            "SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL",
-        )
-        .fetch_all(pool)
-        .await?;
+        let candidates = crate::db_fetch_all!(
+            pool,
+            (i64, String, String),
+            "SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL"
+        )?;
 
         for (id, account_id, code_hash) in candidates {
             if verify(&normalised, &code_hash).unwrap_or(false) {
-                let consumed = sqlx::query(
+                let consumed = crate::db_execute!(
+                    pool,
                     "UPDATE recovery_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
-                )
-                .bind(Utc::now())
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected();
+                    Utc::now(),
+                    id
+                )?;
 
                 // Lost a race with a concurrent redemption of the same code.
                 if consumed == 0 {
@@ -156,19 +154,18 @@ impl RecoveryRepository {
     /// message is also the warning, and it should arrive the moment the request
     /// is made rather than a day later.
     pub async fn request(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<(String, chrono::DateTime<Utc>), sqlx::Error> {
         // One live request at a time, so repeated `!recover` cannot be used to
         // paper over the notification with noise.
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "UPDATE recovery_requests SET cancelled_at = ? \
              WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL",
-        )
-        .bind(Utc::now())
-        .bind(account_id)
-        .execute(pool)
-        .await?;
+            Utc::now(),
+            account_id
+        )?;
 
         let code = random_code(pool).await?;
         let hashed = hash(&code, RECOVERY_HASH_COST)
@@ -177,18 +174,18 @@ impl RecoveryRepository {
         let now = Utc::now();
         let valid_after = now + Duration::hours(RECOVERY_DELAY_HOURS);
 
-        let id = sqlx::query_scalar::<_, String>(
+        let id = crate::db_scalar_one!(
+            pool,
+            String,
             "INSERT INTO recovery_requests \
              (id, account_id, code_hash, requested_at, valid_after, expires_at) \
              VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?) RETURNING id",
-        )
-        .bind(account_id)
-        .bind(&hashed)
-        .bind(now)
-        .bind(valid_after)
-        .bind(valid_after + Duration::hours(RECOVERY_WINDOW_HOURS))
-        .fetch_one(pool)
-        .await?;
+            account_id,
+            &hashed,
+            now,
+            valid_after,
+            valid_after + Duration::hours(RECOVERY_WINDOW_HOURS)
+        )?;
 
         tracing::info!("Recovery requested for {account_id} (request {id})");
 
@@ -199,49 +196,44 @@ impl RecoveryRepository {
     ///
     /// This is what makes the delay meaningful: the real owner, still holding a
     /// working session, sees the notification and stops it.
-    pub async fn cancel_all(pool: &SqlitePool, account_id: &str) -> Result<u64, sqlx::Error> {
-        Ok(sqlx::query(
+    pub async fn cancel_all(pool: &DbPool, account_id: &str) -> Result<u64, sqlx::Error> {
+        Ok(crate::db_execute!(
+            pool,
             "UPDATE recovery_requests SET cancelled_at = ? \
              WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL",
-        )
-        .bind(Utc::now())
-        .bind(account_id)
-        .execute(pool)
-        .await?
-        .rows_affected())
+            Utc::now(),
+            account_id
+        )?)
     }
 
     /// Whether an account has a recovery request currently counting down.
     pub async fn pending(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<Option<chrono::DateTime<Utc>>, sqlx::Error> {
-        sqlx::query_scalar::<_, chrono::DateTime<Utc>>(
+        crate::db_scalar_optional!(
+            pool,
+            chrono::DateTime<Utc>,
             "SELECT valid_after FROM recovery_requests \
              WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL \
                AND expires_at > ? ORDER BY requested_at DESC LIMIT 1",
+            account_id,
+            Utc::now()
         )
-        .bind(account_id)
-        .bind(Utc::now())
-        .fetch_optional(pool)
-        .await
     }
 
     /// Redeems a matured recovery code.
-    pub async fn redeem_request(
-        pool: &SqlitePool,
-        code: &str,
-    ) -> Result<MaturedRecovery, sqlx::Error> {
+    pub async fn redeem_request(pool: &DbPool, code: &str) -> Result<MaturedRecovery, sqlx::Error> {
         let normalised = normalise(code);
         let now = Utc::now();
 
-        let candidates = sqlx::query_as::<_, (String, String, String, chrono::DateTime<Utc>)>(
+        let candidates = crate::db_fetch_all!(
+            pool,
+            (String, String, String, chrono::DateTime<Utc>),
             "SELECT id, account_id, code_hash, valid_after FROM recovery_requests \
              WHERE cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > ?",
-        )
-        .bind(now)
-        .fetch_all(pool)
-        .await?;
+            now
+        )?;
 
         for (id, account_id, code_hash, valid_after) in candidates {
             if !verify(&normalised, &code_hash).unwrap_or(false) {
@@ -252,14 +244,12 @@ impl RecoveryRepository {
                 return Ok(MaturedRecovery::TooEarly);
             }
 
-            let consumed = sqlx::query(
+            let consumed = crate::db_execute!(
+                pool,
                 "UPDATE recovery_requests SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
-            )
-            .bind(now)
-            .bind(&id)
-            .execute(pool)
-            .await?
-            .rows_affected();
+                now,
+                &id
+            )?;
 
             return Ok(if consumed == 1 {
                 MaturedRecovery::Ready { account_id }
@@ -278,12 +268,10 @@ impl RecoveryRepository {
 }
 
 /// A code a person can read off a screen and type into a chat window.
-async fn random_code(pool: &SqlitePool) -> Result<String, sqlx::Error> {
+async fn random_code(pool: &DbPool) -> Result<String, sqlx::Error> {
     const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-    let bytes: Vec<u8> = sqlx::query_scalar::<_, Vec<u8>>("SELECT randomblob(10)")
-        .fetch_one(pool)
-        .await?;
+    let bytes: Vec<u8> = crate::db_scalar_one!(pool, Vec<u8>, "SELECT randomblob(10)")?;
 
     let raw: String = bytes
         .iter()
@@ -313,15 +301,13 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
-    async fn account(pool: &SqlitePool, name: &str) -> String {
+    async fn account(pool: &DbPool, name: &str) -> String {
         AccountRepository::create(pool, name, STATUS_ACTIVE)
             .await
             .unwrap()
@@ -339,10 +325,8 @@ mod tests {
         assert_eq!(unique.len(), RECOVERY_CODE_COUNT, "codes must not repeat");
 
         // Nothing recoverable is stored.
-        let stored: Vec<String> = sqlx::query_scalar("SELECT code_hash FROM recovery_codes")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let stored: Vec<String> =
+            crate::db_scalar_all!(&pool, _, "SELECT code_hash FROM recovery_codes").unwrap();
         for code in &codes {
             assert!(
                 !stored.iter().any(|h| h.contains(code)),
@@ -461,12 +445,13 @@ mod tests {
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
         // Wind the clock forward.
-        sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
-            .bind(Utc::now() - Duration::minutes(1))
-            .bind(&acct)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+            Utc::now() - Duration::minutes(1),
+            &acct
+        )
+        .unwrap();
 
         assert_eq!(
             RecoveryRepository::redeem_request(&pool, &code)
@@ -504,12 +489,13 @@ mod tests {
             .is_none());
 
         // Even once it would have matured, it is dead.
-        sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
-            .bind(Utc::now() - Duration::minutes(1))
-            .bind(&acct)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+            Utc::now() - Duration::minutes(1),
+            &acct
+        )
+        .unwrap();
 
         assert_eq!(
             RecoveryRepository::redeem_request(&pool, &code)
@@ -529,12 +515,13 @@ mod tests {
         let (first, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
         let (second, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
-            .bind(Utc::now() - Duration::minutes(1))
-            .bind(&acct)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+            Utc::now() - Duration::minutes(1),
+            &acct
+        )
+        .unwrap();
 
         assert_eq!(
             RecoveryRepository::redeem_request(&pool, &first)
@@ -558,14 +545,13 @@ mod tests {
         let acct = account(&pool, "evan").await;
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "UPDATE recovery_requests SET valid_after = ?, expires_at = ? WHERE account_id = ?",
+            Utc::now() - Duration::hours(2),
+            Utc::now() - Duration::hours(1),
+            &acct
         )
-        .bind(Utc::now() - Duration::hours(2))
-        .bind(Utc::now() - Duration::hours(1))
-        .bind(&acct)
-        .execute(&pool)
-        .await
         .unwrap();
 
         assert_eq!(

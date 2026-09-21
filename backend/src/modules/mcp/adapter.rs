@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::{debug, warn};
 
 use super::protocol::{CallToolParams, CallToolResult, McpTool, ToolContent};
@@ -20,7 +20,7 @@ pub fn get_mcp_tools() -> Vec<McpTool> {
 
 /// Executes an MCP tool call by delegating to the unified AI tool executor.
 pub async fn call_mcp_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     params: CallToolParams,

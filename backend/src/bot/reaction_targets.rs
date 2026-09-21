@@ -1,8 +1,8 @@
 //! Repository for tracking Matrix message targets (todos, reminders)
 //! that can be interacted with via reactions.
 
+use crate::db::DbPool;
 use sqlx::SqlitePool;
-
 /// A tracked message target linked to a domain entity.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct BotMessageTarget {
@@ -16,7 +16,7 @@ pub struct BotMessageTarget {
 
 /// Records or updates a Matrix message target associated with an entity.
 pub async fn record_target(
-    pool: &SqlitePool,
+    pool: &DbPool,
     event_id: &str,
     room_id: &str,
     entity_type: &str,
@@ -24,7 +24,8 @@ pub async fn record_target(
     owner_id: &str,
     title: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    crate::db_execute!(
+        pool,
         r#"
         INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -35,50 +36,48 @@ pub async fn record_target(
             owner_id = excluded.owner_id,
             title = excluded.title
         "#,
-    )
-    .bind(event_id)
-    .bind(room_id)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(owner_id)
-    .bind(title)
-    .execute(pool)
-    .await?;
+        event_id,
+        room_id,
+        entity_type,
+        entity_id,
+        owner_id,
+        title
+    )?;
 
     Ok(())
 }
 
 /// Retrieves a tracked message target by Matrix event ID.
 pub async fn get_target(
-    pool: &SqlitePool,
+    pool: &DbPool,
     event_id: &str,
 ) -> Result<Option<BotMessageTarget>, sqlx::Error> {
-    sqlx::query_as::<_, BotMessageTarget>(
+    crate::db_fetch_optional!(
+        pool,
+        BotMessageTarget,
         r#"
         SELECT event_id, room_id, entity_type, entity_id, owner_id, title
         FROM bot_message_targets
         WHERE event_id = ?
         "#,
+        event_id
     )
-    .bind(event_id)
-    .fetch_optional(pool)
-    .await
 }
 
 /// Deletes tracked targets for a given entity type and ID.
 pub async fn delete_target_by_entity(
-    pool: &SqlitePool,
+    pool: &DbPool,
     entity_type: &str,
     entity_id: i64,
 ) -> Result<u64, sqlx::Error> {
-    let res =
-        sqlx::query("DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?")
-            .bind(entity_type)
-            .bind(entity_id)
-            .execute(pool)
-            .await?;
+    let res = crate::db_execute!(
+        pool,
+        "DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?",
+        entity_type,
+        entity_id
+    )?;
 
-    Ok(res.rows_affected())
+    Ok(res)
 }
 
 /// Parses entity type, ID, and title from a bot confirmation HTML reply.
@@ -120,7 +119,7 @@ fn extract_title_between_quotes(s: &str) -> String {
 
 /// Records a message target created during an AI tool execution (such as `set_reminder` or `add_todo`).
 pub async fn record_ai_tool_target(
-    pool: &SqlitePool,
+    pool: &DbPool,
     event_id: Option<&str>,
     room_id: &str,
     owner_id: &str,
@@ -155,11 +154,12 @@ pub async fn record_ai_tool_target(
 
 /// Copies targets from one event ID to another.
 pub async fn copy_targets(
-    pool: &SqlitePool,
+    pool: &DbPool,
     from_event_id: &str,
     to_event_id: &str,
 ) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query(
+    let res = crate::db_execute!(
+        pool,
         r#"
         INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
         SELECT ?, room_id, entity_type, entity_id, owner_id, title
@@ -172,19 +172,17 @@ pub async fn copy_targets(
             owner_id = excluded.owner_id,
             title = excluded.title
         "#,
-    )
-    .bind(to_event_id)
-    .bind(from_event_id)
-    .execute(pool)
-    .await?;
+        to_event_id,
+        from_event_id
+    )?;
 
-    Ok(res.rows_affected())
+    Ok(res)
 }
 
 /// Links related events across a command turn (stage placeholder, final bot reply, user prompt event)
 /// to ensure reactions on any of these messages resolve to the underlying entity.
 pub async fn link_turn_targets(
-    pool: &SqlitePool,
+    pool: &DbPool,
     stage_target_id: Option<&str>,
     reply_event_id: Option<&str>,
     user_event_id: &str,
@@ -205,7 +203,7 @@ pub async fn link_turn_targets(
 pub async fn resolve_untracked_target(
     room: &matrix_sdk::Room,
     target_event_id: &str,
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
 ) -> Option<BotMessageTarget> {
     use matrix_sdk::ruma::events::{
@@ -323,13 +321,8 @@ pub async fn resolve_untracked_target(
 
     // 2. Reminder detection
     if lower.contains("reminder") || lower.contains("提醒") {
-        if let Ok(mut reminders) = sqlx::query_as::<_, crate::modules::reminder::models::Reminder>(
-            "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at \
-             FROM reminders WHERE owner_id = ? ORDER BY id DESC LIMIT 15"
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await {
+        if let Ok(mut reminders) = crate::db_fetch_all!(pool, crate::modules::reminder::models::Reminder, "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at \
+             FROM reminders WHERE owner_id = ? ORDER BY id DESC LIMIT 15", owner_id) {
             reminders.sort_by_key(|r| if r.status == "pending" { 0 } else { 1 });
             for rem in &reminders {
                 if body.contains(&rem.message) || lower.contains(&rem.message.to_lowercase()) {
@@ -364,13 +357,8 @@ pub async fn resolve_untracked_target(
 
     // 3. Todo task detection
     if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
-        if let Ok(mut todos) = sqlx::query_as::<_, crate::modules::todo::models::TodoItem>(
-            "SELECT id, room_id, owner_id, sender_name, text, priority, due_at, completed, created_at, remind_before_minutes \
-             FROM todos WHERE owner_id = ? ORDER BY id DESC LIMIT 15"
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await {
+        if let Ok(mut todos) = crate::db_fetch_all!(pool, crate::modules::todo::models::TodoItem, "SELECT id, room_id, owner_id, sender_name, text, priority, due_at, completed, created_at, remind_before_minutes \
+             FROM todos WHERE owner_id = ? ORDER BY id DESC LIMIT 15", owner_id) {
             todos.sort_by_key(|t| if !t.completed { 0 } else { 1 });
             for todo in &todos {
                 if body.contains(&todo.text) || lower.contains(&todo.text.to_lowercase()) {
@@ -408,7 +396,7 @@ pub async fn resolve_untracked_target(
 
 /// Attempts to record a target if the reply message indicates an entity was created.
 pub async fn try_record_from_reply(
-    pool: &SqlitePool,
+    pool: &DbPool,
     event_id: &str,
     room_id: &str,
     owner_id: &str,
@@ -433,11 +421,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

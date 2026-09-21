@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use sqlx::SqlitePool;
 use tracing::error;
 
@@ -6,7 +7,7 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html::html_escape;
 
 pub async fn handle_habit_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     command: &str,
@@ -53,7 +54,7 @@ pub async fn handle_habit_command(
     }
 }
 
-async fn handle_list(pool: &SqlitePool, owner_id: &str, today_str: &str) -> String {
+async fn handle_list(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
     let habits = match HabitsRepository::find_all_with_status(pool, owner_id, today_str).await {
         Ok(list) => list,
         Err(e) => {
@@ -97,7 +98,7 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str, today_str: &str) -> Stri
 }
 
 async fn handle_toggle(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     target: &str,
@@ -186,7 +187,7 @@ async fn handle_toggle(
 }
 
 async fn handle_add(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
@@ -217,7 +218,7 @@ async fn handle_add(
     }
 }
 
-async fn handle_streaks(pool: &SqlitePool, owner_id: &str, today_str: &str) -> String {
+async fn handle_streaks(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
     let habits = match HabitsRepository::find_all_with_status(pool, owner_id, today_str).await {
         Ok(list) => list,
         Err(e) => return format!("<p>⚠️ Error: {}</p>", html_escape(&e.to_string())),
@@ -242,7 +243,7 @@ async fn handle_streaks(pool: &SqlitePool, owner_id: &str, today_str: &str) -> S
 }
 
 async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id_str: &str,
@@ -274,9 +275,9 @@ async fn handle_delete(
 mod tests {
     use super::*;
 
-    async fn setup_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_habits::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
+    async fn setup_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema_habits::create_tables(&pool)
             .await
             .unwrap();
         pool

@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS footprints (
@@ -23,19 +21,19 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             rating BIGINT NOT NULL DEFAULT 5,
             category TEXT NOT NULL DEFAULT 'travel',
             note TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_footprints_owner_arrival \
          ON footprints(owner_id, arrival_date DESC);"
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_footprints_country \
          ON footprints(owner_id, country);"

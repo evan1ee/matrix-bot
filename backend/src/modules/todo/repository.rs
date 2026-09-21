@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
@@ -18,8 +19,8 @@ const COLUMNS: &str = "id, room_id, owner_id, sender_name, text, priority, \
 /// remaining parameters (owner, limit, offset) fixed.
 fn completed_clause(completed: Option<bool>) -> &'static str {
     match completed {
-        Some(true) => " AND completed = 1",
-        Some(false) => " AND completed = 0",
+        Some(true) => " AND completed = TRUE",
+        Some(false) => " AND completed = FALSE",
         None => "",
     }
 }
@@ -29,12 +30,13 @@ pub struct TodoRepository;
 impl TodoRepository {
     /// Re-reads a row after a write, so callers always see what was stored
     /// rather than what they hoped was stored.
-    async fn fetch(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
-        let item =
-            sqlx::query_as::<_, TodoItem>(&format!("SELECT {COLUMNS} FROM todos WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(pool)
-                .await?;
+    async fn fetch(pool: &DbPool, id: i64) -> Result<Option<TodoItem>> {
+        let item = crate::db_fetch_optional!(
+            pool,
+            TodoItem,
+            &format!("SELECT {COLUMNS} FROM todos WHERE id = ?"),
+            id
+        )?;
 
         Ok(item)
     }
@@ -43,24 +45,20 @@ impl TodoRepository {
     ///
     /// Callers that act on behalf of a user must check ownership themselves —
     /// see `find_owned`.
-    pub async fn find(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
+    pub async fn find(pool: &DbPool, id: i64) -> Result<Option<TodoItem>> {
         Self::fetch(pool, id).await
     }
 
     /// Looks up a task that `owner_id` owns, for handlers acting on a caller's
     /// behalf. `owner_id` is the sole ownership key.
-    pub async fn find_owned(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Option<TodoItem>> {
-        let item = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE id = ? AND owner_id = ?"
-        ))
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+    pub async fn find_owned(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<TodoItem>> {
+        let item = crate::db_fetch_optional!(
+            pool,
+            TodoItem,
+            &format!("SELECT {COLUMNS} FROM todos WHERE id = ? AND owner_id = ?"),
+            id,
+            owner_id
+        )?;
 
         Ok(item)
     }
@@ -71,7 +69,7 @@ impl TodoRepository {
     // build that struct inline at the call site instead. No clarity is gained.
     #[allow(clippy::too_many_arguments)]
     pub async fn add(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         sender_name: &str,
@@ -80,54 +78,50 @@ impl TodoRepository {
         due_at: Option<DateTime<Utc>>,
         remind_before_minutes: Option<i64>,
     ) -> Result<TodoItem> {
-        let res = sqlx::query(
+        let res = crate::db_scalar_one!(
+            pool,
+            i64,
             r#"
             INSERT INTO todos (room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)
+            RETURNING id
             "#,
-        )
-        .bind(room_id)
-        .bind(owner_id)
-        .bind(sender_name)
-        .bind(text)
-        .bind(priority.as_str())
-        .bind(due_at)
-        .bind(remind_before_minutes)
-        .execute(pool)
-        .await?;
+            room_id,
+            owner_id,
+            sender_name,
+            text,
+            priority.as_str(),
+            due_at,
+            remind_before_minutes
+        )?;
 
-        let id = res.last_insert_rowid();
+        let id = res;
 
         Self::fetch(pool, id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("inserted todo #{id} vanished before it could be read"))
     }
 
-    pub async fn count_room_active(pool: &SqlitePool, room_id: &str) -> Result<i64> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND completed = 0",
-        )
-        .bind(room_id)
-        .fetch_one(pool)
-        .await?;
+    pub async fn count_room_active(pool: &DbPool, room_id: &str) -> Result<i64> {
+        let count = crate::db_scalar_one!(
+            pool,
+            i64,
+            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND completed = FALSE",
+            room_id
+        )?;
 
         Ok(count)
     }
 
     pub async fn list_room(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<TodoItem>> {
-        let items = sqlx::query_as::<_, TodoItem>(&format!(
+        let items = crate::db_fetch_all!(pool, TodoItem, &format!(
             "SELECT {COLUMNS} FROM todos WHERE room_id = ? ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
-        ))
-        .bind(room_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+        ), room_id, limit, offset)?;
 
         Ok(items)
     }
@@ -138,29 +132,31 @@ impl TodoRepository {
     /// that users control and that collides across identity spaces, so it must
     /// never appear in this predicate.
     pub async fn list_all_user(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         completed: Option<bool>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<TodoItem>> {
         let filter = completed_clause(completed);
-        let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE owner_id = ?{filter} \
+        let items = crate::db_fetch_all!(
+            pool,
+            TodoItem,
+            &format!(
+                "SELECT {COLUMNS} FROM todos WHERE owner_id = ?{filter} \
              ORDER BY completed ASC, id ASC LIMIT ? OFFSET ?"
-        ))
-        .bind(owner_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+            ),
+            owner_id,
+            limit,
+            offset
+        )?;
 
         Ok(items)
     }
 
     /// Lists a single room's tasks owned by `owner_id`.
     pub async fn list_room_user(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         completed: Option<bool>,
@@ -168,103 +164,104 @@ impl TodoRepository {
         offset: i64,
     ) -> Result<Vec<TodoItem>> {
         let filter = completed_clause(completed);
-        let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND owner_id = ?{filter} \
+        let items = crate::db_fetch_all!(
+            pool,
+            TodoItem,
+            &format!(
+                "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND owner_id = ?{filter} \
              ORDER BY completed ASC, id DESC LIMIT ? OFFSET ?"
-        ))
-        .bind(room_id)
-        .bind(owner_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+            ),
+            room_id,
+            owner_id,
+            limit,
+            offset
+        )?;
 
         Ok(items)
     }
 
     pub async fn count_room_user(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         completed: Option<bool>,
     ) -> Result<i64> {
         let filter = completed_clause(completed);
-        let count = sqlx::query_scalar::<_, i64>(&format!(
-            "SELECT COUNT(*) FROM todos WHERE room_id = ? AND owner_id = ?{filter}"
-        ))
-        .bind(room_id)
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+        let count = crate::db_scalar_one!(
+            pool,
+            i64,
+            &format!("SELECT COUNT(*) FROM todos WHERE room_id = ? AND owner_id = ?{filter}"),
+            room_id,
+            owner_id
+        )?;
 
         Ok(count)
     }
 
     /// Tasks owned by `owner_id` matching `completed`, for pagination metadata.
     pub async fn count_all_user(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         completed: Option<bool>,
     ) -> Result<i64> {
         let filter = completed_clause(completed);
-        let count = sqlx::query_scalar::<_, i64>(&format!(
-            "SELECT COUNT(*) FROM todos WHERE owner_id = ?{filter}"
-        ))
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+        let count = crate::db_scalar_one!(
+            pool,
+            i64,
+            &format!("SELECT COUNT(*) FROM todos WHERE owner_id = ?{filter}"),
+            owner_id
+        )?;
 
         Ok(count)
     }
 
-    pub async fn mark_done(pool: &SqlitePool, id: i64) -> Result<Option<TodoItem>> {
+    pub async fn mark_done(pool: &DbPool, id: i64) -> Result<Option<TodoItem>> {
         Self::set_completed(pool, id, true).await
     }
 
     /// Sets completion in either direction. The API exposes `completed` as a
     /// boolean, so un-completing has to be as reachable as completing.
     pub async fn set_completed(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         completed: bool,
     ) -> Result<Option<TodoItem>> {
-        let result = sqlx::query("UPDATE todos SET completed = ? WHERE id = ?")
-            .bind(completed)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let result = crate::db_execute!(
+            pool,
+            "UPDATE todos SET completed = ? WHERE id = ?",
+            completed,
+            id
+        )?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::fetch(pool, id).await
     }
 
-    pub async fn edit_text(pool: &SqlitePool, id: i64, new_text: &str) -> Result<Option<TodoItem>> {
-        let result = sqlx::query("UPDATE todos SET text = ? WHERE id = ?")
-            .bind(new_text)
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn edit_text(pool: &DbPool, id: i64, new_text: &str) -> Result<Option<TodoItem>> {
+        let result =
+            crate::db_execute!(pool, "UPDATE todos SET text = ? WHERE id = ?", new_text, id)?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::fetch(pool, id).await
     }
 
     pub async fn set_priority(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         priority: TodoPriority,
     ) -> Result<Option<TodoItem>> {
-        let result = sqlx::query("UPDATE todos SET priority = ? WHERE id = ?")
-            .bind(priority.as_str())
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let result = crate::db_execute!(
+            pool,
+            "UPDATE todos SET priority = ? WHERE id = ?",
+            priority.as_str(),
+            id
+        )?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::fetch(pool, id).await
@@ -273,17 +270,14 @@ impl TodoRepository {
     /// Sets or clears the due date. `None` clears it, which also tears down any
     /// reminder scheduled from it — see `todo::due_reminder::sync`.
     pub async fn set_due_date(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         due_at: Option<DateTime<Utc>>,
     ) -> Result<Option<TodoItem>> {
-        let result = sqlx::query("UPDATE todos SET due_at = ? WHERE id = ?")
-            .bind(due_at)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let result =
+            crate::db_execute!(pool, "UPDATE todos SET due_at = ? WHERE id = ?", due_at, id)?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::fetch(pool, id).await
@@ -291,73 +285,73 @@ impl TodoRepository {
 
     /// Sets or clears how long before the due date to fire a reminder.
     pub async fn set_remind_before(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         minutes: Option<i64>,
     ) -> Result<Option<TodoItem>> {
-        let result = sqlx::query("UPDATE todos SET remind_before_minutes = ? WHERE id = ?")
-            .bind(minutes)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let result = crate::db_execute!(
+            pool,
+            "UPDATE todos SET remind_before_minutes = ? WHERE id = ?",
+            minutes,
+            id
+        )?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::fetch(pool, id).await
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM todos WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn delete(pool: &DbPool, id: i64) -> Result<bool> {
+        let result = crate::db_execute!(pool, "DELETE FROM todos WHERE id = ?", id)?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
     /// Rows `clear_completed_user` is about to remove, read first so the
     /// caller can announce each one individually.
-    pub async fn list_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<Vec<TodoItem>> {
-        let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE owner_id = ? AND completed = 1"
-        ))
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+    pub async fn list_completed_user(pool: &DbPool, owner_id: &str) -> Result<Vec<TodoItem>> {
+        let items = crate::db_fetch_all!(
+            pool,
+            TodoItem,
+            &format!("SELECT {COLUMNS} FROM todos WHERE owner_id = ? AND completed = TRUE"),
+            owner_id
+        )?;
 
         Ok(items)
     }
 
     /// Rows `clear_completed_room` is about to remove, read first so the
     /// caller can announce each one individually.
-    pub async fn list_completed_room(pool: &SqlitePool, room_id: &str) -> Result<Vec<TodoItem>> {
-        let items = sqlx::query_as::<_, TodoItem>(&format!(
-            "SELECT {COLUMNS} FROM todos WHERE room_id = ? AND completed = 1"
-        ))
-        .bind(room_id)
-        .fetch_all(pool)
-        .await?;
+    pub async fn list_completed_room(pool: &DbPool, room_id: &str) -> Result<Vec<TodoItem>> {
+        let items = crate::db_fetch_all!(
+            pool,
+            TodoItem,
+            &format!("SELECT {COLUMNS} FROM todos WHERE room_id = ? AND completed = TRUE"),
+            room_id
+        )?;
 
         Ok(items)
     }
 
-    pub async fn clear_completed_user(pool: &SqlitePool, owner_id: &str) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM todos WHERE owner_id = ? AND completed = 1")
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+    pub async fn clear_completed_user(pool: &DbPool, owner_id: &str) -> Result<u64> {
+        let result = crate::db_execute!(
+            pool,
+            "DELETE FROM todos WHERE owner_id = ? AND completed = TRUE",
+            owner_id
+        )?;
 
-        Ok(result.rows_affected())
+        Ok(result)
     }
 
-    pub async fn clear_completed_room(pool: &SqlitePool, room_id: &str) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM todos WHERE room_id = ? AND completed = 1")
-            .bind(room_id)
-            .execute(pool)
-            .await?;
+    pub async fn clear_completed_room(pool: &DbPool, room_id: &str) -> Result<u64> {
+        let result = crate::db_execute!(
+            pool,
+            "DELETE FROM todos WHERE room_id = ? AND completed = TRUE",
+            room_id
+        )?;
 
-        Ok(result.rows_affected())
+        Ok(result)
     }
 }
 
@@ -367,11 +361,9 @@ mod tests {
     use crate::db::schema::run_migrations;
     use chrono::Duration;
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -485,15 +477,14 @@ mod tests {
         .unwrap();
 
         // Write the pre-migration shape back in, then re-run migrations.
-        sqlx::query("UPDATE todos SET due_at = '2026-12-31 23:59 UTC' WHERE id = ?")
-            .bind(item.id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "UPDATE todos SET due_at = '2026-12-31 23:59 UTC' WHERE id = ?",
+            item.id
+        )
+        .unwrap();
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
 
         let migrated = TodoRepository::find(&pool, item.id).await.unwrap().unwrap();
         let due = migrated

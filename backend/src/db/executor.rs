@@ -34,6 +34,16 @@ impl DbPool {
         }
     }
 
+    /// Closes the pool, waiting for in-flight connections to finish.
+    ///
+    /// Mirrors `Pool::close` on both drivers so callers do not have to match.
+    pub async fn close(&self) {
+        match self {
+            DbPool::Sqlite(pool) => pool.close().await,
+            DbPool::Postgres(pool) => pool.close().await,
+        }
+    }
+
     /// The SQLite pool, for code not yet converted to the macros below.
     ///
     /// **Migration scaffolding.** It exists so the tree keeps compiling and the
@@ -60,109 +70,267 @@ impl DbPool {
 #[doc(hidden)]
 pub use crate::db::dialect::render_placeholders as __render;
 
-/// `fetch_all` into `Vec<$ty>`.
+/// `query_as` + `fetch_all` into `Vec<$ty>`.
+///
+/// Pass `_` for `$ty` where the row type is inferred from context, which
+/// expands to `query_as::<_, _>` exactly as hand-written sqlx would.
 ///
 /// ```ignore
-/// let rows = db_fetch_all!(pool, Todo, "SELECT * FROM todos WHERE owner_id = ?", owner_id)?;
+/// let rows = crate::db_fetch_all!(pool, Todo, "SELECT * FROM todos WHERE owner_id = ?", owner)?;
 /// ```
 #[macro_export]
 macro_rules! db_fetch_all {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
-        // Bound first: `let x = &format!(..)` extends the temporary to the end of
-        // this block, where using it inline would drop it mid-statement.
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
         let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
             }
         }
     }};
 }
 
-/// `fetch_optional` into `Option<$ty>`.
-#[macro_export]
-macro_rules! db_fetch_optional {
-    ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
-        // Bound first: `let x = &format!(..)` extends the temporary to the end of
-        // this block, where using it inline would drop it mid-statement.
-        let __sql_src = $sql;
-        match $pool {
-            $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
-                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
-            }
-            $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
-                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
-            }
-        }
-    }};
-}
-
-/// `fetch_one` into `$ty`.
+/// `query_as` + `fetch_one` into `$ty`.
 #[macro_export]
 macro_rules! db_fetch_one {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
-        // Bound first: `let x = &format!(..)` extends the temporary to the end of
-        // this block, where using it inline would drop it mid-statement.
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
         let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
         }
     }};
 }
 
-/// A single scalar column, e.g. `COUNT(*)`.
+/// `query_as` + `fetch_optional` into `Option<$ty>`.
 #[macro_export]
-macro_rules! db_fetch_scalar {
+macro_rules! db_fetch_optional {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
-        // Bound first: `let x = &format!(..)` extends the temporary to the end of
-        // this block, where using it inline would drop it mid-statement.
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
         let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+            }
+            $crate::db::DbPool::Postgres(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+            }
+        }
+    }};
+}
+
+/// `query_scalar` + `fetch_all` into `Vec<$ty>`.
+#[macro_export]
+macro_rules! db_scalar_all {
+    ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
+        match $pool {
+            $crate::db::DbPool::Sqlite(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
+            }
+            $crate::db::DbPool::Postgres(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
+            }
+        }
+    }};
+}
+
+/// `query_scalar` + `fetch_one` into `$ty`, e.g. a `COUNT(*)`.
+#[macro_export]
+macro_rules! db_scalar_one {
+    ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
+        match $pool {
+            $crate::db::DbPool::Sqlite(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
                 sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
                 sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
         }
     }};
 }
 
-/// A statement run for its effect, yielding the driver's `QueryResult`.
+/// `query_scalar` + `fetch_optional` into `Option<$ty>`.
+#[macro_export]
+macro_rules! db_scalar_optional {
+    ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
+        match $pool {
+            $crate::db::DbPool::Sqlite(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+            }
+            $crate::db::DbPool::Postgres(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+            }
+        }
+    }};
+}
+
+/// A statement run for its effect, yielding `rows_affected()` directly.
 ///
-/// Note that `rows_affected()` is available on both drivers' results, but
-/// `last_insert_rowid()` is SQLite-only — an insert that needs its new id must
-/// use `RETURNING id` with `db_fetch_scalar!`, which both databases support.
+/// It returns the count rather than the driver's `QueryResult` because the
+/// two drivers' result types differ, and `rows_affected()` is the only part
+/// this project ever reads. `last_insert_rowid()` is SQLite-only and has no
+/// equivalent here: an insert that needs its new id uses `RETURNING id` with
+/// `db_scalar_one!`, which both databases support.
 #[macro_export]
 macro_rules! db_execute {
     ($pool:expr, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the
+        // end of this block, where using it inline would drop it mid-statement.
         let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
-                sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await
-                    .map(|r| r.rows_affected())
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await.map(|r| r.rows_affected())
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
-                sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await
-                    .map(|r| r.rows_affected())
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await.map(|r| r.rows_affected())
+            }
+        }
+    }};
+}
+
+/// `query_as` + `fetch_all` where the number of binds is decided at runtime.
+///
+/// A handful of list endpoints build their `WHERE` clause from optional filters,
+/// so the bind count varies with the request. `$dyn` is an iterable of
+/// same-typed values bound first, in order, followed by any fixed `$bind`
+/// arguments — which is exactly the shape those call sites already had
+/// (filter patterns, then `LIMIT`/`OFFSET`).
+#[macro_export]
+macro_rules! db_fetch_all_dyn {
+    ($pool:expr, $ty:ty, $sql:expr, $dyn:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $pool {
+            $crate::db::DbPool::Sqlite(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+                for __v in $dyn {
+                    __q = __q.bind(__v);
+                }
+                __q$(.bind($bind))*.fetch_all(__p).await
+            }
+            $crate::db::DbPool::Postgres(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+                for __v in $dyn {
+                    __q = __q.bind(__v);
+                }
+                __q$(.bind($bind))*.fetch_all(__p).await
+            }
+        }
+    }};
+}
+
+/// `query_as` + `fetch_one` with a runtime-decided bind count. See
+/// `db_fetch_all_dyn!`.
+#[macro_export]
+macro_rules! db_fetch_one_dyn {
+    ($pool:expr, $ty:ty, $sql:expr, $dyn:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $pool {
+            $crate::db::DbPool::Sqlite(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+                for __v in $dyn {
+                    __q = __q.bind(__v);
+                }
+                __q$(.bind($bind))*.fetch_one(__p).await
+            }
+            $crate::db::DbPool::Postgres(__p) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+                for __v in $dyn {
+                    __q = __q.bind(__v);
+                }
+                __q$(.bind($bind))*.fetch_one(__p).await
             }
         }
     }};
@@ -200,7 +368,7 @@ mod tests {
     async fn test_execute_insert_and_fetch_all_round_trip() {
         let pool = pool().await;
 
-        let affected = db_execute!(
+        let affected = crate::db_execute!(
             &pool,
             "INSERT INTO t (id, name, active) VALUES (?, ?, ?)",
             1_i64,
@@ -210,7 +378,7 @@ mod tests {
         .unwrap();
         assert_eq!(affected, 1);
 
-        let rows = db_fetch_all!(&pool, Row, "SELECT id, name, active FROM t").unwrap();
+        let rows = crate::db_fetch_all!(&pool, Row, "SELECT id, name, active FROM t").unwrap();
         assert_eq!(
             rows,
             vec![Row {
@@ -226,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_optional_matches_on_multiple_bound_values() {
         let pool = pool().await;
-        db_execute!(
+        crate::db_execute!(
             &pool,
             "INSERT INTO t (id, name, active) VALUES (?, ?, ?)",
             7_i64,
@@ -235,7 +403,7 @@ mod tests {
         )
         .unwrap();
 
-        let hit = db_fetch_optional!(
+        let hit = crate::db_fetch_optional!(
             &pool,
             Row,
             "SELECT id, name, active FROM t WHERE name = ? AND active = ?",
@@ -245,7 +413,7 @@ mod tests {
         .unwrap();
         assert_eq!(hit.map(|r| r.id), Some(7));
 
-        let miss = db_fetch_optional!(
+        let miss = crate::db_fetch_optional!(
             &pool,
             Row,
             "SELECT id, name, active FROM t WHERE name = ? AND active = ?",
@@ -260,7 +428,7 @@ mod tests {
     async fn test_fetch_scalar_counts() {
         let pool = pool().await;
         for id in 1..=3_i64 {
-            db_execute!(
+            crate::db_execute!(
                 &pool,
                 "INSERT INTO t (id, name, active) VALUES (?, ?, ?)",
                 id,
@@ -270,7 +438,8 @@ mod tests {
             .unwrap();
         }
         let count =
-            db_fetch_scalar!(&pool, i64, "SELECT COUNT(*) FROM t WHERE active = ?", true).unwrap();
+            crate::db_scalar_one!(&pool, i64, "SELECT COUNT(*) FROM t WHERE active = ?", true)
+                .unwrap();
         assert_eq!(count, 3);
     }
 
@@ -279,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn test_returning_yields_the_new_id_without_last_insert_rowid() {
         let pool = pool().await;
-        let id = db_fetch_scalar!(
+        let id = crate::db_scalar_one!(
             &pool,
             i64,
             "INSERT INTO t (name, active) VALUES (?, ?) RETURNING id",
@@ -288,6 +457,39 @@ mod tests {
         )
         .unwrap();
         assert!(id > 0);
+    }
+
+    /// 81 call sites in this project call `query_as`/`query_scalar` with no
+    /// turbofish and let the type fall out of context. They convert by passing
+    /// `_` as `$ty`, which expands to `query_as::<_, _>` — this pins that it
+    /// compiles and infers, rather than each of those sites discovering it.
+    #[tokio::test]
+    async fn test_an_underscore_type_infers_from_the_binding() {
+        let pool = pool().await;
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO t (id, name, active) VALUES (?, ?, ?)",
+            5_i64,
+            "five",
+            true
+        )
+        .unwrap();
+
+        let rows: Vec<Row> =
+            crate::db_fetch_all!(&pool, _, "SELECT id, name, active FROM t").unwrap();
+        assert_eq!(rows.len(), 1);
+
+        let name: String =
+            crate::db_scalar_one!(&pool, _, "SELECT name FROM t WHERE id = ?", 5_i64).unwrap();
+        assert_eq!(name, "five");
+
+        let missing: Option<String> =
+            crate::db_scalar_optional!(&pool, _, "SELECT name FROM t WHERE id = ?", 99_i64)
+                .unwrap();
+        assert!(missing.is_none());
+
+        let all: Vec<i64> = crate::db_scalar_all!(&pool, _, "SELECT id FROM t").unwrap();
+        assert_eq!(all, vec![5]);
     }
 
     #[tokio::test]

@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::NaiveDate;
 use sqlx::SqlitePool;
 use tracing::error;
@@ -11,7 +12,7 @@ use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
 
 pub async fn handle_journal_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     ctx: &CommandContext,
 ) -> Option<String> {
@@ -73,7 +74,7 @@ pub fn handle_help() -> String {
      • <code>!journal clear [date]</code> — Clear a daily log entry".to_string()
 }
 
-async fn handle_view(pool: &SqlitePool, owner_id: &str, date_str: &str) -> String {
+async fn handle_view(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
     let day_log = match LifeRepository::get_day_log(pool, owner_id, date_str).await {
         Ok(log) => log,
         Err(e) => {
@@ -151,7 +152,7 @@ async fn handle_view(pool: &SqlitePool, owner_id: &str, date_str: &str) -> Strin
     )
 }
 
-async fn handle_activities(pool: &SqlitePool, owner_id: &str, date_str: &str) -> String {
+async fn handle_activities(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
     if NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
         return "⚠️ Invalid date format. Please use <code>YYYY-MM-DD</code>.".to_string();
     }
@@ -195,7 +196,7 @@ async fn handle_activities(pool: &SqlitePool, owner_id: &str, date_str: &str) ->
 }
 
 async fn handle_log(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args: &str,
@@ -276,7 +277,7 @@ async fn handle_log(
 }
 
 async fn handle_clear(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     date_str: &str,
@@ -308,11 +309,9 @@ mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
 
-    async fn setup_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_life_schema(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_life_schema(&pool).await.unwrap();
         pool
     }
 

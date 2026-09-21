@@ -1,5 +1,6 @@
 use axum::{extract::State, Json};
 use serde::Deserialize;
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -49,7 +50,7 @@ pub async fn get_settings(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<UserSettings>, ApiError> {
-    let settings = SettingsRepository::get(state.db.sqlite_pool(), &user.owner_id())
+    let settings = SettingsRepository::get(&state.db.pool, &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -90,8 +91,7 @@ pub async fn update_settings(
         }
     });
 
-    let current =
-        SettingsRepository::get_or_default(state.db.sqlite_pool(), &user.owner_id()).await;
+    let current = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
     let max_history_turns = if let Some(turns) = payload.max_history_turns {
         if !(1..=100).contains(&turns) {
             return Err(ApiError::bad_request(
@@ -129,7 +129,7 @@ pub async fn update_settings(
     };
 
     let settings = SettingsRepository::upsert(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.owner_id(),
         &UserSettings {
             timezone: timezone.name().to_string(),
@@ -158,17 +158,12 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
-    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

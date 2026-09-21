@@ -5,6 +5,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -74,7 +75,7 @@ pub async fn list_reminders(
     let owner_id = user.owner_id();
 
     let items = ReminderRepository::list_user_reminders(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &owner_id,
         query.status.as_deref(),
         query.room_id.as_deref(),
@@ -85,7 +86,7 @@ pub async fn list_reminders(
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let total = ReminderRepository::count_user_reminders(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &owner_id,
         query.status.as_deref(),
         query.room_id.as_deref(),
@@ -128,14 +129,14 @@ pub async fn create_reminder(
         .unwrap_or(RecurrencePattern::None);
 
     let room_id = crate::db::rooms::resolve_target_room(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.owner_id(),
         payload.room_id.as_deref(),
     )
     .await;
 
     let reminder = service::create(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         Some(&state.broadcaster),
         &user.owner_id(),
         NewReminder {
@@ -201,7 +202,7 @@ pub async fn update_reminder(
         .unwrap_or(RecurrencePattern::None);
 
     let updated = ReminderRepository::update_pending(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.owner_id(),
         id,
         &payload.message,
@@ -236,13 +237,14 @@ pub async fn delete_reminder(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT room_id, status FROM reminders WHERE id = ? AND owner_id = ?")
-            .bind(id)
-            .bind(&owner_id)
-            .fetch_optional(state.db.sqlite_pool())
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let row: Option<(String, String)> = crate::db_fetch_optional!(
+        &state.db.pool,
+        _,
+        "SELECT room_id, status FROM reminders WHERE id = ? AND owner_id = ?",
+        id,
+        &owner_id
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let (room_id, status) = match row {
         Some(r) => r,
@@ -250,18 +252,9 @@ pub async fn delete_reminder(
     };
 
     if status == "pending" {
-        service::cancel(
-            state.db.sqlite_pool(),
-            Some(&state.broadcaster),
-            &owner_id,
-            id,
-        )
-        .await?;
+        service::cancel(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
     } else {
-        sqlx::query("DELETE FROM reminders WHERE id = ?")
-            .bind(id)
-            .execute(state.db.sqlite_pool())
-            .await
+        crate::db_execute!(&state.db.pool, "DELETE FROM reminders WHERE id = ?", id)
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         state.broadcaster.send(SystemEvent::ReminderDeleted {
@@ -288,7 +281,7 @@ pub async fn clear_reminder_history(
     user: AuthUser,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    service::clear_history(state.db.sqlite_pool(), Some(&state.broadcaster), &owner_id).await?;
+    service::clear_history(&state.db.pool, Some(&state.broadcaster), &owner_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -298,18 +291,13 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -357,14 +345,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_reminder_is_owner_scoped_and_validated() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -439,14 +423,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_history_api() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

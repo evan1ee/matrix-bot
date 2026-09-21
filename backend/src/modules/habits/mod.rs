@@ -70,7 +70,7 @@ impl BotModule for HabitsModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_habit_command(
-            db.sqlite_pool(),
+            &db.pool,
             broadcaster,
             &ctx.owner_id,
             &ctx.command,

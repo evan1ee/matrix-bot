@@ -1,6 +1,6 @@
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::modules::settings::models::UserSettings;
+use sqlx::SqlitePool;
 
 pub struct SettingsRepository;
 
@@ -10,13 +10,8 @@ impl SettingsRepository {
     /// A missing row is the normal case, not an error: settings are written only
     /// when a user changes one, so every user starts without a row and must
     /// still get a usable answer.
-    pub async fn get(pool: &SqlitePool, owner_id: &str) -> Result<UserSettings, sqlx::Error> {
-        let found = sqlx::query_as::<_, UserSettings>(
-            "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id FROM user_settings WHERE owner_id = ?",
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+    pub async fn get(pool: &DbPool, owner_id: &str) -> Result<UserSettings, sqlx::Error> {
+        let found = crate::db_fetch_optional!(pool, UserSettings, "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id FROM user_settings WHERE owner_id = ?", owner_id)?;
 
         Ok(found.unwrap_or_default())
     }
@@ -27,7 +22,7 @@ impl SettingsRepository {
     /// The Matrix command path has no way to surface a settings lookup failure
     /// that would not also destroy the reply the user actually asked for, so a
     /// failed read renders in UTC/USD and logs, rather than aborting.
-    pub async fn get_or_default(pool: &SqlitePool, owner_id: &str) -> UserSettings {
+    pub async fn get_or_default(pool: &DbPool, owner_id: &str) -> UserSettings {
         match Self::get(pool, owner_id).await {
             Ok(settings) => settings,
             Err(err) => {
@@ -43,12 +38,11 @@ impl SettingsRepository {
 
     /// Writes preferences, creating the row if it does not exist.
     pub async fn upsert(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         settings: &UserSettings,
     ) -> Result<UserSettings, sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id, updated_at) \
+        crate::db_execute!(pool, "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id, updated_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
              ON CONFLICT(owner_id) DO UPDATE SET \
                 timezone = excluded.timezone, \
@@ -58,51 +52,39 @@ impl SettingsRepository {
                 briefing_enabled = excluded.briefing_enabled, \
                 briefing_time = excluded.briefing_time, \
                 tts_speaker_id = excluded.tts_speaker_id, \
-                updated_at = CURRENT_TIMESTAMP",
-        )
-        .bind(owner_id)
-        .bind(&settings.timezone)
-        .bind(&settings.currency)
-        .bind(&settings.dev_room_id)
-        .bind(settings.max_history_turns)
-        .bind(settings.briefing_enabled)
-        .bind(&settings.briefing_time)
-        .bind(settings.tts_speaker_id)
-        .execute(pool)
-        .await?;
+                updated_at = CURRENT_TIMESTAMP", owner_id, &settings.timezone, &settings.currency, &settings.dev_room_id, settings.max_history_turns, settings.briefing_enabled, &settings.briefing_time, settings.tts_speaker_id)?;
 
         Self::get(pool, owner_id).await
     }
 
     /// Retrieves the last date string `YYYY-MM-DD` when the morning briefing was delivered.
-    pub async fn get_last_briefing_date(pool: &SqlitePool, owner_id: &str) -> Option<String> {
-        sqlx::query_scalar::<_, String>(
+    pub async fn get_last_briefing_date(pool: &DbPool, owner_id: &str) -> Option<String> {
+        crate::db_scalar_optional!(
+            pool,
+            String,
             "SELECT last_briefing_date FROM user_settings WHERE owner_id = ?",
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
         .ok()
         .flatten()
     }
 
     /// Updates the last briefing date for an owner.
     pub async fn update_last_briefing_date(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         date_str: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "INSERT INTO user_settings (owner_id, last_briefing_date, updated_at) \
              VALUES (?, ?, CURRENT_TIMESTAMP) \
              ON CONFLICT(owner_id) DO UPDATE SET \
                 last_briefing_date = excluded.last_briefing_date, \
                 updated_at = CURRENT_TIMESTAMP",
-        )
-        .bind(owner_id)
-        .bind(date_str)
-        .execute(pool)
-        .await?;
+            owner_id,
+            date_str
+        )?;
         Ok(())
     }
 }
@@ -112,11 +94,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -180,10 +160,8 @@ mod tests {
         assert_eq!(updated.tts_speaker_id, Some(7));
 
         // The upsert must update the existing row, never accumulate rows.
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_settings")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM user_settings").unwrap();
         assert_eq!(count, 1);
     }
 
@@ -291,12 +269,11 @@ mod tests {
 
         // Written without ever mentioning tts_speaker_id, exactly like a row
         // an older binary would have created.
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
+            owner
         )
-        .bind(owner)
-        .execute(&pool)
-        .await
         .unwrap();
 
         let settings = SettingsRepository::get(&pool, owner).await.unwrap();

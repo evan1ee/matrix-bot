@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS recurring_bills (
@@ -17,7 +15,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             currency_exponent BIGINT NOT NULL DEFAULT 2,
             frequency TEXT NOT NULL DEFAULT 'monthly',
             due_day BIGINT,
-            next_due_at TIMESTAMP NOT NULL,
+            next_due_at TIMESTAMPTZ NOT NULL,
             total_installments BIGINT,
             paid_installments BIGINT NOT NULL DEFAULT 0,
             auto_pay BOOLEAN NOT NULL DEFAULT FALSE,
@@ -25,55 +23,55 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             notes TEXT,
             remind_before_minutes BIGINT,
             remind_room_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_recurring_bills_owner ON recurring_bills(owner_id, status);")?;
+    crate::db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_recurring_bills_owner ON recurring_bills(owner_id, status);")?;
 
-    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_recurring_bills_due ON recurring_bills(owner_id, next_due_at);")?;
+    crate::db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_recurring_bills_due ON recurring_bills(owner_id, next_due_at);")?;
 
     // Migration helpers for recurring_bills columns on existing SQLite DBs
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN currency_exponent BIGINT NOT NULL DEFAULT 2;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN due_day BIGINT;"
     );
-    let _ = db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;");
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;");
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN total_installments BIGINT;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN remind_before_minutes BIGINT;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN remind_room_id TEXT;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN paid_installments BIGINT NOT NULL DEFAULT 0;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT FALSE;"
     );
-    let _ = db_ddl!(
+    let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN status TEXT NOT NULL DEFAULT 'active';"
     );
-    let _ = db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN notes TEXT;");
+    let _ = crate::db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN notes TEXT;");
 
     Ok(())
 }

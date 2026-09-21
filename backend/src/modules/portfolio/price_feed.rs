@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
-use sqlx::SqlitePool;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -250,7 +250,7 @@ pub fn price_to_minor(price: f64, exponent: i64) -> i64 {
 
 /// Refreshes the price for an individual holding and broadcasts an update event.
 pub async fn refresh_holding_price(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     holding: &Holding,
 ) -> Result<Holding, String> {
@@ -278,7 +278,7 @@ pub async fn refresh_holding_price(
 
 /// Refreshes prices for all holdings owned by the given owner ID.
 pub async fn refresh_all_for_owner(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
 ) -> RefreshSummary {

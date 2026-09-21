@@ -6,8 +6,6 @@
 //! together makes the set easy to audit as a whole.
 
 use crate::db::DbPool;
-use crate::db_ddl;
-
 /// Tables backing sign-in: accounts, the identities that reach them, the
 /// credentials that open them, and the paperwork for linking and recovery.
 ///
@@ -21,14 +19,14 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // message from an unknown MXID: it owns real data but has no credential, so
     // it is reachable only through the MXID linked to it until someone claims
     // it by registering a passkey and linking that MXID.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS accounts (
             id            TEXT PRIMARY KEY,
             display_name  TEXT NOT NULL,
             status        TEXT NOT NULL DEFAULT 'active',
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
@@ -40,18 +38,18 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // schema rather than by a check-then-insert that a concurrent link could
     // race. Unlinking deletes the row and leaves the data behind: the rows
     // belong to the account, and unlinking only revokes an access path.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS matrix_links (
             mxid        TEXT PRIMARY KEY,
             account_id  TEXT NOT NULL,
-            linked_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            linked_at   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_matrix_links_account ON matrix_links(account_id);"
     )?;
@@ -63,7 +61,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     //
     // There is no secret here: a passkey's private half never leaves the
     // authenticator, which is the entire reason this replaces `password_hash`.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS webauthn_credentials (
@@ -71,13 +69,13 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             account_id    TEXT NOT NULL,
             passkey_json  TEXT NOT NULL,
             label         TEXT NOT NULL,
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_used_at  TIMESTAMP
+            created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            last_used_at  TIMESTAMPTZ
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_account \
          ON webauthn_credentials(account_id);"
@@ -93,24 +91,24 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // passkey assertion newer than a few minutes, and this is what that is
     // measured against. `restricted_until` marks a session created by account
     // recovery, which may register a passkey and nothing else.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS sessions (
             id_hash          TEXT PRIMARY KEY,
             account_id       TEXT NOT NULL,
-            created_at       TIMESTAMP NOT NULL,
-            last_seen_at     TIMESTAMP NOT NULL,
-            last_verified_at TIMESTAMP NOT NULL,
-            restricted_until TIMESTAMP,
+            created_at       TIMESTAMPTZ NOT NULL,
+            last_seen_at     TIMESTAMPTZ NOT NULL,
+            last_verified_at TIMESTAMPTZ NOT NULL,
+            restricted_until TIMESTAMPTZ,
             user_agent       TEXT,
             ip               TEXT,
-            revoked_at       TIMESTAMP
+            revoked_at       TIMESTAMPTZ
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);"
     )?;
@@ -121,34 +119,34 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // are claiming, so proof of ownership *is* the message sender and cannot be
     // forged. `consumed_at` makes the code single-use: a code seen in a public
     // room is already burned by the time anyone could race it.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS matrix_link_challenges (
             code        TEXT PRIMARY KEY,
             account_id  TEXT NOT NULL,
-            created_at  TIMESTAMP NOT NULL,
-            expires_at  TIMESTAMP NOT NULL,
-            consumed_at TIMESTAMP
+            created_at  TIMESTAMPTZ NOT NULL,
+            expires_at  TIMESTAMPTZ NOT NULL,
+            consumed_at TIMESTAMPTZ
         );
         "#
     )?;
 
     // Single-use enrollment tokens for registering a passkey directly to a Matrix account.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS passkey_enrollment_tokens (
             token       TEXT PRIMARY KEY,
             account_id  TEXT NOT NULL,
-            created_at  TIMESTAMP NOT NULL,
-            expires_at  TIMESTAMP NOT NULL,
-            consumed_at TIMESTAMP
+            created_at  TIMESTAMPTZ NOT NULL,
+            expires_at  TIMESTAMPTZ NOT NULL,
+            consumed_at TIMESTAMPTZ
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_enrollment_tokens_account \
          ON passkey_enrollment_tokens(account_id);"
@@ -156,20 +154,20 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
 
     // Single-use recovery codes, bcrypt-hashed for the same reason a password
     // would be: a leaked backup must not hand someone a way in.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS recovery_codes (
             id          {{PK}},
             account_id  TEXT NOT NULL,
             code_hash   TEXT NOT NULL,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            used_at     TIMESTAMP
+            created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            used_at     TIMESTAMPTZ
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_recovery_codes_account ON recovery_codes(account_id);"
     )?;
@@ -179,23 +177,23 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // `valid_after` is what makes this survivable when the Matrix account is
     // the thing that was compromised: the request is announced immediately and
     // does nothing for a day, during which any live session can cancel it.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS recovery_requests (
             id            TEXT PRIMARY KEY,
             account_id    TEXT NOT NULL,
             code_hash     TEXT NOT NULL,
-            requested_at  TIMESTAMP NOT NULL,
-            valid_after   TIMESTAMP NOT NULL,
-            expires_at    TIMESTAMP NOT NULL,
-            cancelled_at  TIMESTAMP,
-            consumed_at   TIMESTAMP
+            requested_at  TIMESTAMPTZ NOT NULL,
+            valid_after   TIMESTAMPTZ NOT NULL,
+            expires_at    TIMESTAMPTZ NOT NULL,
+            cancelled_at  TIMESTAMPTZ,
+            consumed_at   TIMESTAMPTZ
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_recovery_requests_account \
          ON recovery_requests(account_id);"
@@ -206,7 +204,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     // Written for every sensitive action, and readable in the web UI. This is
     // what gives an account with no linked Matrix identity somewhere to see
     // security notices at all — a DM needs somewhere to send to.
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS security_events (
@@ -214,31 +212,31 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             account_id  TEXT NOT NULL,
             kind        TEXT NOT NULL,
             detail      TEXT,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_security_events_account \
          ON security_events(account_id, created_at DESC);"
     )?;
 
     // Password login compatibility table
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS web_users (
             id {{PK}},
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    let _ = db_ddl!(pool, "ALTER TABLE web_users ADD COLUMN account_id TEXT;");
+    let _ = crate::db_ddl!(pool, "ALTER TABLE web_users ADD COLUMN account_id TEXT;");
 
     Ok(())
 }

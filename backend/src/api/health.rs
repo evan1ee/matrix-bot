@@ -1,5 +1,6 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::ApiState;
@@ -21,10 +22,7 @@ pub struct HealthResponse {
     )
 )]
 pub async fn health_check(State(state): State<ApiState>) -> (StatusCode, Json<HealthResponse>) {
-    let db_ok = sqlx::query("SELECT 1")
-        .execute(state.db.sqlite_pool())
-        .await
-        .is_ok();
+    let db_ok = crate::db_execute!(&state.db.pool, "SELECT 1").is_ok();
 
     let status_code = if db_ok {
         StatusCode::OK
@@ -56,18 +54,13 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_health_check() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -82,12 +75,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_disconnected() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
         pool.close().await;
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

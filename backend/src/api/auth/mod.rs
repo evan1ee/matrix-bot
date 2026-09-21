@@ -1,3 +1,4 @@
+use sqlx::SqlitePool;
 pub mod extractor;
 pub mod handlers;
 pub mod matrix;
@@ -20,19 +21,14 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
-    use sqlx::SqlitePool;
 
     const ORIGIN: &str = "http://localhost:8080";
 
     async fn state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -81,11 +77,10 @@ mod tests {
 
     /// A signed-in account, and the cookie proving it.
     async fn signed_in(state: &ApiState, display_name: &str) -> (String, String) {
-        let account =
-            AccountRepository::create(state.db.sqlite_pool(), display_name, STATUS_ACTIVE)
-                .await
-                .unwrap();
-        let token = SessionRepository::create(state.db.sqlite_pool(), &account, None, None, None)
+        let account = AccountRepository::create(&state.db.pool, display_name, STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let token = SessionRepository::create(&state.db.pool, &account, None, None, None)
             .await
             .unwrap();
         (account, token)
@@ -159,7 +154,7 @@ mod tests {
             .await
             .is_ok());
 
-        SessionRepository::revoke(state.db.sqlite_pool(), &hash_token(&token))
+        SessionRepository::revoke(&state.db.pool, &hash_token(&token))
             .await
             .unwrap();
 
@@ -175,11 +170,12 @@ mod tests {
         let state = state().await;
         let (account, token) = signed_in(&state, "evan").await;
 
-        sqlx::query("DELETE FROM accounts WHERE id = ?")
-            .bind(&account)
-            .execute(state.db.sqlite_pool())
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &state.db.pool,
+            "DELETE FROM accounts WHERE id = ?",
+            &account
+        )
+        .unwrap();
 
         let err = extract(&state, Method::GET, Some(&token), None)
             .await
@@ -303,11 +299,11 @@ mod tests {
     #[tokio::test]
     async fn test_an_mcp_token_never_satisfies_step_up() {
         let state = state().await;
-        let account = AccountRepository::create(state.db.sqlite_pool(), "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(&state.db.pool, "evan", STATUS_ACTIVE)
             .await
             .unwrap();
         let (raw, _token) = crate::modules::mcp::repository::McpTokenRepository::create(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &account,
             "a machine",
             None,

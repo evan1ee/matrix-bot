@@ -1,9 +1,10 @@
+use crate::db::DbPool;
+use sqlx::SqlitePool;
 pub mod alerts;
 pub mod cash;
 pub mod net_worth;
 
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -15,7 +16,7 @@ use crate::modules::portfolio::service;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
@@ -398,11 +399,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

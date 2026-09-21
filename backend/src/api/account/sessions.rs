@@ -21,7 +21,7 @@ pub async fn list_sessions(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<SessionSummary>>, ApiError> {
-    let sessions = SessionRepository::list_for_account(state.db.sqlite_pool(), &user.account_id)
+    let sessions = SessionRepository::list_for_account(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -51,7 +51,7 @@ pub async fn revoke_other_sessions(
     user: VerifiedUser,
 ) -> Result<Json<u64>, ApiError> {
     let revoked = SessionRepository::revoke_all_for_account(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         Some(&user.session_id_hash),
     )
@@ -59,7 +59,7 @@ pub async fn revoke_other_sessions(
     .map_err(ApiError::from)?;
 
     SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         SecurityEventKind::SessionsRevoked,
         Some(&format!("{revoked} session(s)")),
@@ -82,7 +82,7 @@ pub async fn revoke_session(
     axum::extract::Path(id): axum::extract::Path<String>,
     user: VerifiedUser,
 ) -> Result<Json<bool>, ApiError> {
-    let sessions = SessionRepository::list_for_account(state.db.sqlite_pool(), &user.account_id)
+    let sessions = SessionRepository::list_for_account(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -90,12 +90,12 @@ pub async fn revoke_session(
         return Err(ApiError::not_found("Session not found"));
     }
 
-    SessionRepository::revoke(state.db.sqlite_pool(), &id)
+    SessionRepository::revoke(&state.db.pool, &id)
         .await
         .map_err(ApiError::from)?;
 
     SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &user.account_id,
         SecurityEventKind::SessionsRevoked,
         Some("1 session"),

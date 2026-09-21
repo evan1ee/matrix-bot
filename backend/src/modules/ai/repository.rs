@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use uuid::Uuid;
 
 use super::models::{AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput};
@@ -7,19 +7,19 @@ pub struct AiRepository;
 
 impl AiRepository {
     pub async fn get_user_config(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Option<AiUserConfig>, sqlx::Error> {
-        let mut config = sqlx::query_as::<_, AiUserConfig>(
+        let mut config = crate::db_fetch_optional!(
+            pool,
+            AiUserConfig,
             r#"
             SELECT owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
             FROM ai_user_configs
             WHERE owner_id = ?
             "#,
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            owner_id
+        )?;
 
         if let Some(ref mut cfg) = config {
             cfg.has_api_key = cfg
@@ -33,11 +33,12 @@ impl AiRepository {
     }
 
     pub async fn upsert_user_config(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         input: &UpdateAiConfigInput,
     ) -> Result<AiUserConfig, sqlx::Error> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_user_configs (
                 owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
@@ -56,16 +57,14 @@ impl AiRepository {
                 max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),
                 updated_at = CURRENT_TIMESTAMP
             "#,
-        )
-        .bind(owner_id)
-        .bind(&input.api_base_url)
-        .bind(&input.api_key)
-        .bind(&input.model_name)
-        .bind(&input.system_prompt)
-        .bind(input.temperature)
-        .bind(input.max_tokens)
-        .execute(pool)
-        .await?;
+            owner_id,
+            &input.api_base_url,
+            &input.api_key,
+            &input.model_name,
+            &input.system_prompt,
+            input.temperature,
+            input.max_tokens
+        )?;
 
         Self::get_user_config(pool, owner_id)
             .await?
@@ -73,13 +72,15 @@ impl AiRepository {
     }
 
     pub async fn get_or_create_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
         // Look for recent conversation
-        let existing = sqlx::query_as::<_, AiConversation>(
+        let existing = crate::db_fetch_optional!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
@@ -88,12 +89,10 @@ impl AiRepository {
             ORDER BY updated_at DESC
             LIMIT 1
             "#,
-        )
-        .bind(owner_id)
-        .bind(room_id)
-        .bind(max_age_seconds)
-        .fetch_optional(pool)
-        .await?;
+            owner_id,
+            room_id,
+            max_age_seconds
+        )?;
 
         if let Some(conv) = existing {
             return Ok(conv);
@@ -101,17 +100,16 @@ impl AiRepository {
 
         // Otherwise create new conversation
         let id = format!("conv_{}", Uuid::new_v4().simple());
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
             VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             "#,
-        )
-        .bind(&id)
-        .bind(owner_id)
-        .bind(room_id)
-        .execute(pool)
-        .await?;
+            &id,
+            owner_id,
+            room_id
+        )?;
 
         Self::get_conversation(pool, &id, owner_id)
             .await?
@@ -119,29 +117,31 @@ impl AiRepository {
     }
 
     pub async fn get_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<Option<AiConversation>, sqlx::Error> {
-        sqlx::query_as::<_, AiConversation>(
+        crate::db_fetch_optional!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
             WHERE id = ? AND owner_id = ?
             "#,
+            id,
+            owner_id
         )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn list_conversations(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         limit: i64,
     ) -> Result<Vec<AiConversation>, sqlx::Error> {
-        sqlx::query_as::<_, AiConversation>(
+        crate::db_fetch_all!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
@@ -149,49 +149,45 @@ impl AiRepository {
             ORDER BY updated_at DESC
             LIMIT ?
             "#,
+            owner_id,
+            limit
         )
-        .bind(owner_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn delete_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query(
+        let result = crate::db_execute!(
+            pool,
             r#"
             DELETE FROM ai_conversations
             WHERE id = ? AND owner_id = ?
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
-    pub async fn touch_conversation(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    pub async fn touch_conversation(pool: &DbPool, id: &str) -> Result<(), sqlx::Error> {
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE ai_conversations
             SET updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             "#,
-        )
-        .bind(id)
-        .execute(pool)
-        .await?;
+            id
+        )?;
 
         Ok(())
     }
 
     pub async fn add_message(
-        pool: &SqlitePool,
+        pool: &DbPool,
         conversation_id: &str,
         role: &str,
         content: &str,
@@ -199,41 +195,42 @@ impl AiRepository {
         tool_name: Option<&str>,
     ) -> Result<AiMessage, sqlx::Error> {
         let id = format!("msg_{}", Uuid::new_v4().simple());
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             "#,
-        )
-        .bind(&id)
-        .bind(conversation_id)
-        .bind(role)
-        .bind(content)
-        .bind(tool_call_id)
-        .bind(tool_name)
-        .execute(pool)
-        .await?;
+            &id,
+            conversation_id,
+            role,
+            content,
+            tool_call_id,
+            tool_name
+        )?;
 
         Self::touch_conversation(pool, conversation_id).await?;
 
-        sqlx::query_as::<_, AiMessage>(
+        crate::db_fetch_one!(
+            pool,
+            AiMessage,
             r#"
             SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
             FROM ai_messages
             WHERE id = ?
             "#,
+            &id
         )
-        .bind(&id)
-        .fetch_one(pool)
-        .await
     }
 
     pub async fn get_recent_messages(
-        pool: &SqlitePool,
+        pool: &DbPool,
         conversation_id: &str,
         limit: i64,
     ) -> Result<Vec<AiMessage>, sqlx::Error> {
-        let mut messages = sqlx::query_as::<_, AiMessage>(
+        let mut messages = crate::db_fetch_all!(
+            pool,
+            AiMessage,
             r#"
             SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
             FROM ai_messages
@@ -241,11 +238,9 @@ impl AiRepository {
             ORDER BY created_at DESC
             LIMIT ?
             "#,
-        )
-        .bind(conversation_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+            conversation_id,
+            limit
+        )?;
 
         messages.reverse();
         Ok(messages)
@@ -260,12 +255,10 @@ mod tests {
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
-            db.sqlite_pool(),
-            "@tester:mbm.one",
-        )
-        .await
-        .unwrap();
+        let account_id =
+            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@tester:mbm.one")
+                .await
+                .unwrap();
         (db, account_id)
     }
 
@@ -273,7 +266,7 @@ mod tests {
     async fn test_ai_user_config_crud() {
         let (db, owner) = setup_db().await;
 
-        let initial = AiRepository::get_user_config(db.sqlite_pool(), &owner)
+        let initial = AiRepository::get_user_config(&db.pool, &owner)
             .await
             .unwrap();
         assert!(initial.is_none());
@@ -288,13 +281,13 @@ mod tests {
             ..Default::default()
         };
 
-        let saved = AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &input)
+        let saved = AiRepository::upsert_user_config(&db.pool, &owner, &input)
             .await
             .unwrap();
         assert_eq!(saved.model_name.as_deref(), Some("gpt-4o"));
         assert_eq!(saved.temperature, Some(0.5));
 
-        let retrieved = AiRepository::get_user_config(db.sqlite_pool(), &owner)
+        let retrieved = AiRepository::get_user_config(&db.pool, &owner)
             .await
             .unwrap()
             .unwrap();
@@ -317,7 +310,7 @@ mod tests {
             ..Default::default()
         };
 
-        AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &initial_input)
+        AiRepository::upsert_user_config(&db.pool, &owner, &initial_input)
             .await
             .unwrap();
 
@@ -327,7 +320,7 @@ mod tests {
             ..Default::default()
         };
 
-        let updated = AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &model_update)
+        let updated = AiRepository::upsert_user_config(&db.pool, &owner, &model_update)
             .await
             .unwrap();
 
@@ -348,31 +341,24 @@ mod tests {
         let (db, owner) = setup_db().await;
         let room = "!room:mbm.one";
 
-        let conv = AiRepository::get_or_create_conversation(db.sqlite_pool(), &owner, room, 1800)
+        let conv = AiRepository::get_or_create_conversation(&db.pool, &owner, room, 1800)
             .await
             .unwrap();
         assert_eq!(conv.owner_id, owner);
 
-        let msg1 =
-            AiRepository::add_message(db.sqlite_pool(), &conv.id, "user", "Hello!", None, None)
-                .await
-                .unwrap();
+        let msg1 = AiRepository::add_message(&db.pool, &conv.id, "user", "Hello!", None, None)
+            .await
+            .unwrap();
         assert_eq!(msg1.content, "Hello!");
         assert_eq!(msg1.role, "user");
 
-        let msg2 = AiRepository::add_message(
-            db.sqlite_pool(),
-            &conv.id,
-            "assistant",
-            "Hi there!",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let msg2 =
+            AiRepository::add_message(&db.pool, &conv.id, "assistant", "Hi there!", None, None)
+                .await
+                .unwrap();
         assert_eq!(msg2.content, "Hi there!");
 
-        let list = AiRepository::get_recent_messages(db.sqlite_pool(), &conv.id, 10)
+        let list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
             .await
             .unwrap();
         assert_eq!(list.len(), 2);
@@ -381,20 +367,20 @@ mod tests {
 
         // An empty assistant message (e.g. intermediate tool call) should be filtered out
         let _empty_msg =
-            AiRepository::add_message(db.sqlite_pool(), &conv.id, "assistant", "   ", None, None)
+            AiRepository::add_message(&db.pool, &conv.id, "assistant", "   ", None, None)
                 .await
                 .unwrap();
-        let filtered_list = AiRepository::get_recent_messages(db.sqlite_pool(), &conv.id, 10)
+        let filtered_list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
             .await
             .unwrap();
         assert_eq!(filtered_list.len(), 2);
 
-        let deleted = AiRepository::delete_conversation(db.sqlite_pool(), &conv.id, &owner)
+        let deleted = AiRepository::delete_conversation(&db.pool, &conv.id, &owner)
             .await
             .unwrap();
         assert!(deleted);
 
-        let after_delete = AiRepository::get_conversation(db.sqlite_pool(), &conv.id, &owner)
+        let after_delete = AiRepository::get_conversation(&db.pool, &conv.id, &owner)
             .await
             .unwrap();
         assert!(after_delete.is_none());

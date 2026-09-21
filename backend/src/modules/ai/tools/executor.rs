@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use serde_json::json;
-use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
 use super::bills;
@@ -15,7 +15,7 @@ use super::webhooks;
 use crate::events::EventBroadcaster;
 
 pub async fn execute(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,

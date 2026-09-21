@@ -35,14 +35,10 @@ pub async fn get_portfolio_history(
     let timeframe = query.timeframe.as_deref().unwrap_or("1m");
     let currency = query.currency.as_deref().unwrap_or("USD");
 
-    let history = HistoryRepository::get_history(
-        state.db.sqlite_pool(),
-        &user.owner_id(),
-        timeframe,
-        currency,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let history =
+        HistoryRepository::get_history(&state.db.pool, &user.owner_id(), timeframe, currency)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(history))
 }
@@ -54,15 +50,12 @@ mod tests {
     use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AuthUser) {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             broadcaster,
             None,
             "http://localhost:8008".to_string(),

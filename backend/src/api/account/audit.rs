@@ -21,7 +21,7 @@ pub async fn list_security_events(
     user: AuthUser,
 ) -> Result<Json<Vec<SecurityEvent>>, ApiError> {
     Ok(Json(
-        SecurityEventRepository::list(state.db.sqlite_pool(), &user.account_id, 50)
+        SecurityEventRepository::list(&state.db.pool, &user.account_id, 50)
             .await
             .map_err(ApiError::from)?,
     ))

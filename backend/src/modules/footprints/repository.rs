@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use super::models::{
     calculate_stay_duration, Footprint, FootprintCurrencySpend, FootprintsSummary,
@@ -10,7 +10,7 @@ pub struct FootprintRepository;
 impl FootprintRepository {
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         title: &str,
         latitude: f64,
@@ -29,7 +29,9 @@ impl FootprintRepository {
     ) -> Result<Footprint> {
         let duration = calculate_stay_duration(arrival_date, departure_date);
 
-        let footprint = sqlx::query_as::<_, Footprint>(
+        let footprint = crate::db_fetch_one!(
+            pool,
+            Footprint,
             r#"
             INSERT INTO footprints (
                 owner_id, title, latitude, longitude, country, city, address,
@@ -43,56 +45,52 @@ impl FootprintRepository {
                       spend_amount_minor, spend_currency, spend_currency_exponent,
                       rating, category, note, created_at, updated_at;
             "#,
-        )
-        .bind(owner_id)
-        .bind(title)
-        .bind(latitude)
-        .bind(longitude)
-        .bind(country)
-        .bind(city)
-        .bind(address)
-        .bind(arrival_date)
-        .bind(departure_date)
-        .bind(duration)
-        .bind(spend_amount_minor)
-        .bind(spend_currency)
-        .bind(spend_currency_exponent)
-        .bind(rating)
-        .bind(category)
-        .bind(note)
-        .fetch_one(pool)
-        .await?;
+            owner_id,
+            title,
+            latitude,
+            longitude,
+            country,
+            city,
+            address,
+            arrival_date,
+            departure_date,
+            duration,
+            spend_amount_minor,
+            spend_currency,
+            spend_currency_exponent,
+            rating,
+            category,
+            note
+        )?;
 
         Ok(footprint)
     }
 
-    pub async fn find(pool: &SqlitePool, id: i64) -> Result<Option<Footprint>> {
-        let fp = sqlx::query_as::<_, Footprint>("SELECT * FROM footprints WHERE id = ?;")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
+    pub async fn find(pool: &DbPool, id: i64) -> Result<Option<Footprint>> {
+        let fp = crate::db_fetch_optional!(
+            pool,
+            Footprint,
+            "SELECT * FROM footprints WHERE id = ?;",
+            id
+        )?;
 
         Ok(fp)
     }
 
-    pub async fn find_owned(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Option<Footprint>> {
-        let fp = sqlx::query_as::<_, Footprint>(
+    pub async fn find_owned(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<Footprint>> {
+        let fp = crate::db_fetch_optional!(
+            pool,
+            Footprint,
             "SELECT * FROM footprints WHERE id = ? AND owner_id = ?;",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
         Ok(fp)
     }
 
     pub async fn list_by_owner(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         country: Option<&str>,
         category: Option<&str>,
@@ -110,29 +108,29 @@ impl FootprintRepository {
         }
         query.push_str(" ORDER BY arrival_date DESC, id DESC;");
 
-        let mut q = sqlx::query_as::<_, Footprint>(&query).bind(owner_id);
+        // Bind values are collected in the same order the clauses were appended
+        // above, then handed to the macro as one runtime-sized list.
+        let mut binds: Vec<String> = vec![owner_id.to_string()];
         if let Some(c) = country {
-            q = q.bind(c);
+            binds.push(c.to_string());
         }
         if let Some(cat) = category {
-            q = q.bind(cat);
+            binds.push(cat.to_string());
         }
         if let Some(s) = search {
             let pattern = format!("%{}%", s);
-            q = q
-                .bind(pattern.clone())
-                .bind(pattern.clone())
-                .bind(pattern.clone())
-                .bind(pattern);
+            for _ in 0..4 {
+                binds.push(pattern.clone());
+            }
         }
 
-        let items = q.fetch_all(pool).await?;
+        let items = crate::db_fetch_all_dyn!(pool, Footprint, &query, binds)?;
         Ok(items)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
         title: &str,
@@ -152,7 +150,9 @@ impl FootprintRepository {
     ) -> Result<Option<Footprint>> {
         let duration = calculate_stay_duration(arrival_date, departure_date);
 
-        let updated = sqlx::query_as::<_, Footprint>(
+        let updated = crate::db_fetch_optional!(
+            pool,
+            Footprint,
             r#"
             UPDATE footprints
             SET title = ?, latitude = ?, longitude = ?, country = ?, city = ?, address = ?,
@@ -165,43 +165,43 @@ impl FootprintRepository {
                       spend_amount_minor, spend_currency, spend_currency_exponent,
                       rating, category, note, created_at, updated_at;
             "#,
-        )
-        .bind(title)
-        .bind(latitude)
-        .bind(longitude)
-        .bind(country)
-        .bind(city)
-        .bind(address)
-        .bind(arrival_date)
-        .bind(departure_date)
-        .bind(duration)
-        .bind(spend_amount_minor)
-        .bind(spend_currency)
-        .bind(spend_currency_exponent)
-        .bind(rating)
-        .bind(category)
-        .bind(note)
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            title,
+            latitude,
+            longitude,
+            country,
+            city,
+            address,
+            arrival_date,
+            departure_date,
+            duration,
+            spend_amount_minor,
+            spend_currency,
+            spend_currency_exponent,
+            rating,
+            category,
+            note,
+            id,
+            owner_id
+        )?;
 
         Ok(updated)
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool> {
-        let rows = sqlx::query("DELETE FROM footprints WHERE id = ? AND owner_id = ?;")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?
-            .rows_affected();
+    pub async fn delete(pool: &DbPool, id: i64, owner_id: &str) -> Result<bool> {
+        let rows = crate::db_execute!(
+            pool,
+            "DELETE FROM footprints WHERE id = ? AND owner_id = ?;",
+            id,
+            owner_id
+        )?;
 
         Ok(rows > 0)
     }
 
-    pub async fn summary_stats(pool: &SqlitePool, owner_id: &str) -> Result<FootprintsSummary> {
-        let row = sqlx::query_as::<_, (i64, i64, i64)>(
+    pub async fn summary_stats(pool: &DbPool, owner_id: &str) -> Result<FootprintsSummary> {
+        let row = crate::db_fetch_one!(
+            pool,
+            (i64, i64, i64),
             r#"
             SELECT
                 COUNT(id) AS total_places,
@@ -210,12 +210,12 @@ impl FootprintRepository {
             FROM footprints
             WHERE owner_id = ?;
             "#,
-        )
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            owner_id
+        )?;
 
-        let spends = sqlx::query_as::<_, (String, i64, i64)>(
+        let spends = crate::db_fetch_all!(
+            pool,
+            (String, i64, i64),
             r#"
             SELECT spend_currency, spend_currency_exponent, SUM(spend_amount_minor)
             FROM footprints
@@ -223,10 +223,8 @@ impl FootprintRepository {
             GROUP BY spend_currency, spend_currency_exponent
             ORDER BY SUM(spend_amount_minor) DESC;
             "#,
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         let spend_by_currency = spends
             .into_iter()
@@ -257,7 +255,7 @@ mod tests {
         crate::db::schema::run_migrations(&db.pool).await.unwrap();
 
         let created = FootprintRepository::create(
-            db.sqlite_pool(),
+            &db.pool,
             "user_test",
             "Initial Place",
             30.0,
@@ -282,7 +280,7 @@ mod tests {
         assert_eq!(created.rating, 4);
 
         let updated = FootprintRepository::update(
-            db.sqlite_pool(),
+            &db.pool,
             created.id,
             "user_test",
             "Updated Place",
@@ -309,7 +307,7 @@ mod tests {
         assert_eq!(updated.rating, 5);
         assert_eq!(updated.category, "food");
 
-        let found = FootprintRepository::find(db.sqlite_pool(), created.id)
+        let found = FootprintRepository::find(&db.pool, created.id)
             .await
             .unwrap()
             .expect("find must return updated footprint");

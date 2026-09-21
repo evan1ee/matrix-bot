@@ -1,6 +1,6 @@
-use sqlx::SqlitePool;
-
 use crate::accounts::{display_name_for_mxid, Account, STATUS_UNCLAIMED};
+use crate::db::DbPool;
+use sqlx::SqlitePool;
 
 pub struct AccountRepository;
 
@@ -13,19 +13,19 @@ impl AccountRepository {
     /// ships a CSPRNG. Prefixing with `acct_` keeps it obvious at a glance
     /// which identity space a stray string in a log belongs to.
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         display_name: &str,
         status: &str,
     ) -> Result<String, sqlx::Error> {
-        sqlx::query_scalar::<_, String>(
+        crate::db_scalar_one!(
+            pool,
+            String,
             "INSERT INTO accounts (id, display_name, status) \
              VALUES ('acct_' || lower(hex(randomblob(16))), ?, ?) \
              RETURNING id",
+            display_name,
+            status
         )
-        .bind(display_name)
-        .bind(status)
-        .fetch_one(pool)
-        .await
     }
 
     /// Creates an account under an id the caller already holds.
@@ -35,53 +35,50 @@ impl AccountRepository {
     /// must not, or an abandoned registration would leave an account nobody can
     /// ever sign in to.
     pub async fn create_with_id(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         display_name: &str,
         status: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)")
-            .bind(account_id)
-            .bind(display_name)
-            .bind(status)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
+            account_id,
+            display_name,
+            status
+        )?;
         Ok(())
     }
 
-    pub async fn find(pool: &SqlitePool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
-        sqlx::query_as::<_, Account>(
+    pub async fn find(pool: &DbPool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
+        crate::db_fetch_optional!(
+            pool,
+            Account,
             "SELECT id, display_name, status, created_at FROM accounts WHERE id = ?",
+            account_id
         )
-        .bind(account_id)
-        .fetch_optional(pool)
-        .await
     }
 
     /// The account an MXID is linked to, or `None` if it has never been seen.
-    pub async fn find_by_mxid(
-        pool: &SqlitePool,
-        mxid: &str,
-    ) -> Result<Option<String>, sqlx::Error> {
-        sqlx::query_scalar::<_, String>("SELECT account_id FROM matrix_links WHERE mxid = ?")
-            .bind(mxid)
-            .fetch_optional(pool)
-            .await
+    pub async fn find_by_mxid(pool: &DbPool, mxid: &str) -> Result<Option<String>, sqlx::Error> {
+        crate::db_scalar_optional!(
+            pool,
+            String,
+            "SELECT account_id FROM matrix_links WHERE mxid = ?",
+            mxid
+        )
     }
 
     /// Every MXID that can reach `account_id`.
     ///
     /// Phase 3 fans security notifications out over exactly this list.
-    pub async fn linked_mxids(
-        pool: &SqlitePool,
-        account_id: &str,
-    ) -> Result<Vec<String>, sqlx::Error> {
-        sqlx::query_scalar::<_, String>(
+    pub async fn linked_mxids(pool: &DbPool, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
+        crate::db_scalar_all!(
+            pool,
+            String,
             "SELECT mxid FROM matrix_links WHERE account_id = ? ORDER BY linked_at",
+            account_id
         )
-        .bind(account_id)
-        .fetch_all(pool)
-        .await
     }
 
     /// The owner id for a Matrix sender, provisioning an unclaimed account the
@@ -96,23 +93,19 @@ impl AccountRepository {
     /// same time — the sync loop does not serialise event handlers. Without
     /// that, the two would provision two accounts, the second would overwrite
     /// the link, and everything written against the first would be orphaned.
-    pub async fn resolve_or_provision(
-        pool: &SqlitePool,
-        mxid: &str,
-    ) -> Result<String, sqlx::Error> {
+    pub async fn resolve_or_provision(pool: &DbPool, mxid: &str) -> Result<String, sqlx::Error> {
         if let Some(existing) = Self::find_by_mxid(pool, mxid).await? {
             return Ok(existing);
         }
 
         let candidate = Self::create(pool, &display_name_for_mxid(mxid), STATUS_UNCLAIMED).await?;
 
-        let claimed =
-            sqlx::query("INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)")
-                .bind(mxid)
-                .bind(&candidate)
-                .execute(pool)
-                .await?
-                .rows_affected();
+        let claimed = crate::db_execute!(
+            pool,
+            "INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+            mxid,
+            &candidate
+        )?;
 
         if claimed == 1 {
             return Ok(candidate);
@@ -120,10 +113,7 @@ impl AccountRepository {
 
         // A concurrent call linked this MXID first. Drop the account we minted
         // — nothing references it yet — and use the winner's.
-        sqlx::query("DELETE FROM accounts WHERE id = ?")
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(pool, "DELETE FROM accounts WHERE id = ?", &candidate)?;
 
         Self::find_by_mxid(pool, mxid)
             .await?
@@ -137,11 +127,9 @@ mod tests {
     use crate::accounts::STATUS_ACTIVE;
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -175,10 +163,7 @@ mod tests {
 
         assert_eq!(first, second);
 
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 = crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(count, 1, "a repeated sender must not accumulate accounts");
     }
 
@@ -236,10 +221,8 @@ mod tests {
             "resolved to different accounts: {ids:?}"
         );
 
-        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let accounts: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(accounts, 1, "the losing task left an orphan account behind");
     }
 
@@ -250,12 +233,13 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)")
-            .bind("@evan:work.org")
-            .bind(&account)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+            "@evan:work.org",
+            &account
+        )
+        .unwrap();
 
         let mxids = AccountRepository::linked_mxids(&pool, &account)
             .await
@@ -277,11 +261,12 @@ mod tests {
             .unwrap();
         assert_ne!(first, other);
 
-        let duplicate = sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)")
-            .bind("@evan:mbm.one")
-            .bind(&other)
-            .execute(&pool)
-            .await;
+        let duplicate = crate::db_execute!(
+            &pool,
+            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+            "@evan:mbm.one",
+            &other
+        );
 
         assert!(
             duplicate.is_err(),

@@ -13,6 +13,7 @@
 use axum::response::IntoResponse;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -115,11 +116,12 @@ pub async fn register_start(
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id =
-        sqlx::query_scalar::<_, String>("SELECT 'acct_' || lower(hex(randomblob(16)))")
-            .fetch_one(state.db.sqlite_pool())
-            .await
-            .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
+    let account_id = crate::db_scalar_one!(
+        &state.db.pool,
+        String,
+        "SELECT 'acct_' || lower(hex(randomblob(16)))"
+    )
+    .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
 
     let handle = crate::accounts::account_id_to_handle(&account_id)
         .ok_or_else(|| ApiError::internal("minted an account id with no handle"))?;
@@ -162,14 +164,14 @@ pub async fn enroll_start(
 ) -> Result<Json<CeremonyStart>, ApiError> {
     let token = payload.token.trim();
     let account_id =
-        crate::accounts::EnrollmentRepository::validate_and_consume(state.db.sqlite_pool(), token)
+        crate::accounts::EnrollmentRepository::validate_and_consume(&state.db.pool, token)
             .await
             .map_err(|err| {
                 ApiError::internal(format!("could not validate enrollment token: {err}"))
             })?
             .ok_or_else(|| ApiError::bad_request("Enrollment link is invalid or has expired."))?;
 
-    let account = AccountRepository::find(state.db.sqlite_pool(), &account_id)
+    let account = AccountRepository::find(&state.db.pool, &account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not find account: {err}")))?
         .ok_or_else(|| ApiError::bad_request("Account not found"))?;
@@ -177,7 +179,7 @@ pub async fn enroll_start(
     let handle = crate::accounts::account_id_to_handle(&account_id)
         .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
 
-    let stored = CredentialRepository::list_for_account(state.db.sqlite_pool(), &account_id)
+    let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
         .await
         .unwrap_or_default();
     let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
@@ -253,14 +255,13 @@ pub async fn register_finish(
         })?;
 
     // Activate or create the account.
-    sqlx::query(
+    crate::db_execute!(
+        &state.db.pool,
         "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, 'active') \
          ON CONFLICT(id) DO UPDATE SET status = 'active'",
+        &account_id,
+        &display_name
     )
-    .bind(&account_id)
-    .bind(&display_name)
-    .execute(state.db.sqlite_pool())
-    .await
     .map_err(|err| {
         ApiError::internal(format!("could not activate or create the account: {err}"))
     })?;
@@ -272,12 +273,12 @@ pub async fn register_finish(
         .filter(|l| !l.is_empty())
         .unwrap_or("Passkey");
 
-    CredentialRepository::add(state.db.sqlite_pool(), &account_id, &passkey, label)
+    CredentialRepository::add(&state.db.pool, &account_id, &passkey, label)
         .await
         .map_err(|err| ApiError::internal(format!("could not store the passkey: {err}")))?;
 
     crate::accounts::SecurityEventRepository::record(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         &account_id,
         crate::accounts::SecurityEventKind::PasskeyAdded,
         Some(label),
@@ -347,12 +348,12 @@ pub async fn login_finish(
         })?;
 
     let cred_id_str = crate::accounts::credentials::credential_id_string(&cred_id);
-    let account_id = match CredentialRepository::find(state.db.sqlite_pool(), &cred_id_str).await {
+    let account_id = match CredentialRepository::find(&state.db.pool, &cred_id_str).await {
         Ok(Some(cred)) => cred.account_id,
         _ => handle_to_account_id(&handle),
     };
 
-    let stored = CredentialRepository::list_for_account(state.db.sqlite_pool(), &account_id)
+    let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not read credentials: {err}")))?;
 
@@ -387,8 +388,7 @@ pub async fn login_finish(
             if let Some(mut passkey) = row.passkey() {
                 passkey.update_credential(&result);
                 if let Err(err) =
-                    CredentialRepository::record_use(state.db.sqlite_pool(), &row.id, &passkey)
-                        .await
+                    CredentialRepository::record_use(&state.db.pool, &row.id, &passkey).await
                 {
                     tracing::error!("Could not persist the signature counter: {:?}", err);
                 }
@@ -396,7 +396,7 @@ pub async fn login_finish(
         }
     }
 
-    let account = AccountRepository::find(state.db.sqlite_pool(), &account_id)
+    let account = AccountRepository::find(&state.db.pool, &account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not read the account: {err}")))?
         .ok_or_else(|| ApiError::unauthorized("Sign-in failed"))?;
@@ -430,14 +430,13 @@ async fn issue_session(
             crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
         {
             let old_id_hash = crate::accounts::session::hash_token(old_token);
-            let _ = SessionRepository::revoke(state.db.sqlite_pool(), &old_id_hash).await;
+            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
         }
     }
 
-    let token =
-        SessionRepository::create(state.db.sqlite_pool(), account_id, user_agent, None, None)
-            .await
-            .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;
+    let token = SessionRepository::create(&state.db.pool, account_id, user_agent, None, None)
+        .await
+        .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;
 
     let body = Json(SessionResponse {
         account_id: account_id.to_string(),
@@ -489,17 +488,12 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             secret.map(str::to_string),
             "https://mbm.one".to_string(),
@@ -629,10 +623,8 @@ mod tests {
         .await
         .unwrap();
 
-        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(state.db.sqlite_pool())
-            .await
-            .unwrap();
+        let accounts: i64 =
+            crate::db_scalar_one!(&state.db.pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(
             accounts, 0,
             "the account is written only when the ceremony finishes"
@@ -775,15 +767,14 @@ mod tests {
         let state = state_with_secret(None).await;
         // Auto-provision an account
         let account_id =
-            AccountRepository::resolve_or_provision(state.db.sqlite_pool(), "@alice:matrix.org")
+            AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
                 .await
                 .unwrap();
 
         // Issue enrollment token
-        let token =
-            crate::accounts::EnrollmentRepository::issue(state.db.sqlite_pool(), &account_id, 10)
-                .await
-                .unwrap();
+        let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
+            .await
+            .unwrap();
 
         // enroll_start
         let res = enroll_start(

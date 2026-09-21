@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS webhooks (
@@ -15,24 +13,24 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             is_active BIGINT NOT NULL DEFAULT 1,
             total_delivered_count BIGINT NOT NULL DEFAULT 0,
             failure_count BIGINT NOT NULL DEFAULT 0,
-            last_triggered_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_triggered_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (owner_id) REFERENCES accounts(id) ON DELETE CASCADE
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_webhooks_owner ON webhooks(owner_id);"
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_webhooks_token_hash ON webhooks(token_hash);"
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS webhook_outbox (
@@ -47,16 +45,16 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             status TEXT NOT NULL DEFAULT 'pending',
             attempts BIGINT NOT NULL DEFAULT 0,
             max_attempts BIGINT NOT NULL DEFAULT 10,
-            next_attempt_at TIMESTAMP NOT NULL,
+            next_attempt_at TIMESTAMPTZ NOT NULL,
             last_error TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            delivered_at TIMESTAMP,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            delivered_at TIMESTAMPTZ,
             FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_webhook_outbox_pending \
          ON webhook_outbox(status, next_attempt_at);"

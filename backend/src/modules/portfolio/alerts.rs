@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -69,7 +70,7 @@ pub struct AlertsRepository;
 
 impl AlertsRepository {
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         symbol: &str,
         target_price_minor: i64,
@@ -80,51 +81,49 @@ impl AlertsRepository {
         let norm_symbol = symbol.trim().to_uppercase();
         let norm_currency = currency.trim().to_uppercase();
 
-        let id = sqlx::query_scalar::<_, i64>(
+        let id = crate::db_scalar_one!(
+            pool,
+            i64,
             r#"
             INSERT INTO portfolio_price_alerts (
                 owner_id, symbol, target_price_minor, currency, currency_exponent, condition
             ) VALUES (?, ?, ?, ?, ?, ?)
             RETURNING id;
             "#,
-        )
-        .bind(owner_id)
-        .bind(&norm_symbol)
-        .bind(target_price_minor)
-        .bind(&norm_currency)
-        .bind(currency_exponent)
-        .bind(condition.as_str())
-        .fetch_one(pool)
-        .await?;
+            owner_id,
+            &norm_symbol,
+            target_price_minor,
+            &norm_currency,
+            currency_exponent,
+            condition.as_str()
+        )?;
 
         Self::find_by_id(pool, id, owner_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Alert created but not found"))
     }
 
-    pub async fn find_by_id(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Option<PriceAlert>> {
-        let alert = sqlx::query_as::<_, PriceAlert>(
+    pub async fn find_by_id(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<PriceAlert>> {
+        let alert = crate::db_fetch_optional!(
+            pool,
+            PriceAlert,
             r#"
             SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
                    condition, is_triggered, triggered_at, created_at
             FROM portfolio_price_alerts
             WHERE id = ? AND owner_id = ?;
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
         Ok(alert)
     }
 
-    pub async fn list_for_owner(pool: &SqlitePool, owner_id: &str) -> Result<Vec<PriceAlert>> {
-        let alerts = sqlx::query_as::<_, PriceAlert>(
+    pub async fn list_for_owner(pool: &DbPool, owner_id: &str) -> Result<Vec<PriceAlert>> {
+        let alerts = crate::db_fetch_all!(
+            pool,
+            PriceAlert,
             r#"
             SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
                    condition, is_triggered, triggered_at, created_at
@@ -132,64 +131,53 @@ impl AlertsRepository {
             WHERE owner_id = ?
             ORDER BY is_triggered ASC, created_at DESC;
             "#,
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         Ok(alerts)
     }
 
-    pub async fn list_active_for_symbol(
-        pool: &SqlitePool,
-        symbol: &str,
-    ) -> Result<Vec<PriceAlert>> {
+    pub async fn list_active_for_symbol(pool: &DbPool, symbol: &str) -> Result<Vec<PriceAlert>> {
         let norm = symbol.trim().to_uppercase();
-        let alerts = sqlx::query_as::<_, PriceAlert>(
+        let alerts = crate::db_fetch_all!(
+            pool,
+            PriceAlert,
             r#"
             SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
                    condition, is_triggered, triggered_at, created_at
             FROM portfolio_price_alerts
-            WHERE is_triggered = 0 AND (symbol = ? OR symbol LIKE ?);
+            WHERE is_triggered = FALSE AND (symbol = ? OR symbol LIKE ?);
             "#,
-        )
-        .bind(&norm)
-        .bind(format!("{}-%", norm))
-        .fetch_all(pool)
-        .await?;
+            &norm,
+            format!("{}-%", norm)
+        )?;
 
         Ok(alerts)
     }
 
-    pub async fn list_active_symbols(pool: &SqlitePool) -> Result<Vec<String>> {
-        let symbols = sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT symbol FROM portfolio_price_alerts WHERE is_triggered = 0;",
-        )
-        .fetch_all(pool)
-        .await?;
+    pub async fn list_active_symbols(pool: &DbPool) -> Result<Vec<String>> {
+        let symbols = crate::db_scalar_all!(
+            pool,
+            String,
+            "SELECT DISTINCT symbol FROM portfolio_price_alerts WHERE is_triggered = FALSE;"
+        )?;
 
         Ok(symbols)
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool> {
-        let rows = sqlx::query("DELETE FROM portfolio_price_alerts WHERE id = ? AND owner_id = ?;")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?
-            .rows_affected();
+    pub async fn delete(pool: &DbPool, id: i64, owner_id: &str) -> Result<bool> {
+        let rows = crate::db_execute!(
+            pool,
+            "DELETE FROM portfolio_price_alerts WHERE id = ? AND owner_id = ?;",
+            id,
+            owner_id
+        )?;
 
         Ok(rows > 0)
     }
 
-    pub async fn mark_triggered(pool: &SqlitePool, id: i64) -> Result<bool> {
-        let rows = sqlx::query(
-            "UPDATE portfolio_price_alerts SET is_triggered = 1, triggered_at = CURRENT_TIMESTAMP WHERE id = ?;",
-        )
-        .bind(id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    pub async fn mark_triggered(pool: &DbPool, id: i64) -> Result<bool> {
+        let rows = crate::db_execute!(pool, "UPDATE portfolio_price_alerts SET is_triggered = TRUE, triggered_at = CURRENT_TIMESTAMP WHERE id = ?;", id)?;
 
         Ok(rows > 0)
     }
@@ -250,11 +238,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

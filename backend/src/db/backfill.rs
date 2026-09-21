@@ -9,11 +9,12 @@
 //! `backfill_accounts` creates the rows that `demote_credentialless_accounts`
 //! then inspects, so running the demotion first silently does nothing.
 
+use crate::db::DbPool;
 use sqlx::SqlitePool;
 use tracing::info;
 
 /// Runs every conversion, in the only order that works.
-pub async fn run(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn run(pool: &DbPool) -> Result<(), sqlx::Error> {
     backfill_accounts(pool).await?;
     demote_credentialless_accounts(pool).await?;
     Ok(())
@@ -33,10 +34,8 @@ pub async fn run(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 /// Guarded on `accounts` being empty rather than on a version number, because
 /// there is no migration table in this project and re-running the rewrite would
 /// mint a second account for owners that had already been converted.
-async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-        .fetch_one(pool)
-        .await?;
+async fn backfill_accounts(pool: &DbPool) -> Result<(), sqlx::Error> {
+    let existing: i64 = crate::db_scalar_one!(pool, _, "SELECT COUNT(*) FROM accounts")?;
     if existing > 0 {
         return Ok(());
     }
@@ -44,11 +43,13 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Every distinct legacy owner across every table that carries one.
     let mut legacy: Vec<String> = Vec::new();
     for table in crate::accounts::OWNED_TABLES {
-        let owners = sqlx::query_scalar::<_, String>(&format!(
+        let owners = crate::db_scalar_all!(
+            pool,
+            String,
+            &format!(
             "SELECT DISTINCT owner_id FROM {table} WHERE owner_id IS NOT NULL AND owner_id != ''"
-        ))
-        .fetch_all(pool)
-        .await
+        )
+        )
         .unwrap_or_default();
         for owner in owners {
             if !legacy.contains(&owner) {
@@ -58,10 +59,8 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     if legacy.is_empty() {
-        let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM web_users")
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
+        let users: i64 =
+            crate::db_scalar_one!(pool, _, "SELECT COUNT(*) FROM web_users").unwrap_or(0);
         if users == 0 {
             return Ok(());
         }
@@ -87,12 +86,12 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 // than deleted: a migration must not be the thing that destroys
                 // someone's rows, and 'unclaimed' is exactly the state of
                 // "owns data, holds no credential".
-                let has_credential: bool = sqlx::query_scalar::<_, i64>(
+                let has_credential: bool = crate::db_scalar_one!(
+                    pool,
+                    i64,
                     "SELECT COUNT(*) FROM web_users WHERE username = ?",
+                    username
                 )
-                .bind(username)
-                .fetch_one(pool)
-                .await
                 .unwrap_or(0)
                     > 0;
 
@@ -121,62 +120,65 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             ),
         };
 
-        let account_id = sqlx::query_scalar::<_, String>(
+        let account_id = crate::db_scalar_one!(
+            pool,
+            String,
             "INSERT INTO accounts (id, display_name, status) \
              VALUES ('acct_' || lower(hex(randomblob(16))), ?, ?) RETURNING id",
-        )
-        .bind(&display_name)
-        .bind(status)
-        .fetch_one(pool)
-        .await?;
+            &display_name,
+            status
+        )?;
 
         if let Some(mxid) = mxid {
-            sqlx::query("INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)")
-                .bind(&mxid)
-                .bind(&account_id)
-                .execute(pool)
-                .await?;
+            crate::db_execute!(
+                pool,
+                "INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+                &mxid,
+                &account_id
+            )?;
         } else {
-            sqlx::query("UPDATE web_users SET account_id = ? WHERE username = ?")
-                .bind(&account_id)
-                .bind(&display_name)
-                .execute(pool)
-                .await?;
+            crate::db_execute!(
+                pool,
+                "UPDATE web_users SET account_id = ? WHERE username = ?",
+                &account_id,
+                &display_name
+            )?;
         }
 
         for table in crate::accounts::OWNED_TABLES {
-            let _ = sqlx::query(&format!(
-                "UPDATE {table} SET owner_id = ? WHERE owner_id = ?"
-            ))
-            .bind(&account_id)
-            .bind(owner)
-            .execute(pool)
-            .await;
+            let _ = crate::db_execute!(
+                pool,
+                &format!("UPDATE {table} SET owner_id = ? WHERE owner_id = ?"),
+                &account_id,
+                owner
+            );
         }
     }
 
     // A registered user who never created a row still needs an account, or
     // their first login would mint one and look like a brand-new person.
-    let orphan_users =
-        sqlx::query_scalar::<_, String>("SELECT username FROM web_users WHERE account_id IS NULL")
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+    let orphan_users = crate::db_scalar_all!(
+        pool,
+        String,
+        "SELECT username FROM web_users WHERE account_id IS NULL"
+    )
+    .unwrap_or_default();
 
     for username in orphan_users {
-        let account_id = sqlx::query_scalar::<_, String>(
+        let account_id = crate::db_scalar_one!(
+            pool,
+            String,
             "INSERT INTO accounts (id, display_name, status) \
              VALUES ('acct_' || lower(hex(randomblob(16))), ?, 'active') RETURNING id",
-        )
-        .bind(&username)
-        .fetch_one(pool)
-        .await?;
+            &username
+        )?;
 
-        sqlx::query("UPDATE web_users SET account_id = ? WHERE username = ?")
-            .bind(&account_id)
-            .bind(&username)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE web_users SET account_id = ? WHERE username = ?",
+            &account_id,
+            &username
+        )?;
     }
 
     Ok(())
@@ -191,15 +193,13 @@ async fn backfill_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 /// Demoted rather than deleted — the rows it owns are real, and 'unclaimed' is
 /// exactly the state of "owns data, holds no credential". Linking a Matrix
 /// account to it later restores access to everything in it.
-async fn demote_credentialless_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let demoted = sqlx::query(
+async fn demote_credentialless_accounts(pool: &DbPool) -> Result<(), sqlx::Error> {
+    let demoted = crate::db_execute!(
+        pool,
         "UPDATE accounts SET status = 'unclaimed' \
          WHERE status = 'active' \
-           AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = accounts.id)",
-    )
-    .execute(pool)
-    .await?
-    .rows_affected();
+           AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = accounts.id)"
+    )?;
 
     if demoted > 0 {
         info!(
@@ -215,40 +215,37 @@ async fn demote_credentialless_accounts(pool: &SqlitePool) -> Result<(), sqlx::E
 #[cfg(test)]
 mod tests {
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     /// Builds a database in the shape this project had before accounts existed:
     /// `sender_mxid` columns, and owner strings from the two old identity
     /// spaces. This is what every deployed instance actually looks like on the
     /// boot that first runs the new migration.
-    async fn legacy_database() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn legacy_database() -> crate::db::DbPool {
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, \
              sender_mxid TEXT NOT NULL, sender_name TEXT NOT NULL, text TEXT NOT NULL, \
              priority TEXT NOT NULL DEFAULT 'medium', due_at TEXT, \
-             completed BOOLEAN NOT NULL DEFAULT 0, created_at TIMESTAMP)",
+             completed BOOLEAN NOT NULL DEFAULT 0, created_at TIMESTAMP)"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "CREATE TABLE web_users (id INTEGER PRIMARY KEY AUTOINCREMENT, \
-             username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TIMESTAMP)",
+             username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TIMESTAMP)"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "CREATE TABLE user_settings (owner_id TEXT PRIMARY KEY, \
              timezone TEXT NOT NULL DEFAULT 'UTC', currency TEXT NOT NULL DEFAULT 'USD', \
-             updated_at TIMESTAMP)",
+             updated_at TIMESTAMP)"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
         for (owner, text) in [
@@ -256,29 +253,28 @@ mod tests {
             ("@evan:mbm.one", "also from matrix"),
             ("@web-demo:api", "from the web"),
         ] {
-            sqlx::query(
+            crate::db_execute!(
+                &pool,
                 "INSERT INTO todos (room_id, sender_mxid, sender_name, text, priority, completed) \
                  VALUES ('!room:x', ?, 'evan', ?, 'medium', 0)",
+                owner,
+                text
             )
-            .bind(owner)
-            .bind(text)
-            .execute(&pool)
-            .await
             .unwrap();
         }
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO user_settings (owner_id, timezone, currency) \
-             VALUES ('@evan:mbm.one', 'Asia/Tokyo', 'JPY')",
+             VALUES ('@evan:mbm.one', 'Asia/Tokyo', 'JPY')"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
-        sqlx::query("INSERT INTO web_users (username, password_hash) VALUES ('demo', 'x')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO web_users (username, password_hash) VALUES ('demo', 'x')"
+        )
+        .unwrap();
 
         pool
     }
@@ -289,15 +285,11 @@ mod tests {
     #[tokio::test]
     async fn test_backfill_converts_both_legacy_identity_spaces() {
         let pool = legacy_database().await;
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
 
         // The column itself was renamed, so the old name must be gone.
-        let owners: Vec<String> = sqlx::query_scalar("SELECT DISTINCT owner_id FROM todos")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let owners: Vec<String> =
+            crate::db_scalar_all!(&pool, _, "SELECT DISTINCT owner_id FROM todos").unwrap();
         assert_eq!(owners.len(), 2, "two legacy owners, two accounts");
         assert!(
             owners.iter().all(|o| o.starts_with("acct_")),
@@ -305,52 +297,61 @@ mod tests {
         );
 
         // The Matrix owner became an unclaimed account with its MXID linked.
-        let matrix_account: String =
-            sqlx::query_scalar("SELECT account_id FROM matrix_links WHERE mxid = '@evan:mbm.one'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        let status: String = sqlx::query_scalar("SELECT status FROM accounts WHERE id = ?")
-            .bind(&matrix_account)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let matrix_account: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT account_id FROM matrix_links WHERE mxid = '@evan:mbm.one'"
+        )
+        .unwrap();
+        let status: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT status FROM accounts WHERE id = ?",
+            &matrix_account
+        )
+        .unwrap();
         assert_eq!(status, "unclaimed", "a Matrix owner has no credential yet");
 
         // Both of that MXID's todos moved together.
-        let moved: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos WHERE owner_id = ?")
-            .bind(&matrix_account)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let moved: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM todos WHERE owner_id = ?",
+            &matrix_account
+        )
+        .unwrap();
         assert_eq!(moved, 2);
 
         // Settings followed the same owner, so the user keeps Asia/Tokyo.
-        let tz: String =
-            sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
-                .bind(&matrix_account)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let tz: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT timezone FROM user_settings WHERE owner_id = ?",
+            &matrix_account
+        )
+        .unwrap();
         assert_eq!(tz, "Asia/Tokyo");
 
         // The web owner became an active account wired to its `web_users` row,
         // so the existing password login keeps working and lands on its data.
-        let web_account: String =
-            sqlx::query_scalar("SELECT account_id FROM web_users WHERE username = 'demo'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let web_account: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT account_id FROM web_users WHERE username = 'demo'"
+        )
+        .unwrap();
         assert_ne!(
             web_account, matrix_account,
             "unlinked identities stay separate"
         );
 
-        let web_todos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos WHERE owner_id = ?")
-            .bind(&web_account)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let web_todos: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM todos WHERE owner_id = ?",
+            &web_account
+        )
+        .unwrap();
         assert_eq!(web_todos, 1);
     }
 
@@ -360,35 +361,25 @@ mod tests {
     async fn test_backfill_runs_once_however_often_migrations_run() {
         let pool = legacy_database().await;
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        let after_first: Vec<String> = sqlx::query_scalar("SELECT id FROM accounts ORDER BY id")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        let after_first: Vec<String> =
+            crate::db_scalar_all!(&pool, _, "SELECT id FROM accounts ORDER BY id").unwrap();
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
-        let after_third: Vec<String> = sqlx::query_scalar("SELECT id FROM accounts ORDER BY id")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let after_third: Vec<String> =
+            crate::db_scalar_all!(&pool, _, "SELECT id FROM accounts ORDER BY id").unwrap();
 
         assert_eq!(
             after_first, after_third,
             "re-running must not create accounts"
         );
 
-        let orphans: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM todos WHERE owner_id NOT IN (SELECT id FROM accounts)",
+        let orphans: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM todos WHERE owner_id NOT IN (SELECT id FROM accounts)"
         )
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(orphans, 0, "every row must still point at a live account");
     }
@@ -398,20 +389,20 @@ mod tests {
     #[tokio::test]
     async fn test_backfill_covers_users_with_no_data() {
         let pool = legacy_database().await;
-        sqlx::query("INSERT INTO web_users (username, password_hash) VALUES ('quiet', 'x')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO web_users (username, password_hash) VALUES ('quiet', 'x')"
+        )
+        .unwrap();
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
 
-        let account: Option<String> =
-            sqlx::query_scalar("SELECT account_id FROM web_users WHERE username = 'quiet'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let account: Option<String> = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT account_id FROM web_users WHERE username = 'quiet'"
+        )
+        .unwrap();
         assert!(
             account.is_some(),
             "a user with no rows still needs an account"
@@ -438,23 +429,17 @@ mod tests {
             panic!("set MIGRATE_TEST_DB to a *copy* of a real database");
         };
 
-        let pool = SqlitePool::connect(&format!("sqlite://{path}"))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::SqlitePool::connect(&format!("sqlite://{path}"))
+                .await
+                .unwrap(),
+        );
 
-        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let before: i64 = crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM todos").unwrap();
 
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        run_migrations(&pool).await.unwrap();
 
-        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let after: i64 = crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM todos").unwrap();
         assert_eq!(
             before, after,
             "the migration must not lose or duplicate rows"
@@ -462,23 +447,25 @@ mod tests {
 
         // Nothing may still point at an owner that no account claims.
         for table in crate::accounts::OWNED_TABLES {
-            let stranded: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE owner_id NOT IN (SELECT id FROM accounts)"
-            ))
-            .fetch_one(&pool)
-            .await
+            let stranded: i64 = crate::db_scalar_one!(
+                &pool,
+                _,
+                &format!(
+                    "SELECT COUNT(*) FROM {table} WHERE owner_id NOT IN (SELECT id FROM accounts)"
+                )
+            )
             .unwrap();
             assert_eq!(stranded, 0, "{table} has rows no account owns");
         }
 
         // 'active' asserts a passkey exists. An active account without one is
         // the migration having lied about the state it created.
-        let unreachable_active: i64 = sqlx::query_scalar(
+        let unreachable_active: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM accounts a WHERE a.status = 'active' \
-               AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = a.id)",
+               AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = a.id)"
         )
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(
             unreachable_active, 0,
@@ -488,12 +475,12 @@ mod tests {
         // Unclaimed accounts with no linked MXID are legacy orphans — data from
         // a local account that was deleted before this migration. Reported, not
         // failed: the migration inherited them, it did not create them.
-        let orphans: i64 = sqlx::query_scalar(
+        let orphans: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM accounts a WHERE a.status = 'unclaimed' \
-               AND NOT EXISTS (SELECT 1 FROM matrix_links m WHERE m.account_id = a.id)",
+               AND NOT EXISTS (SELECT 1 FROM matrix_links m WHERE m.account_id = a.id)"
         )
-        .fetch_one(&pool)
-        .await
         .unwrap();
         if orphans > 0 {
             println!("note: {orphans} orphaned legacy account(s) carried over, data preserved");
@@ -503,15 +490,12 @@ mod tests {
     /// A fresh install has nothing to convert and must not invent an account.
     #[tokio::test]
     async fn test_backfill_is_a_no_op_on_an_empty_database() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
 
-        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let accounts: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(accounts, 0);
     }
 }

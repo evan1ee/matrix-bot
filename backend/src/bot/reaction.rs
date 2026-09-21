@@ -6,6 +6,7 @@
 //! - 😝: Delay +1 Day (postpones task due date or reminder trigger by 24h)
 //! - 🎉: Celebrate Completion (completes item and replies with celebration)
 
+use crate::db::DbPool;
 use chrono::{Duration, Utc};
 use matrix_sdk::{
     room::Room,
@@ -89,7 +90,7 @@ pub fn register_reaction_handler(
             };
 
             let sender_owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-                db.sqlite_pool(),
+                &db.pool,
                 ev.sender.as_str(),
             )
             .await
@@ -105,13 +106,13 @@ pub fn register_reaction_handler(
             };
 
             let target_event_id = &ev.content.relates_to.event_id;
-            let target = match get_target(db.sqlite_pool(), target_event_id.as_str()).await {
+            let target = match get_target(&db.pool, target_event_id.as_str()).await {
                 Ok(Some(t)) => t,
                 Ok(None) => {
                     match crate::bot::reaction_targets::resolve_untracked_target(
                         &room,
                         target_event_id.as_str(),
-                        db.sqlite_pool(),
+                        &db.pool,
                         &sender_owner_id,
                     )
                     .await
@@ -150,13 +151,13 @@ pub fn register_reaction_handler(
             );
 
             if let Some(outcome) =
-                apply_reaction(db.sqlite_pool(), &target, action, broadcaster.as_ref()).await
+                apply_reaction(&db.pool, &target, action, broadcaster.as_ref()).await
             {
                 send_reaction(&room, target_event_id, outcome.ack_emoji).await;
                 if let Some(reply_eid) = send_reply(&room, &outcome.reply_html).await {
                     if action != AllowedReaction::Delete {
                         let _ = crate::bot::reaction_targets::record_target(
-                            db.sqlite_pool(),
+                            &db.pool,
                             reply_eid.as_str(),
                             room.room_id().as_str(),
                             &target.entity_type,
@@ -173,7 +174,7 @@ pub fn register_reaction_handler(
 }
 
 pub async fn apply_reaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     action: AllowedReaction,
     broadcaster: Option<&EventBroadcaster>,
@@ -187,7 +188,7 @@ pub async fn apply_reaction(
 }
 
 async fn handle_done(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -246,7 +247,7 @@ async fn handle_done(
 }
 
 async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -278,16 +279,15 @@ async fn handle_delete(
             // message's item gone", not "cancel an active plan" — so this
             // stays a direct, unconditional status flip. See the Part A
             // report for the full reasoning.
-            let res = sqlx::query(
+            let res = crate::db_execute!(
+                pool,
                 "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ?",
-            )
-            .bind(target.entity_id)
-            .bind(&target.owner_id)
-            .execute(pool)
-            .await;
+                target.entity_id,
+                &target.owner_id
+            );
 
             match res {
-                Ok(r) if r.rows_affected() > 0 => {
+                Ok(r) if r > 0 => {
                     let _ = delete_target_by_entity(pool, "reminder", target.entity_id).await;
                     if let Some(bc) = broadcaster {
                         bc.send(SystemEvent::ReminderCancelled {
@@ -319,7 +319,7 @@ async fn handle_delete(
 }
 
 async fn handle_delay(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -406,7 +406,7 @@ async fn handle_delay(
 }
 
 async fn handle_celebrate(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -494,11 +494,9 @@ mod tests {
     use crate::modules::reminder::models::{RecurrencePattern, ReminderSource};
     use crate::modules::todo::models::TodoPriority;
 
-    async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_pool() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

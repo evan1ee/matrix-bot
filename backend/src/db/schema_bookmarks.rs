@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS bookmarks (
@@ -19,20 +17,20 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
             is_archived BOOLEAN NOT NULL DEFAULT FALSE,
             tags TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#
     )?;
 
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner ON bookmarks(owner_id);"
     )?;
 
-    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_archived ON bookmarks(owner_id, is_archived);")?;
+    crate::db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_archived ON bookmarks(owner_id, is_archived);")?;
 
-    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_favorite ON bookmarks(owner_id, is_favorite);")?;
+    crate::db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_favorite ON bookmarks(owner_id, is_favorite);")?;
 
     Ok(())
 }

@@ -15,6 +15,7 @@
 //! migration time, which is boot. Adding a construct means adding a token here,
 //! not hoping a rule generalises.
 
+use sqlx::SqlitePool;
 use std::borrow::Cow;
 
 use crate::db::dialect::Dialect;
@@ -166,7 +167,6 @@ macro_rules! db_ddl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[test]
     fn test_sql_without_tokens_is_borrowed() {
@@ -216,7 +216,7 @@ mod tests {
     /// need a third token.
     #[tokio::test]
     async fn test_sqlite_accepts_the_portable_spellings_used_in_the_schema() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
         let sql = render(
             &format!(
                 "CREATE TABLE portable (
@@ -229,18 +229,16 @@ mod tests {
             Dialect::Sqlite,
         )
         .into_owned();
-        sqlx::query(&sql).execute(&pool).await.unwrap();
+        crate::db_execute!(&pool, &sql).unwrap();
 
-        sqlx::query("INSERT INTO portable (id) VALUES (1)")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(&pool, "INSERT INTO portable (id) VALUES (1)").unwrap();
 
-        let (off, on): (bool, bool) =
-            sqlx::query_as("SELECT flag_off, flag_on FROM portable WHERE id = 1")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (off, on): (bool, bool) = crate::db_fetch_one!(
+            &pool,
+            _,
+            "SELECT flag_off, flag_on FROM portable WHERE id = 1"
+        )
+        .unwrap();
         assert!(!off, "DEFAULT FALSE must store false on SQLite");
         assert!(on, "DEFAULT TRUE must store true on SQLite");
     }
@@ -256,42 +254,66 @@ mod tests {
     /// range survives the round trip.
     #[tokio::test]
     async fn test_sqlite_round_trips_a_bigint_beyond_int4_range() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE money (amount_minor BIGINT NOT NULL)")
-            .execute(&pool)
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db_execute!(&pool, "CREATE TABLE money (amount_minor BIGINT NOT NULL)").unwrap();
 
         let beyond_int4: i64 = 9_000_000_000;
-        sqlx::query("INSERT INTO money (amount_minor) VALUES (?)")
-            .bind(beyond_int4)
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO money (amount_minor) VALUES (?)",
+            beyond_int4
+        )
+        .unwrap();
+
+        let read: i64 = crate::db_scalar_one!(&pool, _, "SELECT amount_minor FROM money").unwrap();
+        assert_eq!(read, beyond_int4);
+    }
+
+    /// Why the schema says `TIMESTAMPTZ` and never bare `TIMESTAMP`.
+    ///
+    /// PostgreSQL's `TIMESTAMP` is "without time zone" and will not decode into
+    /// the `DateTime<Utc>` the models use — a live repository round-trip caught
+    /// this as `Rust type Option<DateTime<Utc>> (as SQL type TIMESTAMPTZ) is
+    /// not compatible with SQL type TIMESTAMP`. SQLite gives both spellings the
+    /// same NUMERIC affinity, so this asserts it round-trips there unchanged.
+    #[tokio::test]
+    async fn test_sqlite_round_trips_a_timestamptz_into_datetime_utc() {
+        use chrono::{DateTime, TimeZone, Utc};
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE stamped (at TIMESTAMPTZ NOT NULL)")
             .execute(&pool)
             .await
             .unwrap();
 
-        let read: i64 = sqlx::query_scalar("SELECT amount_minor FROM money")
+        let when: DateTime<Utc> = Utc.with_ymd_and_hms(2026, 9, 21, 12, 30, 0).unwrap();
+        sqlx::query("INSERT INTO stamped (at) VALUES (?)")
+            .bind(when)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let read: DateTime<Utc> = sqlx::query_scalar("SELECT at FROM stamped")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(read, beyond_int4);
+        assert_eq!(read, when);
     }
 
     /// The SQLite PK token must actually auto-assign, which is the only reason
     /// it is not just `INTEGER PRIMARY KEY`.
     #[tokio::test]
     async fn test_the_sqlite_primary_key_token_auto_assigns() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
         let sql = render(
             &format!("CREATE TABLE t (id {PK}, a TEXT)"),
             Dialect::Sqlite,
         )
         .into_owned();
-        sqlx::query(&sql).execute(&pool).await.unwrap();
+        crate::db_execute!(&pool, &sql).unwrap();
 
-        let id: i64 = sqlx::query_scalar("INSERT INTO t (a) VALUES ('x') RETURNING id")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let id: i64 =
+            crate::db_scalar_one!(&pool, _, "INSERT INTO t (a) VALUES ('x') RETURNING id").unwrap();
         assert_eq!(id, 1);
     }
 
@@ -335,30 +357,28 @@ mod tests {
     /// created. `accounts/merge.rs` depends on this firing.
     #[tokio::test]
     async fn test_the_sqlite_audit_triggers_actually_refuse_writes() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
         let create = render(
             &format!("CREATE TABLE portfolio_audit_log (id {PK}, owner_id TEXT NOT NULL)"),
             Dialect::Sqlite,
         )
         .into_owned();
-        sqlx::query(&create).execute(&pool).await.unwrap();
+        crate::db_execute!(&pool, &create).unwrap();
         for statement in audit_log_immutability(Dialect::Sqlite) {
-            sqlx::query(&statement).execute(&pool).await.unwrap();
+            crate::db_execute!(&pool, &statement).unwrap();
         }
 
-        sqlx::query("INSERT INTO portfolio_audit_log (owner_id) VALUES ('acct_a')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO portfolio_audit_log (owner_id) VALUES ('acct_a')"
+        )
+        .unwrap();
 
-        let updated = sqlx::query("UPDATE portfolio_audit_log SET owner_id = 'acct_b'")
-            .execute(&pool)
-            .await;
+        let updated =
+            crate::db_execute!(&pool, "UPDATE portfolio_audit_log SET owner_id = 'acct_b'");
         assert!(updated.is_err(), "an audit row must not be updatable");
 
-        let deleted = sqlx::query("DELETE FROM portfolio_audit_log")
-            .execute(&pool)
-            .await;
+        let deleted = crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log");
         assert!(deleted.is_err(), "an audit row must not be deletable");
     }
 }

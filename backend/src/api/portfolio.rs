@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -82,7 +83,7 @@ pub async fn list_holdings(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<Holding>>, ApiError> {
-    let holdings = PortfolioRepository::list(state.db.sqlite_pool(), &user.owner_id())
+    let holdings = PortfolioRepository::list(&state.db.pool, &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -116,7 +117,7 @@ pub async fn buy_holding(
     let exponent = exponent_for(&currency);
 
     let outcome = service::buy(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         Some(&state.broadcaster),
         &owner_id,
         TradeRequest {
@@ -177,13 +178,13 @@ pub async fn sell_holding(
 ) -> Result<Json<SellResponse>, ApiError> {
     let owner_id = user.owner_id();
 
-    let existing = PortfolioRepository::find_owned(state.db.sqlite_pool(), id, &owner_id)
+    let existing = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
     let outcome = service::sell(
-        state.db.sqlite_pool(),
+        &state.db.pool,
         Some(&state.broadcaster),
         &owner_id,
         &existing.symbol,
@@ -237,7 +238,7 @@ pub async fn set_price(
 ) -> Result<Json<Holding>, ApiError> {
     let owner_id = user.owner_id();
 
-    let existing = PortfolioRepository::find_owned(state.db.sqlite_pool(), id, &owner_id)
+    let existing = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
@@ -246,15 +247,11 @@ pub async fn set_price(
     let price_minor =
         parse_amount(&payload.price, exponent).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let holding = PortfolioRepository::set_price(
-        state.db.sqlite_pool(),
-        &owner_id,
-        &existing.symbol,
-        price_minor,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
+    let holding =
+        PortfolioRepository::set_price(&state.db.pool, &owner_id, &existing.symbol, price_minor)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
     state
         .broadcaster
@@ -294,16 +291,15 @@ pub async fn set_note(
         None => None,
     };
 
-    let existing = PortfolioRepository::find_owned(state.db.sqlite_pool(), id, &owner_id)
+    let existing = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
-    let holding =
-        PortfolioRepository::set_note(state.db.sqlite_pool(), &owner_id, &existing.symbol, note)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
+    let holding = PortfolioRepository::set_note(&state.db.pool, &owner_id, &existing.symbol, note)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
     state
         .broadcaster
@@ -329,12 +325,12 @@ pub async fn delete_holding(
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
 
-    let existing = PortfolioRepository::find_owned(state.db.sqlite_pool(), id, &owner_id)
+    let existing = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Holding not found or access denied"))?;
 
-    PortfolioRepository::delete(state.db.sqlite_pool(), &owner_id, &existing.symbol)
+    PortfolioRepository::delete(&state.db.pool, &owner_id, &existing.symbol)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -361,7 +357,7 @@ pub async fn summary(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<PortfolioCurrencySummary>>, ApiError> {
-    let summaries = PortfolioRepository::summary(state.db.sqlite_pool(), &user.owner_id())
+    let summaries = PortfolioRepository::summary(&state.db.pool, &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -377,17 +373,12 @@ mod tests {
     use crate::modules::portfolio::cash_repo;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::service::MAX_NOTE_LEN;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database {
-                pool: crate::db::DbPool::Sqlite(pool),
-            },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -399,7 +390,7 @@ mod tests {
     /// any single test spends.
     async fn fund(state: &ApiState, user: &AuthUser, currency: &str, exponent: i64) {
         cash_repo::deposit_cash(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &user.owner_id(),
             currency,
             exponent,
@@ -863,7 +854,7 @@ mod tests {
 
         // Verify deposit posted an expense transaction to the finance ledger
         let txs = crate::modules::finance::repository::FinanceRepository::list(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &alice.owner_id(),
             None,
             10,
@@ -901,7 +892,7 @@ mod tests {
 
         // Verify deposit (expense) and withdraw (income) transactions in the finance ledger
         let txs = crate::modules::finance::repository::FinanceRepository::list(
-            state.db.sqlite_pool(),
+            &state.db.pool,
             &alice.owner_id(),
             None,
             10,

@@ -1,8 +1,6 @@
 use crate::db::DbPool;
-use crate::db_ddl;
-
 pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
-    db_ddl!(
+    crate::db_ddl!(
         pool,
         r#"
         CREATE TABLE IF NOT EXISTS ai_user_configs (
@@ -13,15 +11,15 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             system_prompt TEXT,
             temperature REAL DEFAULT 0.7,
             max_tokens BIGINT DEFAULT 2048,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS ai_conversations (
             id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
             room_id TEXT NOT NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_ai_conversations_owner_room 
@@ -34,7 +32,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             content TEXT NOT NULL,
             tool_call_id TEXT,
             tool_name TEXT,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_ai_messages_conv_created 

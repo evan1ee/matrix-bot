@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use chrono::{Datelike, TimeZone, Utc};
 use sqlx::SqlitePool;
 use tracing::error;
@@ -26,7 +27,7 @@ struct ParsedEntry {
 }
 
 pub async fn handle_finance_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -157,7 +158,7 @@ fn parse_entry(args: &str, default_currency: &str) -> Result<ParsedEntry, String
 }
 
 async fn handle_add(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -245,7 +246,7 @@ async fn handle_add(
 }
 
 async fn handle_list(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     sender_name: &str,
     page: i64,
@@ -295,7 +296,7 @@ fn format_ledger(items: &[Transaction], sender_name: &str, page: i64) -> String 
     html
 }
 
-async fn handle_summary(pool: &SqlitePool, owner_id: &str, sender_name: &str) -> Option<String> {
+async fn handle_summary(pool: &DbPool, owner_id: &str, sender_name: &str) -> Option<String> {
     let now = Utc::now();
     let start = Utc
         .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
@@ -350,7 +351,7 @@ async fn handle_summary(pool: &SqlitePool, owner_id: &str, sender_name: &str) ->
 }
 
 async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id_str: &str,
@@ -374,7 +375,7 @@ async fn handle_delete(
 }
 
 async fn handle_category(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     rest: &str,
@@ -534,10 +535,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_finance_alias_and_rm() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // Add expense via !expense add
         let add_res = handle_finance_command(
@@ -571,10 +570,8 @@ mod tests {
     /// open browser because the Matrix path never broadcast anything.
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
         let broadcaster = crate::events::EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
@@ -605,10 +602,8 @@ mod tests {
     /// covers the side-effect-free rejection itself.
     #[tokio::test]
     async fn test_expense_add_refuses_an_unknown_category() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_finance_command(
             &pool,

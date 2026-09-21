@@ -20,7 +20,7 @@ pub const ALERT_CHECK_INTERVAL: Duration = Duration::from_secs(120);
 
 /// Checks all active alerts against latest market prices and notifies users on Matrix.
 pub async fn check_price_alerts(ctx: &ModuleContext) {
-    let active_symbols = match AlertsRepository::list_active_symbols(ctx.db.sqlite_pool()).await {
+    let active_symbols = match AlertsRepository::list_active_symbols(&ctx.db.pool).await {
         Ok(s) if !s.is_empty() => s,
         _ => return, // No active alerts in the system
     };
@@ -39,11 +39,10 @@ pub async fn check_price_alerts(ctx: &ModuleContext) {
             }
         };
 
-        let alerts =
-            match AlertsRepository::list_active_for_symbol(ctx.db.sqlite_pool(), &sym).await {
-                Ok(list) => list,
-                Err(_) => continue,
-            };
+        let alerts = match AlertsRepository::list_active_for_symbol(&ctx.db.pool, &sym).await {
+            Ok(list) => list,
+            Err(_) => continue,
+        };
 
         for alert in alerts {
             let price_minor =
@@ -59,18 +58,15 @@ pub async fn check_price_alerts(ctx: &ModuleContext) {
                     alert.id, alert.symbol, alert.owner_id, alert.target_price_minor, price_minor
                 );
 
-                if let Ok(true) =
-                    AlertsRepository::mark_triggered(ctx.db.sqlite_pool(), alert.id).await
-                {
+                if let Ok(true) = AlertsRepository::mark_triggered(&ctx.db.pool, alert.id).await {
                     if let Some(b) = ctx.broadcaster.as_ref() {
                         b.send(SystemEvent::PortfolioAlertTriggered(alert.clone()));
                     }
 
                     let (plain, html) = format_alert_notification(&alert, price_minor);
-                    let mxids =
-                        AccountRepository::linked_mxids(ctx.db.sqlite_pool(), &alert.owner_id)
-                            .await
-                            .unwrap_or_default();
+                    let mxids = AccountRepository::linked_mxids(&ctx.db.pool, &alert.owner_id)
+                        .await
+                        .unwrap_or_default();
 
                     for mxid in mxids {
                         send_dm_html(&ctx.client, &mxid, &plain, &html).await;
@@ -98,12 +94,11 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                 last_sweep = tokio::time::Instant::now();
                 debug!("Running scheduled portfolio price refresh sweep");
 
-                let owners = match sqlx::query_scalar::<_, String>(
-                    "SELECT DISTINCT owner_id FROM portfolio_holdings;",
-                )
-                .fetch_all(ctx.db.sqlite_pool())
-                .await
-                {
+                let owners = match crate::db_scalar_all!(
+                    &ctx.db.pool,
+                    String,
+                    "SELECT DISTINCT owner_id FROM portfolio_holdings;"
+                ) {
                     Ok(list) => list,
                     Err(err) => {
                         warn!("Failed querying owners for portfolio price sweep: {}", err);
@@ -113,7 +108,7 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
 
                 for owner in &owners {
                     let summary = price_feed::refresh_all_for_owner(
-                        ctx.db.sqlite_pool(),
+                        &ctx.db.pool,
                         ctx.broadcaster.as_ref(),
                         owner,
                     )
@@ -128,11 +123,9 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                     }
 
                     // Record daily snapshot for performance charts
-                    let _ = HistoryRepository::capture_current_snapshot_for_owner(
-                        ctx.db.sqlite_pool(),
-                        owner,
-                    )
-                    .await;
+                    let _ =
+                        HistoryRepository::capture_current_snapshot_for_owner(&ctx.db.pool, owner)
+                            .await;
                 }
             }
 

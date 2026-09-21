@@ -19,6 +19,7 @@
 //! go. Neither is a transport handling a user request, so neither routes
 //! through here.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
@@ -92,7 +93,7 @@ fn validate(message: &str, trigger_at: DateTime<Utc>) -> Result<(), ReminderErro
 
 /// Creates a reminder: validates, writes, then broadcasts.
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     input: NewReminder<'_>,
@@ -121,7 +122,7 @@ pub async fn create(
 
 /// Cancels an owned, still-pending reminder, then broadcasts.
 pub async fn cancel(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -160,7 +161,7 @@ pub async fn cancel(
 /// `ReminderRepository::update_pending` directly in `api/reminders.rs`; see
 /// the Part A report for why.
 pub async fn reschedule(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -202,7 +203,7 @@ pub async fn reschedule(
 /// directly — marking a reminder triggered as it actually fires is not a user
 /// request, so it does not route through here.
 pub async fn mark_triggered(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -231,7 +232,7 @@ pub async fn mark_triggered(
 /// Clears the owner's reminder history (everything not pending), then
 /// broadcasts.
 pub async fn clear_history(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
 ) -> Result<(), ReminderError> {
@@ -254,11 +255,9 @@ mod tests {
     use crate::db::schema::run_migrations;
     use chrono::Duration;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

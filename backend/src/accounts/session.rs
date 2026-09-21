@@ -13,6 +13,7 @@
 //! database, so a leaked backup cannot be replayed as a live session, the same
 //! reasoning `api/auth/types.rs` applies to its token cache.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -96,7 +97,7 @@ impl SessionRepository {
     /// `restricted_until` is `Some` only for a session minted by account
     /// recovery.
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         user_agent: Option<&str>,
         ip: Option<&str>,
@@ -105,27 +106,24 @@ impl SessionRepository {
         // Minted by SQLite for the same reason account ids are: no RNG crate is
         // a direct dependency, and 32 random bytes from its CSPRNG is more
         // entropy than a session token needs.
-        let token = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(32)))")
-            .fetch_one(pool)
-            .await?;
+        let token = crate::db_scalar_one!(pool, String, "SELECT lower(hex(randomblob(32)))")?;
 
         let now = Utc::now();
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "INSERT INTO sessions \
              (id_hash, account_id, created_at, last_seen_at, last_verified_at, \
               restricted_until, user_agent, ip) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(hash_token(&token))
-        .bind(account_id)
-        .bind(now)
-        .bind(now)
-        .bind(now)
-        .bind(restricted_until)
-        .bind(user_agent)
-        .bind(ip)
-        .execute(pool)
-        .await?;
+            hash_token(&token),
+            account_id,
+            now,
+            now,
+            now,
+            restricted_until,
+            user_agent,
+            ip
+        )?;
 
         Ok(token)
     }
@@ -135,17 +133,17 @@ impl SessionRepository {
     /// Returns `None` for anything not currently usable — unknown, revoked, or
     /// past either timeout — so a caller cannot accidentally treat an expired
     /// session as merely stale.
-    pub async fn resolve(pool: &SqlitePool, token: &str) -> Result<Option<Session>, sqlx::Error> {
+    pub async fn resolve(pool: &DbPool, token: &str) -> Result<Option<Session>, sqlx::Error> {
         let id_hash = hash_token(token);
 
-        let Some(session) = sqlx::query_as::<_, Session>(
+        let Some(session) = crate::db_fetch_optional!(
+            pool,
+            Session,
             "SELECT id_hash, account_id, created_at, last_seen_at, last_verified_at, \
                     restricted_until, user_agent, ip, revoked_at \
              FROM sessions WHERE id_hash = ?",
-        )
-        .bind(&id_hash)
-        .fetch_optional(pool)
-        .await?
+            &id_hash
+        )?
         else {
             return Ok(None);
         };
@@ -155,11 +153,12 @@ impl SessionRepository {
             return Ok(None);
         }
 
-        sqlx::query("UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?")
-            .bind(now)
-            .bind(&id_hash)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?",
+            now,
+            &id_hash
+        )?;
 
         Ok(Some(Session {
             last_seen_at: now,
@@ -171,41 +170,41 @@ impl SessionRepository {
     ///
     /// This is what opens the step-up window, so it is called only from a
     /// finished WebAuthn assertion — never from an ordinary request.
-    pub async fn mark_verified(pool: &SqlitePool, id_hash: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE sessions SET last_verified_at = ? WHERE id_hash = ?")
-            .bind(Utc::now())
-            .bind(id_hash)
-            .execute(pool)
-            .await?;
+    pub async fn mark_verified(pool: &DbPool, id_hash: &str) -> Result<(), sqlx::Error> {
+        crate::db_execute!(
+            pool,
+            "UPDATE sessions SET last_verified_at = ? WHERE id_hash = ?",
+            Utc::now(),
+            id_hash
+        )?;
         Ok(())
     }
 
-    pub async fn revoke(pool: &SqlitePool, id_hash: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL")
-            .bind(Utc::now())
-            .bind(id_hash)
-            .execute(pool)
-            .await?;
+    pub async fn revoke(pool: &DbPool, id_hash: &str) -> Result<(), sqlx::Error> {
+        crate::db_execute!(
+            pool,
+            "UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL",
+            Utc::now(),
+            id_hash
+        )?;
         Ok(())
     }
 
     /// Signs out every session for an account except, optionally, the one
     /// asking. Used by "sign out other devices" and by account recovery.
     pub async fn revoke_all_for_account(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         except: Option<&str>,
     ) -> Result<u64, sqlx::Error> {
-        let affected = sqlx::query(
+        let affected = crate::db_execute!(
+            pool,
             "UPDATE sessions SET revoked_at = ? \
              WHERE account_id = ? AND revoked_at IS NULL AND id_hash IS NOT ?",
-        )
-        .bind(Utc::now())
-        .bind(account_id)
-        .bind(except)
-        .execute(pool)
-        .await?
-        .rows_affected();
+            Utc::now(),
+            account_id,
+            except
+        )?;
 
         Ok(affected)
     }
@@ -213,18 +212,18 @@ impl SessionRepository {
     /// Live sessions for an account, newest first — the "where you're signed
     /// in" list.
     pub async fn list_for_account(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<Session>, sqlx::Error> {
-        let sessions = sqlx::query_as::<_, Session>(
+        let sessions = crate::db_fetch_all!(
+            pool,
+            Session,
             "SELECT id_hash, account_id, created_at, last_seen_at, last_verified_at, \
                     restricted_until, user_agent, ip, revoked_at \
              FROM sessions WHERE account_id = ? AND revoked_at IS NULL \
              ORDER BY last_seen_at DESC",
-        )
-        .bind(account_id)
-        .fetch_all(pool)
-        .await?;
+            account_id
+        )?;
 
         let now = Utc::now();
         Ok(sessions.into_iter().filter(|s| s.is_live(now)).collect())
@@ -236,11 +235,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_migrations(&pool).await.unwrap();
         pool
     }
 
@@ -253,10 +250,8 @@ mod tests {
             .await
             .unwrap();
 
-        let stored: Vec<String> = sqlx::query_scalar("SELECT id_hash FROM sessions")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let stored: Vec<String> =
+            crate::db_scalar_all!(&pool, _, "SELECT id_hash FROM sessions").unwrap();
 
         assert_eq!(stored.len(), 1);
         assert_ne!(

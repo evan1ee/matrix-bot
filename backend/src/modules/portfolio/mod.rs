@@ -126,13 +126,8 @@ impl BotModule for PortfolioModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_portfolio_command(
-            db.sqlite_pool(),
-            &ctx.owner_id,
-            &ctx.full_body,
-            broadcaster,
-        )
-        .await
+        handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
+            .await
     }
 
     async fn spawn_background_workers(
@@ -304,7 +299,7 @@ mod tests {
         let db = db().await;
 
         SettingsRepository::upsert(
-            db.sqlite_pool(),
+            &db.pool,
             "@alice:a",
             &UserSettings {
                 timezone: "UTC".to_string(),
@@ -466,11 +461,7 @@ mod tests {
 
         // Verify deposit and withdraw transactions were posted to the finance ledger
         let txs = crate::modules::finance::repository::FinanceRepository::list(
-            db.sqlite_pool(),
-            "@alice:a",
-            None,
-            10,
-            0,
+            &db.pool, "@alice:a", None, 10, 0,
         )
         .await
         .unwrap();

@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use sqlx::SqlitePool;
 use tracing::error;
 
@@ -7,7 +8,7 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html::html_escape;
 
 pub async fn handle_life_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     command: &str,
@@ -55,7 +56,7 @@ fn handle_help() -> String {
      • <code>!life log &lt;mood&gt; [note]</code> — Log today (moods: amazing, good, neutral, low, rough)".to_string()
 }
 
-async fn handle_stats(pool: &SqlitePool, owner_id: &str, today_str: &str) -> String {
+async fn handle_stats(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
     match LifeRepository::get_stats(pool, owner_id, today_str).await {
         Ok(stats) => {
             let profile_msg = match &stats.profile {
@@ -89,7 +90,7 @@ async fn handle_stats(pool: &SqlitePool, owner_id: &str, today_str: &str) -> Str
     }
 }
 
-async fn handle_today(pool: &SqlitePool, owner_id: &str, today_str: &str) -> String {
+async fn handle_today(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
     match LifeRepository::get_day_log(pool, owner_id, today_str).await {
         Ok(Some(log)) => {
             let note = log
@@ -124,7 +125,7 @@ async fn handle_today(pool: &SqlitePool, owner_id: &str, today_str: &str) -> Str
 }
 
 async fn handle_set_birth(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args: &str,
@@ -161,7 +162,7 @@ async fn handle_set_birth(
 }
 
 async fn handle_log(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args: &str,
@@ -215,11 +216,9 @@ mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
 
-    async fn setup_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_life_schema(&crate::db::DbPool::Sqlite(pool.clone()))
-            .await
-            .unwrap();
+    async fn setup_db() -> DbPool {
+        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        run_life_schema(&pool).await.unwrap();
         pool
     }
 
