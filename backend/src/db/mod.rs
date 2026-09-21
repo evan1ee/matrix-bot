@@ -1,6 +1,7 @@
 pub mod backfill;
 pub mod dialect;
 pub mod dialect_probe;
+pub mod executor;
 pub mod pool;
 pub mod rooms;
 pub mod schema;
@@ -21,6 +22,8 @@ pub mod schema_settings;
 pub mod schema_todos;
 pub mod schema_webhooks;
 
+pub use dialect::Dialect;
+pub use executor::DbPool;
 pub use pool::Database;
 pub use rooms::{
     get_cached_rooms, resolve_target_room, resolve_user_default_room, save_cached_rooms,
