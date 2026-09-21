@@ -20,8 +20,9 @@ impl AccountRepository {
             pool,
             String,
             "INSERT INTO accounts (id, display_name, status) \
-             VALUES ('acct_' || lower(hex(randomblob(16))), ?, ?) \
+             VALUES (?, ?, ?) \
              RETURNING id",
+            crate::utils::random::new_account_id(),
             display_name,
             status
         )
@@ -125,10 +126,9 @@ mod tests {
     use super::*;
     use crate::accounts::STATUS_ACTIVE;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

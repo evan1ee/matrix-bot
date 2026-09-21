@@ -346,7 +346,6 @@ pub async fn handle_sell(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[test]
     fn test_parse_buy_grammar() {
@@ -405,7 +404,7 @@ mod tests {
     /// through `service::buy`, a note of any length reached the database.
     #[tokio::test]
     async fn test_a_matrix_buy_enforces_the_note_limit() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);

@@ -82,7 +82,7 @@ impl RecoveryRepository {
 
         let mut codes = Vec::with_capacity(RECOVERY_CODE_COUNT);
         for _ in 0..RECOVERY_CODE_COUNT {
-            let code = random_code(pool).await?;
+            let code = random_code();
             let hashed = hash(&code, RECOVERY_HASH_COST)
                 .map_err(|err| sqlx::Error::Protocol(format!("could not hash a code: {err}")))?;
 
@@ -166,7 +166,7 @@ impl RecoveryRepository {
             account_id
         )?;
 
-        let code = random_code(pool).await?;
+        let code = random_code();
         let hashed = hash(&code, RECOVERY_HASH_COST)
             .map_err(|err| sqlx::Error::Protocol(format!("could not hash a code: {err}")))?;
 
@@ -178,7 +178,8 @@ impl RecoveryRepository {
             String,
             "INSERT INTO recovery_requests \
              (id, account_id, code_hash, requested_at, valid_after, expires_at) \
-             VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?) RETURNING id",
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            crate::utils::random::random_hex(16),
             account_id,
             &hashed,
             now,
@@ -267,17 +268,17 @@ impl RecoveryRepository {
 }
 
 /// A code a person can read off a screen and type into a chat window.
-async fn random_code(pool: &DbPool) -> Result<String, sqlx::Error> {
+fn random_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-    let bytes: Vec<u8> = crate::db_scalar_one!(pool, Vec<u8>, "SELECT randomblob(10)")?;
+    let bytes: Vec<u8> = crate::utils::random::random_bytes(10);
 
     let raw: String = bytes
         .iter()
         .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
         .collect();
 
-    Ok(format!("{}-{}", &raw[..5], &raw[5..10]))
+    format!("{}-{}", &raw[..5], &raw[5..10])
 }
 
 fn normalise(code: &str) -> String {
@@ -299,10 +300,9 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

@@ -256,7 +256,6 @@ async fn handle_cash_withdraw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[test]
     fn test_parse_cash_amount_grammar() {
@@ -287,7 +286,7 @@ mod tests {
     /// service.
     #[tokio::test]
     async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();

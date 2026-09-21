@@ -42,6 +42,71 @@ jobs:
           cargo run --bin generate-openapi
           git diff --exit-code backend/openapi.json
 
+  backend-postgres:
+    name: Backend CI (PostgreSQL dialect)
+    runs-on: ubuntu-latest
+
+    # Reporting only, for now. 594 of 719 tests pass against PostgreSQL; the
+    # remainder are almost all test fixtures that hand-write SQLite DDL
+    # (`AUTOINCREMENT`), read `sqlite_master`, call `datetime()`, or insert 0/1
+    # into a boolean column. The production code they exercise is converted —
+    # see docs/POSTGRES_MIGRATION.md for the exact remaining categories.
+    #
+    # Flip this to blocking once that count reaches zero. Leaving the job out
+    # entirely until then would be worse: it is what found every dialect defect
+    # fixed so far, and a red-but-visible job keeps that pressure on.
+    continue-on-error: true
+
+    # The same suite, against a real PostgreSQL. The SQLite job above is the
+    # fast default; this one exists because SQLite accepts plenty that Postgres
+    # rejects — `completed = 0` for a boolean, bare `TIMESTAMP` for a
+    # `DateTime<Utc>`, `INTEGER` where an `i64` is read — and each of those was
+    # a live defect found only this way. See docs/POSTGRES_MIGRATION.md.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Every test opens its own schema on this server instead of an in-memory
+      # SQLite database.
+      TEST_DATABASE_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
+      # The #[ignore]d live tests read this one.
+      PG_TEST_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-rust"
+
+      # Same reason as the SQLite job: cache pruning drops the .so files while
+      # Cargo still believes sherpa-onnx-sys is built.
+      - name: Clean sherpa-onnx prebuilt cache
+        run: |
+          cargo clean -p sherpa-onnx-sys -p sherpa-onnx || true
+          rm -rf target/sherpa-onnx-prebuilt
+
+      - name: Run the suite against PostgreSQL
+        run: cargo test --workspace
+
+      # These are #[ignore]d because they need a server, which is exactly what
+      # this job has. They cover the boot path, the schema, the audit-log
+      # triggers and the merge savepoints.
+      - name: Run the live PostgreSQL tests
+        run: cargo test --package matrix-bot live_postgres -- --ignored --test-threads=1
+
   frontend:
     name: Frontend CI (build & typecheck)
     runs-on: ubuntu-latest

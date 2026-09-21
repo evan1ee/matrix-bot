@@ -273,10 +273,9 @@ async fn handle_delete(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_habits::create_tables(&pool)
             .await
             .unwrap();

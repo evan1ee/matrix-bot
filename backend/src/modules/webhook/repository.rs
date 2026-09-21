@@ -27,7 +27,7 @@ impl WebhookRepository {
         name: &str,
         default_room_id: &str,
     ) -> Result<(Webhook, String), sqlx::Error> {
-        let raw_random = crate::db_scalar_one!(pool, String, "SELECT lower(hex(randomblob(24)))")?;
+        let raw_random = crate::utils::random::random_hex(24);
         let raw_token = format!("whk_{raw_random}");
         let token_hash = hash_token(&raw_token);
         let token_prefix = raw_token.chars().take(10).collect::<String>();
@@ -37,11 +37,7 @@ impl WebhookRepository {
             pool,
             Webhook,
             r#"
-            INSERT INTO webhooks (
-                id, owner_id, name, token_hash, token_prefix, default_room_id,
-                is_active, total_delivered_count, failure_count, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, CURRENT_TIMESTAMP)
+            INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id, is_active, total_delivered_count, failure_count, created_at) VALUES (?, ?, ?, ?, ?, ?, TRUE, 0, 0, CURRENT_TIMESTAMP)
             RETURNING *;
             "#,
             id,
@@ -131,7 +127,7 @@ impl WebhookRepository {
         id: &str,
         owner_id: &str,
     ) -> Result<Option<(Webhook, String)>, sqlx::Error> {
-        let raw_random = crate::db_scalar_one!(pool, String, "SELECT lower(hex(randomblob(24)))")?;
+        let raw_random = crate::utils::random::random_hex(24);
         let raw_token = format!("whk_{raw_random}");
         let token_hash = hash_token(&raw_token);
         let token_prefix = raw_token.chars().take(10).collect::<String>();
@@ -356,12 +352,11 @@ impl WebhookRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
 
     async fn setup_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

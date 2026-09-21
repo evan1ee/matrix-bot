@@ -420,10 +420,9 @@ mod tests {
     use crate::modules::recurring_bills::repository::RecurringBillRepository;
     use crate::modules::settings::models::UserSettings;
     use crate::modules::settings::repository::SettingsRepository;
-    use sqlx::SqlitePool;
 
     async fn test_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         pool
     }

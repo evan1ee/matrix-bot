@@ -341,10 +341,9 @@ impl LifeRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn setup_test_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -451,8 +450,7 @@ mod tests {
 
         // Insert a todo for a date without a life_day_log
         crate::db_execute!(&pool, r#"
-            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at)
-            VALUES ('!room:matrix.org', ?, 'Alice', 'Workout task', 'medium', 0, '2026-09-10 10:00:00')
+            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) VALUES ('!room:matrix.org', ?, 'Alice', 'Workout task', 'medium', FALSE, '2026-09-10 10:00:00')
             "#, owner)
         .unwrap();
 

@@ -290,11 +290,10 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool },
@@ -345,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_reminder_is_owner_scoped_and_validated() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool },
@@ -423,7 +422,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_history_api() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool },

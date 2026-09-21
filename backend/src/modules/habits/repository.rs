@@ -228,8 +228,7 @@ impl HabitsRepository {
                 crate::db_execute!(
                     pool,
                     r#"
-                    INSERT INTO habit_logs (habit_id, owner_id, log_date, completed, note)
-                    VALUES (?, ?, ?, 1, ?)
+                    INSERT INTO habit_logs (habit_id, owner_id, log_date, completed, note) VALUES (?, ?, ?, TRUE, ?)
                     "#,
                     habit_id,
                     owner_id,
@@ -289,10 +288,9 @@ impl HabitsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_habits::create_tables(&pool)
             .await
             .unwrap();

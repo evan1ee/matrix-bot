@@ -152,7 +152,6 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
@@ -172,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_refuses_public_room() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         let db = Database { pool: pool };
         let ctx = dummy_ctx("mcp", "token", false);
 
@@ -183,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_auth::create_tables(&pool).await.unwrap();
         crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 

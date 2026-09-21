@@ -156,7 +156,6 @@ mod step_up_tests {
     use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use sqlx::SqlitePool;
     use tower::ServiceExt;
 
     const ORIGIN: &str = "http://localhost:8080";
@@ -192,7 +191,7 @@ mod step_up_tests {
     ];
 
     async fn app_with_session(verified_minutes_ago: i64) -> (Router, String) {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)

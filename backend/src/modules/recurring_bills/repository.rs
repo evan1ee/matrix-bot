@@ -259,11 +259,10 @@ pub fn advance_due_date(current_due_at: &str, frequency: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_recurring_bill_crud() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let payload = CreateBillPayload {

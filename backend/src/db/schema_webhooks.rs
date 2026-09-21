@@ -10,7 +10,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             token_hash TEXT NOT NULL UNIQUE,
             token_prefix TEXT NOT NULL,
             default_room_id TEXT NOT NULL,
-            is_active BIGINT NOT NULL DEFAULT 1,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             total_delivered_count BIGINT NOT NULL DEFAULT 0,
             failure_count BIGINT NOT NULL DEFAULT 0,
             last_triggered_at TIMESTAMPTZ,

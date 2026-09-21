@@ -379,10 +379,9 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -1194,8 +1193,7 @@ mod tests {
     /// list would silently agree with itself.
     #[tokio::test]
     async fn test_every_merged_table_has_the_row_key_this_names() {
-        let pool =
-            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         for table in crate::accounts::OWNED_TABLES
@@ -1214,8 +1212,7 @@ mod tests {
     /// a colliding row must not stop the others from moving.
     #[tokio::test]
     async fn test_a_collision_does_not_block_the_rows_that_can_move() {
-        let pool =
-            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // `finance_categories` is unique on (owner_id, name). Both owners have

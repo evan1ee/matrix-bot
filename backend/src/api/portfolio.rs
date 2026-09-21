@@ -372,10 +372,9 @@ mod tests {
     use crate::modules::portfolio::cash_repo;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::service::MAX_NOTE_LEN;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
             crate::db::Database { pool: pool },

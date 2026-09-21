@@ -15,7 +15,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             currency_exponent BIGINT NOT NULL DEFAULT 2,
             frequency TEXT NOT NULL DEFAULT 'monthly',
             due_day BIGINT,
-            next_due_at TIMESTAMPTZ NOT NULL,
+            next_due_at TEXT NOT NULL,
             total_installments BIGINT,
             paid_installments BIGINT NOT NULL DEFAULT 0,
             auto_pay BOOLEAN NOT NULL DEFAULT FALSE,
@@ -46,7 +46,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN due_day BIGINT;"
     );
-    let _ = crate::db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN next_due_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;");
+    let _ = crate::db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN next_due_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
     let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE recurring_bills ADD COLUMN total_installments BIGINT;"

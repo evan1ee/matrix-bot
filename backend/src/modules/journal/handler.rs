@@ -307,10 +307,9 @@ async fn handle_clear(
 mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
-    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_life_schema(&pool).await.unwrap();
         pool
     }

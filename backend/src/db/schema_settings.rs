@@ -10,7 +10,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             currency TEXT NOT NULL DEFAULT 'USD',
             dev_room_id TEXT,
             max_history_turns BIGINT NOT NULL DEFAULT 10,
-            briefing_enabled BIGINT NOT NULL DEFAULT 1,
+            briefing_enabled BOOLEAN NOT NULL DEFAULT TRUE,
             briefing_time TEXT NOT NULL DEFAULT '07:00',
             last_briefing_date TEXT,
             updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -30,7 +30,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
 
     let _ = crate::db_ddl!(
         pool,
-        "ALTER TABLE user_settings ADD COLUMN briefing_enabled BIGINT NOT NULL DEFAULT 1;"
+        "ALTER TABLE user_settings ADD COLUMN briefing_enabled BOOLEAN NOT NULL DEFAULT TRUE;"
     );
 
     let _ = crate::db_ddl!(

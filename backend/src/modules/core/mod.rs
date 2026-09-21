@@ -104,9 +104,7 @@ mod tests {
         };
 
         let dummy_db = Database {
-            pool: crate::db::DbPool::Sqlite(
-                sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap(),
-            ),
+            pool: crate::db::pool::test_pool().await,
         };
 
         let res = core.handle_command(&ctx, &dummy_db, None).await.unwrap();

@@ -268,7 +268,6 @@ mod tests {
     use super::*;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::view::{format_quantity, signed_amount};
-    use sqlx::SqlitePool;
 
     #[test]
     fn test_format_quantity_trims_trailing_zeros() {
@@ -289,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_refresh_empty_holdings() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
@@ -300,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_record_holding_without_cash() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_portfolio_command(

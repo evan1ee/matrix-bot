@@ -68,10 +68,9 @@ mod tests {
     use crate::modules::reminder::repository::ReminderRepository;
     use crate::modules::todo::models::TodoPriority;
     use crate::modules::todo::repository::TodoRepository;
-    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

@@ -32,10 +32,9 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::{Path, State};
     use axum::Json;
-    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
             crate::db::Database { pool: pool },

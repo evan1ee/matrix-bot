@@ -105,7 +105,7 @@ impl SessionRepository {
         // Minted by SQLite for the same reason account ids are: no RNG crate is
         // a direct dependency, and 32 random bytes from its CSPRNG is more
         // entropy than a session token needs.
-        let token = crate::db_scalar_one!(pool, String, "SELECT lower(hex(randomblob(32)))")?;
+        let token = crate::utils::random::random_hex(32);
 
         let now = Utc::now();
         crate::db_execute!(
@@ -233,10 +233,9 @@ impl SessionRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

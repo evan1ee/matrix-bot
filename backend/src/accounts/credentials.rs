@@ -212,10 +212,7 @@ impl EnrollmentRepository {
         account_id: &str,
         ttl_minutes: i64,
     ) -> Result<String, sqlx::Error> {
-        let token = format!(
-            "pk_{}",
-            crate::db_scalar_one!(pool, String, "SELECT lower(hex(randomblob(20)))")?
-        );
+        let token = format!("pk_{}", crate::utils::random::random_hex(20));
         let now = Utc::now();
         let expires_at = now + chrono::Duration::minutes(ttl_minutes);
 
@@ -266,10 +263,9 @@ pub enum DeleteOutcome {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

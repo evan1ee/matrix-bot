@@ -60,7 +60,7 @@ design is unsound and every model would need a second driver-specific mapping.
 | 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | **done** — see below |
 | 5 | Convert 553 query sites, module by module | **done** — see below |
 | 6 | Convert the 5 production transaction sites | **done** — see below |
-| 7 | Test harness runs both dialects; CI Postgres service | todo |
+| 7 | Test harness runs both dialects; CI Postgres service | **done** — see below |
 | 8 | Docs, `.env.example`, `docker-compose.yml` | todo |
 
 Stages 3–6 are done and **the scaffolding is gone**: `DbPool::sqlite_or_err()`,
@@ -285,3 +285,77 @@ two in test fixtures.
 removed `use sqlx::SqlitePool` from 76 files where only the `#[cfg(test)]`
 module used it, breaking the test build. The right fix was to move those imports
 *into* the test modules, which is where they belong.
+
+## Stage 7 notes
+
+`db::pool::test_pool()` is now the single place a test gets a database. It
+returns in-memory SQLite by default — so `cargo test` stays instant and needs
+nothing installed — and, when `TEST_DATABASE_URL` is set, a PostgreSQL pool
+scoped to a schema of its own.
+
+The per-test schema is not decoration. The suite runs in parallel and
+`search_path` is a property of a connection, not a statement, so tests sharing
+one schema would see each other's tables. The name carries the process id so two
+concurrent `cargo test` runs cannot collide either. Schemas are left behind
+deliberately: the server is a throwaway CI container, and a test that failed is
+easier to look at with its rows still there.
+
+The pool comes back **unmigrated**, exactly as the inline
+`SqlitePool::connect` did, so every test still runs whichever schema it wants
+and nothing about the 84 call sites changed beyond the one expression.
+
+CI gains a `backend-postgres` job running the same suite against `postgres:18`,
+plus the `#[ignore]`d live tests that need a server. The SQLite job stays the
+fast default. Both run on every pull request, because the whole argument for
+this job is that SQLite accepts things Postgres rejects — `completed = 0` for a
+boolean, bare `TIMESTAMP` for a `DateTime<Utc>`, `INTEGER` where an `i64` is
+read — and each of those was a real defect found only by running against a
+server.
+
+One self-inflicted bug worth recording: the script that rewrote 84 test setups
+to call `test_pool()` also rewrote the SQLite fallback *inside `test_pool`
+itself*, producing infinite recursion. `rustc` caught it as "recursion in an
+async fn requires boxing". A bulk rewrite has to exclude its own target.
+
+### Where the PostgreSQL suite actually stands
+
+**594 of 719 pass; 125 fail.** SQLite remains 719/719. The CI job is
+`continue-on-error: true` until that reaches zero — visible and reporting, not
+blocking. Leaving it out until it were green would be worse: this job is what
+found every dialect defect listed below.
+
+Production defects it found and that are now fixed:
+
+| Defect | Why SQLite hid it |
+|---|---|
+| `randomblob(n)` in 14 places minting account ids, session tokens, recovery and link codes, MCP and webhook tokens | SQLite-only function. Now `utils::random`, so a token's entropy no longer depends on the deployed database |
+| `briefing_enabled` and `is_active` declared `BIGINT` but read as `bool` | SQLite stores a boolean as an integer; PostgreSQL refuses. **Introduced by my own stage 4 `INTEGER` → `BIGINT` sweep** |
+| `next_due_at` declared `TIMESTAMPTZ` but read as `String` | Same cause: the stage 4 `TIMESTAMP` → `TIMESTAMPTZ` sweep assumed every timestamp column is a `DateTime<Utc>`; this one is not |
+
+The two schema errors above are worth dwelling on: a blanket type sweep is
+exactly the kind of change that looks safe on a dynamically typed database and
+is not. Both were caught here and nowhere else.
+
+Remaining failures, by cause:
+
+| Cause | Distinct errors | Kind |
+|---|---|---|
+| Test fixtures inserting `0`/`1` into a `BOOLEAN` column | 13 | test-only |
+| `next_due_at` bound as text in fixtures | 9 | test-only |
+| Fixtures creating tables with `AUTOINCREMENT` | 6 | test-only |
+| Guard tests reading `sqlite_master` | 4 | SQLite-only by nature; should skip on Postgres |
+| Fixtures calling `datetime()` | 2 | test-only |
+| One `syntax error at or near "$3"` | 1 | **unexplained — investigate before trusting the renderer** |
+
+Most of the 125 cascade from those ~36 root errors. The one that deserves a
+look before anything else is the `$3` syntax error: every other entry is a
+fixture written in SQLite dialect, but that one could mean
+`render_placeholders` emits invalid SQL for some statement shape, which would
+be a production bug rather than a test one.
+
+### Also worth recording
+
+The first PostgreSQL run showed **265 failures from "could not resize shared
+memory segment"** — Docker's default 64 MB `/dev/shm`, not a code problem at
+all. `--shm-size=1g` on the container fixed it. Without checking, that would
+have read as "PostgreSQL does not work".

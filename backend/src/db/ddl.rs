@@ -216,7 +216,7 @@ mod tests {
     /// need a third token.
     #[tokio::test]
     async fn test_sqlite_accepts_the_portable_spellings_used_in_the_schema() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         let sql = render(
             &format!(
                 "CREATE TABLE portable (
@@ -254,7 +254,7 @@ mod tests {
     /// range survives the round trip.
     #[tokio::test]
     async fn test_sqlite_round_trips_a_bigint_beyond_int4_range() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db_execute!(&pool, "CREATE TABLE money (amount_minor BIGINT NOT NULL)").unwrap();
 
         let beyond_int4: i64 = 9_000_000_000;
@@ -304,7 +304,7 @@ mod tests {
     /// it is not just `INTEGER PRIMARY KEY`.
     #[tokio::test]
     async fn test_the_sqlite_primary_key_token_auto_assigns() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         let sql = render(
             &format!("CREATE TABLE t (id {PK}, a TEXT)"),
             Dialect::Sqlite,
@@ -357,7 +357,7 @@ mod tests {
     /// created. `accounts/merge.rs` depends on this firing.
     #[tokio::test]
     async fn test_the_sqlite_audit_triggers_actually_refuse_writes() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         let create = render(
             &format!("CREATE TABLE portfolio_audit_log (id {PK}, owner_id TEXT NOT NULL)"),
             Dialect::Sqlite,

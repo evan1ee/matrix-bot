@@ -53,11 +53,10 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_health_check() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool },
@@ -75,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_disconnected() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         pool.close().await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },

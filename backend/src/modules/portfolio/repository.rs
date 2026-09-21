@@ -161,10 +161,9 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::trade;
-    use sqlx::SqlitePool;
 
     async fn pool() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

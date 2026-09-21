@@ -184,11 +184,10 @@ pub async fn resolve_target_room(pool: &DbPool, account_id: &str, query: Option<
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_room_repository_crud_and_resolution() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         let account_id = "acct_test_rooms";

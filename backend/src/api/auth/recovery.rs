@@ -176,11 +176,10 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool.clone() },
@@ -239,7 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery_rate_limit_cannot_be_bypassed_with_spoofed_headers() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
             crate::db::Database { pool: pool },

@@ -123,7 +123,8 @@ async fn backfill_accounts(pool: &DbPool) -> Result<(), sqlx::Error> {
             pool,
             String,
             "INSERT INTO accounts (id, display_name, status) \
-             VALUES ('acct_' || lower(hex(randomblob(16))), ?, ?) RETURNING id",
+             VALUES (?, ?, ?) RETURNING id",
+            crate::utils::random::new_account_id(),
             &display_name,
             status
         )?;
@@ -168,7 +169,8 @@ async fn backfill_accounts(pool: &DbPool) -> Result<(), sqlx::Error> {
             pool,
             String,
             "INSERT INTO accounts (id, display_name, status) \
-             VALUES ('acct_' || lower(hex(randomblob(16))), ?, 'active') RETURNING id",
+             VALUES (?, ?, 'active') RETURNING id",
+            crate::utils::random::new_account_id(),
             &username
         )?;
 
@@ -220,8 +222,7 @@ mod tests {
     /// spaces. This is what every deployed instance actually looks like on the
     /// boot that first runs the new migration.
     async fn legacy_database() -> crate::db::DbPool {
-        let pool =
-            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
 
         crate::db_execute!(
             &pool,
@@ -489,8 +490,7 @@ mod tests {
     /// A fresh install has nothing to convert and must not invent an account.
     #[tokio::test]
     async fn test_backfill_is_a_no_op_on_an_empty_database() {
-        let pool =
-            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         let accounts: i64 =

@@ -374,10 +374,9 @@ mod tests {
     use crate::db::Database;
     use crate::db::DbPool;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn create_test_state() -> (ApiState, DbPool) {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_life_schema(&pool).await.unwrap();
         let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);

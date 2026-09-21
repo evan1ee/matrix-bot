@@ -54,7 +54,6 @@ pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     /// Reads `sqlite_master`, so it is SQLite-only on purpose. The PostgreSQL
     /// equivalent queries `information_schema` and arrives with the live
@@ -66,7 +65,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_creates_every_table() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         let tables = table_names(&pool).await;
@@ -94,7 +93,7 @@ mod tests {
     /// It must be safe to apply repeatedly to an already-migrated database.
     #[tokio::test]
     async fn test_migrations_are_idempotent() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
 
         run_migrations(&pool).await.unwrap();
         let first = table_names(&pool).await;
@@ -112,7 +111,7 @@ mod tests {
     /// Re-running migrations must not disturb rows that already exist.
     #[tokio::test]
     async fn test_migrations_preserve_existing_data() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         crate::db_execute!(
@@ -132,7 +131,7 @@ mod tests {
     /// the same name; the repository relies on it rather than a read-then-write.
     #[tokio::test]
     async fn test_category_name_uniqueness_is_enforced_by_the_schema() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         crate::db_execute!(

@@ -78,6 +78,50 @@ pub fn pg_test_url() -> String {
     std::env::var("PG_TEST_URL").expect("PG_TEST_URL must be set for the live PostgreSQL tests")
 }
 
+/// The pool every in-crate test runs against.
+///
+/// SQLite in memory by default, which keeps `cargo test` instant and
+/// dependency-free. Set `TEST_DATABASE_URL` to a PostgreSQL server and the
+/// whole suite runs there instead — that is what the second CI job does, and it
+/// is the only way a query that happens to be SQLite-flavoured gets caught
+/// before production.
+///
+/// Each call gets its own PostgreSQL schema, because the suite runs in parallel
+/// and `search_path` is per connection, not per statement. The schema name
+/// carries the process id so concurrent `cargo test` runs cannot collide.
+/// Schemas are left behind: the server is a throwaway CI container, and a test
+/// that failed is more useful with its rows still in place.
+///
+/// The pool is returned **unmigrated**; callers run whichever schema they need,
+/// exactly as they did when this was an inline `SqlitePool::connect`.
+#[cfg(test)]
+pub async fn test_pool() -> crate::db::DbPool {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let Ok(base) = std::env::var("TEST_DATABASE_URL") else {
+        return crate::db::DbPool::Sqlite(
+            sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap(),
+        );
+    };
+
+    let schema = format!(
+        "t{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+
+    let admin = connect_pool(&base, 1)
+        .await
+        .expect("TEST_DATABASE_URL must point at a reachable server");
+    crate::db_execute!(&admin, &format!("CREATE SCHEMA IF NOT EXISTS {schema}")).unwrap();
+    admin.close().await;
+
+    let separator = if base.contains('?') { "&" } else { "?" };
+    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
+    connect_pool(&scoped, 2).await.expect("scoped test pool")
+}
+
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.
 ///
 /// The search path has to travel in the connection options, not in a `SET`

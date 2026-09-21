@@ -115,12 +115,7 @@ pub async fn register_start(
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id = crate::db_scalar_one!(
-        &state.db.pool,
-        String,
-        "SELECT 'acct_' || lower(hex(randomblob(16)))"
-    )
-    .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
+    let account_id = crate::utils::random::new_account_id();
 
     let handle = crate::accounts::account_id_to_handle(&account_id)
         .ok_or_else(|| ApiError::internal("minted an account id with no handle"))?;
@@ -487,10 +482,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
             crate::db::Database { pool: pool },

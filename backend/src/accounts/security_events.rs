@@ -150,10 +150,9 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -211,7 +210,7 @@ mod tests {
     /// Recording must not be able to fail an action that already happened.
     #[tokio::test]
     async fn test_recording_against_a_broken_table_does_not_panic() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         // No migrations: the table does not exist.
         SecurityEventRepository::record(&pool, "acct_a", SecurityEventKind::SignedIn, None).await;
     }

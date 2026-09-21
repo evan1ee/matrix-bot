@@ -483,10 +483,9 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::{EventBroadcaster, SystemEvent};
-    use sqlx::SqlitePool;
 
     async fn setup_test_db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

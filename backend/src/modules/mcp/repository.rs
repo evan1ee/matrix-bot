@@ -16,8 +16,7 @@ impl McpTokenRepository {
         name: &str,
         expires_in_days: Option<i64>,
     ) -> Result<(String, McpToken), sqlx::Error> {
-        let random_hex: String =
-            crate::db_scalar_one!(pool, _, "SELECT lower(hex(randomblob(20)))")?;
+        let random_hex: String = crate::utils::random::random_hex(20);
 
         let token = format!("mb_mcp_{}", random_hex);
         let token_hash = hash_token(&token);
@@ -121,11 +120,10 @@ impl McpTokenRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_mcp_token_lifecycle() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_auth::create_tables(&pool).await.unwrap();
         crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 

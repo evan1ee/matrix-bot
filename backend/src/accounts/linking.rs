@@ -59,7 +59,7 @@ impl LinkRepository {
     pub async fn issue(pool: &DbPool, account_id: &str) -> Result<String, sqlx::Error> {
         const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-        let bytes: Vec<u8> = crate::db_scalar_one!(pool, Vec<u8>, "SELECT randomblob(8)")?;
+        let bytes: Vec<u8> = crate::utils::random::random_bytes(8);
 
         let raw: String = bytes
             .iter()
@@ -234,10 +234,9 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

@@ -463,7 +463,6 @@ async fn handle_category(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     #[test]
     fn test_parses_amount_currency_note_and_category() {
@@ -535,7 +534,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_finance_alias_and_rm() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // Add expense via !expense add
@@ -570,7 +569,7 @@ mod tests {
     /// open browser because the Matrix path never broadcast anything.
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let broadcaster = crate::events::EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
@@ -602,7 +601,7 @@ mod tests {
     /// covers the side-effect-free rejection itself.
     #[tokio::test]
     async fn test_expense_add_refuses_an_unknown_category() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_finance_command(

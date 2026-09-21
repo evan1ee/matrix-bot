@@ -64,11 +64,10 @@ mod tests {
     use crate::accounts::{AccountRepository, SessionRepository};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_sse_handler_creation() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -99,7 +98,7 @@ mod tests {
     /// away rather than being carried forward.
     #[tokio::test]
     async fn test_the_stream_requires_a_session() {
-        let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = test_state(pool.clone());
 
