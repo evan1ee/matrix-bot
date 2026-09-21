@@ -342,16 +342,26 @@ of being mistranslated. The audit-log triggers are written out per dialect,
 because PostgreSQL has no `CREATE TRIGGER IF NOT EXISTS` and needs a `plpgsql`
 function behind each guard.
 
-Portability rules that only the PostgreSQL CI job enforces, because SQLite
-accepts every violation silently:
+Portability is enforced by the `backend-postgres` CI job and essentially
+nothing else, because SQLite accepts every violation silently. `AGENTS.md` has
+the full table of what not to write; the shape of the problem is that SQLite is
+dynamically typed and PostgreSQL is not, so a column whose declared type
+disagrees with the Rust type it is read as works locally and fails there.
 
-- `BIGINT` for anything read as `i64` (Postgres `INTEGER` is `i32`), `BOOLEAN`
-  for a `bool`, `TIMESTAMPTZ` for a `DateTime<Utc>` (bare `TIMESTAMP` carries no
-  zone). Three columns were wrong on exactly this and were caught only there.
-- `TRUE`/`FALSE` for a boolean, never `0`/`1`.
-- No `last_insert_rowid()` (use `RETURNING id`), `randomblob()` (use
-  `utils::random`), `datetime()`, `INSERT OR IGNORE` (use `ON CONFLICT DO
-  NOTHING`), `PRAGMA` or `sqlite_master`.
+The costly version of that lesson: three separate rounds of defects came from
+blanket type sweeps over the schema — widening every `INTEGER` to `BIGINT` and
+every `TIMESTAMP` to `TIMESTAMPTZ` without checking what each column is read as.
+`briefing_enabled` and `is_active` became integers that models read as `bool`;
+`currency_exponent` is read as `i32` in two modules and `i64` in thirty-eight;
+`latitude`, `longitude` and `temperature` were `REAL`, which is `float4`, while
+the models read `f64`; and `next_due_at` plus six tables' `created_at`/
+`updated_at` became timestamps that models read as `String`. **Change column
+types one at a time, against the field that reads them.**
+
+A related trap with no defect in it: `TIMESTAMPTZ` holds microseconds and
+`DateTime<Utc>` holds nanoseconds, so a round-tripped instant differs in the
+last three digits on PostgreSQL only. `utils::time::now_at_storage_precision`
+exists for tests that assert on one.
 
 `accounts::merge::move_rows` replaces `UPDATE OR IGNORE`, which Postgres has no
 equivalent of. It tries the bulk update in a savepoint and falls back to moving
@@ -368,8 +378,11 @@ token's unguessability should not depend on which database was deployed.
 Tests run on either. `db::pool::test_pool()` returns in-memory SQLite by
 default and, with `TEST_DATABASE_URL` set, a PostgreSQL pool in a schema of its
 own — the suite runs in parallel and `search_path` belongs to a connection, not
-a statement. CI runs both. See `docs/POSTGRES_MIGRATION.md`, including the
-PostgreSQL suite's current pass count and what is still failing.
+a statement. CI runs both on every pull request, and the PostgreSQL job is
+blocking. Seven tests skip there and print why: they are about SQLite itself —
+`db::backfill`'s fixtures build a legacy SQLite database by hand, and the
+`accounts`/`db::schema` guards read `sqlite_master` to derive the table list.
+See `docs/POSTGRES_MIGRATION.md` for the full history.
 
 ### Frontend module mirror
 

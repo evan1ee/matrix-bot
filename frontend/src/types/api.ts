@@ -2014,7 +2014,7 @@ export interface components {
             auto_pay?: boolean | null;
             category: string;
             currency: string;
-            /** Format: int32 */
+            /** Format: int64 */
             currency_exponent?: number | null;
             /** Format: int32 */
             due_day?: number | null;
@@ -2675,7 +2675,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             currency: string;
-            /** Format: int32 */
+            /** Format: int64 */
             currency_exponent: number;
             /** Format: int64 */
             id: number;
@@ -2747,7 +2747,7 @@ export interface components {
             category: string;
             created_at?: string | null;
             currency: string;
-            /** Format: int32 */
+            /** Format: int64 */
             currency_exponent: number;
             /** Format: int32 */
             due_day?: number | null;

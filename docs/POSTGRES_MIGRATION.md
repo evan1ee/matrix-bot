@@ -383,12 +383,12 @@ databases, one set of queries" section covering the macro layer, why
 `sqlx::Any` cannot do the job, the DDL tokens, and `move_rows`.
 
 The README documents the switch, adds a Compose recipe, and marks the
-PostgreSQL roadmap item shipped. Its feature bullet deliberately does **not**
-claim every feature works on PostgreSQL: what is verified is the boot path,
-migrations, a repository round-trip and a merge collision, all against
-PostgreSQL 18.6. The bullet says that and links here for the rest, because
-125 tests still fail on PostgreSQL and a README that glossed over it would be
-the wrong kind of confident.
+PostgreSQL roadmap item shipped.
+
+*Written while 125 tests were still failing, the README's feature bullet
+deliberately claimed only what had been verified — the boot path, migrations, a
+repository round-trip and a merge collision — and linked here for the rest. It
+now says the whole suite passes on both, because it does.*
 
 **Not done, and not attempted:** nothing migrates an existing SQLite database
 into PostgreSQL. Pointing `DATABASE_URL` at a PostgreSQL server creates a fresh

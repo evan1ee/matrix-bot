@@ -40,8 +40,49 @@ This document defines the architectural conventions, coding rules, frontend desi
 4. **Database & SQLx Persistence Rules**:
    - **Never call `sqlx::query*` directly.** Every query goes through the dual-dialect macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_all!`, `db_scalar_one!`, `db_scalar_optional!`, `db_execute!`, and the `tx_*` family inside a transaction. They take a `&DbPool` (or `&mut DbTx`), dispatch on the live driver, and rewrite `?` placeholders to `$1..$n` for PostgreSQL. Write the SQL once, in SQLite's `?` style. Pass `_` as the row type where it is inferred from context.
    - Compile-time checked macros (`query!`) remain banned: they need a database URL at build time, which would defeat both the dual-dialect layer and an offline build.
-   - Keep SQL portable. `last_insert_rowid()`, `randomblob()`, `datetime()`, `INSERT OR IGNORE`, `UPDATE OR IGNORE`, `PRAGMA` and `sqlite_master` are SQLite-only. Use `RETURNING id`, `utils::random`, `CURRENT_TIMESTAMP`, `ON CONFLICT DO NOTHING` and `information_schema` instead. A boolean column takes `TRUE`/`FALSE`, never `0`/`1`.
-   - New DDL uses `BIGINT` for anything read as an `i64`, `BOOLEAN` for a `bool`, and `TIMESTAMPTZ` for a `DateTime<Utc>`. PostgreSQL's `INTEGER` is `i32` and its `TIMESTAMP` carries no time zone; SQLite accepts either spelling, so only the PostgreSQL CI job catches a mismatch.
+   - **Keep SQL portable.** Every item below was a real defect that SQLite
+     accepted silently and PostgreSQL rejected. The `backend-postgres` CI job is
+     what catches them; it is blocking, and the suite passes on both databases.
+
+     | Do not write | Write instead | Why |
+     |---|---|---|
+     | `last_insert_rowid()` | `RETURNING id` with `db_scalar_one!` | SQLite-only |
+     | `randomblob(n)` | `utils::random` | SQLite-only, and a token's entropy should not depend on the database |
+     | `datetime('now')`, `strftime(...)` | `CAST(CURRENT_TIMESTAMP AS TEXT)`, or compute it in Rust | SQLite-only |
+     | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` | SQLite-only |
+     | `UPDATE OR IGNORE` | `accounts::merge::move_rows` | PostgreSQL has no equivalent |
+     | `x IS NOT ?` | `x IS DISTINCT FROM ?` | `IS NOT` expects `NULL`/`TRUE` on PostgreSQL |
+     | `COLLATE NOCASE` | `LOWER(...)` | SQLite-only collation |
+     | `PRAGMA`, `sqlite_master` | `information_schema`, or gate with `pool::skip_on_postgres` | SQLite-only |
+     | `SUM(bigint_col)` | `CAST(SUM(...) AS BIGINT)` | PostgreSQL returns `NUMERIC` |
+     | `SELECT 1` read as `i64` | `SELECT CAST(1 AS BIGINT)` | an integer literal is `INT4` |
+     | `date(x)` compared or unioned with text | `CAST(date(x) AS TEXT)` | PostgreSQL returns a `date` |
+     | `substr(timestamp_col, ...)` | `substr(CAST(col AS TEXT), ...)` | `substr` needs text |
+     | `ON CONFLICT DO UPDATE SET c = c + excluded.c` | qualify: `tbl.c + excluded.c` | ambiguous on PostgreSQL |
+     | a timestamp column compared to a `String` | bind a `DateTime<Utc>` | no implicit cast |
+     | `0`/`1` for a boolean, in comparisons **and** `VALUES` | `TRUE`/`FALSE` | PostgreSQL has a real boolean |
+
+   - **Match the column type to the Rust type it is read as**, and check both
+     directions when changing either. PostgreSQL is strict where SQLite is not,
+     so a mismatch is invisible locally:
+
+     | Rust | Column |
+     |---|---|
+     | `i64` | `BIGINT` |
+     | `i32` | `INTEGER` (PostgreSQL's `INTEGER` is `i32`, not `i64`) |
+     | `f64` | `DOUBLE PRECISION` (`REAL` is `float4`) |
+     | `bool` | `BOOLEAN` |
+     | `DateTime<Utc>` | `TIMESTAMPTZ` (bare `TIMESTAMP` carries no zone) |
+     | `String` holding a timestamp | `TEXT` with the `{{NOW_TEXT}}` default |
+
+     Do not run a blanket type sweep across the schema. Three separate rounds of
+     defects came from exactly that — widening every `INTEGER` to `BIGINT` and
+     every `TIMESTAMP` to `TIMESTAMPTZ` without checking what each column is
+     actually read as.
+
+   - `TIMESTAMPTZ` holds microseconds; `DateTime<Utc>` holds nanoseconds. A test
+     asserting on a round-tripped instant must build it with
+     `utils::time::now_at_storage_precision`, not `Utc::now()`.
    - Always run table DDL migrations using `CREATE TABLE IF NOT EXISTS` and backwards-compatible `ALTER TABLE` statements in modular schema files (`backend/src/db/schema_*.rs`) orchestrated through [`backend/src/db/schema.rs`](backend/src/db/schema.rs).
    - Never couple domain repositories or bot modules to API modules: room caching and resolution must reside in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs) so all layers access rooms without inverted dependencies.
    - SQLite pools must be initialized with `WAL` journal mode (`journal_mode=WAL`), `busy_timeout=5000`, and configurable max connections via `DATABASE_MAX_CONNECTIONS`. PostgreSQL pools take the same connection limit and nothing else — the server owns its storage.
