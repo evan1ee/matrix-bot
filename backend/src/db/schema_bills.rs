@@ -14,17 +14,17 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             currency TEXT NOT NULL,
             currency_exponent BIGINT NOT NULL DEFAULT 2,
             frequency TEXT NOT NULL DEFAULT 'monthly',
-            due_day BIGINT,
+            due_day INTEGER,
             next_due_at TEXT NOT NULL,
-            total_installments BIGINT,
-            paid_installments BIGINT NOT NULL DEFAULT 0,
+            total_installments INTEGER,
+            paid_installments INTEGER NOT NULL DEFAULT 0,
             auto_pay BOOLEAN NOT NULL DEFAULT FALSE,
             status TEXT NOT NULL DEFAULT 'active',
             notes TEXT,
             remind_before_minutes BIGINT,
             remind_room_id TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT {{NOW_TEXT}},
+            updated_at TEXT DEFAULT {{NOW_TEXT}}
         );
         "#
     )?;
@@ -44,12 +44,12 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     );
     let _ = crate::db_ddl!(
         pool,
-        "ALTER TABLE recurring_bills ADD COLUMN due_day BIGINT;"
+        "ALTER TABLE recurring_bills ADD COLUMN due_day INTEGER;"
     );
     let _ = crate::db_ddl!(pool, "ALTER TABLE recurring_bills ADD COLUMN next_due_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
     let _ = crate::db_ddl!(
         pool,
-        "ALTER TABLE recurring_bills ADD COLUMN total_installments BIGINT;"
+        "ALTER TABLE recurring_bills ADD COLUMN total_installments INTEGER;"
     );
     let _ = crate::db_ddl!(
         pool,
@@ -61,7 +61,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
     );
     let _ = crate::db_ddl!(
         pool,
-        "ALTER TABLE recurring_bills ADD COLUMN paid_installments BIGINT NOT NULL DEFAULT 0;"
+        "ALTER TABLE recurring_bills ADD COLUMN paid_installments INTEGER NOT NULL DEFAULT 0;"
     );
     let _ = crate::db_ddl!(
         pool,

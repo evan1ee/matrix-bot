@@ -161,7 +161,7 @@ impl HabitsRepository {
             Habit,
             r#"
             UPDATE habits
-            SET name = ?, description = ?, frequency = ?, category = ?, target_days_per_week = ?, updated_at = CURRENT_TIMESTAMP
+            SET name = ?, description = ?, frequency = ?, category = ?, target_days_per_week = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             "#,

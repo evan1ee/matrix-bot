@@ -65,7 +65,7 @@ impl FinanceRepository {
             pool,
             Category,
             "SELECT id, owner_id, name, created_at FROM finance_categories \
-             WHERE owner_id = ? ORDER BY name COLLATE NOCASE ASC",
+             WHERE owner_id = ? ORDER BY LOWER(name) ASC",
             owner_id
         )?;
 
@@ -81,7 +81,7 @@ impl FinanceRepository {
             pool,
             Category,
             "SELECT id, owner_id, name, created_at FROM finance_categories \
-             WHERE owner_id = ? AND name = ? COLLATE NOCASE",
+             WHERE owner_id = ? AND LOWER(name) = LOWER(?)",
             owner_id,
             name
         )
@@ -307,7 +307,7 @@ impl FinanceRepository {
             pool,
             (String, i64, Option<String>, String, i64),
             r#"
-            SELECT t.currency, t.currency_exponent, c.name, t.direction, SUM(t.amount_minor)
+            SELECT t.currency, t.currency_exponent, c.name, t.direction, CAST(SUM(t.amount_minor) AS BIGINT)
             FROM transactions t
             LEFT JOIN finance_categories c ON c.id = t.category_id
             WHERE t.owner_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?

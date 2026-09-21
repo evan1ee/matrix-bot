@@ -60,7 +60,7 @@ impl RoomRepository {
             crate::tx_execute!(
                 &mut tx,
                 "INSERT INTO account_rooms (account_id, room_id, name, is_direct, updated_at) \
-                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                 VALUES (?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT))",
                 account_id,
                 &room.room_id,
                 &room.name,

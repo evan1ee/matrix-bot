@@ -46,16 +46,6 @@ jobs:
     name: Backend CI (PostgreSQL dialect)
     runs-on: ubuntu-latest
 
-    # Reporting only, for now. 594 of 719 tests pass against PostgreSQL; the
-    # remainder are almost all test fixtures that hand-write SQLite DDL
-    # (`AUTOINCREMENT`), read `sqlite_master`, call `datetime()`, or insert 0/1
-    # into a boolean column. The production code they exercise is converted —
-    # see docs/POSTGRES_MIGRATION.md for the exact remaining categories.
-    #
-    # Flip this to blocking once that count reaches zero. Leaving the job out
-    # entirely until then would be worse: it is what found every dialect defect
-    # fixed so far, and a red-but-visible job keeps that pressure on.
-    continue-on-error: true
 
     # The same suite, against a real PostgreSQL. The SQLite job above is the
     # fast default; this one exists because SQLite accepts plenty that Postgres

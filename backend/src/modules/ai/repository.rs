@@ -43,7 +43,7 @@ impl AiRepository {
             INSERT INTO ai_user_configs (
                 owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id) DO UPDATE SET
                 api_base_url = COALESCE(excluded.api_base_url, ai_user_configs.api_base_url),
                 api_key = CASE
@@ -55,7 +55,7 @@ impl AiRepository {
                 system_prompt = COALESCE(excluded.system_prompt, ai_user_configs.system_prompt),
                 temperature = COALESCE(excluded.temperature, ai_user_configs.temperature),
                 max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             "#,
             owner_id,
             &input.api_base_url,
@@ -77,21 +77,28 @@ impl AiRepository {
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
-        // Look for recent conversation
+        // The cutoff is computed here rather than in SQL. `strftime` is
+        // SQLite-only, and `updated_at` is a TEXT column in the
+        // `YYYY-MM-DD HH:MM:SS` shape `CAST(CURRENT_TIMESTAMP AS TEXT)`
+        // produces, so a lexicographic comparison against the same shape means
+        // the same thing on both databases.
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+
         let existing = crate::db_fetch_optional!(
             pool,
             AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
-            WHERE owner_id = ? AND room_id = ?
-              AND (strftime('%s', 'now') - strftime('%s', updated_at)) <= ?
+            WHERE owner_id = ? AND room_id = ? AND updated_at >= ?
             ORDER BY updated_at DESC
             LIMIT 1
             "#,
             owner_id,
             room_id,
-            max_age_seconds
+            &cutoff
         )?;
 
         if let Some(conv) = existing {
@@ -104,7 +111,7 @@ impl AiRepository {
             pool,
             r#"
             INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             "#,
             &id,
             owner_id,
@@ -177,7 +184,7 @@ impl AiRepository {
             pool,
             r#"
             UPDATE ai_conversations
-            SET updated_at = CURRENT_TIMESTAMP
+            SET updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ?
             "#,
             id
@@ -199,7 +206,7 @@ impl AiRepository {
             pool,
             r#"
             INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT))
             "#,
             &id,
             conversation_id,

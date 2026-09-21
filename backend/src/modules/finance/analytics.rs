@@ -121,16 +121,24 @@ impl FinanceAnalyticsRepository {
             .first()
             .cloned()
             .unwrap_or_else(|| "1970-01".into());
-        let cutoff_start = format!("{earliest_month}-01 00:00:00");
+        // Bound as a real instant rather than a string. `occurred_at` is a
+        // timestamp column, and PostgreSQL will not compare one against text —
+        // SQLite would, which is how this stayed a string for so long.
+        let cutoff_start =
+            chrono::NaiveDate::parse_from_str(&format!("{earliest_month}-01"), "%Y-%m-%d")
+                .ok()
+                .and_then(|d| d.and_hms_opt(0, 0, 0))
+                .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+                .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).expect("epoch is valid"));
 
         // Query transactions aggregated by month and direction
         let rows = crate::db_fetch_all!(
             pool,
             (String, String, i64),
             r#"
-            SELECT substr(occurred_at, 1, 7) AS month_str,
+            SELECT substr(CAST(occurred_at AS TEXT), 1, 7) AS month_str,
                    direction,
-                   SUM(amount_minor) AS total_minor
+                   CAST(SUM(amount_minor) AS BIGINT) AS total_minor
             FROM transactions
             WHERE owner_id = ? AND currency = ? AND occurred_at >= ?
             GROUP BY month_str, direction
@@ -175,7 +183,7 @@ impl FinanceAnalyticsRepository {
             r#"
             SELECT c.name,
                    COUNT(t.id) AS tx_cnt,
-                   SUM(t.amount_minor) AS sum_minor
+                   CAST(SUM(t.amount_minor) AS BIGINT) AS sum_minor
             FROM transactions t
             LEFT JOIN finance_categories c ON c.id = t.category_id
             WHERE t.owner_id = ? AND t.direction = 'expense' AND t.currency = ? AND t.occurred_at >= ?

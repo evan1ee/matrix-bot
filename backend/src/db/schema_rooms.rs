@@ -8,7 +8,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             room_id TEXT NOT NULL,
             name TEXT NOT NULL,
             is_direct BOOLEAN NOT NULL DEFAULT FALSE,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT {{NOW_TEXT}},
             PRIMARY KEY (account_id, room_id),
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         );

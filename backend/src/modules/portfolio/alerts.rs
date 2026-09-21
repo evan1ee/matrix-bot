@@ -45,7 +45,7 @@ pub struct PriceAlert {
     pub symbol: String,
     pub target_price_minor: i64,
     pub currency: String,
-    pub currency_exponent: i32,
+    pub currency_exponent: i64,
     pub condition: String,
     pub is_triggered: bool,
     pub triggered_at: Option<DateTime<Utc>>,
@@ -75,7 +75,7 @@ impl AlertsRepository {
         symbol: &str,
         target_price_minor: i64,
         currency: &str,
-        currency_exponent: i32,
+        currency_exponent: i64,
         condition: AlertCondition,
     ) -> Result<PriceAlert> {
         let norm_symbol = symbol.trim().to_uppercase();
@@ -186,7 +186,7 @@ impl AlertsRepository {
 /// Formats a clean, readable notification for a triggered alert (both plain and HTML).
 pub fn format_alert_notification(alert: &PriceAlert, current_price_minor: i64) -> (String, String) {
     let cond = alert.parsed_condition();
-    let exp = alert.currency_exponent;
+    let exp = alert.currency_exponent as i32;
     let target = (alert.target_price_minor as f64) / 10f64.powi(exp);
     let current = (current_price_minor as f64) / 10f64.powi(exp);
 

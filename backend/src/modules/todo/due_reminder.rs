@@ -97,7 +97,7 @@ mod tests {
     #[tokio::test]
     async fn test_schedules_at_due_minus_lead() {
         let pool = setup().await;
-        let due = Utc::now() + Duration::hours(4);
+        let due = crate::utils::time::now_at_storage_precision() + Duration::hours(4);
         let todo = todo_with(&pool, Some(due), Some(60)).await;
 
         let outcome = sync(&pool, None, &todo, "!room:a").await.unwrap();
@@ -125,7 +125,12 @@ mod tests {
             SyncOutcome::Nothing
         );
 
-        let no_lead = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), None).await;
+        let no_lead = todo_with(
+            &pool,
+            Some(crate::utils::time::now_at_storage_precision() + Duration::hours(4)),
+            None,
+        )
+        .await;
         assert_eq!(
             sync(&pool, None, &no_lead, "!room:a").await.unwrap(),
             SyncOutcome::Nothing
@@ -136,7 +141,7 @@ mod tests {
     async fn test_lead_time_already_past_schedules_nothing() {
         let pool = setup().await;
         // Due in 10 minutes, but asking for a reminder an hour beforehand.
-        let due = Utc::now() + Duration::minutes(10);
+        let due = crate::utils::time::now_at_storage_precision() + Duration::minutes(10);
         let todo = todo_with(&pool, Some(due), Some(60)).await;
 
         let outcome = sync(&pool, None, &todo, "!room:a").await.unwrap();
@@ -153,7 +158,12 @@ mod tests {
     #[tokio::test]
     async fn test_completing_the_task_cancels_the_reminder() {
         let pool = setup().await;
-        let todo = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), Some(60)).await;
+        let todo = todo_with(
+            &pool,
+            Some(crate::utils::time::now_at_storage_precision() + Duration::hours(4)),
+            Some(60),
+        )
+        .await;
         sync(&pool, None, &todo, "!room:a").await.unwrap();
 
         let done = TodoRepository::mark_done(&pool, todo.id)
@@ -174,10 +184,15 @@ mod tests {
     #[tokio::test]
     async fn test_moving_the_due_date_reschedules_without_stacking() {
         let pool = setup().await;
-        let todo = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), Some(60)).await;
+        let todo = todo_with(
+            &pool,
+            Some(crate::utils::time::now_at_storage_precision() + Duration::hours(4)),
+            Some(60),
+        )
+        .await;
         sync(&pool, None, &todo, "!room:a").await.unwrap();
 
-        let moved_due = Utc::now() + Duration::days(2);
+        let moved_due = crate::utils::time::now_at_storage_precision() + Duration::days(2);
         let moved = TodoRepository::set_due_date(&pool, todo.id, Some(moved_due))
             .await
             .unwrap()
@@ -203,7 +218,12 @@ mod tests {
     #[tokio::test]
     async fn test_clearing_the_lead_time_cancels_the_reminder() {
         let pool = setup().await;
-        let todo = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), Some(60)).await;
+        let todo = todo_with(
+            &pool,
+            Some(crate::utils::time::now_at_storage_precision() + Duration::hours(4)),
+            Some(60),
+        )
+        .await;
         sync(&pool, None, &todo, "!room:a").await.unwrap();
 
         let cleared = TodoRepository::set_remind_before(&pool, todo.id, None)
@@ -221,7 +241,12 @@ mod tests {
     #[tokio::test]
     async fn test_sync_is_idempotent() {
         let pool = setup().await;
-        let todo = todo_with(&pool, Some(Utc::now() + Duration::hours(4)), Some(60)).await;
+        let todo = todo_with(
+            &pool,
+            Some(crate::utils::time::now_at_storage_precision() + Duration::hours(4)),
+            Some(60),
+        )
+        .await;
 
         let first = sync(&pool, None, &todo, "!room:a").await.unwrap();
         let second = sync(&pool, None, &todo, "!room:a").await.unwrap();

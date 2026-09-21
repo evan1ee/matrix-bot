@@ -173,7 +173,7 @@ mod tests {
             crate::db_execute!(
                 &db.pool,
                 "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-                 VALUES ('!r:x', ?, 'evan', ?, 'medium', 0)",
+                 VALUES ('!r:x', ?, 'evan', ?, 'medium', FALSE)",
                 &old,
                 text
             )

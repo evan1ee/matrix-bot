@@ -9,17 +9,17 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             api_key TEXT,
             model_name TEXT,
             system_prompt TEXT,
-            temperature REAL DEFAULT 0.7,
+            temperature DOUBLE PRECISION DEFAULT 0.7,
             max_tokens BIGINT DEFAULT 2048,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            updated_at TEXT NOT NULL DEFAULT {{NOW_TEXT}}
         );
 
         CREATE TABLE IF NOT EXISTS ai_conversations (
             id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
             room_id TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT {{NOW_TEXT}},
+            updated_at TEXT NOT NULL DEFAULT {{NOW_TEXT}}
         );
 
         CREATE INDEX IF NOT EXISTS idx_ai_conversations_owner_room 
@@ -32,7 +32,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             content TEXT NOT NULL,
             tool_call_id TEXT,
             tool_name TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT {{NOW_TEXT}}
         );
 
         CREATE INDEX IF NOT EXISTS idx_ai_messages_conv_created 

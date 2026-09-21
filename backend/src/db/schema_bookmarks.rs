@@ -17,8 +17,8 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
             is_archived BOOLEAN NOT NULL DEFAULT FALSE,
             tags TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT {{NOW_TEXT}},
+            updated_at TEXT DEFAULT {{NOW_TEXT}}
         );
         "#
     )?;

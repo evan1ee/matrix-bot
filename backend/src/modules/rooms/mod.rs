@@ -161,7 +161,7 @@ pub async fn is_room_authorized_for_account(
     if let Ok(Some(_)) = crate::db_scalar_optional!(
         pool,
         i64,
-        "SELECT 1 FROM account_rooms WHERE account_id = ? AND room_id = ? LIMIT 1",
+        "SELECT CAST(1 AS BIGINT) FROM account_rooms WHERE account_id = ? AND room_id = ? LIMIT 1",
         account_id,
         room_id
     ) {

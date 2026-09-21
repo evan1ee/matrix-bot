@@ -52,7 +52,7 @@ pub async fn credit_cash(
     crate::db_execute!(pool, "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
          ON CONFLICT(owner_id, currency) DO UPDATE SET \
-            balance_minor = balance_minor + excluded.balance_minor, \
+            balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor, \
             updated_at = CURRENT_TIMESTAMP", owner_id, currency, currency_exponent, amount_minor)?;
 
     get_cash_or_zero(pool, owner_id, currency, currency_exponent).await

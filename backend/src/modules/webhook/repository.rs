@@ -58,7 +58,7 @@ impl WebhookRepository {
         crate::db_fetch_optional!(
             pool,
             Webhook,
-            "SELECT * FROM webhooks WHERE token_hash = ? AND is_active = 1;",
+            "SELECT * FROM webhooks WHERE token_hash = ? AND is_active = TRUE;",
             token_hash
         )
     }

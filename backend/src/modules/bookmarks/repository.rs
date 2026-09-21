@@ -28,7 +28,7 @@ impl BookmarksRepository {
                 domain, reader_content, reading_time_minutes, is_favorite,
                 is_archived, tags, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, FALSE, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
                       is_archived, tags, created_at, updated_at
@@ -234,7 +234,7 @@ impl BookmarksRepository {
             Bookmark,
             r#"
             UPDATE bookmarks
-            SET title = ?, description = ?, is_favorite = ?, is_archived = ?, tags = ?, updated_at = datetime('now')
+            SET title = ?, description = ?, is_favorite = ?, is_archived = ?, tags = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
@@ -258,7 +258,7 @@ impl BookmarksRepository {
             Bookmark,
             r#"
             UPDATE bookmarks
-            SET is_favorite = NOT is_favorite, updated_at = datetime('now')
+            SET is_favorite = NOT is_favorite, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
@@ -277,7 +277,7 @@ impl BookmarksRepository {
             Bookmark,
             r#"
             UPDATE bookmarks
-            SET is_archived = NOT is_archived, updated_at = datetime('now')
+            SET is_archived = NOT is_archived, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,

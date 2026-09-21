@@ -72,7 +72,7 @@ pub async fn sync(
         return tear_down(pool, broadcaster, bill.id).await;
     };
 
-    let major = bill.amount_minor as f64 / 10f64.powi(bill.currency_exponent);
+    let major = bill.amount_minor as f64 / 10f64.powi(bill.currency_exponent as i32);
     let plan = ReminderPlan {
         source: ReminderSource::RecurringBill,
         source_id: bill.id,

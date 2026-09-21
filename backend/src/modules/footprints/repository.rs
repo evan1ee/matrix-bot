@@ -206,7 +206,7 @@ impl FootprintRepository {
             SELECT
                 COUNT(id) AS total_places,
                 COUNT(DISTINCT NULLIF(country, '')) AS total_countries,
-                COALESCE(SUM(stay_duration_days), 0) AS total_days_traveled
+                COALESCE(CAST(SUM(stay_duration_days) AS BIGINT), 0) AS total_days_traveled
             FROM footprints
             WHERE owner_id = ?;
             "#,
@@ -217,11 +217,11 @@ impl FootprintRepository {
             pool,
             (String, i64, i64),
             r#"
-            SELECT spend_currency, spend_currency_exponent, SUM(spend_amount_minor)
+            SELECT spend_currency, spend_currency_exponent, CAST(SUM(spend_amount_minor) AS BIGINT)
             FROM footprints
             WHERE owner_id = ? AND spend_amount_minor > 0
             GROUP BY spend_currency, spend_currency_exponent
-            ORDER BY SUM(spend_amount_minor) DESC;
+            ORDER BY CAST(SUM(spend_amount_minor) AS BIGINT) DESC;
             "#,
             owner_id
         )?;

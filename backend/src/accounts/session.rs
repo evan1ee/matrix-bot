@@ -199,7 +199,7 @@ impl SessionRepository {
         let affected = crate::db_execute!(
             pool,
             "UPDATE sessions SET revoked_at = ? \
-             WHERE account_id = ? AND revoked_at IS NULL AND id_hash IS NOT ?",
+             WHERE account_id = ? AND revoked_at IS NULL AND id_hash IS DISTINCT FROM ?",
             Utc::now(),
             account_id,
             except

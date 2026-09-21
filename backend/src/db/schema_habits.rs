@@ -12,8 +12,8 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             category TEXT NOT NULL DEFAULT 'wellness',
             target_days_per_week BIGINT NOT NULL DEFAULT 7,
             archived BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT {{NOW_TEXT}},
+            updated_at TEXT DEFAULT {{NOW_TEXT}}
         );
         CREATE INDEX IF NOT EXISTS idx_habits_owner ON habits(owner_id);
         "#
@@ -29,7 +29,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             log_date TEXT NOT NULL,
             completed BOOLEAN NOT NULL DEFAULT TRUE,
             note TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT {{NOW_TEXT}},
             UNIQUE(habit_id, log_date)
         );
         CREATE INDEX IF NOT EXISTS idx_habit_logs_owner_date ON habit_logs(owner_id, log_date);

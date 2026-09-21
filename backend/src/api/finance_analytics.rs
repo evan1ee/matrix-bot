@@ -173,7 +173,6 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use crate::modules::finance::repository::FinanceRepository;
-    use chrono::Utc;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -207,7 +206,7 @@ mod tests {
             Some("Stipend"),
             None,
             None,
-            Utc::now(),
+            crate::utils::time::now_at_storage_precision(),
         )
         .await
         .unwrap();

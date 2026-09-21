@@ -204,7 +204,7 @@ pub async fn sell_at(
     crate::tx_execute!(&mut tx, "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
          ON CONFLICT(owner_id, currency) DO UPDATE SET \
-            balance_minor = balance_minor + excluded.balance_minor, \
+            balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor, \
             updated_at = CURRENT_TIMESTAMP", owner_id, &existing.currency, existing.currency_exponent, proceeds)?;
 
     let cash = crate::tx_fetch_one!(

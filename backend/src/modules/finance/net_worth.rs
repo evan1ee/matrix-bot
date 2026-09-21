@@ -59,7 +59,7 @@ impl NetWorthService {
             (String, i64, Option<i64>),
             r#"
             SELECT currency, currency_exponent,
-                   SUM(CASE WHEN direction = 'income' THEN amount_minor ELSE -amount_minor END)
+                   CAST(SUM(CASE WHEN direction = 'income' THEN amount_minor ELSE -amount_minor END) AS BIGINT)
             FROM transactions
             WHERE owner_id = ?
             GROUP BY currency, currency_exponent

@@ -33,11 +33,11 @@ impl LifeRepository {
             LifeProfile,
             r#"
             INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years, created_at, updated_at)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id) DO UPDATE SET
                 birth_date = excluded.birth_date,
                 expected_lifespan_years = excluded.expected_lifespan_years,
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING owner_id, birth_date, expected_lifespan_years, created_at, updated_at
             "#,
             owner_id,
@@ -79,14 +79,14 @@ impl LifeRepository {
             LifeDayLog,
             r#"
             INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id, log_date) DO UPDATE SET
                 mood = excluded.mood,
                 weather = excluded.weather,
                 activities = excluded.activities,
                 note = excluded.note,
                 time_allocation = COALESCE(excluded.time_allocation, life_day_logs.time_allocation),
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             "#,
             owner_id,
@@ -110,10 +110,10 @@ impl LifeRepository {
             LifeDayLog,
             r#"
             INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
-            VALUES (?, ?, '', NULL, NULL, NULL, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, '', NULL, NULL, NULL, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id, log_date) DO UPDATE SET
                 time_allocation = excluded.time_allocation,
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             "#,
             owner_id,
@@ -177,21 +177,21 @@ impl LifeRepository {
             LifeHorizonDay,
             r#"
             WITH user_activities AS (
-                SELECT date(created_at) AS act_date FROM todos WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM todos WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT date(due_at) AS act_date FROM todos WHERE owner_id = ? AND due_at IS NOT NULL
+                SELECT CAST(date(due_at) AS TEXT) AS act_date FROM todos WHERE owner_id = ? AND due_at IS NOT NULL
                 UNION ALL
-                SELECT date(occurred_at) AS act_date FROM transactions WHERE owner_id = ? AND occurred_at IS NOT NULL
+                SELECT CAST(date(occurred_at) AS TEXT) AS act_date FROM transactions WHERE owner_id = ? AND occurred_at IS NOT NULL
                 UNION ALL
-                SELECT date(created_at) AS act_date FROM portfolio_audit_log WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM portfolio_audit_log WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT log_date AS act_date FROM habit_logs WHERE owner_id = ? AND log_date IS NOT NULL
+                SELECT CAST(log_date AS TEXT) AS act_date FROM habit_logs WHERE owner_id = ? AND log_date IS NOT NULL
                 UNION ALL
-                SELECT date(trigger_at) AS act_date FROM reminders WHERE owner_id = ? AND trigger_at IS NOT NULL
+                SELECT CAST(date(trigger_at) AS TEXT) AS act_date FROM reminders WHERE owner_id = ? AND trigger_at IS NOT NULL
                 UNION ALL
-                SELECT date(created_at) AS act_date FROM bookmarks WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM bookmarks WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT arrival_date AS act_date FROM footprints WHERE owner_id = ? AND arrival_date IS NOT NULL
+                SELECT CAST(arrival_date AS TEXT) AS act_date FROM footprints WHERE owner_id = ? AND arrival_date IS NOT NULL
             ),
             activity_counts AS (
                 SELECT act_date, COUNT(*) AS cnt 

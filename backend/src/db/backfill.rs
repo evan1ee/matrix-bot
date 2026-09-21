@@ -199,7 +199,7 @@ async fn demote_credentialless_accounts(pool: &DbPool) -> Result<(), sqlx::Error
         pool,
         "UPDATE accounts SET status = 'unclaimed' \
          WHERE status = 'active' \
-           AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = accounts.id)"
+           AND NOT EXISTS (SELECT CAST(1 AS BIGINT) FROM webauthn_credentials c WHERE c.account_id = accounts.id)"
     )?;
 
     if demoted > 0 {
@@ -256,7 +256,7 @@ mod tests {
             crate::db_execute!(
                 &pool,
                 "INSERT INTO todos (room_id, sender_mxid, sender_name, text, priority, completed) \
-                 VALUES ('!room:x', ?, 'evan', ?, 'medium', 0)",
+                 VALUES ('!room:x', ?, 'evan', ?, 'medium', FALSE)",
                 owner,
                 text
             )
@@ -284,6 +284,9 @@ mod tests {
     /// can no longer see from anywhere.
     #[tokio::test]
     async fn test_backfill_converts_both_legacy_identity_spaces() {
+        if crate::db::pool::skip_on_postgres("builds a legacy SQLite database by hand") {
+            return;
+        }
         let pool = legacy_database().await;
         run_migrations(&pool).await.unwrap();
 
@@ -359,6 +362,9 @@ mod tests {
     /// set of accounts and strand every row against the first set.
     #[tokio::test]
     async fn test_backfill_runs_once_however_often_migrations_run() {
+        if crate::db::pool::skip_on_postgres("builds a legacy SQLite database by hand") {
+            return;
+        }
         let pool = legacy_database().await;
 
         run_migrations(&pool).await.unwrap();
@@ -388,6 +394,9 @@ mod tests {
     /// next login would provision one and present as a brand-new person.
     #[tokio::test]
     async fn test_backfill_covers_users_with_no_data() {
+        if crate::db::pool::skip_on_postgres("builds a legacy SQLite database by hand") {
+            return;
+        }
         let pool = legacy_database().await;
         crate::db_execute!(
             &pool,
@@ -464,7 +473,7 @@ mod tests {
             &pool,
             _,
             "SELECT COUNT(*) FROM accounts a WHERE a.status = 'active' \
-               AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = a.id)"
+               AND NOT EXISTS (SELECT CAST(1 AS BIGINT) FROM webauthn_credentials c WHERE c.account_id = a.id)"
         )
         .unwrap();
         assert_eq!(
@@ -479,7 +488,7 @@ mod tests {
             &pool,
             _,
             "SELECT COUNT(*) FROM accounts a WHERE a.status = 'unclaimed' \
-               AND NOT EXISTS (SELECT 1 FROM matrix_links m WHERE m.account_id = a.id)"
+               AND NOT EXISTS (SELECT CAST(1 AS BIGINT) FROM matrix_links m WHERE m.account_id = a.id)"
         )
         .unwrap();
         if orphans > 0 {

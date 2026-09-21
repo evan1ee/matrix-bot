@@ -135,7 +135,7 @@ mod tests {
         crate::db_execute!(
             &state.db.pool,
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('web', ?, 'victim', 'private', 'medium', 0)",
+             VALUES ('web', ?, 'victim', 'private', 'medium', FALSE)",
             &victim
         )
         .unwrap();
@@ -172,7 +172,7 @@ mod tests {
             crate::db_execute!(
                 &state.db.pool,
                 "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-                 VALUES ('!r:x', ?, 'evan', ?, 'medium', 0)",
+                 VALUES ('!r:x', ?, 'evan', ?, 'medium', FALSE)",
                 &old,
                 text
             )

@@ -25,7 +25,7 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
 - 🔊 **Voice replies** — `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus with waveform), synthesized entirely offline by sherpa-onnx Kokoro (English + Mandarin, 103 voices, per-language lexicons and Chinese text normalization). Every user picks their own voice; no cloud TTS API and no second ML runtime.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
-- 🗄️ **SQLite or PostgreSQL** — one `DATABASE_URL` picks the database; no application code is dialect-specific. SQLite is the default and needs no server, which is what keeps the standalone single binary a single binary. Point it at PostgreSQL for a shared or managed deployment and the schema is created there on boot — verified end to end against PostgreSQL 18, from `Database::connect` through migrations to reads and writes. The PostgreSQL CI job is still being driven to green; [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md) has the current pass count and what remains.
+- 🗄️ **SQLite or PostgreSQL** — one `DATABASE_URL` picks the database; no application code is dialect-specific. SQLite is the default and needs no server, which is what keeps the standalone single binary a single binary. Point it at PostgreSQL for a shared or managed deployment and the schema is created there on boot. The **entire test suite passes on both**, and CI runs both on every pull request. See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
 
 ---
@@ -509,9 +509,9 @@ changing auth, ownership or migrations.
 
 ## 🚀 Roadmap
 
-- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is the switch; see
-  [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md) for how it works and
-  what is still being driven to green in the PostgreSQL CI job.
+- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is the switch, and the whole
+  suite passes on both databases; see
+  [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 - **Conditional-UI sign-in** — passkey autofill on page load, rather than a
   button.
 - **Offline Sync for Native iOS** — local SwiftData caching in Element X iOS for offline task and log creation.

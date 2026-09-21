@@ -284,6 +284,9 @@ mod tests {
     /// classified as following a merge or explicitly not, or this fails.
     #[tokio::test]
     async fn test_owned_tables_and_exceptions_match_the_schema() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
+            return;
+        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "owner_id").await;
         let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
@@ -312,6 +315,9 @@ mod tests {
     /// a row pointing at an account id that the merge is about to delete.
     #[tokio::test]
     async fn test_account_id_tables_are_all_classified() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
+            return;
+        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "account_id").await;
         let classified = declared(&[

@@ -10,7 +10,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
             sender_name TEXT NOT NULL,
             text TEXT NOT NULL,
             priority TEXT NOT NULL DEFAULT 'medium',
-            due_at TEXT,
+            due_at TIMESTAMPTZ,
             completed BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );

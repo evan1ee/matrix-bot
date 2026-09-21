@@ -216,7 +216,10 @@ mod tests {
     /// need a third token.
     #[tokio::test]
     async fn test_sqlite_accepts_the_portable_spellings_used_in_the_schema() {
-        let pool = crate::db::pool::test_pool().await;
+        // These probes are about SQLite's own behaviour — that it accepts a
+        // portable spelling — so they need a real SQLite pool, not whichever
+        // database the run is pointed at.
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let sql = render(
             &format!(
                 "CREATE TABLE portable (
@@ -229,16 +232,18 @@ mod tests {
             Dialect::Sqlite,
         )
         .into_owned();
-        crate::db_execute!(&pool, &sql).unwrap();
+        sqlx::query(&sql).execute(&pool).await.unwrap();
 
-        crate::db_execute!(&pool, "INSERT INTO portable (id) VALUES (1)").unwrap();
+        sqlx::query("INSERT INTO portable (id) VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
 
-        let (off, on): (bool, bool) = crate::db_fetch_one!(
-            &pool,
-            _,
-            "SELECT flag_off, flag_on FROM portable WHERE id = 1"
-        )
-        .unwrap();
+        let (off, on): (bool, bool) =
+            sqlx::query_as("SELECT flag_off, flag_on FROM portable WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(!off, "DEFAULT FALSE must store false on SQLite");
         assert!(on, "DEFAULT TRUE must store true on SQLite");
     }
@@ -254,18 +259,26 @@ mod tests {
     /// range survives the round trip.
     #[tokio::test]
     async fn test_sqlite_round_trips_a_bigint_beyond_int4_range() {
-        let pool = crate::db::pool::test_pool().await;
-        crate::db_execute!(&pool, "CREATE TABLE money (amount_minor BIGINT NOT NULL)").unwrap();
+        // These probes are about SQLite's own behaviour — that it accepts a
+        // portable spelling — so they need a real SQLite pool, not whichever
+        // database the run is pointed at.
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE money (amount_minor BIGINT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let beyond_int4: i64 = 9_000_000_000;
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO money (amount_minor) VALUES (?)",
-            beyond_int4
-        )
-        .unwrap();
+        sqlx::query("INSERT INTO money (amount_minor) VALUES (?)")
+            .bind(beyond_int4)
+            .execute(&pool)
+            .await
+            .unwrap();
 
-        let read: i64 = crate::db_scalar_one!(&pool, _, "SELECT amount_minor FROM money").unwrap();
+        let read: i64 = sqlx::query_scalar("SELECT amount_minor FROM money")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(read, beyond_int4);
     }
 
@@ -300,20 +313,85 @@ mod tests {
         assert_eq!(read, when);
     }
 
+    /// `IS DISTINCT FROM` is the portable null-safe inequality.
+    ///
+    /// `sessions` used SQLite's `IS NOT <expr>` for "every session but this
+    /// one", where the operand may be NULL. PostgreSQL reads `IS NOT` as
+    /// expecting `NULL`/`TRUE`/`FALSE` and rejects a parameter there, which is
+    /// how a `syntax error at or near "$3"` surfaced. This pins that the
+    /// standard spelling behaves identically on SQLite, including the NULL
+    /// case, which is the only reason the SQLite-only operator was used.
+    #[tokio::test]
+    async fn test_sqlite_supports_the_portable_null_safe_inequality() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE s (id TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for id in ["a", "b"] {
+            sqlx::query("INSERT INTO s (id) VALUES (?)")
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let others: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM s WHERE id IS DISTINCT FROM ? ORDER BY id")
+                .bind("a")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(others, vec!["b".to_string()]);
+
+        // The NULL case: with no exception, every row must match.
+        let all: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM s WHERE id IS DISTINCT FROM ? ORDER BY id")
+                .bind(Option::<String>::None)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(all, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    /// `CAST(CURRENT_TIMESTAMP AS TEXT)` is the portable `datetime('now')`.
+    ///
+    /// Several `TEXT` timestamp columns were written with SQLite's
+    /// `datetime('now')`, which PostgreSQL does not have. `CAST(... AS TEXT)`
+    /// is standard and needs no bind reordering at the call sites. This pins
+    /// that SQLite still yields its usual `YYYY-MM-DD HH:MM:SS` shape, since
+    /// those values are read back as `String` and rendered.
+    #[tokio::test]
+    async fn test_sqlite_casts_the_current_timestamp_to_the_expected_text() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let stamp: String = sqlx::query_scalar("SELECT CAST(CURRENT_TIMESTAMP AS TEXT)")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stamp.len(), 19, "expected YYYY-MM-DD HH:MM:SS, got {stamp}");
+        assert_eq!(&stamp[4..5], "-");
+        assert_eq!(&stamp[10..11], " ");
+    }
+
     /// The SQLite PK token must actually auto-assign, which is the only reason
     /// it is not just `INTEGER PRIMARY KEY`.
     #[tokio::test]
     async fn test_the_sqlite_primary_key_token_auto_assigns() {
-        let pool = crate::db::pool::test_pool().await;
+        // These probes are about SQLite's own behaviour — that it accepts a
+        // portable spelling — so they need a real SQLite pool, not whichever
+        // database the run is pointed at.
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let sql = render(
             &format!("CREATE TABLE t (id {PK}, a TEXT)"),
             Dialect::Sqlite,
         )
         .into_owned();
-        crate::db_execute!(&pool, &sql).unwrap();
+        sqlx::query(&sql).execute(&pool).await.unwrap();
 
-        let id: i64 =
-            crate::db_scalar_one!(&pool, _, "INSERT INTO t (a) VALUES ('x') RETURNING id").unwrap();
+        let id: i64 = sqlx::query_scalar("INSERT INTO t (a) VALUES ('x') RETURNING id")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(id, 1);
     }
 
@@ -357,28 +435,33 @@ mod tests {
     /// created. `accounts/merge.rs` depends on this firing.
     #[tokio::test]
     async fn test_the_sqlite_audit_triggers_actually_refuse_writes() {
-        let pool = crate::db::pool::test_pool().await;
+        // These probes are about SQLite's own behaviour — that it accepts a
+        // portable spelling — so they need a real SQLite pool, not whichever
+        // database the run is pointed at.
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let create = render(
             &format!("CREATE TABLE portfolio_audit_log (id {PK}, owner_id TEXT NOT NULL)"),
             Dialect::Sqlite,
         )
         .into_owned();
-        crate::db_execute!(&pool, &create).unwrap();
+        sqlx::query(&create).execute(&pool).await.unwrap();
         for statement in audit_log_immutability(Dialect::Sqlite) {
-            crate::db_execute!(&pool, &statement).unwrap();
+            sqlx::query(&statement).execute(&pool).await.unwrap();
         }
 
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO portfolio_audit_log (owner_id) VALUES ('acct_a')"
-        )
-        .unwrap();
+        sqlx::query("INSERT INTO portfolio_audit_log (owner_id) VALUES ('acct_a')")
+            .execute(&pool)
+            .await
+            .unwrap();
 
-        let updated =
-            crate::db_execute!(&pool, "UPDATE portfolio_audit_log SET owner_id = 'acct_b'");
+        let updated = sqlx::query("UPDATE portfolio_audit_log SET owner_id = 'acct_b'")
+            .execute(&pool)
+            .await;
         assert!(updated.is_err(), "an audit row must not be updatable");
 
-        let deleted = crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log");
+        let deleted = sqlx::query("DELETE FROM portfolio_audit_log")
+            .execute(&pool)
+            .await;
         assert!(deleted.is_err(), "an audit row must not be deletable");
     }
 }

@@ -122,6 +122,26 @@ pub async fn test_pool() -> crate::db::DbPool {
     connect_pool(&scoped, 2).await.expect("scoped test pool")
 }
 
+/// Whether the current run is on SQLite, for the handful of tests that are
+/// about SQLite itself rather than about this project's behaviour.
+///
+/// Three kinds qualify, and no others should: `db::backfill`'s fixtures build a
+/// *legacy SQLite database* by hand to prove the one-shot conversion still
+/// works on one; the `accounts` and `db::schema` guards read `sqlite_master` to
+/// derive the table list from the live schema; and `db::ddl`'s probes assert
+/// SQLite's own acceptance of a portable spelling.
+///
+/// Skipping is deliberate rather than a silent pass: each caller prints why, so
+/// a PostgreSQL run says what it did not cover instead of quietly covering less.
+#[cfg(test)]
+pub fn skip_on_postgres(what: &str) -> bool {
+    if std::env::var("TEST_DATABASE_URL").is_ok() {
+        println!("skipped on PostgreSQL: {what}");
+        return true;
+    }
+    false
+}
+
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.
 ///
 /// The search path has to travel in the connection options, not in a `SET`

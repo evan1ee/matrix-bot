@@ -317,41 +317,48 @@ to call `test_pool()` also rewrote the SQLite fallback *inside `test_pool`
 itself*, producing infinite recursion. `rustc` caught it as "recursion in an
 async fn requires boxing". A bulk rewrite has to exclude its own target.
 
-### Where the PostgreSQL suite actually stands
+### Where the PostgreSQL suite stands
 
-**594 of 719 pass; 125 fail.** SQLite remains 719/719. The CI job is
-`continue-on-error: true` until that reaches zero — visible and reporting, not
-blocking. Leaving it out until it were green would be worse: this job is what
-found every dialect defect listed below.
+**721 of 721 pass on both dialects.** The CI job is blocking, not
+`continue-on-error`. Seven tests skip on PostgreSQL and say so on stdout:
+`db::backfill`'s fixtures build a legacy *SQLite* database by hand, and the
+`accounts`/`db::schema` guards read `sqlite_master` to derive the table list
+from the live schema. Those are about SQLite itself, not about this project's
+behaviour on a database.
 
-Production defects it found and that are now fixed:
+Getting there took fixing 30-odd distinct defects that SQLite accepted
+silently. The ones in production code:
 
-| Defect | Why SQLite hid it |
+| Defect | The portable form |
 |---|---|
-| `randomblob(n)` in 14 places minting account ids, session tokens, recovery and link codes, MCP and webhook tokens | SQLite-only function. Now `utils::random`, so a token's entropy no longer depends on the deployed database |
-| `briefing_enabled` and `is_active` declared `BIGINT` but read as `bool` | SQLite stores a boolean as an integer; PostgreSQL refuses. **Introduced by my own stage 4 `INTEGER` → `BIGINT` sweep** |
-| `next_due_at` declared `TIMESTAMPTZ` but read as `String` | Same cause: the stage 4 `TIMESTAMP` → `TIMESTAMPTZ` sweep assumed every timestamp column is a `DateTime<Utc>`; this one is not |
+| `randomblob(n)` in 14 places minting account ids, session tokens, recovery and link codes, MCP and webhook tokens | `utils::random` |
+| `id_hash IS NOT ?` — SQLite's null-safe inequality, in "revoke my other sessions" | `IS DISTINCT FROM` |
+| `UPDATE OR IGNORE` / `INSERT OR IGNORE` | `move_rows` with savepoints / `ON CONFLICT DO NOTHING` |
+| `last_insert_rowid()` | `RETURNING id` |
+| `datetime('now')`, `strftime('%s', …)` | `CAST(CURRENT_TIMESTAMP AS TEXT)`, and a cutoff computed in Rust |
+| `COLLATE NOCASE` | `LOWER(...)` |
+| `ON CONFLICT DO UPDATE SET balance_minor = balance_minor + excluded.…` — ambiguous on PostgreSQL | qualify with the table name |
+| `SUM(bigint)` returns `NUMERIC` on PostgreSQL | `CAST(SUM(…) AS BIGINT)` |
+| `SELECT 1` is `INT4`, not `INT8` | `CAST(1 AS BIGINT)` |
+| `date(x)` returns a `date`, not text — broke a `UNION` and every `date(x) = ?` | `CAST(date(x) AS TEXT)` |
+| `substr(timestamp, …)` | `substr(CAST(… AS TEXT), …)` |
+| `occurred_at >= '<string>'` — a timestamp compared to text | bind a real `DateTime<Utc>` |
+| Boolean columns compared and inserted as `0`/`1` | `TRUE`/`FALSE` |
 
-The two schema errors above are worth dwelling on: a blanket type sweep is
-exactly the kind of change that looks safe on a dynamically typed database and
-is not. Both were caught here and nowhere else.
+And the column types, every one of which **my own stage 4 blanket sweeps got
+wrong**: `briefing_enabled`/`is_active` widened to `BIGINT` but read as `bool`;
+`currency_exponent` read as both `i32` and `i64` in different modules;
+`due_day`/`paid_installments`/`total_installments` genuinely `i32`;
+`latitude`/`longitude`/`temperature` declared `REAL` (float4) but read as `f64`;
+`next_due_at`, and `created_at`/`updated_at` on six tables, declared as
+timestamps but read as `String`. A blanket type sweep looks safe on a
+dynamically typed database and is not.
 
-Remaining failures, by cause:
-
-| Cause | Distinct errors | Kind |
-|---|---|---|
-| Test fixtures inserting `0`/`1` into a `BOOLEAN` column | 13 | test-only |
-| `next_due_at` bound as text in fixtures | 9 | test-only |
-| Fixtures creating tables with `AUTOINCREMENT` | 6 | test-only |
-| Guard tests reading `sqlite_master` | 4 | SQLite-only by nature; should skip on Postgres |
-| Fixtures calling `datetime()` | 2 | test-only |
-| One `syntax error at or near "$3"` | 1 | **unexplained — investigate before trusting the renderer** |
-
-Most of the 125 cascade from those ~36 root errors. The one that deserves a
-look before anything else is the `$3` syntax error: every other entry is a
-fixture written in SQLite dialect, but that one could mean
-`render_placeholders` emits invalid SQL for some statement shape, which would
-be a production bug rather than a test one.
+One difference is inherent rather than a defect: PostgreSQL's `TIMESTAMPTZ`
+holds microseconds where `DateTime<Utc>` holds nanoseconds, so a round-tripped
+instant differs in the last three digits. `utils::time::now_at_storage_precision`
+exists for tests that assert on a round-tripped timestamp, which are asserting
+on scheduling rather than on storage precision.
 
 ### Also worth recording
 
@@ -387,3 +394,12 @@ the wrong kind of confident.
 into PostgreSQL. Pointing `DATABASE_URL` at a PostgreSQL server creates a fresh
 schema; existing rows stay where they are. The README says so in a note rather
 than leaving it to be discovered.
+
+## Status
+
+All eight stages are complete. `DATABASE_URL` picks SQLite or PostgreSQL, the
+full suite passes on both, and CI runs both on every pull request with the
+PostgreSQL job blocking.
+
+Still deliberately absent: **nothing migrates an existing SQLite database into
+PostgreSQL.** Switching `DATABASE_URL` creates a fresh schema.

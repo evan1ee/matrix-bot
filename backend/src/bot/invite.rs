@@ -23,7 +23,7 @@ pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<Str
                 let is_linked = crate::db_scalar_optional!(
                     &db.pool,
                     i64,
-                    "SELECT 1 FROM matrix_links WHERE mxid = ?",
+                    "SELECT CAST(1 AS BIGINT) FROM matrix_links WHERE mxid = ?",
                     sender
                 )
                 .ok()

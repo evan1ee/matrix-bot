@@ -65,6 +65,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_creates_every_table() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master to list tables") {
+            return;
+        }
         let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
@@ -93,6 +96,9 @@ mod tests {
     /// It must be safe to apply repeatedly to an already-migrated database.
     #[tokio::test]
     async fn test_migrations_are_idempotent() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master to list tables") {
+            return;
+        }
         let pool = crate::db::pool::test_pool().await;
 
         run_migrations(&pool).await.unwrap();
@@ -117,7 +123,7 @@ mod tests {
         crate::db_execute!(
             &pool,
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('web', '@a:x', 'a', 'keep me', 'medium', 0)"
+             VALUES ('web', '@a:x', 'a', 'keep me', 'medium', FALSE)"
         )
         .unwrap();
 

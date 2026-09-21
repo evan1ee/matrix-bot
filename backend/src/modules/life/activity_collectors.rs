@@ -56,7 +56,7 @@ pub(crate) async fn query_todos(
         pool,
         TodoRow,
         "SELECT text, priority, completed, created_at \
-         FROM todos WHERE owner_id = ? AND date(created_at) = ?",
+         FROM todos WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ?",
         owner,
         date
     )
@@ -93,7 +93,7 @@ pub(crate) async fn query_todos(
         pool,
         TodoRow,
         "SELECT text, priority, completed, created_at \
-         FROM todos WHERE owner_id = ? AND date(due_at) = ? AND date(created_at) != ?",
+         FROM todos WHERE owner_id = ? AND CAST(date(due_at) AS TEXT) = ? AND CAST(date(created_at) AS TEXT) != ?",
         owner,
         date,
         date
@@ -143,7 +143,7 @@ pub(crate) async fn query_finance(
                 c.name AS category_name, t.note, t.occurred_at \
          FROM transactions t \
          LEFT JOIN finance_categories c ON c.id = t.category_id \
-         WHERE t.owner_id = ? AND date(t.occurred_at) = ? \
+         WHERE t.owner_id = ? AND CAST(date(t.occurred_at) AS TEXT) = ? \
          ORDER BY t.occurred_at",
         owner,
         date
@@ -211,7 +211,7 @@ pub(crate) async fn query_portfolio(
         "SELECT action, symbol, quantity_minor, amount_minor, \
                 currency, currency_exponent, created_at \
          FROM portfolio_audit_log \
-         WHERE owner_id = ? AND date(created_at) = ? \
+         WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ? \
          ORDER BY created_at",
         owner,
         date
@@ -315,7 +315,7 @@ pub(crate) async fn query_reminders(
         ReminderRow,
         "SELECT message, trigger_at, status \
          FROM reminders \
-         WHERE owner_id = ? AND date(trigger_at) = ? \
+         WHERE owner_id = ? AND CAST(date(trigger_at) AS TEXT) = ? \
          ORDER BY trigger_at",
         owner,
         date
@@ -360,7 +360,7 @@ pub(crate) async fn query_bookmarks(
         BookmarkRow,
         "SELECT title, domain, created_at \
          FROM bookmarks \
-         WHERE owner_id = ? AND date(created_at) = ? \
+         WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ? \
          ORDER BY created_at",
         owner,
         date

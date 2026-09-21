@@ -120,7 +120,7 @@ impl RecurringBillRepository {
             SET name = ?, category = ?, amount_minor = ?, currency = ?, frequency = ?,
                 due_day = ?, next_due_at = ?, total_installments = ?, paid_installments = ?,
                 auto_pay = ?, status = ?, notes = ?, remind_before_minutes = ?,
-                remind_room_id = ?, updated_at = CURRENT_TIMESTAMP
+                remind_room_id = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?;
             "#,
             &name,
@@ -187,7 +187,7 @@ impl RecurringBillRepository {
             pool,
             r#"
             UPDATE recurring_bills
-            SET paid_installments = ?, next_due_at = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+            SET paid_installments = ?, next_due_at = ?, status = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?;
             "#,
             new_paid_installments,

@@ -64,7 +64,7 @@ mod tests {
             account_id: account_id.to_string(),
             display_name: account_id.to_string(),
             session_id_hash: "sess_hash".to_string(),
-            last_verified_at: chrono::Utc::now(),
+            last_verified_at: crate::utils::time::now_at_storage_precision(),
             restricted_until: None,
         }
     }
@@ -92,7 +92,7 @@ mod tests {
         let (state, pool) = create_test_state().await;
 
         crate::db_execute!(&pool, "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) \
-             VALUES ('!r', 'user1', 'Alice', 'Buy groceries', 'high', 0, '2026-09-06 09:15:00')")
+             VALUES ('!r', 'user1', 'Alice', 'Buy groceries', 'high', FALSE, '2026-09-06 09:15:00')")
         .unwrap();
 
         let user = test_user("user1");

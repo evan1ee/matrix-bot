@@ -55,7 +55,7 @@ async fn handle_list_alerts(pool: &DbPool, owner_id: &str) -> String {
         } else {
             "<strong>Active</strong>"
         };
-        let target_fmt = (a.target_price_minor as f64) / 10f64.powi(a.currency_exponent);
+        let target_fmt = (a.target_price_minor as f64) / 10f64.powi(a.currency_exponent as i32);
         out.push_str(&format!(
             "<li>#{} <strong>{}</strong> {} {:.2} {} — {}</li>",
             a.id,
@@ -129,15 +129,15 @@ async fn handle_create_alert(
             Ok(c) => c,
             Err(e) => return format!("<p>{}</p>", html_escape(&e.to_string())),
         };
-        let exp = exponent_for(&cur);
+        let exp = i64::from(exponent_for(&cur));
         (cur, exp)
     } else {
         let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-        let exp = exponent_for(&settings.currency);
+        let exp = i64::from(exponent_for(&settings.currency));
         (settings.currency, exp)
     };
 
-    let target_price_minor = match parse_amount(raw_price, exponent) {
+    let target_price_minor = match parse_amount(raw_price, exponent as u32) {
         Ok(p) if p > 0 => p,
         _ => return "<p>Invalid price. Enter a positive decimal number, e.g. <code>150.00</code>.</p>".to_string(),
     };
@@ -148,7 +148,7 @@ async fn handle_create_alert(
         &symbol,
         target_price_minor,
         &currency,
-        exponent as i32,
+        exponent,
         condition,
     )
     .await
