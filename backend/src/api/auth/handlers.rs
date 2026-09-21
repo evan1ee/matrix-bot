@@ -276,7 +276,9 @@ mod tests {
     #[tokio::test]
     async fn test_media_proxy_rejects_malformed_input_before_any_request() {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),

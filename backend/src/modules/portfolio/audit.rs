@@ -193,9 +193,15 @@ pub async fn absorb_ledger(
         return Ok(0);
     }
 
-    sqlx::query("DROP TRIGGER IF EXISTS prevent_portfolio_audit_update")
-        .execute(&mut *conn)
-        .await?;
+    // `crate::db::ddl` is the single source for these statements so the schema
+    // and this drop/restore pair cannot drift apart. Pinned to SQLite because
+    // this function still takes a `SqliteConnection`; it moves to the pool's
+    // dialect when transactions convert in stage 6.
+    sqlx::query(&crate::db::ddl::drop_audit_update_trigger(
+        crate::db::Dialect::Sqlite,
+    ))
+    .execute(&mut *conn)
+    .await?;
 
     sqlx::query("UPDATE portfolio_audit_log SET owner_id = ? WHERE owner_id = ?")
         .bind(into)
@@ -259,9 +265,9 @@ pub async fn absorb_ledger(
         prev = entry_hash;
     }
 
-    sqlx::query(crate::db::schema_portfolio::AUDIT_UPDATE_TRIGGER)
-        .execute(&mut *conn)
-        .await?;
+    for statement in crate::db::ddl::audit_update_trigger(crate::db::Dialect::Sqlite) {
+        sqlx::query(&statement).execute(&mut *conn).await?;
+    }
 
     Ok(moved)
 }
@@ -394,7 +400,9 @@ mod tests {
 
     async fn pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         pool
     }
 

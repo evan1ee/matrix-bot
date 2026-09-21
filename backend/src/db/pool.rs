@@ -69,6 +69,42 @@ pub async fn connect_pool(database_url: &str, max_connections: u32) -> Result<Db
     }
 }
 
+/// The PostgreSQL URL the `#[ignore]`d live tests connect to.
+///
+/// Lives here because `config.rs`'s "only config reads the environment" guard
+/// allow-lists this file, and duplicating the read into other modules would
+/// mean growing that list further.
+#[cfg(test)]
+pub fn pg_test_url() -> String {
+    std::env::var("PG_TEST_URL").expect("PG_TEST_URL must be set for the live PostgreSQL tests")
+}
+
+/// A pool pointed at a throwaway PostgreSQL schema, for the live tests.
+///
+/// The search path has to travel in the connection options, not in a `SET`
+/// statement: a `SET` applies to one session, and a pool hands successive
+/// queries to different connections. That is not hypothetical — it is how the
+/// first run of these tests failed, creating `matrix_links` on one connection
+/// and then looking for it from another.
+#[cfg(test)]
+pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
+    let base = pg_test_url();
+    let admin = connect_pool(&base, 1).await.expect("admin pool");
+    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
+    crate::db_execute!(&admin, &format!("CREATE SCHEMA {schema}")).unwrap();
+
+    let separator = if base.contains('?') { "&" } else { "?" };
+    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
+    connect_pool(&scoped, 2).await.expect("scoped pool")
+}
+
+/// Drops a schema created by `connect_pg_schema`.
+#[cfg(test)]
+pub async fn drop_pg_schema(schema: &str) {
+    let admin = connect_pool(&pg_test_url(), 1).await.expect("admin pool");
+    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
+}
+
 impl Database {
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self> {
         info!("Connecting to database at {}", database_url);
@@ -89,7 +125,7 @@ impl Database {
 
         let pool = connect_pool(database_url, max_connections).await?;
 
-        schema::run_migrations(pool.sqlite_or_err()?)
+        schema::run_migrations(&pool)
             .await
             .context("Failed to execute database migrations")?;
 
@@ -189,18 +225,20 @@ mod tests {
     /// are gated:
     ///
     /// ```text
-    /// docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:16
+    /// docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:18
     /// PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres \
     ///   cargo test --package matrix-bot connects_to_a_live_postgres -- --ignored
     /// ```
     #[tokio::test]
     #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
     async fn test_connect_pool_connects_to_a_live_postgres() {
-        let url = std::env::var("PG_TEST_URL").expect("PG_TEST_URL must be set for this test");
+        let url = pg_test_url();
         let pool = connect_pool(&url, 2).await.expect("should connect");
         assert_eq!(pool.dialect(), Dialect::Postgres);
 
-        let one: i64 = crate::db_fetch_scalar!(&pool, i64, "SELECT 1").unwrap();
+        // `SELECT 1` is int4 on PostgreSQL and will not decode into i64 — the
+        // same mismatch that made the schema use BIGINT everywhere.
+        let one: i64 = crate::db_fetch_scalar!(&pool, i64, "SELECT 1::bigint").unwrap();
         assert_eq!(one, 1, "the pool must actually answer a query");
     }
 }

@@ -287,7 +287,9 @@ mod tests {
     #[tokio::test]
     async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 

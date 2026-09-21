@@ -1,7 +1,9 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
+use crate::db_ddl;
 
-pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
+    db_ddl!(
+        pool,
         r#"
         CREATE TABLE IF NOT EXISTS ai_user_configs (
             owner_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -10,7 +12,7 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             model_name TEXT,
             system_prompt TEXT,
             temperature REAL DEFAULT 0.7,
-            max_tokens INTEGER DEFAULT 2048,
+            max_tokens BIGINT DEFAULT 2048,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -37,10 +39,8 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         CREATE INDEX IF NOT EXISTS idx_ai_messages_conv_created 
         ON ai_messages(conversation_id, created_at);
-        "#,
-    )
-    .execute(pool)
-    .await?;
+        "#
+    )?;
 
     Ok(())
 }

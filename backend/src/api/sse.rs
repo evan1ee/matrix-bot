@@ -104,7 +104,9 @@ mod tests {
     #[tokio::test]
     async fn test_the_stream_requires_a_session() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = test_state(pool.clone());
 
         let account = AccountRepository::create(&pool, "evan", "active")

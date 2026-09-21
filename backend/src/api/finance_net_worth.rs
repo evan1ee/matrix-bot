@@ -44,7 +44,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_net_worth_api_handler() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let state = ApiState::new(
             crate::db::Database {

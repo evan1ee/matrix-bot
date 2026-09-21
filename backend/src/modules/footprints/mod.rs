@@ -76,9 +76,7 @@ mod tests {
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(db.sqlite_pool())
-            .await
-            .unwrap();
+        crate::db::schema::run_migrations(&db.pool).await.unwrap();
         let account_id = crate::accounts::AccountRepository::resolve_or_provision(
             db.sqlite_pool(),
             "@traveler:mbm.one",

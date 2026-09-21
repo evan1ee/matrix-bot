@@ -137,7 +137,9 @@ mod tests {
 
     async fn setup_state() -> (ApiState, AuthUser) {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
             crate::db::Database {

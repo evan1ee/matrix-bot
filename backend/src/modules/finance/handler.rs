@@ -535,7 +535,9 @@ mod tests {
     #[tokio::test]
     async fn test_finance_alias_and_rm() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // Add expense via !expense add
         let add_res = handle_finance_command(
@@ -570,7 +572,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let broadcaster = crate::events::EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
@@ -602,7 +606,9 @@ mod tests {
     #[tokio::test]
     async fn test_expense_add_refuses_an_unknown_category() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let reply = handle_finance_command(
             &pool,

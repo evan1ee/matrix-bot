@@ -193,7 +193,9 @@ mod step_up_tests {
 
     async fn app_with_session(verified_minutes_ago: i64) -> (Router, String) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
             .await

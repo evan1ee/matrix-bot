@@ -1,4 +1,5 @@
 pub mod backfill;
+pub mod ddl;
 pub mod dialect;
 pub mod dialect_probe;
 pub mod executor;

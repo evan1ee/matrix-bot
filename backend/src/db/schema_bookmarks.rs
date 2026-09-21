@@ -1,10 +1,12 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
+use crate::db_ddl;
 
-pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
+    db_ddl!(
+        pool,
         r#"
         CREATE TABLE IF NOT EXISTS bookmarks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {{PK}},
             owner_id TEXT NOT NULL,
             url TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -13,29 +15,24 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             image_url TEXT,
             domain TEXT NOT NULL,
             reader_content TEXT,
-            reading_time_minutes INTEGER DEFAULT 1,
-            is_favorite BOOLEAN NOT NULL DEFAULT 0,
-            is_archived BOOLEAN NOT NULL DEFAULT 0,
+            reading_time_minutes BIGINT DEFAULT 1,
+            is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
             tags TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        "#,
-    )
-    .execute(pool)
-    .await?;
+        "#
+    )?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_bookmarks_owner ON bookmarks(owner_id);")
-        .execute(pool)
-        .await?;
+    db_ddl!(
+        pool,
+        "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner ON bookmarks(owner_id);"
+    )?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_archived ON bookmarks(owner_id, is_archived);")
-        .execute(pool)
-        .await?;
+    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_archived ON bookmarks(owner_id, is_archived);")?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_favorite ON bookmarks(owner_id, is_favorite);")
-        .execute(pool)
-        .await?;
+    db_ddl!(pool, "CREATE INDEX IF NOT EXISTS idx_bookmarks_owner_favorite ON bookmarks(owner_id, is_favorite);")?;
 
     Ok(())
 }

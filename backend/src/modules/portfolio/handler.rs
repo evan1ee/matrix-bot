@@ -289,7 +289,9 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_empty_holdings() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
             .await
@@ -300,7 +302,9 @@ mod tests {
     #[tokio::test]
     async fn test_record_holding_without_cash() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let reply = handle_portfolio_command(
             &pool,

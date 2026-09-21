@@ -61,7 +61,9 @@ mod tests {
     #[tokio::test]
     async fn test_health_check() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),

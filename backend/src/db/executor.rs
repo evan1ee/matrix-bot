@@ -68,13 +68,16 @@ pub use crate::db::dialect::render_placeholders as __render;
 #[macro_export]
 macro_rules! db_fetch_all {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the end of
+        // this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
             }
         }
@@ -85,13 +88,16 @@ macro_rules! db_fetch_all {
 #[macro_export]
 macro_rules! db_fetch_optional {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the end of
+        // this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
             }
         }
@@ -102,13 +108,16 @@ macro_rules! db_fetch_optional {
 #[macro_export]
 macro_rules! db_fetch_one {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the end of
+        // this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
                 sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
         }
@@ -119,13 +128,16 @@ macro_rules! db_fetch_one {
 #[macro_export]
 macro_rules! db_fetch_scalar {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        // Bound first: `let x = &format!(..)` extends the temporary to the end of
+        // this block, where using it inline would drop it mid-statement.
+        let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
                 sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
                 sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
             }
         }
@@ -140,14 +152,15 @@ macro_rules! db_fetch_scalar {
 #[macro_export]
 macro_rules! db_execute {
     ($pool:expr, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
         match $pool {
             $crate::db::DbPool::Sqlite(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Sqlite);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Sqlite);
                 sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await
                     .map(|r| r.rows_affected())
             }
             $crate::db::DbPool::Postgres(__p) => {
-                let __sql = $crate::db::executor::__render($sql, $crate::db::dialect::Dialect::Postgres);
+                let __sql = $crate::db::executor::__render(__sql_src, $crate::db::dialect::Dialect::Postgres);
                 sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await
                     .map(|r| r.rows_affected())
             }

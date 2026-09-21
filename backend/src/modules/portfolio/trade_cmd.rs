@@ -405,7 +405,9 @@ mod tests {
     #[tokio::test]
     async fn test_a_matrix_buy_enforces_the_note_limit() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
         let args = format!("AAPL 10 @ 150.00 USD {}", over_limit_note);

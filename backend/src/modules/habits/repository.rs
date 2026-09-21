@@ -297,7 +297,7 @@ mod tests {
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_habits::create_tables(&pool)
+        crate::db::schema_habits::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
             .await
             .unwrap();
         pool

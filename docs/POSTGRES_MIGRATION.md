@@ -57,7 +57,7 @@ design is unsound and every model would need a second driver-specific mapping.
 | 1 | `dialect.rs`: `Dialect`, `render_placeholders` | **done** — `0c5faed` |
 | 2 | `executor.rs`: `DbPool` enum + the five macros | **done** — `6e39bd3` |
 | 3 | `pool.rs`: connect either driver from `DATABASE_URL` | **done** — see below |
-| 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | todo |
+| 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | **done** — see below |
 | 5 | Convert 553 query sites, module by module | todo |
 | 6 | Convert the 5 production transaction sites | todo |
 | 7 | Test harness runs both dialects; CI Postgres service | todo |
@@ -95,6 +95,8 @@ literal-skipping arm fails exactly the three tests written to catch it.
 
 Baseline at stage 2: **697 passed, 0 failed, 8 ignored.**
 Baseline at stage 3: **699 passed, 0 failed, 9 ignored.**
+Baseline at stage 4: **709 passed, 0 failed, 11 ignored**, plus 3 live
+PostgreSQL tests passing against PostgreSQL 18.6.
 
 ## Stage 3 notes
 
@@ -123,8 +125,63 @@ Desktop was not running on the development machine, so
 `#[ignore]`d and carries the exact command:
 
 ```bash
-docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:16
+docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:18
 PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres   cargo test --package matrix-bot connects_to_a_live_postgres -- --ignored
 ```
 
 Run it before trusting stage 3.
+
+## Stage 4 notes
+
+The whole schema now creates on a real PostgreSQL. `create_schema` was split out
+of `run_migrations` so it can be verified before `backfill` converts, and
+`test_the_whole_schema_creates_on_a_live_postgres` runs it twice to prove
+idempotence — which matters more on Postgres, since it has no
+`CREATE TRIGGER IF NOT EXISTS`.
+
+Most DDL stayed written once. `db/ddl.rs` substitutes **named tokens**
+(`{{PK}}`, `{{NOW_TEXT}}`) rather than pattern-matching SQL, so an unhandled
+construct leaves an unsubstituted token and fails loudly instead of being
+mistranslated. The audit-log triggers are written out per dialect, because
+PostgreSQL needs a `plpgsql` function plus a row trigger where SQLite needs one
+statement. `db/ddl.rs` is now the single source for those, so the schema and
+`absorb_ledger`'s drop/restore pair cannot drift — which the old
+`AUDIT_UPDATE_TRIGGER` comment warned about.
+
+The `ALTER TABLE ... ADD COLUMN` statements needed nothing: their errors were
+already discarded with `let _ =`, and Postgres's duplicate-column error is
+discarded the same way.
+
+### Four defects the live test caught that SQLite never would
+
+1. **`INTEGER` is `int4` on PostgreSQL.** Every model reads `i64`, so 58 columns
+   would have failed with `Rust type i64 (as SQL type INT8) is not compatible
+   with SQL type INT4` — and `amount_minor` would have capped money at about
+   2.1 billion minor units. All widened to `BIGINT`, which is a no-op on SQLite
+   (INTEGER affinity). Pinned by
+   `test_sqlite_round_trips_a_bigint_beyond_int4_range`.
+2. **`SET search_path` does not survive a pool.** It applies to one session, and
+   a pool hands successive queries to different connections, so
+   `matrix_links` was created on one and looked for from another. The search
+   path now travels in the connection options.
+3. **PostgreSQL refuses multiple commands in a prepared statement.** Four DDL
+   blocks bundle a `CREATE TABLE` with its indexes. `db_ddl!` now uses
+   `sqlx::raw_sql` (simple query protocol); DDL has no bind parameters, so
+   nothing is lost.
+4. **Temporaries died inside the macros.** `db_ddl!(pool, &format!(..))` dropped
+   the `format!` result mid-statement. The macros now bind the SQL expression in
+   a `let` first, which extends the temporary to the end of the block. This
+   would have recurred at stage 5 call sites.
+
+### Running the live tests
+
+```bash
+docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:18
+```
+
+```bash
+PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres cargo test --package matrix-bot live_postgres -- --ignored --test-threads=1
+```
+
+Each test works in a throwaway schema it creates and drops, so the tests neither
+depend on nor leave behind state.

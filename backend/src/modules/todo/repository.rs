@@ -369,7 +369,9 @@ mod tests {
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         pool
     }
 
@@ -489,7 +491,9 @@ mod tests {
             .await
             .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let migrated = TodoRepository::find(&pool, item.id).await.unwrap().unwrap();
         let due = migrated

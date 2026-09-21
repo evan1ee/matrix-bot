@@ -192,8 +192,12 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_auth::create_tables(&pool).await.unwrap();
-        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+        crate::db::schema_auth::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
+        crate::db::schema_mcp::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
             .execute(&pool)

@@ -544,9 +544,7 @@ mod tests {
 
     async fn setup_test() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(db.sqlite_pool())
-            .await
-            .unwrap();
+        crate::db::schema::run_migrations(&db.pool).await.unwrap();
         let owner = crate::accounts::AccountRepository::resolve_or_provision(
             db.sqlite_pool(),
             "@user:mbm.one",

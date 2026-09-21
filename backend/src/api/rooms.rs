@@ -89,7 +89,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),
@@ -108,7 +110,9 @@ mod tests {
     #[tokio::test]
     async fn test_cached_rooms_crud_and_list() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // Create account
         crate::accounts::AccountRepository::create_with_id(

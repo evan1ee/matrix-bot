@@ -223,7 +223,9 @@ mod tests {
     #[tokio::test]
     async fn test_room_repository_crud_and_resolution() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let account_id = "acct_test_rooms";
         crate::accounts::AccountRepository::create_with_id(

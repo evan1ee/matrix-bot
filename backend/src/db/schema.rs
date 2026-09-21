@@ -1,18 +1,35 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
+use crate::db_ddl;
 use tracing::info;
 
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::Error> {
     info!("Running database table schema initialization...");
 
+    create_schema(pool).await?;
+
+    // One-shot data conversions, kept out of the DDL because they are a
+    // different job: `create_schema` describes the shape of the database, and
+    // `backfill` rewrites what is already in it. That distinction is also what
+    // lets the PostgreSQL migration be verified before `backfill` converts —
+    // it is still on `&SqlitePool` until stage 5.
+    crate::db::backfill::run(pool.sqlite_or_err()?).await?;
+
+    info!("Database migrations applied successfully.");
+    Ok(())
+}
+
+/// Every `CREATE TABLE` / `CREATE INDEX` / `ALTER TABLE` in the project.
+///
+/// Separate from `run_migrations` so it can run against either database while
+/// `backfill` is still SQLite-only, which is what
+/// `test_the_whole_schema_creates_on_a_live_postgres` exercises.
+pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
     // The ownership column used to be called `sender_mxid`, because it held a
     // Matrix user ID. It now holds an `accounts.id`, so the old name actively
     // lies about what is in it. Renamed first, before anything reads or indexes it.
     for table in ["todos", "reminders", "transactions", "recurring_bills"] {
-        let _ = sqlx::query(&format!(
-            "ALTER TABLE {table} RENAME COLUMN sender_mxid TO owner_id;"
-        ))
-        .execute(pool)
-        .await;
+        let rename = format!("ALTER TABLE {table} RENAME COLUMN sender_mxid TO owner_id;");
+        let _ = db_ddl!(pool, &rename);
     }
 
     crate::db::schema_auth::create_tables(pool).await?;
@@ -32,20 +49,18 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::db::schema_bills::create_tables(pool).await?;
     crate::db::schema_reactions::create_tables(pool).await?;
 
-    // One-shot data conversions, kept out of the DDL above because they are a
-    // different job: this function describes the shape of the database, and
-    // `backfill` rewrites what is already in it.
-    crate::db::backfill::run(pool).await?;
-
-    info!("Database migrations applied successfully.");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::DbPool;
     use sqlx::SqlitePool;
 
+    /// Reads `sqlite_master`, so it is SQLite-only on purpose. The PostgreSQL
+    /// equivalent queries `information_schema` and arrives with the live
+    /// migration test in stage 7.
     async fn table_names(pool: &SqlitePool) -> Vec<String> {
         sqlx::query_scalar::<_, String>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -58,7 +73,9 @@ mod tests {
     #[tokio::test]
     async fn test_creates_every_table() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let tables = table_names(&pool).await;
         for expected in [
@@ -87,11 +104,17 @@ mod tests {
     async fn test_migrations_are_idempotent() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let first = table_names(&pool).await;
 
-        run_migrations(&pool).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let third = table_names(&pool).await;
 
         assert_eq!(
@@ -104,7 +127,9 @@ mod tests {
     #[tokio::test]
     async fn test_migrations_preserve_existing_data() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         sqlx::query(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
@@ -114,7 +139,9 @@ mod tests {
         .await
         .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let text: String = sqlx::query_scalar("SELECT text FROM todos")
             .fetch_one(&pool)
@@ -128,7 +155,9 @@ mod tests {
     #[tokio::test]
     async fn test_category_name_uniqueness_is_enforced_by_the_schema() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
             .execute(&pool)
@@ -149,5 +178,98 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+    }
+
+    /// The stage 4 acceptance test: every `CREATE TABLE` in this project, run
+    /// against a real PostgreSQL. Nothing short of this shows that the DDL
+    /// tokens, the portable spellings and the plpgsql trigger functions are
+    /// right — SQLite accepts plenty that Postgres rejects, and vice versa.
+    ///
+    /// `#[ignore]`d because it needs a live server:
+    ///
+    /// ```text
+    /// docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:18
+    /// PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres     ///   cargo test --package matrix-bot live_postgres -- --ignored --test-threads=1
+    /// ```
+    ///
+    /// It works in a throwaway schema so it neither depends on nor leaves
+    /// behind state, and so it can be run repeatedly.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_the_whole_schema_creates_on_a_live_postgres() {
+        let pool = crate::db::pool::connect_pg_schema("migration_check").await;
+
+        create_schema(&pool)
+            .await
+            .expect("the whole schema must create on PostgreSQL");
+
+        // Re-running must be a no-op, which is the promise every
+        // `IF NOT EXISTS` in the schema makes. Postgres has no
+        // CREATE TRIGGER IF NOT EXISTS, so this is really a test of the
+        // DROP-then-CREATE in `ddl::guard_trigger`.
+        create_schema(&pool)
+            .await
+            .expect("the schema must be idempotent on PostgreSQL");
+
+        let tables: Vec<String> = crate::db_fetch_all!(
+            &pool,
+            (String,),
+            "SELECT table_name FROM information_schema.tables              WHERE table_schema = 'migration_check' ORDER BY table_name"
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| r.0)
+        .collect();
+
+        for expected in [
+            "accounts",
+            "todos",
+            "reminders",
+            "transactions",
+            "recurring_bills",
+            "portfolio_holdings",
+            "portfolio_audit_log",
+            "user_settings",
+        ] {
+            assert!(
+                tables.iter().any(|t| t == expected),
+                "PostgreSQL schema is missing `{expected}`; got {tables:?}"
+            );
+        }
+
+        crate::db::pool::drop_pg_schema("migration_check").await;
+    }
+
+    /// The audit log must be append-only on PostgreSQL too, not merely have
+    /// triggers created. `accounts/merge.rs` depends on the UPDATE guard
+    /// firing, so a trigger that exists but does not abort would be worse than
+    /// none at all.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_the_audit_log_is_append_only_on_a_live_postgres() {
+        let pool = crate::db::pool::connect_pg_schema("trigger_check").await;
+        create_schema(&pool).await.unwrap();
+
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO portfolio_audit_log (owner_id, action, amount_minor, currency)              VALUES (?, ?, ?, ?)",
+            "acct_a",
+            "buy",
+            1_000_i64,
+            "USD"
+        )
+        .expect("an audit row must be insertable");
+
+        assert!(
+            crate::db_execute!(&pool, "UPDATE portfolio_audit_log SET owner_id = 'acct_b'")
+                .is_err(),
+            "PostgreSQL must refuse to update an audit row"
+        );
+        assert!(
+            crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log").is_err(),
+            "PostgreSQL must refuse to delete an audit row"
+        );
+
+        crate::db::pool::drop_pg_schema("trigger_check").await;
     }
 }

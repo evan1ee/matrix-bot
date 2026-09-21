@@ -303,7 +303,9 @@ mod tests {
     #[tokio::test]
     async fn test_completed_filter_narrows_both_items_and_total() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),
@@ -387,7 +389,9 @@ mod tests {
     #[tokio::test]
     async fn test_todo_api_crud_and_isolation() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),
@@ -463,7 +467,9 @@ mod tests {
     #[tokio::test]
     async fn test_completion_can_be_toggled_back_off() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),
@@ -544,7 +550,9 @@ mod tests {
     #[tokio::test]
     async fn test_local_account_cannot_reach_matrix_user_data() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),
@@ -655,7 +663,9 @@ mod tests {
 
     async fn due_reminder_state() -> ApiState {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),

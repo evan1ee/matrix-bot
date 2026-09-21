@@ -142,8 +142,12 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_lifecycle() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::db::schema_auth::create_tables(&pool).await.unwrap();
-        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+        crate::db::schema_auth::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
+        crate::db::schema_mcp::create_tables(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // Create a test account
         sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_1', 'Alice')")

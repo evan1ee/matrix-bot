@@ -1,9 +1,11 @@
 //! Schema for MCP personal access tokens.
 
-use sqlx::SqlitePool;
+use crate::db::DbPool;
+use crate::db_ddl;
 
-pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
+    db_ddl!(
+        pool,
         r#"
         CREATE TABLE IF NOT EXISTS mcp_tokens (
             id            TEXT PRIMARY KEY,
@@ -16,18 +18,18 @@ pub async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             expires_at    TIMESTAMP,
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         );
-        "#,
-    )
-    .execute(pool)
-    .await?;
+        "#
+    )?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tokens_hash ON mcp_tokens(token_hash);")
-        .execute(pool)
-        .await?;
+    db_ddl!(
+        pool,
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_hash ON mcp_tokens(token_hash);"
+    )?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mcp_tokens_account ON mcp_tokens(account_id);")
-        .execute(pool)
-        .await?;
+    db_ddl!(
+        pool,
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_account ON mcp_tokens(account_id);"
+    )?;
 
     Ok(())
 }

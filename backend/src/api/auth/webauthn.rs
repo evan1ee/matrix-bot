@@ -493,7 +493,9 @@ mod tests {
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),

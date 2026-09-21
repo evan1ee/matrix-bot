@@ -271,7 +271,9 @@ mod tests {
 
     #[sqlx::test]
     async fn test_set_reminder_with_local_time(pool: SqlitePool) {
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // Dated relative to the run: the service rejects a trigger time that has
 
@@ -306,7 +308,9 @@ mod tests {
 
     #[sqlx::test]
     async fn test_set_reminder_with_z_suffix(pool: SqlitePool) {
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // When an LLM sends a local time formatted as ISO-8601 with Z
         // Dated relative to the run: the service rejects a trigger time that has
@@ -337,7 +341,9 @@ mod tests {
 
     #[sqlx::test]
     async fn test_set_reminder_resolves_account_display_name(pool: SqlitePool) {
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let acct_id = crate::accounts::AccountRepository::create(
             &pool,

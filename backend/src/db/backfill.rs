@@ -289,7 +289,9 @@ mod tests {
     #[tokio::test]
     async fn test_backfill_converts_both_legacy_identity_spaces() {
         let pool = legacy_database().await;
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // The column itself was renamed, so the old name must be gone.
         let owners: Vec<String> = sqlx::query_scalar("SELECT DISTINCT owner_id FROM todos")
@@ -358,14 +360,20 @@ mod tests {
     async fn test_backfill_runs_once_however_often_migrations_run() {
         let pool = legacy_database().await;
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let after_first: Vec<String> = sqlx::query_scalar("SELECT id FROM accounts ORDER BY id")
             .fetch_all(&pool)
             .await
             .unwrap();
 
-        run_migrations(&pool).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let after_third: Vec<String> = sqlx::query_scalar("SELECT id FROM accounts ORDER BY id")
             .fetch_all(&pool)
             .await
@@ -395,7 +403,9 @@ mod tests {
             .await
             .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let account: Option<String> =
             sqlx::query_scalar("SELECT account_id FROM web_users WHERE username = 'quiet'")
@@ -437,7 +447,9 @@ mod tests {
             .await
             .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM todos")
             .fetch_one(&pool)
@@ -492,7 +504,9 @@ mod tests {
     #[tokio::test]
     async fn test_backfill_is_a_no_op_on_an_empty_database() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
             .fetch_one(&pool)

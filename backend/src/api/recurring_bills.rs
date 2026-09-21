@@ -365,7 +365,9 @@ mod tests {
     #[tokio::test]
     async fn test_bill_lead_time_schedules_rearms_and_tears_down() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -459,7 +461,9 @@ mod tests {
     #[tokio::test]
     async fn test_lead_time_is_validated_at_the_boundary() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -501,7 +505,9 @@ mod tests {
     #[tokio::test]
     async fn test_recurring_bills_api_flow() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
         let state = ApiState::new(
             crate::db::Database {
                 pool: crate::db::DbPool::Sqlite(pool),

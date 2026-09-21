@@ -245,7 +245,9 @@ mod tests {
             .await
             .unwrap();
 
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::schema::run_migrations(&crate::db::DbPool::Sqlite(pool.clone()))
+            .await
+            .unwrap();
 
         // Insert a transaction (ledger cash: $50.00 USD)
         sqlx::query(
