@@ -1,4 +1,6 @@
 pub mod backfill;
+pub mod dialect;
+pub mod dialect_probe;
 pub mod pool;
 pub mod rooms;
 pub mod schema;
