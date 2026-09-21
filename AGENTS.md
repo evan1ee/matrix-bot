@@ -38,10 +38,13 @@ This document defines the architectural conventions, coding rules, frontend desi
      - `scheduler.rs`: (Optional) Background worker tasks
 
 4. **Database & SQLx Persistence Rules**:
-   - Use runtime SQLx query binding (`sqlx::query(...)` and `sqlx::query_as::<_, Model>(...)`) with `.bind(...)` rather than compile-time checked macros (`query!`) to allow seamless DB connection switching without compile-time database URL requirements.
+   - **Never call `sqlx::query*` directly.** Every query goes through the dual-dialect macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_all!`, `db_scalar_one!`, `db_scalar_optional!`, `db_execute!`, and the `tx_*` family inside a transaction. They take a `&DbPool` (or `&mut DbTx`), dispatch on the live driver, and rewrite `?` placeholders to `$1..$n` for PostgreSQL. Write the SQL once, in SQLite's `?` style. Pass `_` as the row type where it is inferred from context.
+   - Compile-time checked macros (`query!`) remain banned: they need a database URL at build time, which would defeat both the dual-dialect layer and an offline build.
+   - Keep SQL portable. `last_insert_rowid()`, `randomblob()`, `datetime()`, `INSERT OR IGNORE`, `UPDATE OR IGNORE`, `PRAGMA` and `sqlite_master` are SQLite-only. Use `RETURNING id`, `utils::random`, `CURRENT_TIMESTAMP`, `ON CONFLICT DO NOTHING` and `information_schema` instead. A boolean column takes `TRUE`/`FALSE`, never `0`/`1`.
+   - New DDL uses `BIGINT` for anything read as an `i64`, `BOOLEAN` for a `bool`, and `TIMESTAMPTZ` for a `DateTime<Utc>`. PostgreSQL's `INTEGER` is `i32` and its `TIMESTAMP` carries no time zone; SQLite accepts either spelling, so only the PostgreSQL CI job catches a mismatch.
    - Always run table DDL migrations using `CREATE TABLE IF NOT EXISTS` and backwards-compatible `ALTER TABLE` statements in modular schema files (`backend/src/db/schema_*.rs`) orchestrated through [`backend/src/db/schema.rs`](backend/src/db/schema.rs).
    - Never couple domain repositories or bot modules to API modules: room caching and resolution must reside in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs) so all layers access rooms without inverted dependencies.
-   - SQLite pools must be initialized with `WAL` journal mode (`journal_mode=WAL`), `busy_timeout=5000`, and configurable max connections via `DATABASE_MAX_CONNECTIONS`.
+   - SQLite pools must be initialized with `WAL` journal mode (`journal_mode=WAL`), `busy_timeout=5000`, and configurable max connections via `DATABASE_MAX_CONNECTIONS`. PostgreSQL pools take the same connection limit and nothing else — the server owns its storage.
 
 5. **Matrix Response & Formatting Rules**:
    - Always construct Matrix responses using HTML formatting (`RoomMessageEventContent::text_html(&plain_text, &reply_html)`).

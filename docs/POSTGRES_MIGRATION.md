@@ -61,7 +61,7 @@ design is unsound and every model would need a second driver-specific mapping.
 | 5 | Convert 553 query sites, module by module | **done** — see below |
 | 6 | Convert the 5 production transaction sites | **done** — see below |
 | 7 | Test harness runs both dialects; CI Postgres service | **done** — see below |
-| 8 | Docs, `.env.example`, `docker-compose.yml` | todo |
+| 8 | Docs, `.env.example`, `docker-compose.yml` | **done** — see below |
 
 Stages 3–6 are done and **the scaffolding is gone**: `DbPool::sqlite_or_err()`,
 `Database::sqlite_pool()` and the boot-time refusal of a Postgres URL were all
@@ -359,3 +359,31 @@ The first PostgreSQL run showed **265 failures from "could not resize shared
 memory segment"** — Docker's default 64 MB `/dev/shm`, not a code problem at
 all. `--shm-size=1g` on the container fixed it. Without checking, that would
 have read as "PostgreSQL does not work".
+
+## Stage 8 notes
+
+`.env.example` documents the PostgreSQL URL beside the SQLite default.
+`docker-compose.yml` gains a `postgres` service behind a **profile**, so
+`docker compose up` still starts one container and the SQLite path is
+untouched; `--profile postgres` adds the database. `depends_on` uses
+`required: false` so the default run does not drag in a container it has no use
+for, and the service sets `shm_size: 1gb` — Docker's 64 MB default surfaces as
+"could not resize shared memory segment", which names nothing useful.
+
+`AGENTS.md` now bans calling `sqlx::query*` directly and lists the portability
+rules that only the PostgreSQL CI job enforces. `CLAUDE.md` gains a "Two
+databases, one set of queries" section covering the macro layer, why
+`sqlx::Any` cannot do the job, the DDL tokens, and `move_rows`.
+
+The README documents the switch, adds a Compose recipe, and marks the
+PostgreSQL roadmap item shipped. Its feature bullet deliberately does **not**
+claim every feature works on PostgreSQL: what is verified is the boot path,
+migrations, a repository round-trip and a merge collision, all against
+PostgreSQL 18.6. The bullet says that and links here for the rest, because
+125 tests still fail on PostgreSQL and a README that glossed over it would be
+the wrong kind of confident.
+
+**Not done, and not attempted:** nothing migrates an existing SQLite database
+into PostgreSQL. Pointing `DATABASE_URL` at a PostgreSQL server creates a fresh
+schema; existing rows stay where they are. The README says so in a note rather
+than leaving it to be discovered.

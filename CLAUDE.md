@@ -310,7 +310,66 @@ Selling the full quantity held deletes the row — average cost has no meaning f
 
 Two one-shot conversions live there and are guarded rather than versioned, since there is no migration table. `backfill_accounts` runs only when `accounts` is empty and converts legacy `owner_id` values onto real accounts. After it, any `active` account holding no passkey is demoted to `unclaimed` — passwords are gone, so calling it active would assert something the schema can no longer honour. Ordering matters: the demotion must run *after* the backfill that creates those rows.
 
-The ownership column was renamed `sender_mxid` → `owner_id` on `todos`, `reminders`, `transactions` and `recurring_bills`. The renames run *first*, before any index or read touches the column, and are best-effort so a fresh database (no table) and an already-migrated one (already renamed) both no-op. Use runtime-bound queries (`sqlx::query_as::<_, Model>(...).bind(...)`), never the `query!` macros — the project avoids compile-time DB connections.
+The ownership column was renamed `sender_mxid` → `owner_id` on `todos`, `reminders`, `transactions` and `recurring_bills`. The renames run *first*, before any index or read touches the column, and are best-effort so a fresh database (no table) and an already-migrated one (already renamed) both no-op.
+
+### Two databases, one set of queries
+
+`DATABASE_URL` picks SQLite or PostgreSQL at boot and everything else follows.
+SQLite stays the default: the standalone binary and `docker run` with a volume
+need no server. Postgres is a supported target, not a compatibility shim.
+
+**Never call `sqlx::query*` directly.** `db/executor.rs` holds `DbPool` (an enum
+over both drivers) and the macros every call site uses — `db_fetch_all!`,
+`db_fetch_one!`, `db_fetch_optional!`, `db_scalar_all!`, `db_scalar_one!`,
+`db_scalar_optional!`, `db_execute!`, plus `db_fetch_all_dyn!` for the few list
+endpoints whose bind count depends on which filters a request carries, and a
+`tx_*` family taking `&mut DbTx`. SQL is written once in SQLite's `?` style and
+`dialect::render_placeholders` rewrites it to `$1..$n` for Postgres. Pass `_` as
+the row type where context infers it.
+
+`sqlx::Any` cannot do this job, which is measured rather than assumed: its type
+set in 0.7 is `Null, Bool, SmallInt, Integer, BigInt, Real, Double, Text, Blob`
+— **no chrono** — so every `DateTime<Utc>` column would regress to `String`,
+which `schema_todos.rs` records as a bug already fixed once. What makes the
+macro approach work instead is that one `#[derive(FromRow)]` model satisfies
+both `SqliteRow` and `PgRow`; `db/dialect_probe.rs` asserts that at compile
+time, and if it ever stops compiling this design is unsound.
+
+`db/ddl.rs` carries the DDL that has no shared spelling, through **named
+tokens** (`{{PK}}`, `{{NOW_TEXT}}`) rather than pattern-matching SQL: an
+unhandled construct then leaves an unsubstituted token and fails loudly instead
+of being mistranslated. The audit-log triggers are written out per dialect,
+because PostgreSQL has no `CREATE TRIGGER IF NOT EXISTS` and needs a `plpgsql`
+function behind each guard.
+
+Portability rules that only the PostgreSQL CI job enforces, because SQLite
+accepts every violation silently:
+
+- `BIGINT` for anything read as `i64` (Postgres `INTEGER` is `i32`), `BOOLEAN`
+  for a `bool`, `TIMESTAMPTZ` for a `DateTime<Utc>` (bare `TIMESTAMP` carries no
+  zone). Three columns were wrong on exactly this and were caught only there.
+- `TRUE`/`FALSE` for a boolean, never `0`/`1`.
+- No `last_insert_rowid()` (use `RETURNING id`), `randomblob()` (use
+  `utils::random`), `datetime()`, `INSERT OR IGNORE` (use `ON CONFLICT DO
+  NOTHING`), `PRAGMA` or `sqlite_master`.
+
+`accounts::merge::move_rows` replaces `UPDATE OR IGNORE`, which Postgres has no
+equivalent of. It tries the bulk update in a savepoint and falls back to moving
+rows one at a time only on a unique violation. All-or-nothing would lose data:
+if `from` has "food" and "travel" while `into` already has "food", **"travel"
+must still transfer**. It deliberately enumerates no constraints — the database
+reports the collision — because the comment it replaced named four
+unique-constrained tables when the schema has seven.
+
+Identifiers and secrets come from `utils::random`, not the database. That began
+as a portability fix for `randomblob` but is the right shape anyway: a session
+token's unguessability should not depend on which database was deployed.
+
+Tests run on either. `db::pool::test_pool()` returns in-memory SQLite by
+default and, with `TEST_DATABASE_URL` set, a PostgreSQL pool in a schema of its
+own — the suite runs in parallel and `search_path` belongs to a connection, not
+a statement. CI runs both. See `docs/POSTGRES_MIGRATION.md`, including the
+PostgreSQL suite's current pass count and what is still failing.
 
 ### Frontend module mirror
 

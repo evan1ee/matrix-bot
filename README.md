@@ -25,13 +25,14 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
 - 🔊 **Voice replies** — `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus with waveform), synthesized entirely offline by sherpa-onnx Kokoro (English + Mandarin, 103 voices, per-language lexicons and Chinese text normalization). Every user picks their own voice; no cloud TTS API and no second ML runtime.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
+- 🗄️ **SQLite or PostgreSQL** — one `DATABASE_URL` picks the database; no application code is dialect-specific. SQLite is the default and needs no server, which is what keeps the standalone single binary a single binary. Point it at PostgreSQL for a shared or managed deployment and the schema is created there on boot — verified end to end against PostgreSQL 18, from `Database::connect` through migrations to reads and writes. The PostgreSQL CI job is still being driven to green; [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md) has the current pass count and what remains.
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
 
 ---
 
 ## 🏛️ System Architecture
 
-The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent SQLite storage:
+The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent SQLite **or PostgreSQL** storage:
 
 ```
                                       Matrix
@@ -73,7 +74,7 @@ The system unifies two distinct interaction models — fast, deterministic chat 
    - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
 
 4. **Persistence & Real-Time Sync**:
-   - All state modifications persist directly to SQLite using runtime SQLx query binding with write-ahead logging (WAL). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
+   - All state modifications persist through runtime SQLx query binding to **either SQLite or PostgreSQL**, chosen at boot from `DATABASE_URL`. SQLite is the default and uses write-ahead logging (WAL); no code is dialect-specific, because every query goes through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
    - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
 
 ---
@@ -262,8 +263,9 @@ MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=optional_e2ee_recovery_key
 
-# SQLite Database
+# Database — SQLite (default, no server) or PostgreSQL; the scheme decides
 DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
+# DATABASE_URL=postgres://bot:bot@localhost:5432/matrix_bot
 
 # Web & API Server
 API_HOST=0.0.0.0
@@ -372,6 +374,26 @@ docker compose down
 ```
 
 Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts.
+
+---
+
+#### Running against PostgreSQL
+
+SQLite is the default and needs nothing extra. To run against PostgreSQL
+instead, the Compose file ships a `postgres` profile:
+
+```bash
+DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot docker compose --profile postgres up -d
+```
+
+The profile keeps the database container out of the default `docker compose up`,
+so the SQLite path stays a single service. The schema is created on first boot;
+there is no separate migration step.
+
+> [!NOTE]
+> This is a *new* database, not a migration of an existing one. Nothing here
+> copies rows from a SQLite file into PostgreSQL — if you have existing data,
+> move it yourself before switching.
 
 ---
 
@@ -487,8 +509,9 @@ changing auth, ownership or migrations.
 
 ## 🚀 Roadmap
 
-- **PostgreSQL** — the repository layer is already abstract; `DATABASE_URL` is
-  the switch.
+- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is the switch; see
+  [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md) for how it works and
+  what is still being driven to green in the PostgreSQL CI job.
 - **Conditional-UI sign-in** — passkey autofill on page load, rather than a
   button.
 - **Offline Sync for Native iOS** — local SwiftData caching in Element X iOS for offline task and log creation.

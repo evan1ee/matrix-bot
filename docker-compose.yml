@@ -12,7 +12,10 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8080
       - ENVIRONMENT=${ENVIRONMENT:-}
-      - DATABASE_URL=sqlite:///app/data/bot_data.db?mode=rwc
+      # SQLite by default: no second container, and the data lives in the
+      # bot-data volume below. Override to run against PostgreSQL:
+      #   DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot docker compose --profile postgres up
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/bot_data.db?mode=rwc}
       - DATABASE_MAX_CONNECTIONS=10
       - RUST_LOG=info,matrix_bot=info
       - MATRIX_HOMESERVER=${MATRIX_HOMESERVER:-}
@@ -34,6 +37,14 @@ services:
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
     volumes:
       - bot-data:/app/data
+    # `required: false` so the default SQLite run does not pull in a database
+    # container it has no use for. Needs Compose 2.20+; on older versions the
+    # bot's `restart: unless-stopped` covers it, since a boot against an
+    # unreachable server exits and is retried.
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/api/v1/health"]
       interval: 30s
@@ -41,6 +52,32 @@ services:
       retries: 3
       start_period: 10s
 
+  # Only started with `--profile postgres`. The bot defaults to SQLite, so this
+  # stays out of the way unless asked for.
+  postgres:
+    image: postgres:18
+    container_name: matrix-bot-postgres
+    restart: unless-stopped
+    profiles: [postgres]
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-bot}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bot}
+      - POSTGRES_DB=${POSTGRES_DB:-matrix_bot}
+    # PostgreSQL uses shared memory for parallel query workers, and Docker's
+    # 64 MB default is not enough — it surfaces as "could not resize shared
+    # memory segment" rather than anything that names the real cause.
+    shm_size: 1gb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot} -d ${POSTGRES_DB:-matrix_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   bot-data:
     name: matrix-bot-data
+  postgres-data:
+    name: matrix-bot-postgres-data
