@@ -544,11 +544,15 @@ mod tests {
 
     async fn setup_test() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
-                .await
-                .unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
+        let owner = crate::accounts::AccountRepository::resolve_or_provision(
+            db.sqlite_pool(),
+            "@user:mbm.one",
+        )
+        .await
+        .unwrap();
         (db, owner)
     }
 
@@ -557,7 +561,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let help = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -576,7 +580,7 @@ mod tests {
         assert!(help.contains("AI Assistant Commands"));
 
         let config = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -601,7 +605,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let res = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -620,7 +624,7 @@ mod tests {
         assert!(res.contains("AI model updated to: <code>gpt-4o-mini</code>"));
 
         let hist = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -639,7 +643,7 @@ mod tests {
         assert!(hist.contains("AI max history turns updated to: <code>20</code>"));
 
         let config2 = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -658,7 +662,7 @@ mod tests {
         assert!(config2.contains("Max History Turns:</b> <code>20</code>"));
 
         let reset = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -690,12 +694,12 @@ mod tests {
             model_name: Some("test-model".to_string()),
             ..Default::default()
         };
-        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+        AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &input)
             .await
             .unwrap();
 
         let result1 = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -720,7 +724,7 @@ mod tests {
 
         // Second failure during same outage
         let result2 = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -745,13 +749,14 @@ mod tests {
     #[tokio::test]
     async fn test_multiturn_history_filters_tool_messages() {
         let (db, owner) = setup_test().await;
-        let conv = AiRepository::get_or_create_conversation(&db.pool, &owner, "!room:1", 1800)
-            .await
-            .unwrap();
+        let conv =
+            AiRepository::get_or_create_conversation(db.sqlite_pool(), &owner, "!room:1", 1800)
+                .await
+                .unwrap();
 
         // 1. User message
         AiRepository::add_message(
-            &db.pool,
+            db.sqlite_pool(),
             &conv.id,
             "user",
             "Add a task: buy milk",
@@ -761,12 +766,12 @@ mod tests {
         .await
         .unwrap();
         // 2. Assistant tool call with empty content
-        AiRepository::add_message(&db.pool, &conv.id, "assistant", "", None, None)
+        AiRepository::add_message(db.sqlite_pool(), &conv.id, "assistant", "", None, None)
             .await
             .unwrap();
         // 3. Tool result
         AiRepository::add_message(
-            &db.pool,
+            db.sqlite_pool(),
             &conv.id,
             "tool",
             "{\"id\":1,\"status\":\"ok\"}",
@@ -777,7 +782,7 @@ mod tests {
         .unwrap();
         // 4. Assistant final reply
         AiRepository::add_message(
-            &db.pool,
+            db.sqlite_pool(),
             &conv.id,
             "assistant",
             "I added your task: buy milk.",
@@ -787,7 +792,7 @@ mod tests {
         .await
         .unwrap();
 
-        let recent = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
+        let recent = AiRepository::get_recent_messages(db.sqlite_pool(), &conv.id, 10)
             .await
             .unwrap();
         assert_eq!(recent.len(), 3);
@@ -832,7 +837,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         crate::modules::todo::repository::TodoRepository::add(
-            &db.pool,
+            db.sqlite_pool(),
             "!room:mbm.one",
             &owner,
             "Tester",
@@ -845,7 +850,7 @@ mod tests {
         .unwrap();
 
         crate::modules::todo::repository::TodoRepository::add(
-            &db.pool,
+            db.sqlite_pool(),
             "!room:mbm.one",
             &owner,
             "Tester",
@@ -859,7 +864,7 @@ mod tests {
 
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -906,7 +911,7 @@ mod tests {
 
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -927,7 +932,11 @@ mod tests {
 
         // Verify task in SQLite DB
         let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(
-            &db.pool, &owner, None, 10, 0,
+            db.sqlite_pool(),
+            &owner,
+            None,
+            10,
+            0,
         )
         .await
         .unwrap();
@@ -937,7 +946,7 @@ mod tests {
 
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -960,7 +969,10 @@ mod tests {
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
         let summary = crate::modules::finance::repository::FinanceRepository::summary(
-            &db.pool, &owner, from, to,
+            db.sqlite_pool(),
+            &owner,
+            from,
+            to,
         )
         .await
         .unwrap();
@@ -985,7 +997,7 @@ mod tests {
 
         // Turn 1: Add a task
         let turn1 = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -1003,7 +1015,7 @@ mod tests {
 
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -1040,7 +1052,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let result = run_ai_turn(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             &owner,
@@ -1067,7 +1079,10 @@ mod tests {
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
         let summary = crate::modules::finance::repository::FinanceRepository::summary(
-            &db.pool, &owner, from, to,
+            db.sqlite_pool(),
+            &owner,
+            from,
+            to,
         )
         .await
         .unwrap();
@@ -1084,7 +1099,10 @@ mod tests {
         // Verify reminder in DB
         let reminders =
             crate::modules::reminder::repository::ReminderRepository::list_user_pending(
-                &db.pool, &owner, 10, 0,
+                db.sqlite_pool(),
+                &owner,
+                10,
+                0,
             )
             .await
             .unwrap();
@@ -1107,7 +1125,7 @@ mod tests {
 
         // When neither mentioned nor direct, unrecognized command returns None immediately
         let unhandled = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -1132,13 +1150,13 @@ mod tests {
             model_name: Some("test-model".to_string()),
             ..Default::default()
         };
-        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+        AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &input)
             .await
             .unwrap();
 
         // When mentioned in a room, prompt is routed to AI
         let _ = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,
@@ -1172,7 +1190,7 @@ mod tests {
             model_name: Some("test-model".to_string()),
             ..Default::default()
         };
-        AiRepository::upsert_user_config(&db.pool, &owner, &input)
+        AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &input)
             .await
             .unwrap();
 
@@ -1184,7 +1202,7 @@ mod tests {
 
         // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
         let _ = handle_ai_command(
-            &db.pool,
+            db.sqlite_pool(),
             &crate::config::AiEnvConfig::default(),
             None,
             None,

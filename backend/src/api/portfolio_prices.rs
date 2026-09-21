@@ -27,11 +27,12 @@ pub async fn refresh_all_prices(
     user: AuthUser,
 ) -> Result<Json<RefreshSummary>, ApiError> {
     let owner_id = user.owner_id();
-    let summary = refresh_all_for_owner(&state.db.pool, Some(&state.broadcaster), &owner_id).await;
+    let summary =
+        refresh_all_for_owner(state.db.sqlite_pool(), Some(&state.broadcaster), &owner_id).await;
 
     let _ =
         crate::modules::portfolio::history::HistoryRepository::capture_current_snapshot_for_owner(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &owner_id,
         )
         .await;
@@ -59,12 +60,12 @@ pub async fn refresh_single_holding_price(
     Path(id): Path<i64>,
 ) -> Result<Json<Holding>, ApiError> {
     let owner_id = user.owner_id();
-    let holding = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
+    let holding = PortfolioRepository::find_owned(state.db.sqlite_pool(), id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("Holding with id {} not found", id)))?;
 
-    match refresh_holding_price(&state.db.pool, Some(&state.broadcaster), &holding).await {
+    match refresh_holding_price(state.db.sqlite_pool(), Some(&state.broadcaster), &holding).await {
         Ok(updated) => Ok(Json(updated)),
         Err(err) => Err(ApiError::bad_request(format!(
             "Failed to fetch market price for {}: {}",
@@ -94,7 +95,7 @@ pub async fn record_holding_position(
     let owner_id = user.owner_id();
 
     let result = service::record(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         TradeRequest {
@@ -139,7 +140,7 @@ pub async fn get_portfolio_activity(
     let offset = params.offset.unwrap_or(0);
 
     let entries = crate::modules::portfolio::audit::list_audit_entries(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.owner_id(),
         limit,
         offset,
@@ -234,7 +235,7 @@ pub async fn update_holding_symbol(
 ) -> Result<Json<Holding>, ApiError> {
     let owner_id = user.owner_id();
 
-    match PortfolioRepository::update_symbol(&state.db.pool, &owner_id, id, &payload.symbol)
+    match PortfolioRepository::update_symbol(state.db.sqlite_pool(), &owner_id, id, &payload.symbol)
         .await
         .map_err(|e| ApiError::not_found(e.to_string()))?
     {
@@ -264,9 +265,10 @@ pub async fn verify_portfolio_activity_chain(
     user: AuthUser,
 ) -> Result<Json<AuditVerificationResult>, ApiError> {
     let owner_id = user.owner_id();
-    let report = crate::modules::portfolio::audit::verify_audit_chain(&state.db.pool, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let report =
+        crate::modules::portfolio::audit::verify_audit_chain(state.db.sqlite_pool(), &owner_id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(report))
 }
@@ -282,7 +284,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

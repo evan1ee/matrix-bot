@@ -43,7 +43,7 @@ async fn deliver_outbox_item(ctx: &ModuleContext, item: &WebhookOutboxItem) -> R
 
     // Verify that the webhook owner is authorized for this room before delivery
     let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-        &ctx.db.pool,
+        ctx.db.sqlite_pool(),
         Some(&ctx.client),
         &item.owner_id,
         &item.room_id,
@@ -76,14 +76,14 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
         loop {
             // Drain all available pending items in batches
             loop {
-                let pending = match WebhookRepository::fetch_pending_outbox(&ctx.db.pool, 20).await
-                {
-                    Ok(batch) => batch,
-                    Err(err) => {
-                        error!("Failed reading webhook outbox batch: {:?}", err);
-                        break;
-                    }
-                };
+                let pending =
+                    match WebhookRepository::fetch_pending_outbox(ctx.db.sqlite_pool(), 20).await {
+                        Ok(batch) => batch,
+                        Err(err) => {
+                            error!("Failed reading webhook outbox batch: {:?}", err);
+                            break;
+                        }
+                    };
 
                 if pending.is_empty() {
                     break;
@@ -94,7 +94,7 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                         Ok(_) => {
                             info!("Delivered webhook alert {} to {}", item.id, item.room_id);
                             if let Err(err) = WebhookRepository::mark_outbox_delivered(
-                                &ctx.db.pool,
+                                ctx.db.sqlite_pool(),
                                 &item.id,
                                 &item.webhook_id,
                             )
@@ -111,7 +111,7 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                                     item.id, err_msg
                                 );
                                 let _ = WebhookRepository::mark_outbox_failed(
-                                    &ctx.db.pool,
+                                    ctx.db.sqlite_pool(),
                                     &item.id,
                                     &item.webhook_id,
                                     &err_msg,
@@ -125,7 +125,7 @@ pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                                     next_attempts, item.max_attempts, backoff, err_msg
                                 );
                                 let _ = WebhookRepository::mark_outbox_retry(
-                                    &ctx.db.pool,
+                                    ctx.db.sqlite_pool(),
                                     &item.id,
                                     &item.webhook_id,
                                     next_attempts,

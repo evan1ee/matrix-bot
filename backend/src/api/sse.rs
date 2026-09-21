@@ -70,7 +70,9 @@ mod tests {
     async fn test_sse_handler_creation() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -83,7 +85,9 @@ mod tests {
 
     fn test_state(pool: sqlx::SqlitePool) -> ApiState {
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

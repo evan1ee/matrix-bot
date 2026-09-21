@@ -259,11 +259,15 @@ mod tests {
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@tester:mbm.one")
-                .await
-                .unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
+        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
+            db.sqlite_pool(),
+            "@tester:mbm.one",
+        )
+        .await
+        .unwrap();
         (db, account_id)
     }
 
@@ -271,7 +275,7 @@ mod tests {
     async fn test_ai_user_config_crud() {
         let (db, owner) = setup_db().await;
 
-        let initial = AiRepository::get_user_config(&db.pool, &owner)
+        let initial = AiRepository::get_user_config(db.sqlite_pool(), &owner)
             .await
             .unwrap();
         assert!(initial.is_none());
@@ -286,13 +290,13 @@ mod tests {
             ..Default::default()
         };
 
-        let saved = AiRepository::upsert_user_config(&db.pool, &owner, &input)
+        let saved = AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &input)
             .await
             .unwrap();
         assert_eq!(saved.model_name.as_deref(), Some("gpt-4o"));
         assert_eq!(saved.temperature, Some(0.5));
 
-        let retrieved = AiRepository::get_user_config(&db.pool, &owner)
+        let retrieved = AiRepository::get_user_config(db.sqlite_pool(), &owner)
             .await
             .unwrap()
             .unwrap();
@@ -315,7 +319,7 @@ mod tests {
             ..Default::default()
         };
 
-        AiRepository::upsert_user_config(&db.pool, &owner, &initial_input)
+        AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &initial_input)
             .await
             .unwrap();
 
@@ -325,7 +329,7 @@ mod tests {
             ..Default::default()
         };
 
-        let updated = AiRepository::upsert_user_config(&db.pool, &owner, &model_update)
+        let updated = AiRepository::upsert_user_config(db.sqlite_pool(), &owner, &model_update)
             .await
             .unwrap();
 
@@ -346,24 +350,31 @@ mod tests {
         let (db, owner) = setup_db().await;
         let room = "!room:mbm.one";
 
-        let conv = AiRepository::get_or_create_conversation(&db.pool, &owner, room, 1800)
+        let conv = AiRepository::get_or_create_conversation(db.sqlite_pool(), &owner, room, 1800)
             .await
             .unwrap();
         assert_eq!(conv.owner_id, owner);
 
-        let msg1 = AiRepository::add_message(&db.pool, &conv.id, "user", "Hello!", None, None)
-            .await
-            .unwrap();
+        let msg1 =
+            AiRepository::add_message(db.sqlite_pool(), &conv.id, "user", "Hello!", None, None)
+                .await
+                .unwrap();
         assert_eq!(msg1.content, "Hello!");
         assert_eq!(msg1.role, "user");
 
-        let msg2 =
-            AiRepository::add_message(&db.pool, &conv.id, "assistant", "Hi there!", None, None)
-                .await
-                .unwrap();
+        let msg2 = AiRepository::add_message(
+            db.sqlite_pool(),
+            &conv.id,
+            "assistant",
+            "Hi there!",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(msg2.content, "Hi there!");
 
-        let list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
+        let list = AiRepository::get_recent_messages(db.sqlite_pool(), &conv.id, 10)
             .await
             .unwrap();
         assert_eq!(list.len(), 2);
@@ -372,20 +383,20 @@ mod tests {
 
         // An empty assistant message (e.g. intermediate tool call) should be filtered out
         let _empty_msg =
-            AiRepository::add_message(&db.pool, &conv.id, "assistant", "   ", None, None)
+            AiRepository::add_message(db.sqlite_pool(), &conv.id, "assistant", "   ", None, None)
                 .await
                 .unwrap();
-        let filtered_list = AiRepository::get_recent_messages(&db.pool, &conv.id, 10)
+        let filtered_list = AiRepository::get_recent_messages(db.sqlite_pool(), &conv.id, 10)
             .await
             .unwrap();
         assert_eq!(filtered_list.len(), 2);
 
-        let deleted = AiRepository::delete_conversation(&db.pool, &conv.id, &owner)
+        let deleted = AiRepository::delete_conversation(db.sqlite_pool(), &conv.id, &owner)
             .await
             .unwrap();
         assert!(deleted);
 
-        let after_delete = AiRepository::get_conversation(&db.pool, &conv.id, &owner)
+        let after_delete = AiRepository::get_conversation(db.sqlite_pool(), &conv.id, &owner)
             .await
             .unwrap();
         assert!(after_delete.is_none());

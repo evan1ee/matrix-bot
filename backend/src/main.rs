@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
             );
         }
 
-        matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;
+        matrix_bot::modules::mcp::stdio::run_stdio(db.sqlite_pool(), &owner_id).await?;
         return Ok(());
     }
 

@@ -89,7 +89,7 @@ pub async fn handle_text(
     // must not cost a query, and must not create an account for
     // someone who only ever said hello to a room the bot is in.
     let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-        &db.pool,
+        db.sqlite_pool(),
         ev.sender.as_str(),
     )
     .await
@@ -146,7 +146,7 @@ pub async fn handle_text(
 
             if let Some(ref eid) = sent_eid {
                 crate::bot::reaction_targets::try_record_from_reply(
-                    &db.pool,
+                    db.sqlite_pool(),
                     eid.as_str(),
                     room.room_id().as_str(),
                     &cmd_ctx.owner_id,
@@ -156,7 +156,7 @@ pub async fn handle_text(
             }
 
             crate::bot::reaction_targets::link_turn_targets(
-                &db.pool,
+                db.sqlite_pool(),
                 ph_eid.as_deref().map(|e| e.as_str()),
                 sent_eid.as_deref().map(|e| e.as_str()),
                 ev.event_id.as_str(),

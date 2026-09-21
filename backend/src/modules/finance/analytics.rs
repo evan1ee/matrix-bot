@@ -381,7 +381,7 @@ mod tests {
         // Insert some transactions
         let now = Utc::now();
         FinanceRepository::create_transaction(
-            &db.pool,
+            db.sqlite_pool(),
             "!room:x",
             owner,
             "Alice",
@@ -398,13 +398,13 @@ mod tests {
         .await
         .unwrap();
 
-        let cat = FinanceRepository::create_category(&db.pool, owner, "Groceries")
+        let cat = FinanceRepository::create_category(db.sqlite_pool(), owner, "Groceries")
             .await
             .unwrap()
             .unwrap();
 
         FinanceRepository::create_transaction(
-            &db.pool,
+            db.sqlite_pool(),
             "!room:x",
             owner,
             "Alice",
@@ -422,10 +422,14 @@ mod tests {
         .unwrap();
 
         // 1. Get analytics report
-        let report =
-            FinanceAnalyticsRepository::get_analytics_report(&db.pool, owner, Some("USD"), 6)
-                .await
-                .unwrap();
+        let report = FinanceAnalyticsRepository::get_analytics_report(
+            db.sqlite_pool(),
+            owner,
+            Some("USD"),
+            6,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(report.currency, "USD");
         assert_eq!(report.total_income_minor, 500_000);
@@ -443,7 +447,7 @@ mod tests {
 
         // 2. Share lifecycle
         let share = FinanceAnalyticsRepository::upsert_share(
-            &db.pool,
+            db.sqlite_pool(),
             owner,
             true,
             Some("Alice's Public Budget"),
@@ -454,20 +458,22 @@ mod tests {
         assert_eq!(share.title.as_deref(), Some("Alice's Public Budget"));
 
         // Fetch public report by token
-        let pub_report = FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
-            .await
-            .unwrap()
-            .expect("public report should exist");
+        let pub_report =
+            FinanceAnalyticsRepository::get_public_report(db.sqlite_pool(), &share.token, 6)
+                .await
+                .unwrap()
+                .expect("public report should exist");
         assert_eq!(pub_report.title, "Alice's Public Budget");
         assert_eq!(pub_report.recent_transactions.len(), 2);
 
         // Disable share
-        FinanceAnalyticsRepository::disable_share(&db.pool, owner)
+        FinanceAnalyticsRepository::disable_share(db.sqlite_pool(), owner)
             .await
             .unwrap();
-        let disabled = FinanceAnalyticsRepository::get_public_report(&db.pool, &share.token, 6)
-            .await
-            .unwrap();
+        let disabled =
+            FinanceAnalyticsRepository::get_public_report(db.sqlite_pool(), &share.token, 6)
+                .await
+                .unwrap();
         assert!(disabled.is_none());
     }
 }

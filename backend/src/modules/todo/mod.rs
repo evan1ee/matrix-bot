@@ -86,7 +86,7 @@ impl BotModule for TodoModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_todo_command(
-            &db.pool,
+            db.sqlite_pool(),
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
@@ -213,7 +213,7 @@ mod tests {
         );
 
         SettingsRepository::upsert(
-            &db.pool,
+            db.sqlite_pool(),
             "@alice:a",
             &UserSettings {
                 timezone: "Asia/Shanghai".to_string(),

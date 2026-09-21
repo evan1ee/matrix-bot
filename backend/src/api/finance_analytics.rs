@@ -55,7 +55,7 @@ pub async fn get_analytics(
     let months = query.months.unwrap_or(6);
     let owner_id = auth.owner_id();
     let report = FinanceAnalyticsRepository::get_analytics_report(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &owner_id,
         query.currency.as_deref(),
         months,
@@ -80,7 +80,7 @@ pub async fn get_share(
     auth: AuthUser,
 ) -> Result<Json<Option<FinanceShare>>, ApiError> {
     let owner_id = auth.owner_id();
-    let share = FinanceAnalyticsRepository::get_share(&state.db.pool, &owner_id)
+    let share = FinanceAnalyticsRepository::get_share(state.db.sqlite_pool(), &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -104,7 +104,7 @@ pub async fn upsert_share(
 ) -> Result<Json<FinanceShare>, ApiError> {
     let owner_id = auth.owner_id();
     let share = FinanceAnalyticsRepository::upsert_share(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &owner_id,
         payload.is_enabled,
         payload.title.as_deref(),
@@ -129,7 +129,7 @@ pub async fn delete_share(
     auth: AuthUser,
 ) -> Result<Json<StatusResponse>, ApiError> {
     let owner_id = auth.owner_id();
-    FinanceAnalyticsRepository::disable_share(&state.db.pool, &owner_id)
+    FinanceAnalyticsRepository::disable_share(state.db.sqlite_pool(), &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -155,9 +155,10 @@ pub async fn get_public_report(
     Query(query): Query<PublicQuery>,
 ) -> Result<Json<PublicFinanceReport>, ApiError> {
     let months = query.months.unwrap_or(6);
-    let report = FinanceAnalyticsRepository::get_public_report(&state.db.pool, &token, months)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let report =
+        FinanceAnalyticsRepository::get_public_report(state.db.sqlite_pool(), &token, months)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     match report {
         Some(r) => Ok(Json(r)),
@@ -180,7 +181,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -196,7 +199,7 @@ mod tests {
 
         // Create sample transaction
         FinanceRepository::create_transaction(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             "!room:1",
             &owner_id,
             "Alice",

@@ -66,7 +66,7 @@ pub async fn list_bills(
     user: AuthUser,
 ) -> Result<Json<Vec<RecurringBill>>, ApiError> {
     let owner_id = user.owner_id();
-    let bills = RecurringBillRepository::list_by_owner(&state.db.pool, &owner_id)
+    let bills = RecurringBillRepository::list_by_owner(state.db.sqlite_pool(), &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -111,12 +111,17 @@ pub async fn create_bill(
     let owner_id = user.owner_id();
     let display_name = user.display_name;
 
-    let bill =
-        RecurringBillRepository::create(&state.db.pool, "web", &owner_id, &display_name, payload)
-            .await
-            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let bill = RecurringBillRepository::create(
+        state.db.sqlite_pool(),
+        "web",
+        &owner_id,
+        &display_name,
+        payload,
+    )
+    .await
+    .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &bill)
+    due_reminder::sync(state.db.sqlite_pool(), Some(&state.broadcaster), &bill)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -144,7 +149,7 @@ pub async fn get_bill(
     Path(id): Path<i64>,
 ) -> Result<Json<RecurringBill>, ApiError> {
     let owner_id = user.owner_id();
-    let bill = RecurringBillRepository::get_by_id(&state.db.pool, id)
+    let bill = RecurringBillRepository::get_by_id(state.db.sqlite_pool(), id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Recurring bill not found"))?;
@@ -196,7 +201,7 @@ pub async fn update_bill(
         validate_lead(minutes)?;
     }
 
-    let updated = RecurringBillRepository::update(&state.db.pool, id, &owner_id, payload)
+    let updated = RecurringBillRepository::update(state.db.sqlite_pool(), id, &owner_id, payload)
         .await
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
@@ -207,7 +212,7 @@ pub async fn update_bill(
 
     // Reconcile from the stored state, so a changed due date, lead time, or
     // status reschedules or cancels the reminder without a per-field rule here.
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &updated)
+    due_reminder::sync(state.db.sqlite_pool(), Some(&state.broadcaster), &updated)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -235,7 +240,7 @@ pub async fn delete_bill(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    let success = RecurringBillRepository::delete(&state.db.pool, id, &owner_id)
+    let success = RecurringBillRepository::delete(state.db.sqlite_pool(), id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -246,7 +251,7 @@ pub async fn delete_bill(
     }
 
     // The bill is gone; its reminder must not outlive it pointing at nothing.
-    due_reminder::tear_down(&state.db.pool, Some(&state.broadcaster), id)
+    due_reminder::tear_down(state.db.sqlite_pool(), Some(&state.broadcaster), id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -278,19 +283,23 @@ pub async fn pay_bill(
     // bill announces the resulting transaction the same way any other write
     // through the service does — this call site only announces the parts
     // specific to the bill.
-    let (bill, _tx) =
-        RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id, Some(&state.broadcaster))
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => {
-                    ApiError::not_found("Recurring bill not found or access denied")
-                }
-                err => ApiError::internal(err.to_string()),
-            })?;
+    let (bill, _tx) = RecurringBillRepository::mark_paid(
+        state.db.sqlite_pool(),
+        id,
+        &owner_id,
+        Some(&state.broadcaster),
+    )
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => {
+            ApiError::not_found("Recurring bill not found or access denied")
+        }
+        err => ApiError::internal(err.to_string()),
+    })?;
 
     // Paying advanced `next_due_at`, so re-arm at the next period — or tear
     // down if that was the final installment.
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &bill)
+    due_reminder::sync(state.db.sqlite_pool(), Some(&state.broadcaster), &bill)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -317,7 +326,9 @@ mod tests {
 
     fn state_with(pool: SqlitePool) -> ApiState {
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -369,7 +380,7 @@ mod tests {
         assert_eq!(bill.remind_before_minutes, Some(1440));
 
         let scheduled = ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::RecurringBill,
             bill.id,
         )
@@ -384,7 +395,7 @@ mod tests {
             .unwrap()
             .0;
         let rearmed = ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::RecurringBill,
             bill.id,
         )
@@ -410,7 +421,7 @@ mod tests {
         .await
         .unwrap();
         assert!(ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::RecurringBill,
             bill.id
         )
@@ -434,7 +445,7 @@ mod tests {
             .await
             .unwrap();
         assert!(ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::RecurringBill,
             bill.id
         )
@@ -492,7 +503,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -545,7 +558,7 @@ mod tests {
 
         // Verify bill payment automatically posted an expense transaction to the finance ledger
         let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &alice.owner_id(),
             None,
             10,

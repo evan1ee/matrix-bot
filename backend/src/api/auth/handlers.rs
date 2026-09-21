@@ -22,7 +22,7 @@ pub async fn logout(
     // Revoked server-side as well as cleared client-side. Clearing the cookie
     // alone would leave a token that still resolves, so anyone holding a copy
     // would stay signed in — which is exactly the gap a stateless JWT had.
-    SessionRepository::revoke(&state.db.pool, &user.session_id_hash)
+    SessionRepository::revoke(state.db.sqlite_pool(), &user.session_id_hash)
         .await
         .map_err(|err| ApiError::internal(format!("could not sign out: {err}")))?;
 
@@ -50,7 +50,7 @@ pub async fn get_current_user(
     // An account can have several linked Matrix identities, so there is no
     // single "the" MXID any more. The first link supplies the avatar, purely
     // so the UI has a picture to show; nothing here decides anything.
-    let linked = AccountRepository::linked_mxids(&state.db.pool, &auth_user.account_id)
+    let linked = AccountRepository::linked_mxids(state.db.sqlite_pool(), &auth_user.account_id)
         .await
         .unwrap_or_default();
 
@@ -278,7 +278,9 @@ mod tests {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             crate::events::EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

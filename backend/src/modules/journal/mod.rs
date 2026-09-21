@@ -62,6 +62,6 @@ impl BotModule for JournalModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_journal_command(&db.pool, broadcaster, ctx).await
+        handler::handle_journal_command(db.sqlite_pool(), broadcaster, ctx).await
     }
 }

@@ -49,7 +49,7 @@ pub async fn get_settings(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<UserSettings>, ApiError> {
-    let settings = SettingsRepository::get(&state.db.pool, &user.owner_id())
+    let settings = SettingsRepository::get(state.db.sqlite_pool(), &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -90,7 +90,8 @@ pub async fn update_settings(
         }
     });
 
-    let current = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
+    let current =
+        SettingsRepository::get_or_default(state.db.sqlite_pool(), &user.owner_id()).await;
     let max_history_turns = if let Some(turns) = payload.max_history_turns {
         if !(1..=100).contains(&turns) {
             return Err(ApiError::bad_request(
@@ -128,7 +129,7 @@ pub async fn update_settings(
     };
 
     let settings = SettingsRepository::upsert(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.owner_id(),
         &UserSettings {
             timezone: timezone.name().to_string(),
@@ -163,7 +164,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

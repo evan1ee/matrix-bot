@@ -81,7 +81,7 @@ pub async fn process_image_event(
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
     match crate::modules::ai::handler::run_ai_turn_with_stage(
-        &db.pool,
+        db.sqlite_pool(),
         ai,
         broadcaster,
         owner_id,

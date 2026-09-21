@@ -72,14 +72,21 @@ impl BotModule for BookmarksModule {
     ) -> Option<String> {
         match ctx.command.as_str() {
             "save" => Some(
-                handler::handle_save_command(ctx, &db.pool, Some(&self.http_client), broadcaster)
-                    .await,
+                handler::handle_save_command(
+                    ctx,
+                    db.sqlite_pool(),
+                    Some(&self.http_client),
+                    broadcaster,
+                )
+                .await,
             ),
-            "bookmarks" | "reading" => Some(handler::handle_list_command(ctx, &db.pool).await),
+            "bookmarks" | "reading" => {
+                Some(handler::handle_list_command(ctx, db.sqlite_pool()).await)
+            }
             "bookmark" => Some(
                 handler::handle_bookmark_subcommands(
                     ctx,
-                    &db.pool,
+                    db.sqlite_pool(),
                     Some(&self.http_client),
                     broadcaster,
                 )

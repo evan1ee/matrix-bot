@@ -31,7 +31,7 @@ pub async fn handle_link_command(
             .to_string();
     }
 
-    match LinkRepository::claim(&db.pool, code, sender_mxid, is_direct).await {
+    match LinkRepository::claim(db.sqlite_pool(), code, sender_mxid, is_direct).await {
         Ok(LinkOutcome::NotADirectMessage) => {
             "That code was visible to everyone in this room, so I have cancelled it.<br/>\
              Generate a new one and send it to me in a <b>direct message</b>."
@@ -57,7 +57,7 @@ pub async fn handle_link_command(
             account_id,
             from_account,
         }) => {
-            let preview = MergeRepository::preview(&db.pool, &from_account)
+            let preview = MergeRepository::preview(db.sqlite_pool(), &from_account)
                 .await
                 .unwrap_or_default();
 
@@ -88,7 +88,7 @@ pub async fn handle_link_command(
 
 async fn notify_linked(db: &Database, account_id: &str, mxid: &str) {
     crate::accounts::SecurityEventRepository::record(
-        &db.pool,
+        db.sqlite_pool(),
         account_id,
         crate::accounts::SecurityEventKind::MatrixLinked,
         Some(&escape(mxid)),
@@ -106,7 +106,9 @@ mod tests {
     async fn db() -> Database {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database {
+            pool: crate::db::DbPool::Sqlite(pool),
+        }
     }
 
     #[tokio::test]
@@ -122,16 +124,18 @@ mod tests {
     #[tokio::test]
     async fn test_a_first_time_link_does_not_provision_or_prompt() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
+        let code = LinkRepository::issue(db.sqlite_pool(), &account)
+            .await
+            .unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
         assert!(reply.contains("Linked"), "{reply}");
 
         let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&db.pool)
+            .fetch_one(db.sqlite_pool())
             .await
             .unwrap();
         assert_eq!(
@@ -140,7 +144,7 @@ mod tests {
         );
 
         assert_eq!(
-            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one")
+            AccountRepository::find_by_mxid(db.sqlite_pool(), "@evan:mbm.one")
                 .await
                 .unwrap(),
             Some(account)
@@ -150,10 +154,12 @@ mod tests {
     #[tokio::test]
     async fn test_a_public_room_cancels_the_code_and_says_so() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
+        let code = LinkRepository::issue(db.sqlite_pool(), &account)
+            .await
+            .unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", false, None).await;
         assert!(reply.contains("direct message"));
@@ -169,7 +175,7 @@ mod tests {
     #[tokio::test]
     async fn test_existing_history_asks_before_moving_anything() {
         let db = db().await;
-        let old = AccountRepository::resolve_or_provision(&db.pool, "@evan:mbm.one")
+        let old = AccountRepository::resolve_or_provision(db.sqlite_pool(), "@evan:mbm.one")
             .await
             .unwrap();
         for text in ["one", "two", "three"] {
@@ -179,15 +185,15 @@ mod tests {
             )
             .bind(&old)
             .bind(text)
-            .execute(&db.pool)
+            .execute(db.sqlite_pool())
             .await
             .unwrap();
         }
 
-        let new = AccountRepository::create(&db.pool, "web", STATUS_ACTIVE)
+        let new = AccountRepository::create(db.sqlite_pool(), "web", STATUS_ACTIVE)
             .await
             .unwrap();
-        let code = LinkRepository::issue(&db.pool, &new).await.unwrap();
+        let code = LinkRepository::issue(db.sqlite_pool(), &new).await.unwrap();
 
         let pending: PendingMerges = Default::default();
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, Some(&pending)).await;
@@ -200,7 +206,7 @@ mod tests {
         // The MXID still points at the old account: the link is deliberately
         // left undone until the merge is confirmed.
         assert_eq!(
-            AccountRepository::find_by_mxid(&db.pool, "@evan:mbm.one")
+            AccountRepository::find_by_mxid(db.sqlite_pool(), "@evan:mbm.one")
                 .await
                 .unwrap(),
             Some(old)
@@ -210,19 +216,21 @@ mod tests {
     #[tokio::test]
     async fn test_an_mxid_belonging_to_someone_else_is_refused() {
         let db = db().await;
-        let theirs = AccountRepository::create(&db.pool, "theirs", STATUS_ACTIVE)
+        let theirs = AccountRepository::create(db.sqlite_pool(), "theirs", STATUS_ACTIVE)
             .await
             .unwrap();
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
             .bind(&theirs)
-            .execute(&db.pool)
+            .execute(db.sqlite_pool())
             .await
             .unwrap();
 
-        let mine = AccountRepository::create(&db.pool, "mine", STATUS_ACTIVE)
+        let mine = AccountRepository::create(db.sqlite_pool(), "mine", STATUS_ACTIVE)
             .await
             .unwrap();
-        let code = LinkRepository::issue(&db.pool, &mine).await.unwrap();
+        let code = LinkRepository::issue(db.sqlite_pool(), &mine)
+            .await
+            .unwrap();
 
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
         assert!(reply.contains("already linked"));
@@ -231,14 +239,16 @@ mod tests {
     #[tokio::test]
     async fn test_a_successful_link_is_written_to_the_audit_log() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let code = LinkRepository::issue(&db.pool, &account).await.unwrap();
+        let code = LinkRepository::issue(db.sqlite_pool(), &account)
+            .await
+            .unwrap();
 
         handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
 
-        let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = crate::accounts::SecurityEventRepository::list(db.sqlite_pool(), &account, 10)
             .await
             .unwrap();
         assert_eq!(events[0].kind, "matrix_linked");

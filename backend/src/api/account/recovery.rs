@@ -21,12 +21,12 @@ pub async fn regenerate_recovery_codes(
     State(state): State<ApiState>,
     user: VerifiedUser,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
-    let codes = RecoveryRepository::issue_codes(&state.db.pool, &user.account_id)
+    let codes = RecoveryRepository::issue_codes(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
     SecurityEventRepository::record(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         SecurityEventKind::RecoveryCodesIssued,
         None,
@@ -47,10 +47,10 @@ pub async fn recovery_status(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let remaining = RecoveryRepository::remaining(&state.db.pool, &user.account_id)
+    let remaining = RecoveryRepository::remaining(state.db.sqlite_pool(), &user.account_id)
         .await
         .unwrap_or(0);
-    let pending = RecoveryRepository::pending(&state.db.pool, &user.account_id)
+    let pending = RecoveryRepository::pending(state.db.sqlite_pool(), &user.account_id)
         .await
         .unwrap_or(None);
 
@@ -77,13 +77,13 @@ pub async fn cancel_recovery(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<u64>, ApiError> {
-    let cancelled = RecoveryRepository::cancel_all(&state.db.pool, &user.account_id)
+    let cancelled = RecoveryRepository::cancel_all(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
     if cancelled > 0 {
         SecurityEventRepository::record(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &user.account_id,
             SecurityEventKind::RecoveryCancelled,
             None,

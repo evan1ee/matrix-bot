@@ -34,7 +34,7 @@ pub async fn list_bookmarks(
     State(state): State<ApiState>,
     Query(query): Query<BookmarkQuery>,
 ) -> Result<Json<Vec<Bookmark>>, ApiError> {
-    let items = BookmarksRepository::list(&state.db.pool, &user.account_id, &query)
+    let items = BookmarksRepository::list(state.db.sqlite_pool(), &user.account_id, &query)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -52,7 +52,7 @@ pub async fn get_stats(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<BookmarkStats>, ApiError> {
-    let stats = BookmarksRepository::get_stats(&state.db.pool, &user.account_id)
+    let stats = BookmarksRepository::get_stats(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -120,7 +120,7 @@ pub async fn create_bookmark(
         fetch_and_extract_metadata(Some(&state.http_client), url, payload.title.as_deref()).await;
 
     let bookmark = BookmarksRepository::create(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         url,
         &meta.title,
@@ -155,7 +155,7 @@ pub async fn get_bookmark(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let bookmark = BookmarksRepository::find_by_id(&state.db.pool, id, &user.account_id)
+    let bookmark = BookmarksRepository::find_by_id(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found("Bookmark not found"))?;
@@ -189,9 +189,10 @@ pub async fn update_bookmark(
         }
     }
 
-    let updated = BookmarksRepository::update(&state.db.pool, id, &user.account_id, &payload)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let updated =
+        BookmarksRepository::update(state.db.sqlite_pool(), id, &user.account_id, &payload)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state
         .broadcaster
@@ -213,9 +214,10 @@ pub async fn toggle_favorite(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let updated = BookmarksRepository::toggle_favorite(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let updated =
+        BookmarksRepository::toggle_favorite(state.db.sqlite_pool(), id, &user.account_id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state
         .broadcaster
@@ -237,9 +239,10 @@ pub async fn toggle_archive(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let updated = BookmarksRepository::toggle_archived(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let updated =
+        BookmarksRepository::toggle_archived(state.db.sqlite_pool(), id, &user.account_id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state
         .broadcaster
@@ -261,7 +264,7 @@ pub async fn delete_bookmark(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = BookmarksRepository::delete(&state.db.pool, id, &user.account_id)
+    let deleted = BookmarksRepository::delete(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -292,7 +295,9 @@ mod tests {
                 .await
                 .unwrap();
         let state = ApiState::new(
-            Database { pool },
+            Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

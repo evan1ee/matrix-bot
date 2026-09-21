@@ -56,7 +56,7 @@ where
             }
         }
 
-        crate::accounts::resolve_credential(&api_state.db.pool, &credential)
+        crate::accounts::resolve_credential(api_state.db.sqlite_pool(), &credential)
             .await
             .map_err(|err| {
                 tracing::error!("Could not read the session: {:?}", err);

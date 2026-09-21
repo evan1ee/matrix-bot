@@ -67,9 +67,10 @@ pub async fn list_habits(
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<Vec<HabitWithStatus>>, ApiError> {
     let today = get_today_string(params.today.as_deref());
-    let items = HabitsRepository::find_all_with_status(&state.db.pool, &user.account_id, &today)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let items =
+        HabitsRepository::find_all_with_status(state.db.sqlite_pool(), &user.account_id, &today)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(items))
 }
@@ -102,7 +103,7 @@ pub async fn create_habit(
     }
 
     let habit = HabitsRepository::create_habit(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         name,
         payload.description.as_deref(),
@@ -151,7 +152,7 @@ pub async fn update_habit(
     }
 
     let habit = HabitsRepository::update_habit(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         id,
         &user.account_id,
         name,
@@ -188,7 +189,7 @@ pub async fn delete_habit(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = HabitsRepository::delete_habit(&state.db.pool, id, &user.account_id)
+    let deleted = HabitsRepository::delete_habit(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -223,7 +224,7 @@ pub async fn toggle_habit_log(
     Path(id): Path<i64>,
     Json(payload): Json<ToggleHabitRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let habit = HabitsRepository::find_by_id(&state.db.pool, id, &user.account_id)
+    let habit = HabitsRepository::find_by_id(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("Habit #{} not found", id)))?;
@@ -231,7 +232,7 @@ pub async fn toggle_habit_log(
     let log_date = get_today_string(payload.date.as_deref());
 
     let new_completed = HabitsRepository::toggle_log(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         habit.id,
         &user.account_id,
         &log_date,
@@ -268,7 +269,7 @@ pub async fn get_heatmap(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<HeatmapDay>>, ApiError> {
-    let days = HabitsRepository::get_heatmap(&state.db.pool, &user.account_id)
+    let days = HabitsRepository::get_heatmap(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -297,9 +298,10 @@ pub async fn get_stats(
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<HabitStatsSummary>, ApiError> {
     let today = get_today_string(params.today.as_deref());
-    let stats = HabitsRepository::get_summary_stats(&state.db.pool, &user.account_id, &today)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let stats =
+        HabitsRepository::get_summary_stats(state.db.sqlite_pool(), &user.account_id, &today)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(stats))
 }

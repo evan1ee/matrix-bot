@@ -110,7 +110,7 @@ async fn owned_category(
         return Ok(None);
     };
 
-    let categories = FinanceRepository::list_categories(&state.db.pool, owner_id)
+    let categories = FinanceRepository::list_categories(state.db.sqlite_pool(), owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -149,10 +149,11 @@ pub async fn list_transactions(
         None => None,
     };
 
-    let items = FinanceRepository::list(&state.db.pool, &owner_id, direction, limit, offset)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let total = FinanceRepository::count(&state.db.pool, &owner_id, direction)
+    let items =
+        FinanceRepository::list(state.db.sqlite_pool(), &owner_id, direction, limit, offset)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let total = FinanceRepository::count(state.db.sqlite_pool(), &owner_id, direction)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -186,7 +187,7 @@ pub async fn create_transaction(
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
 
     let tx = service::create_transaction(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         NewTransaction {
@@ -235,7 +236,7 @@ pub async fn update_transaction(
     let category = owned_category(&state, &owner_id, payload.category_id).await?;
 
     let tx = service::update_transaction(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         id,
@@ -271,7 +272,13 @@ pub async fn delete_transaction(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    service::delete_transaction(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
+    service::delete_transaction(
+        state.db.sqlite_pool(),
+        Some(&state.broadcaster),
+        &owner_id,
+        id,
+    )
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -295,10 +302,14 @@ pub async fn summary(
         return Err(ApiError::bad_request("`to` must be after `from`"));
     }
 
-    let summaries =
-        FinanceRepository::summary(&state.db.pool, &user.owner_id(), query.from, query.to)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+    let summaries = FinanceRepository::summary(
+        state.db.sqlite_pool(),
+        &user.owner_id(),
+        query.from,
+        query.to,
+    )
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(summaries))
 }
@@ -316,7 +327,7 @@ pub async fn list_categories(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<Category>>, ApiError> {
-    let categories = FinanceRepository::list_categories(&state.db.pool, &user.owner_id())
+    let categories = FinanceRepository::list_categories(state.db.sqlite_pool(), &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -340,7 +351,7 @@ pub async fn create_category(
     Json(payload): Json<CategoryRequest>,
 ) -> Result<Json<Category>, ApiError> {
     let category = service::create_category(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &user.owner_id(),
         &payload.name,
@@ -368,8 +379,13 @@ pub async fn delete_category(
 ) -> Result<Json<CategoryDeletedResponse>, ApiError> {
     let owner_id = user.owner_id();
 
-    let uncategorised =
-        service::delete_category(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
+    let uncategorised = service::delete_category(
+        state.db.sqlite_pool(),
+        Some(&state.broadcaster),
+        &owner_id,
+        id,
+    )
+    .await?;
 
     Ok(Json(CategoryDeletedResponse {
         id,
@@ -388,7 +404,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

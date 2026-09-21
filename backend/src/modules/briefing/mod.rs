@@ -58,7 +58,13 @@ impl BotModule for BriefingModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_briefing_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster).await
+        handler::handle_briefing_command(
+            db.sqlite_pool(),
+            &ctx.owner_id,
+            &ctx.full_body,
+            broadcaster,
+        )
+        .await
     }
 
     async fn spawn_background_workers(

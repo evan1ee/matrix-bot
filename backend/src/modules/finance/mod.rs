@@ -80,7 +80,7 @@ impl BotModule for FinanceModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_finance_command(
-            &db.pool,
+            db.sqlite_pool(),
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
@@ -231,7 +231,7 @@ mod tests {
         let db = db().await;
 
         SettingsRepository::upsert(
-            &db.pool,
+            db.sqlite_pool(),
             "@alice:a",
             &UserSettings {
                 timezone: "UTC".to_string(),

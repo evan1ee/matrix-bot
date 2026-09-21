@@ -30,7 +30,7 @@ pub async fn notify_account(
     kind: SecurityEventKind,
     detail: Option<&str>,
 ) {
-    SecurityEventRepository::record(&db.pool, account_id, kind, detail).await;
+    SecurityEventRepository::record(db.sqlite_pool(), account_id, kind, detail).await;
 
     if !kind.warrants_a_dm() {
         return;
@@ -45,7 +45,7 @@ pub async fn notify_account(
         return;
     };
 
-    let mxids = match AccountRepository::linked_mxids(&db.pool, account_id).await {
+    let mxids = match AccountRepository::linked_mxids(db.sqlite_pool(), account_id).await {
         Ok(mxids) => mxids,
         Err(err) => {
             error!(
@@ -154,7 +154,9 @@ mod tests {
     async fn db() -> Database {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database {
+            pool: crate::db::DbPool::Sqlite(pool),
+        }
     }
 
     /// With no Matrix client the event must still be recorded. An account with
@@ -162,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn test_the_event_is_logged_even_with_nowhere_to_send_it() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -175,7 +177,7 @@ mod tests {
         )
         .await;
 
-        let events = SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = SecurityEventRepository::list(db.sqlite_pool(), &account, 10)
             .await
             .unwrap();
         assert_eq!(events.len(), 1);

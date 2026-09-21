@@ -30,7 +30,7 @@ pub async fn add_passkey_start(
     let handle = crate::accounts::account_id_to_handle(&user.account_id)
         .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
 
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &user.account_id)
+    let stored = CredentialRepository::list_for_account(state.db.sqlite_pool(), &user.account_id)
         .await
         .unwrap_or_default();
     let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
@@ -78,7 +78,7 @@ pub async fn list_passkeys(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<PasskeySummary>>, ApiError> {
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &user.account_id)
+    let stored = CredentialRepository::list_for_account(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -116,16 +116,17 @@ pub async fn rename_passkey(
         ));
     }
 
-    let renamed = CredentialRepository::rename(&state.db.pool, &user.account_id, &id, label)
-        .await
-        .map_err(ApiError::from)?;
+    let renamed =
+        CredentialRepository::rename(state.db.sqlite_pool(), &user.account_id, &id, label)
+            .await
+            .map_err(ApiError::from)?;
 
     if !renamed {
         return Err(ApiError::not_found("No such passkey"));
     }
 
     SecurityEventRepository::record(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         SecurityEventKind::PasskeyRenamed,
         Some(label),
@@ -150,13 +151,13 @@ pub async fn delete_passkey(
     user: VerifiedUser,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    match CredentialRepository::delete(&state.db.pool, &user.account_id, &id)
+    match CredentialRepository::delete(state.db.sqlite_pool(), &user.account_id, &id)
         .await
         .map_err(ApiError::from)?
     {
         DeleteOutcome::Removed => {
             SecurityEventRepository::record(
-                &state.db.pool,
+                state.db.sqlite_pool(),
                 &user.account_id,
                 SecurityEventKind::PasskeyRemoved,
                 None,

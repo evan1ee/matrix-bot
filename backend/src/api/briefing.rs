@@ -22,9 +22,10 @@ pub async fn trigger_briefing(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<BriefingPayload>, ApiError> {
-    let settings = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
+    let settings =
+        SettingsRepository::get_or_default(state.db.sqlite_pool(), &user.owner_id()).await;
 
-    let payload = generate_briefing(&state.db.pool, &user.owner_id(), &settings)
+    let payload = generate_briefing(state.db.sqlite_pool(), &user.owner_id(), &settings)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -32,7 +33,8 @@ pub async fn trigger_briefing(
     let client_guard = state.bot_client.read().await;
     if let Some(ref client) = *client_guard {
         if let Some(target_room) =
-            RoomRepository::resolve_user_default_room(&state.db.pool, &user.owner_id()).await
+            RoomRepository::resolve_user_default_room(state.db.sqlite_pool(), &user.owner_id())
+                .await
         {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
                 let content =
@@ -72,7 +74,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

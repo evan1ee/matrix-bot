@@ -42,11 +42,15 @@ mod tests {
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
+        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
+            db.sqlite_pool(),
+            "@alice:mbm.one",
+        )
+        .await
+        .unwrap();
         (db, account_id)
     }
 
@@ -106,7 +110,7 @@ mod tests {
         let (db, owner) = setup_db().await;
 
         let add_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -118,7 +122,7 @@ mod tests {
         assert!(add_res.contains("Buy oat milk"));
 
         let complete_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -135,7 +139,7 @@ mod tests {
         let (db, owner) = setup_db().await;
 
         let fin_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -148,7 +152,7 @@ mod tests {
         assert!(fin_res.contains("Food"));
 
         let rem_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -165,7 +169,7 @@ mod tests {
         let (db, owner) = setup_db().await;
 
         let dep_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -177,7 +181,7 @@ mod tests {
         assert!(dep_res.contains("200000"));
 
         let buy_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -195,7 +199,7 @@ mod tests {
 
         // Deposit cash
         ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -207,7 +211,7 @@ mod tests {
 
         // Buy 10 AAPL @ 150 = 1500
         ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -219,7 +223,7 @@ mod tests {
 
         // Query holding details
         let holding_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -233,7 +237,7 @@ mod tests {
 
         // Sell 4 AAPL @ 180 = 720
         let sell_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -247,7 +251,7 @@ mod tests {
 
         // Withdraw 500 cash
         let withdraw_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -265,7 +269,7 @@ mod tests {
 
         // Create price alert
         let alert_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -279,7 +283,7 @@ mod tests {
 
         // List alerts
         let list_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -292,7 +296,7 @@ mod tests {
 
         // Cancel alert by symbol
         let cancel_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -305,7 +309,7 @@ mod tests {
 
         // Performance history
         let history_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -323,7 +327,7 @@ mod tests {
 
         // Record two entries
         let e1 = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -335,7 +339,7 @@ mod tests {
         assert!(e1.contains("Groceries"));
 
         ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -347,7 +351,7 @@ mod tests {
 
         // List transactions
         let list_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -361,7 +365,7 @@ mod tests {
 
         // Category spending
         let spending_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -380,7 +384,7 @@ mod tests {
 
         // LLM calls record_finance_entry with number amount, entry_type, description, occurred_at
         let res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -395,7 +399,7 @@ mod tests {
         assert!(res.contains("CNY"));
 
         // Verify transaction is recorded in SQLite
-        let txs = FinanceRepository::list(&db.pool, &owner, None, 10, 0)
+        let txs = FinanceRepository::list(db.sqlite_pool(), &owner, None, 10, 0)
             .await
             .unwrap();
         assert_eq!(txs.len(), 1);
@@ -413,7 +417,7 @@ mod tests {
 
         // 1. Create habit
         let create_habit_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -426,7 +430,7 @@ mod tests {
 
         // 2. Log habit
         let log_habit_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -439,7 +443,7 @@ mod tests {
 
         // 3. Log life day
         let log_life_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -452,7 +456,7 @@ mod tests {
 
         // 4. Record footprint
         let footprint_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -465,7 +469,7 @@ mod tests {
 
         // 5. Weekly retrospective
         let retro_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -478,7 +482,7 @@ mod tests {
 
         // 6. Bookmarks
         let save_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -491,7 +495,7 @@ mod tests {
         assert!(save_res.contains("example.com"));
 
         let list_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -509,7 +513,7 @@ mod tests {
 
         // 1. Todo update & delete
         let add_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -522,7 +526,7 @@ mod tests {
         let todo_id = todo_json["id"].as_i64().unwrap();
 
         let update_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -538,7 +542,7 @@ mod tests {
         assert!(update_res.contains("high"));
 
         let delete_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -551,7 +555,7 @@ mod tests {
 
         // 2. Reminder cancel
         let rem_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -564,7 +568,7 @@ mod tests {
         let rem_id = rem_json["id"].as_i64().unwrap();
 
         let cancel_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -577,7 +581,7 @@ mod tests {
 
         // 3. Recurring bill create & delete
         let bill_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -591,7 +595,7 @@ mod tests {
         let bill_id = bill_json["id"].as_i64().unwrap();
 
         let del_bill_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -604,7 +608,7 @@ mod tests {
 
         // 4. Habit delete
         let habit_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -617,7 +621,7 @@ mod tests {
         let habit_id = habit_json["id"].as_i64().unwrap();
 
         let del_habit_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -629,15 +633,21 @@ mod tests {
         assert!(del_habit_res.contains(r#""deleted":true"#));
 
         // 5. Daily log query
-        let daily_log_res =
-            ToolRegistry::execute_tool(&db.pool, None, &owner, "!room:a", "get_daily_log", r#"{}"#)
-                .await
-                .unwrap();
+        let daily_log_res = ToolRegistry::execute_tool(
+            db.sqlite_pool(),
+            None,
+            &owner,
+            "!room:a",
+            "get_daily_log",
+            r#"{}"#,
+        )
+        .await
+        .unwrap();
         assert!(daily_log_res.contains("date"));
 
         // 6. Settings update
         let settings_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",
@@ -651,7 +661,7 @@ mod tests {
 
         // 7. Webhooks list
         let webhooks_res = ToolRegistry::execute_tool(
-            &db.pool,
+            db.sqlite_pool(),
             None,
             &owner,
             "!room:a",

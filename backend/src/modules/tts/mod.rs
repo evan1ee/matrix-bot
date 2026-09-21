@@ -88,7 +88,7 @@ impl TtsModule {
         // default — a sensible voice (e.g. Mandarin) for a room full of people
         // who have never picked their own. `resolve_speaker_id` decides
         // between it and the sender's saved `tts_speaker_id`.
-        let settings = SettingsRepository::get_or_default(&db.pool, &ctx.owner_id).await;
+        let settings = SettingsRepository::get_or_default(db.sqlite_pool(), &ctx.owner_id).await;
         let speaker_id = resolve_speaker_id(self.config.speaker_id, settings.tts_speaker_id);
 
         let speech = match engine::synthesize(&self.config, &text, speaker_id).await {

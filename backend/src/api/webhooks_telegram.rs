@@ -40,7 +40,7 @@ pub async fn telegram_send_message_post(
     body_bytes: Bytes,
 ) -> Result<Json<TelegramResponse>, ApiError> {
     let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
+    let webhook = WebhookRepository::find_by_token_hash(state.db.sqlite_pool(), &token_hash)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
@@ -122,7 +122,7 @@ pub async fn telegram_send_message_get(
     Query(q): Query<TelegramQuery>,
 ) -> Result<Json<TelegramResponse>, ApiError> {
     let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
+    let webhook = WebhookRepository::find_by_token_hash(state.db.sqlite_pool(), &token_hash)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;

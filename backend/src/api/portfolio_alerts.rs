@@ -38,7 +38,7 @@ pub async fn list_alerts(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<PriceAlert>>, ApiError> {
-    let alerts = AlertsRepository::list_for_owner(&state.db.pool, &user.owner_id())
+    let alerts = AlertsRepository::list_for_owner(state.db.sqlite_pool(), &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -78,7 +78,7 @@ pub async fn create_alert(
 
     let owner_id = user.owner_id();
     let alert = AlertsRepository::create(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &owner_id,
         &symbol,
         target_price_minor,
@@ -114,7 +114,7 @@ pub async fn delete_alert(
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
 
-    let deleted = AlertsRepository::delete(&state.db.pool, id, &owner_id)
+    let deleted = AlertsRepository::delete(state.db.sqlite_pool(), id, &owner_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -140,7 +140,9 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             broadcaster,
             None,
             "http://localhost:8008".to_string(),

@@ -23,7 +23,7 @@ pub async fn list_rooms(
     user: AuthUser,
 ) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
     // 1. Check database cache first — instantaneous response without network delay
-    let cached = get_cached_rooms(&state.db.pool, &user.account_id)
+    let cached = get_cached_rooms(state.db.sqlite_pool(), &user.account_id)
         .await
         .unwrap_or_default();
 
@@ -36,10 +36,11 @@ pub async fn list_rooms(
         return Ok(Json(Vec::new()));
     };
 
-    let discovered = discover_rooms_for_account(&state.db.pool, &client, &user.account_id).await;
+    let discovered =
+        discover_rooms_for_account(state.db.sqlite_pool(), &client, &user.account_id).await;
     if !discovered.is_empty() {
-        let _ = save_cached_rooms(&state.db.pool, &user.account_id, &discovered).await;
-        if let Ok(saved) = get_cached_rooms(&state.db.pool, &user.account_id).await {
+        let _ = save_cached_rooms(state.db.sqlite_pool(), &user.account_id, &discovered).await;
+        if let Ok(saved) = get_cached_rooms(state.db.sqlite_pool(), &user.account_id).await {
             return Ok(Json(saved));
         }
     }
@@ -65,12 +66,13 @@ pub async fn sync_rooms(
         return Err(ApiError::bad_request("Matrix bot client not connected"));
     };
 
-    let discovered = discover_rooms_for_account(&state.db.pool, &client, &user.account_id).await;
-    save_cached_rooms(&state.db.pool, &user.account_id, &discovered)
+    let discovered =
+        discover_rooms_for_account(state.db.sqlite_pool(), &client, &user.account_id).await;
+    save_cached_rooms(state.db.sqlite_pool(), &user.account_id, &discovered)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to save cached rooms: {}", e)))?;
 
-    let refreshed = get_cached_rooms(&state.db.pool, &user.account_id)
+    let refreshed = get_cached_rooms(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to read cached rooms: {}", e)))?;
 
@@ -89,7 +91,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -146,7 +150,9 @@ mod tests {
 
         // Test list_rooms hits cache directly without bot client
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

@@ -63,7 +63,7 @@ impl BotModule for LifeModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_life_command(
-            &db.pool,
+            db.sqlite_pool(),
             broadcaster,
             &ctx.owner_id,
             &ctx.command,

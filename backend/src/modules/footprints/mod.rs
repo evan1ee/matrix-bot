@@ -55,7 +55,7 @@ impl BotModule for FootprintsModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_footprint_command(
-            &db.pool,
+            db.sqlite_pool(),
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
@@ -76,11 +76,15 @@ mod tests {
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@traveler:mbm.one")
-                .await
-                .unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
+        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
+            db.sqlite_pool(),
+            "@traveler:mbm.one",
+        )
+        .await
+        .unwrap();
         (db, account_id)
     }
 
@@ -89,7 +93,7 @@ mod tests {
         let (db, owner) = setup_db().await;
 
         let created = FootprintRepository::create(
-            &db.pool,
+            db.sqlite_pool(),
             &owner,
             "Eiffel Tower",
             48.8584,
@@ -113,19 +117,19 @@ mod tests {
         assert_eq!(created.stay_duration_days, 4);
         assert_eq!(created.rating, 5);
 
-        let list = FootprintRepository::list_by_owner(&db.pool, &owner, None, None, None)
+        let list = FootprintRepository::list_by_owner(db.sqlite_pool(), &owner, None, None, None)
             .await
             .unwrap();
         assert_eq!(list.len(), 1);
 
-        let stats = FootprintRepository::summary_stats(&db.pool, &owner)
+        let stats = FootprintRepository::summary_stats(db.sqlite_pool(), &owner)
             .await
             .unwrap();
         assert_eq!(stats.total_places, 1);
         assert_eq!(stats.total_countries, 1);
         assert_eq!(stats.total_days_traveled, 4);
 
-        let deleted = FootprintRepository::delete(&db.pool, created.id, &owner)
+        let deleted = FootprintRepository::delete(db.sqlite_pool(), created.id, &owner)
             .await
             .unwrap();
         assert!(deleted);

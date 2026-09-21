@@ -62,7 +62,7 @@ impl BotModule for WebhookModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_webhook_command(
-            &db.pool,
+            db.sqlite_pool(),
             &ctx.room_id,
             &ctx.owner_id,
             &ctx.sender_name,

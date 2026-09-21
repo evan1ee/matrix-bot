@@ -31,7 +31,7 @@ pub async fn get_day_activity(
         ));
     }
 
-    let response = collect_day_activity(&state.db.pool, &user.account_id, &date).await;
+    let response = collect_day_activity(state.db.sqlite_pool(), &user.account_id, &date).await;
     Ok(Json(response))
 }
 
@@ -46,7 +46,9 @@ mod tests {
     async fn create_test_state() -> (ApiState, SqlitePool) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
-        let db = Database { pool: pool.clone() };
+        let db = Database {
+            pool: crate::db::DbPool::Sqlite(pool.clone()),
+        };
         let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();
         let state = ApiState::new(

@@ -89,7 +89,7 @@ pub fn register_reaction_handler(
             };
 
             let sender_owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-                &db.pool,
+                db.sqlite_pool(),
                 ev.sender.as_str(),
             )
             .await
@@ -105,13 +105,13 @@ pub fn register_reaction_handler(
             };
 
             let target_event_id = &ev.content.relates_to.event_id;
-            let target = match get_target(&db.pool, target_event_id.as_str()).await {
+            let target = match get_target(db.sqlite_pool(), target_event_id.as_str()).await {
                 Ok(Some(t)) => t,
                 Ok(None) => {
                     match crate::bot::reaction_targets::resolve_untracked_target(
                         &room,
                         target_event_id.as_str(),
-                        &db.pool,
+                        db.sqlite_pool(),
                         &sender_owner_id,
                     )
                     .await
@@ -150,13 +150,13 @@ pub fn register_reaction_handler(
             );
 
             if let Some(outcome) =
-                apply_reaction(&db.pool, &target, action, broadcaster.as_ref()).await
+                apply_reaction(db.sqlite_pool(), &target, action, broadcaster.as_ref()).await
             {
                 send_reaction(&room, target_event_id, outcome.ack_emoji).await;
                 if let Some(reply_eid) = send_reply(&room, &outcome.reply_html).await {
                     if action != AllowedReaction::Delete {
                         let _ = crate::bot::reaction_targets::record_target(
-                            &db.pool,
+                            db.sqlite_pool(),
                             reply_eid.as_str(),
                             room.room_id().as_str(),
                             &target.entity_type,

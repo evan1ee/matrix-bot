@@ -45,7 +45,7 @@ pub async fn list_cash(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<CashBalance>>, ApiError> {
-    let balances = cash_repo::list_cash(&state.db.pool, &user.owner_id())
+    let balances = cash_repo::list_cash(state.db.sqlite_pool(), &user.owner_id())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -76,7 +76,7 @@ pub async fn deposit_cash(
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
     let cash = service::deposit_cash(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         &payload.currency,
@@ -88,7 +88,7 @@ pub async fn deposit_cash(
     // The service broadcasts `PortfolioCashUpdated` itself; this handler only
     // needs to post the finance-ledger transaction below.
     crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         "deposit",
@@ -126,7 +126,7 @@ pub async fn withdraw_cash(
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
     match service::withdraw_cash(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &owner_id,
         &payload.currency,
@@ -139,7 +139,7 @@ pub async fn withdraw_cash(
             // The service broadcasts `PortfolioCashUpdated` itself; this
             // handler only needs to post the finance-ledger transaction below.
             crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-                &state.db.pool,
+                state.db.sqlite_pool(),
                 Some(&state.broadcaster),
                 &owner_id,
                 "withdraw",

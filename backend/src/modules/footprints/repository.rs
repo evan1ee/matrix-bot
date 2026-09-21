@@ -254,10 +254,12 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_update_atomic_returning() {
         let db = Database::connect("sqlite::memory:", 5).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
 
         let created = FootprintRepository::create(
-            &db.pool,
+            db.sqlite_pool(),
             "user_test",
             "Initial Place",
             30.0,
@@ -282,7 +284,7 @@ mod tests {
         assert_eq!(created.rating, 4);
 
         let updated = FootprintRepository::update(
-            &db.pool,
+            db.sqlite_pool(),
             created.id,
             "user_test",
             "Updated Place",
@@ -309,7 +311,7 @@ mod tests {
         assert_eq!(updated.rating, 5);
         assert_eq!(updated.category, "food");
 
-        let found = FootprintRepository::find(&db.pool, created.id)
+        let found = FootprintRepository::find(db.sqlite_pool(), created.id)
             .await
             .unwrap()
             .expect("find must return updated footprint");

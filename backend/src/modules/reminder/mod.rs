@@ -58,7 +58,7 @@ impl BotModule for ReminderModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_reminder_command(
-            &db.pool,
+            db.sqlite_pool(),
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,

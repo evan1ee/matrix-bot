@@ -47,7 +47,7 @@ pub async fn list_footprints(
     Query(params): Query<ListFootprintsQuery>,
 ) -> Result<Json<Vec<Footprint>>, ApiError> {
     let items = FootprintRepository::list_by_owner(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         params.country.as_deref(),
         params.category.as_deref(),
@@ -76,7 +76,7 @@ pub async fn get_footprint(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Footprint>, ApiError> {
-    let fp = FootprintRepository::find_owned(&state.db.pool, id, &user.account_id)
+    let fp = FootprintRepository::find_owned(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
@@ -113,9 +113,10 @@ pub async fn create_footprint(
         ));
     }
 
-    let default_currency = SettingsRepository::get_or_default(&state.db.pool, &user.account_id)
-        .await
-        .currency;
+    let default_currency =
+        SettingsRepository::get_or_default(state.db.sqlite_pool(), &user.account_id)
+            .await
+            .currency;
     let raw_currency = payload
         .spend_currency
         .as_deref()
@@ -138,7 +139,7 @@ pub async fn create_footprint(
     let category = payload.category.as_deref().unwrap_or("travel");
 
     let created = FootprintRepository::create(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.account_id,
         title,
         payload.latitude,
@@ -185,7 +186,7 @@ pub async fn update_footprint(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateFootprintRequest>,
 ) -> Result<Json<Footprint>, ApiError> {
-    let existing = FootprintRepository::find_owned(&state.db.pool, id, &user.account_id)
+    let existing = FootprintRepository::find_owned(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
@@ -234,7 +235,7 @@ pub async fn update_footprint(
     let note = payload.note.as_deref().or(existing.note.as_deref());
 
     let updated = FootprintRepository::update(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         id,
         &user.account_id,
         title,
@@ -280,7 +281,7 @@ pub async fn delete_footprint(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = FootprintRepository::delete(&state.db.pool, id, &user.account_id)
+    let deleted = FootprintRepository::delete(state.db.sqlite_pool(), id, &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -310,7 +311,7 @@ pub async fn get_summary_stats(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<FootprintsSummary>, ApiError> {
-    let stats = FootprintRepository::summary_stats(&state.db.pool, &user.account_id)
+    let stats = FootprintRepository::summary_stats(state.db.sqlite_pool(), &user.account_id)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 

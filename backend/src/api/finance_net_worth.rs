@@ -21,10 +21,10 @@ pub async fn get_net_worth(
     user: AuthUser,
 ) -> Result<Json<NetWorthResponse>, ApiError> {
     let owner_id = user.owner_id();
-    let settings = SettingsRepository::get_or_default(&state.db.pool, &owner_id).await;
+    let settings = SettingsRepository::get_or_default(state.db.sqlite_pool(), &owner_id).await;
 
     let net_worth = NetWorthService::compute_net_worth(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &state.http_client,
         &owner_id,
         &settings.currency,
@@ -47,7 +47,9 @@ mod tests {
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

@@ -111,7 +111,7 @@ pub async fn list_todos(
 
     let (items, total) = if let Some(room) = &query.room_id {
         let items = TodoRepository::list_room_user(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             room,
             &owner_id,
             query.completed,
@@ -120,15 +120,19 @@ pub async fn list_todos(
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total =
-            TodoRepository::count_room_user(&state.db.pool, room, &owner_id, query.completed)
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total = TodoRepository::count_room_user(
+            state.db.sqlite_pool(),
+            room,
+            &owner_id,
+            query.completed,
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
         (items, total)
     } else {
         let items = TodoRepository::list_all_user(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &owner_id,
             query.completed,
             limit,
@@ -136,9 +140,10 @@ pub async fn list_todos(
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = TodoRepository::count_all_user(&state.db.pool, &owner_id, query.completed)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let total =
+            TodoRepository::count_all_user(state.db.sqlite_pool(), &owner_id, query.completed)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?;
         (items, total)
     };
 
@@ -173,7 +178,7 @@ pub async fn create_todo(
         .unwrap_or(TodoPriority::Medium);
 
     let room_id = crate::db::rooms::resolve_target_room(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.owner_id(),
         payload.room_id.as_deref(),
     )
@@ -181,14 +186,19 @@ pub async fn create_todo(
 
     let remind_room = if let Some(rr) = payload.remind_room_id.as_deref() {
         Some(
-            crate::db::rooms::resolve_target_room(&state.db.pool, &user.owner_id(), Some(rr)).await,
+            crate::db::rooms::resolve_target_room(
+                state.db.sqlite_pool(),
+                &user.owner_id(),
+                Some(rr),
+            )
+            .await,
         )
     } else {
         None
     };
 
     let item = service::create(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &user.owner_id(),
         NewTodo {
@@ -230,7 +240,7 @@ pub async fn update_todo(
         .map(TodoPriority::from_str_or_default);
 
     let item = service::update(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &user.owner_id(),
         id,
@@ -265,7 +275,7 @@ pub async fn delete_todo(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     service::delete(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &user.owner_id(),
         id,
@@ -295,7 +305,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -377,7 +389,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -451,7 +465,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -530,7 +546,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -639,7 +657,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -681,7 +701,7 @@ mod tests {
 
         let rem =
             crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
-                &state.db.pool,
+                state.db.sqlite_pool(),
                 ReminderSource::Todo,
                 created.id,
             )
@@ -805,7 +825,7 @@ mod tests {
         assert!(cleared.due_at.is_none());
         assert!(
             crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
-                &state.db.pool,
+                state.db.sqlite_pool(),
                 ReminderSource::Todo,
                 created.id,
             )
@@ -852,7 +872,7 @@ mod tests {
         assert_eq!(edited.priority, "high");
 
         let rem = ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::Todo,
             created.id,
         )
@@ -899,7 +919,7 @@ mod tests {
         .unwrap();
 
         let rem = ReminderRepository::find_pending_for_source(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             ReminderSource::Todo,
             created.id,
         )
@@ -933,7 +953,7 @@ mod tests {
 
         assert!(
             crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
-                &state.db.pool,
+                state.db.sqlite_pool(),
                 ReminderSource::Todo,
                 created.id,
             )

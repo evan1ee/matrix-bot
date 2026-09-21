@@ -23,7 +23,7 @@ pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<Str
                 let is_linked =
                     sqlx::query_scalar::<_, i64>("SELECT 1 FROM matrix_links WHERE mxid = ?")
                         .bind(sender)
-                        .fetch_optional(&db.pool)
+                        .fetch_optional(db.sqlite_pool())
                         .await
                         .ok()
                         .flatten()

@@ -56,7 +56,7 @@ design is unsound and every model would need a second driver-specific mapping.
 | 0 | `postgres` driver feature; `dialect_probe` compile gate | **done** — `0c5faed` |
 | 1 | `dialect.rs`: `Dialect`, `render_placeholders` | **done** — `0c5faed` |
 | 2 | `executor.rs`: `DbPool` enum + the five macros | **done** — `6e39bd3` |
-| 3 | `pool.rs`: connect either driver from `DATABASE_URL` | todo |
+| 3 | `pool.rs`: connect either driver from `DATABASE_URL` | **done** — see below |
 | 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | todo |
 | 5 | Convert 553 query sites, module by module | todo |
 | 6 | Convert the 5 production transaction sites | todo |
@@ -94,3 +94,37 @@ clean, and any guard test mutation-tested before it is trusted. The
 literal-skipping arm fails exactly the three tests written to catch it.
 
 Baseline at stage 2: **697 passed, 0 failed, 8 ignored.**
+Baseline at stage 3: **699 passed, 0 failed, 9 ignored.**
+
+## Stage 3 notes
+
+`connect_pool` opens either driver. SQLite keeps its directory creation, WAL
+journal mode and busy timeout; PostgreSQL has none of those, because the server
+owns its storage.
+
+`Database.pool` is now a `DbPool`, but **no repository signature changed**.
+`Database::sqlite_pool()` returns `&SqlitePool`, so all 406 `pool: &SqlitePool`
+signatures stayed as they are and only the ~495 call sites reaching `db.pool`
+moved to `db.sqlite_pool()`. That is what keeps stage 5 incremental: a module
+converts by changing its own signatures to `&DbPool` and its bodies to the
+macros, with everything else still compiling.
+
+`Database::connect` **refuses a Postgres URL at boot** with an explanation.
+Until stages 4 and 5 land, the DDL is SQLite-only and most repositories still
+reach `sqlite_pool()`, so booting on Postgres would create no tables and then
+fail per query. Refusing is the honest behaviour, and it also makes
+`sqlite_pool()`'s `expect` unreachable by construction. The guard, the
+scaffolding accessor and their tests are deleted in the same commit as stage 5.
+
+**Not yet verified against a real server.** The unit tests prove a Postgres URL
+is *routed* to the Postgres driver and that a SQLite URL is not, but Docker
+Desktop was not running on the development machine, so
+`test_connect_pool_connects_to_a_live_postgres` has never been executed. It is
+`#[ignore]`d and carries the exact command:
+
+```bash
+docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=bot --name bot-pg postgres:16
+PG_TEST_URL=postgres://postgres:bot@127.0.0.1:55432/postgres   cargo test --package matrix-bot connects_to_a_live_postgres -- --ignored
+```
+
+Run it before trusting stage 3.

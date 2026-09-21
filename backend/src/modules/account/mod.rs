@@ -139,7 +139,7 @@ impl AccountModule {
         // The sender's account is whatever this MXID reaches. An MXID linked to
         // nothing has only the empty account the resolver just made it, and
         // recovering that is meaningless.
-        let account = match AccountRepository::find(&db.pool, &ctx.owner_id).await {
+        let account = match AccountRepository::find(db.sqlite_pool(), &ctx.owner_id).await {
             Ok(Some(account)) => account,
             _ => return "Could not read your account. Try again shortly.".to_string(),
         };
@@ -153,13 +153,14 @@ impl AccountModule {
             );
         }
 
-        let (code, valid_after) = match RecoveryRepository::request(&db.pool, &ctx.owner_id).await {
-            Ok(result) => result,
-            Err(err) => {
-                tracing::error!("Could not start recovery for {}: {:?}", ctx.owner_id, err);
-                return "Could not start recovery. Try again shortly.".to_string();
-            }
-        };
+        let (code, valid_after) =
+            match RecoveryRepository::request(db.sqlite_pool(), &ctx.owner_id).await {
+                Ok(result) => result,
+                Err(err) => {
+                    tracing::error!("Could not start recovery for {}: {:?}", ctx.owner_id, err);
+                    return "Could not start recovery. Try again shortly.".to_string();
+                }
+            };
 
         // Announced to *every* linked identity, not just this one. If someone
         // else started this, the real owner has to hear about it — on a channel
@@ -203,7 +204,9 @@ impl AccountModule {
                 return "Send <code>!passkey add</code> in a direct message — the link contains a single-use token that must not be shown in a shared room.".to_string();
             }
 
-            match crate::accounts::EnrollmentRepository::issue(&db.pool, &ctx.owner_id, 10).await {
+            match crate::accounts::EnrollmentRepository::issue(db.sqlite_pool(), &ctx.owner_id, 10)
+                .await
+            {
                 Ok(token) => {
                     let enroll_url =
                         format!("{}/?enroll={}", self.web_url.trim_end_matches('/'), token);
@@ -230,8 +233,11 @@ impl AccountModule {
             let target = trimmed.split_whitespace().nth(1).unwrap_or("");
             self.handle_unlink_passkey(ctx, db, target).await
         } else {
-            match crate::accounts::CredentialRepository::list_for_account(&db.pool, &ctx.owner_id)
-                .await
+            match crate::accounts::CredentialRepository::list_for_account(
+                db.sqlite_pool(),
+                &ctx.owner_id,
+            )
+            .await
             {
                 Ok(creds) => {
                     if creds.is_empty() {
@@ -284,10 +290,10 @@ impl AccountModule {
                 if !ctx.is_direct {
                     return "Send <code>!unlink sessions</code> in a direct message.".to_string();
                 }
-                match crate::accounts::SessionRepository::revoke_all_for_account(&db.pool, &ctx.owner_id, None).await {
+                match crate::accounts::SessionRepository::revoke_all_for_account(db.sqlite_pool(), &ctx.owner_id, None).await {
                     Ok(count) => {
                         crate::accounts::SecurityEventRepository::record(
-                            &db.pool,
+                            db.sqlite_pool(),
                             &ctx.owner_id,
                             crate::accounts::SecurityEventKind::SessionsRevoked,
                             Some(&format!("revoked {} session(s) via Matrix command", count)),
@@ -309,10 +315,10 @@ impl AccountModule {
                 if target_mxid == ctx.sender_mxid {
                     return "Cannot unlink your currently active Matrix identity. To unlink a secondary Matrix account, specify its MXID.".to_string();
                 }
-                match crate::accounts::LinkRepository::unlink(&db.pool, &ctx.owner_id, target_mxid).await {
+                match crate::accounts::LinkRepository::unlink(db.sqlite_pool(), &ctx.owner_id, target_mxid).await {
                     Ok(true) => {
                         crate::accounts::SecurityEventRepository::record(
-                            &db.pool,
+                            db.sqlite_pool(),
                             &ctx.owner_id,
                             crate::accounts::SecurityEventKind::MatrixUnlinked,
                             Some(target_mxid),
@@ -368,7 +374,7 @@ pub async fn redeem_matured_recovery(
     client: Option<&Client>,
     code: &str,
 ) -> Result<String, RecoveryRejection> {
-    match RecoveryRepository::redeem_request(&db.pool, code).await {
+    match RecoveryRepository::redeem_request(db.sqlite_pool(), code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
             notify_account(
                 client,
@@ -405,7 +411,9 @@ mod tests {
     async fn db() -> Database {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database {
+            pool: crate::db::DbPool::Sqlite(pool),
+        }
     }
 
     fn module() -> AccountModule {
@@ -474,7 +482,7 @@ mod tests {
     #[tokio::test]
     async fn test_recover_is_refused_outside_a_direct_message() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -485,7 +493,7 @@ mod tests {
 
         assert!(reply.contains("direct message"));
         assert!(
-            RecoveryRepository::pending(&db.pool, &account)
+            RecoveryRepository::pending(db.sqlite_pool(), &account)
                 .await
                 .unwrap()
                 .is_none(),
@@ -498,7 +506,7 @@ mod tests {
     #[tokio::test]
     async fn test_recover_needs_a_claimed_account() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_UNCLAIMED)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_UNCLAIMED)
             .await
             .unwrap();
 
@@ -508,7 +516,7 @@ mod tests {
             .unwrap();
 
         assert!(reply.contains("!link"), "it should say how to link instead");
-        assert!(RecoveryRepository::pending(&db.pool, &account)
+        assert!(RecoveryRepository::pending(db.sqlite_pool(), &account)
             .await
             .unwrap()
             .is_none());
@@ -518,7 +526,7 @@ mod tests {
     #[tokio::test]
     async fn test_recover_issues_a_delayed_code_and_says_so() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -532,13 +540,13 @@ mod tests {
             "the delay must be stated: {reply}"
         );
         assert!(reply.contains("cancel"), "the way out must be stated");
-        assert!(RecoveryRepository::pending(&db.pool, &account)
+        assert!(RecoveryRepository::pending(db.sqlite_pool(), &account)
             .await
             .unwrap()
             .is_some());
 
         // And it is logged, so the web UI shows it even with no DM delivered.
-        let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = crate::accounts::SecurityEventRepository::list(db.sqlite_pool(), &account, 10)
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_requested");
@@ -548,10 +556,10 @@ mod tests {
     #[tokio::test]
     async fn test_a_premature_code_is_refused_in_the_web_ui_too() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account)
+        let (code, _) = RecoveryRepository::request(db.sqlite_pool(), &account)
             .await
             .unwrap();
 
@@ -564,17 +572,17 @@ mod tests {
     #[tokio::test]
     async fn test_a_matured_code_opens_the_account_and_is_logged() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account)
+        let (code, _) = RecoveryRepository::request(db.sqlite_pool(), &account)
             .await
             .unwrap();
 
         sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
             .bind(chrono::Utc::now() - chrono::Duration::minutes(1))
             .bind(&account)
-            .execute(&db.pool)
+            .execute(db.sqlite_pool())
             .await
             .unwrap();
 
@@ -583,7 +591,7 @@ mod tests {
             account
         );
 
-        let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = crate::accounts::SecurityEventRepository::list(db.sqlite_pool(), &account, 10)
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_completed");
@@ -592,7 +600,7 @@ mod tests {
     #[tokio::test]
     async fn test_passkey_add_generates_enroll_link_in_dm() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -616,7 +624,7 @@ mod tests {
     #[tokio::test]
     async fn test_passkeys_list_and_unlink_flow() {
         let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let account = AccountRepository::create(db.sqlite_pool(), "evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -628,13 +636,13 @@ mod tests {
         // Insert two passkeys and a matrix link
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
             .bind(&account)
-            .execute(&db.pool)
+            .execute(db.sqlite_pool())
             .await
             .unwrap();
         sqlx::query("INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ('pk1', ?, '{}', 'MacBook'), ('pk2', ?, '{}', 'iPhone')")
             .bind(&account)
             .bind(&account)
-            .execute(&db.pool)
+            .execute(db.sqlite_pool())
             .await
             .unwrap();
 
@@ -655,7 +663,7 @@ mod tests {
 
         // Verify passkeys were NOT deleted from database
         let creds_after =
-            crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
+            crate::accounts::CredentialRepository::list_for_account(db.sqlite_pool(), &account)
                 .await
                 .unwrap();
         assert_eq!(creds_after.len(), 2);

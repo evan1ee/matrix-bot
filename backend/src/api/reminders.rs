@@ -74,7 +74,7 @@ pub async fn list_reminders(
     let owner_id = user.owner_id();
 
     let items = ReminderRepository::list_user_reminders(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &owner_id,
         query.status.as_deref(),
         query.room_id.as_deref(),
@@ -85,7 +85,7 @@ pub async fn list_reminders(
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let total = ReminderRepository::count_user_reminders(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &owner_id,
         query.status.as_deref(),
         query.room_id.as_deref(),
@@ -128,14 +128,14 @@ pub async fn create_reminder(
         .unwrap_or(RecurrencePattern::None);
 
     let room_id = crate::db::rooms::resolve_target_room(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.owner_id(),
         payload.room_id.as_deref(),
     )
     .await;
 
     let reminder = service::create(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         Some(&state.broadcaster),
         &user.owner_id(),
         NewReminder {
@@ -201,7 +201,7 @@ pub async fn update_reminder(
         .unwrap_or(RecurrencePattern::None);
 
     let updated = ReminderRepository::update_pending(
-        &state.db.pool,
+        state.db.sqlite_pool(),
         &user.owner_id(),
         id,
         &payload.message,
@@ -240,7 +240,7 @@ pub async fn delete_reminder(
         sqlx::query_as("SELECT room_id, status FROM reminders WHERE id = ? AND owner_id = ?")
             .bind(id)
             .bind(&owner_id)
-            .fetch_optional(&state.db.pool)
+            .fetch_optional(state.db.sqlite_pool())
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -250,11 +250,17 @@ pub async fn delete_reminder(
     };
 
     if status == "pending" {
-        service::cancel(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
+        service::cancel(
+            state.db.sqlite_pool(),
+            Some(&state.broadcaster),
+            &owner_id,
+            id,
+        )
+        .await?;
     } else {
         sqlx::query("DELETE FROM reminders WHERE id = ?")
             .bind(id)
-            .execute(&state.db.pool)
+            .execute(state.db.sqlite_pool())
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -282,7 +288,7 @@ pub async fn clear_reminder_history(
     user: AuthUser,
 ) -> Result<StatusCode, ApiError> {
     let owner_id = user.owner_id();
-    service::clear_history(&state.db.pool, Some(&state.broadcaster), &owner_id).await?;
+    service::clear_history(state.db.sqlite_pool(), Some(&state.broadcaster), &owner_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -299,7 +305,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -350,7 +358,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -428,7 +438,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

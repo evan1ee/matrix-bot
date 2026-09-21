@@ -22,7 +22,7 @@ pub struct HealthResponse {
 )]
 pub async fn health_check(State(state): State<ApiState>) -> (StatusCode, Json<HealthResponse>) {
     let db_ok = sqlx::query("SELECT 1")
-        .execute(&state.db.pool)
+        .execute(state.db.sqlite_pool())
         .await
         .is_ok();
 
@@ -63,7 +63,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -81,7 +83,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         pool.close().await;
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

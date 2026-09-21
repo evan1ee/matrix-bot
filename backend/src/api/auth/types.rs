@@ -325,7 +325,7 @@ impl ApiState {
     /// accumulate when someone starts one, so the work belongs on that path.
     pub async fn stash_ceremony(&self, ceremony: Ceremony) -> Result<String, ApiError> {
         let id = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(16)))")
-            .fetch_one(&self.db.pool)
+            .fetch_one(self.db.sqlite_pool())
             .await
             .map_err(|err| ApiError::internal(format!("could not start a ceremony: {err}")))?;
 
@@ -453,7 +453,9 @@ mod tests {
 
         let state = ApiState::from_config(
             &config,
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )
@@ -499,7 +501,9 @@ mod tests {
 
         assert!(ApiState::from_config(
             &config,
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool)
+            },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )

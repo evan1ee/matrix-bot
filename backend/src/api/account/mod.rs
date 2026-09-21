@@ -38,7 +38,9 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database {
+                pool: crate::db::DbPool::Sqlite(pool),
+            },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -49,13 +51,18 @@ mod tests {
     /// A caller whose session is genuinely in the database, so `session_id_hash`
     /// matches a real row.
     async fn signed_in(state: &ApiState, name: &str) -> AuthUser {
-        let account = AccountRepository::create(&state.db.pool, name, STATUS_ACTIVE)
+        let account = AccountRepository::create(state.db.sqlite_pool(), name, STATUS_ACTIVE)
             .await
             .unwrap();
-        let token =
-            SessionRepository::create(&state.db.pool, &account, Some("Test/1.0"), None, None)
-                .await
-                .unwrap();
+        let token = SessionRepository::create(
+            state.db.sqlite_pool(),
+            &account,
+            Some("Test/1.0"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         AuthUser {
             account_id: account,
@@ -76,9 +83,10 @@ mod tests {
             .unwrap();
         assert_eq!(res.expires_in_seconds, LINK_CODE_TTL_MINUTES * 60);
 
-        let outcome = LinkRepository::claim(&state.db.pool, &res.code, "@evan:mbm.one", true)
-            .await
-            .unwrap();
+        let outcome =
+            LinkRepository::claim(state.db.sqlite_pool(), &res.code, "@evan:mbm.one", true)
+                .await
+                .unwrap();
         assert_eq!(
             outcome,
             LinkOutcome::Linked {
@@ -98,7 +106,7 @@ mod tests {
 
         sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
             .bind(&theirs.account_id)
-            .execute(&state.db.pool)
+            .execute(state.db.sqlite_pool())
             .await
             .unwrap();
 
@@ -115,7 +123,7 @@ mod tests {
 
         // Still linked to its real owner.
         assert_eq!(
-            AccountRepository::find_by_mxid(&state.db.pool, "@evan:mbm.one")
+            AccountRepository::find_by_mxid(state.db.sqlite_pool(), "@evan:mbm.one")
                 .await
                 .unwrap(),
             Some(theirs.account_id)
@@ -128,7 +136,7 @@ mod tests {
     async fn test_a_merge_cannot_be_confirmed_without_a_pending_link() {
         let state = state().await;
         let attacker = signed_in(&state, "attacker").await;
-        let victim = AccountRepository::create(&state.db.pool, "victim", STATUS_UNCLAIMED)
+        let victim = AccountRepository::create(state.db.sqlite_pool(), "victim", STATUS_UNCLAIMED)
             .await
             .unwrap();
 
@@ -137,7 +145,7 @@ mod tests {
              VALUES ('web', ?, 'victim', 'private', 'medium', 0)",
         )
         .bind(&victim)
-        .execute(&state.db.pool)
+        .execute(state.db.sqlite_pool())
         .await
         .unwrap();
 
@@ -153,7 +161,7 @@ mod tests {
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
 
         let owner: String = sqlx::query_scalar("SELECT owner_id FROM todos WHERE text = 'private'")
-            .fetch_one(&state.db.pool)
+            .fetch_one(state.db.sqlite_pool())
             .await
             .unwrap();
         assert_eq!(owner, victim, "the victim's row must not have moved");
@@ -163,7 +171,7 @@ mod tests {
     async fn test_a_pending_merge_can_be_previewed_then_confirmed() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let old = AccountRepository::resolve_or_provision(&state.db.pool, "@evan:mbm.one")
+        let old = AccountRepository::resolve_or_provision(state.db.sqlite_pool(), "@evan:mbm.one")
             .await
             .unwrap();
 
@@ -174,7 +182,7 @@ mod tests {
             )
             .bind(&old)
             .bind(text)
-            .execute(&state.db.pool)
+            .execute(state.db.sqlite_pool())
             .await
             .unwrap();
         }
@@ -210,7 +218,7 @@ mod tests {
              VALUES ('only', ?, '{}', 'Only key')",
         )
         .bind(&user.account_id)
-        .execute(&state.db.pool)
+        .execute(state.db.sqlite_pool())
         .await
         .unwrap();
 
@@ -229,7 +237,7 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
         SessionRepository::create(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &user.account_id,
             Some("Other/1.0"),
             None,
@@ -250,16 +258,17 @@ mod tests {
     async fn test_revoking_others_leaves_this_session_alone() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let other = SessionRepository::create(&state.db.pool, &user.account_id, None, None, None)
-            .await
-            .unwrap();
+        let other =
+            SessionRepository::create(state.db.sqlite_pool(), &user.account_id, None, None, None)
+                .await
+                .unwrap();
 
         let revoked = revoke_other_sessions(State(state.clone()), VerifiedUser(user.clone()))
             .await
             .unwrap();
         assert_eq!(revoked.0, 1);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other)
+        assert!(SessionRepository::resolve(state.db.sqlite_pool(), &other)
             .await
             .unwrap()
             .is_none());
@@ -273,9 +282,10 @@ mod tests {
     async fn test_revoking_single_session_works() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let other = SessionRepository::create(&state.db.pool, &user.account_id, None, None, None)
-            .await
-            .unwrap();
+        let other =
+            SessionRepository::create(state.db.sqlite_pool(), &user.account_id, None, None, None)
+                .await
+                .unwrap();
         let other_hash = hash_token(&other);
 
         let res = revoke_session(
@@ -287,7 +297,7 @@ mod tests {
         .unwrap();
         assert!(res.0);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other)
+        assert!(SessionRepository::resolve(state.db.sqlite_pool(), &other)
             .await
             .unwrap()
             .is_none());
@@ -319,11 +329,11 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
 
-        RecoveryRepository::request(&state.db.pool, &user.account_id)
+        RecoveryRepository::request(state.db.sqlite_pool(), &user.account_id)
             .await
             .unwrap();
         assert!(
-            RecoveryRepository::pending(&state.db.pool, &user.account_id)
+            RecoveryRepository::pending(state.db.sqlite_pool(), &user.account_id)
                 .await
                 .unwrap()
                 .is_some()
@@ -339,7 +349,7 @@ mod tests {
         let cancelled = cancel_recovery(State(state.clone()), stale).await.unwrap();
         assert_eq!(cancelled.0, 1);
         assert!(
-            RecoveryRepository::pending(&state.db.pool, &user.account_id)
+            RecoveryRepository::pending(state.db.sqlite_pool(), &user.account_id)
                 .await
                 .unwrap()
                 .is_none()
@@ -376,11 +386,11 @@ mod tests {
              VALUES ('theirs', ?, '{}', 'Their key')",
         )
         .bind(&theirs.account_id)
-        .execute(&state.db.pool)
+        .execute(state.db.sqlite_pool())
         .await
         .unwrap();
         SecurityEventRepository::record(
-            &state.db.pool,
+            state.db.sqlite_pool(),
             &theirs.account_id,
             SecurityEventKind::SignedIn,
             None,

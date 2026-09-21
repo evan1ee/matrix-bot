@@ -349,11 +349,15 @@ mod tests {
 
     async fn setup_db() -> (Database, String) {
         let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
-        let account_id =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        crate::db::schema::run_migrations(db.sqlite_pool())
+            .await
+            .unwrap();
+        let account_id = crate::accounts::AccountRepository::resolve_or_provision(
+            db.sqlite_pool(),
+            "@alice:mbm.one",
+        )
+        .await
+        .unwrap();
         (db, account_id)
     }
 
@@ -365,7 +369,8 @@ mod tests {
         let over_limit = "x".repeat(service::MAX_TASK_TEXT_LEN + 1);
         let args = json!({ "text": over_limit });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args).await;
+        let result =
+            execute_tool(db.sqlite_pool(), None, &owner, "!room:a", "add_todo", &args).await;
         assert!(matches!(result, Some(Err(_))));
     }
 
@@ -382,17 +387,20 @@ mod tests {
             "remind_before_minutes": 60,
         });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args)
+        let result = execute_tool(db.sqlite_pool(), None, &owner, "!room:a", "add_todo", &args)
             .await
             .unwrap()
             .unwrap();
         let todo: serde_json::Value = serde_json::from_str(&result).unwrap();
         let todo_id = todo["id"].as_i64().unwrap();
 
-        let pending =
-            ReminderRepository::find_pending_for_source(&db.pool, ReminderSource::Todo, todo_id)
-                .await
-                .unwrap();
+        let pending = ReminderRepository::find_pending_for_source(
+            db.sqlite_pool(),
+            ReminderSource::Todo,
+            todo_id,
+        )
+        .await
+        .unwrap();
         assert!(pending.is_some(), "a due reminder must be scheduled");
     }
 }
