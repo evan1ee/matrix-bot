@@ -16,7 +16,6 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
 
 /// The cookie a browser presents to prove who it is.
 pub const COOKIE_NAME: &str = "mb_session";
@@ -234,6 +233,7 @@ impl SessionRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

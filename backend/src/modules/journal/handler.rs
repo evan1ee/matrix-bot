@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::NaiveDate;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -308,6 +307,7 @@ async fn handle_clear(
 mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
+    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

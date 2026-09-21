@@ -24,7 +24,7 @@ pub mod schema_todos;
 pub mod schema_webhooks;
 
 pub use dialect::Dialect;
-pub use executor::DbPool;
+pub use executor::{DbPool, DbTx};
 pub use pool::Database;
 pub use rooms::{
     get_cached_rooms, resolve_target_room, resolve_user_default_room, save_cached_rooms,

@@ -1,7 +1,6 @@
 //! Trade command handling for portfolio (buy, record/import, sell).
 
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::EventBroadcaster;
@@ -347,6 +346,7 @@ pub async fn handle_sell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[test]
     fn test_parse_buy_grammar() {

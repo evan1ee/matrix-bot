@@ -7,7 +7,6 @@
 //! and out.
 
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use super::cash_repo;
@@ -257,6 +256,7 @@ async fn handle_cash_withdraw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[test]
     fn test_parse_cash_amount_grammar() {

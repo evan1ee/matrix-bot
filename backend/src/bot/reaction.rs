@@ -20,7 +20,6 @@ use matrix_sdk::{
     },
     Client, RoomState,
 };
-use sqlx::SqlitePool;
 use tracing::{error, info, warn};
 
 use crate::bot::reaction_targets::{delete_target_by_entity, get_target, BotMessageTarget};
@@ -493,6 +492,7 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::modules::reminder::models::{RecurrencePattern, ReminderSource};
     use crate::modules::todo::models::TodoPriority;
+    use sqlx::SqlitePool;
 
     async fn setup_pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

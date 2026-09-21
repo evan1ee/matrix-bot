@@ -34,6 +34,14 @@ impl DbPool {
         }
     }
 
+    /// Starts a transaction on whichever driver is live.
+    pub async fn begin(&self) -> Result<DbTx<'_>, sqlx::Error> {
+        Ok(match self {
+            DbPool::Sqlite(pool) => DbTx::Sqlite(pool.begin().await?),
+            DbPool::Postgres(pool) => DbTx::Postgres(pool.begin().await?),
+        })
+    }
+
     /// Closes the pool, waiting for in-flight connections to finish.
     ///
     /// Mirrors `Pool::close` on both drivers so callers do not have to match.
@@ -331,6 +339,211 @@ macro_rules! db_fetch_one_dyn {
                     __q = __q.bind(__v);
                 }
                 __q$(.bind($bind))*.fetch_one(__p).await
+            }
+        }
+    }};
+}
+
+/// A transaction on whichever database this process is talking to.
+///
+/// `Transaction<'_, Sqlite>` and `Transaction<'_, Postgres>` are different
+/// types with no shared trait that covers both `commit` and use as an executor,
+/// so the same enum-and-macro shape `DbPool` uses applies here. This is why
+/// transactions were left out of stage 5: converting them is not a matter of
+/// rewriting SQL.
+pub enum DbTx<'c> {
+    Sqlite(sqlx::Transaction<'c, sqlx::Sqlite>),
+    Postgres(sqlx::Transaction<'c, sqlx::Postgres>),
+}
+
+impl DbTx<'_> {
+    pub fn dialect(&self) -> Dialect {
+        match self {
+            DbTx::Sqlite(_) => Dialect::Sqlite,
+            DbTx::Postgres(_) => Dialect::Postgres,
+        }
+    }
+
+    pub async fn commit(self) -> Result<(), sqlx::Error> {
+        match self {
+            DbTx::Sqlite(tx) => tx.commit().await,
+            DbTx::Postgres(tx) => tx.commit().await,
+        }
+    }
+
+    /// Explicit rollback. Dropping a `DbTx` also rolls back, which is what makes
+    /// the failure paths safe without a `finally`.
+    pub async fn rollback(self) -> Result<(), sqlx::Error> {
+        match self {
+            DbTx::Sqlite(tx) => tx.rollback().await,
+            DbTx::Postgres(tx) => tx.rollback().await,
+        }
+    }
+}
+
+/// A statement inside a transaction, yielding `rows_affected()`.
+#[macro_export]
+macro_rules! tx_execute {
+    ($tx:expr, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query(&__sql)$(.bind($bind))*.execute(&mut **__t).await.map(|r| r.rows_affected())
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query(&__sql)$(.bind($bind))*.execute(&mut **__t).await.map(|r| r.rows_affected())
+            }
+        }
+    }};
+}
+
+/// `query_as` + `fetch_all` inside a transaction.
+#[macro_export]
+macro_rules! tx_fetch_all {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+            }
+        }
+    }};
+}
+
+/// `query_as` + `fetch_one` inside a transaction.
+#[macro_export]
+macro_rules! tx_fetch_one {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+            }
+        }
+    }};
+}
+
+/// `query_as` + `fetch_optional` inside a transaction.
+#[macro_export]
+macro_rules! tx_fetch_optional {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
+            }
+        }
+    }};
+}
+
+/// `query_scalar` + `fetch_one` inside a transaction.
+#[macro_export]
+macro_rules! tx_scalar_one {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+            }
+        }
+    }};
+}
+
+/// `query_scalar` + `fetch_all` inside a transaction.
+#[macro_export]
+macro_rules! tx_scalar_all {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+            }
+        }
+    }};
+}
+
+/// `query_scalar` + `fetch_optional` inside a transaction.
+#[macro_export]
+macro_rules! tx_scalar_optional {
+    ($tx:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
+        let __sql_src = $sql;
+        match $tx {
+            $crate::db::DbTx::Sqlite(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Sqlite,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
+            }
+            $crate::db::DbTx::Postgres(__t) => {
+                let __sql = $crate::db::executor::__render(
+                    __sql_src,
+                    $crate::db::dialect::Dialect::Postgres,
+                );
+                sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
             }
         }
     }};

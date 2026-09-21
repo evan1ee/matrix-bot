@@ -1,7 +1,6 @@
 use crate::db::DbPool;
 use chrono::{Duration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use utoipa::ToSchema;
 
@@ -421,6 +420,7 @@ mod tests {
     use crate::modules::recurring_bills::repository::RecurringBillRepository;
     use crate::modules::settings::models::UserSettings;
     use crate::modules::settings::repository::SettingsRepository;
+    use sqlx::SqlitePool;
 
     async fn test_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

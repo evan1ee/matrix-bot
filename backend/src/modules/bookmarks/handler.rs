@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use reqwest::Client;
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
@@ -238,6 +237,7 @@ pub fn format_help() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     async fn setup_db() -> (DbPool, String) {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

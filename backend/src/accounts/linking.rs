@@ -12,7 +12,6 @@
 
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, Utc};
-use sqlx::SqlitePool;
 
 /// How long a link code stays usable.
 ///
@@ -235,6 +234,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

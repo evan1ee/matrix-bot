@@ -13,7 +13,6 @@
 use axum::response::IntoResponse;
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -488,6 +487,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

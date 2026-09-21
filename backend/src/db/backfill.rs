@@ -10,7 +10,6 @@
 //! then inspects, so running the demotion first silently does nothing.
 
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::info;
 
 /// Runs every conversion, in the only order that works.
@@ -132,7 +131,7 @@ async fn backfill_accounts(pool: &DbPool) -> Result<(), sqlx::Error> {
         if let Some(mxid) = mxid {
             crate::db_execute!(
                 pool,
-                "INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+                "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
                 &mxid,
                 &account_id
             )?;

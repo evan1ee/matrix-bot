@@ -24,8 +24,6 @@
 //! It has no credential, so there is nothing to authenticate as, and nothing to
 //! steal by guessing its id.
 
-use crate::db::DbPool;
-use crate::db_scalar_all;
 pub mod credentials;
 pub mod linking;
 pub mod merge;
@@ -191,6 +189,7 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use crate::db::DbPool;
     use sqlx::{Row, SqlitePool};
     use std::collections::BTreeSet;
 

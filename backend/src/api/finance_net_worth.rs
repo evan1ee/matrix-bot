@@ -1,7 +1,6 @@
 //! API handler for unified cross-currency net worth calculation.
 
 use axum::{extract::State, Json};
-use sqlx::SqlitePool;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -40,6 +39,7 @@ pub async fn get_net_worth(
 mod tests {
     use super::*;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_get_net_worth_api_handler() {

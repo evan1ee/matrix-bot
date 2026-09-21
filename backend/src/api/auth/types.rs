@@ -1,4 +1,3 @@
-use crate::db::DbPool;
 use crate::db_scalar_one;
 use axum::extract::FromRef;
 use serde::{Deserialize, Serialize};

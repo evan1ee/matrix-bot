@@ -15,7 +15,6 @@
 use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::due_reminder::{self, ReminderPlan, SyncOutcome};
@@ -106,6 +105,7 @@ mod tests {
     use crate::modules::recurring_bills::models::CreateBillPayload;
     use crate::modules::recurring_bills::repository::RecurringBillRepository;
     use crate::modules::reminder::repository::ReminderRepository;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

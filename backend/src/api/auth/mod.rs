@@ -1,4 +1,3 @@
-use sqlx::SqlitePool;
 pub mod extractor;
 pub mod handlers;
 pub mod matrix;
@@ -21,6 +20,7 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
+    use sqlx::SqlitePool;
 
     const ORIGIN: &str = "http://localhost:8080";
 

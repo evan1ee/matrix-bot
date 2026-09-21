@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::{Datelike, TimeZone, Utc};
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::EventBroadcaster;
@@ -464,6 +463,7 @@ async fn handle_category(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[test]
     fn test_parses_amount_currency_note_and_category() {

@@ -4,7 +4,6 @@ use crate::modules::briefing::generator::generate_briefing;
 use crate::modules::settings::models::parse_briefing_time;
 use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
-use sqlx::SqlitePool;
 
 pub async fn handle_briefing_command(
     pool: &DbPool,
@@ -182,6 +181,7 @@ fn usage() -> String {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

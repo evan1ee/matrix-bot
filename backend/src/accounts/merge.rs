@@ -25,7 +25,6 @@
 
 use crate::accounts::{ACCOUNT_ID_DISCARDED, ACCOUNT_ID_FOLLOWS, OWNED_TABLES};
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 
 /// How many rows each table would contribute to a merge.
 ///
@@ -114,6 +113,112 @@ pub struct MergeOutcome {
     pub discarded: i64,
 }
 
+/// The column identifying one row within an owner's set.
+///
+/// Used only by the per-row fallback in `move_rows`. Most tables have `id`; the
+/// exceptions are keyed by something else, and
+/// `test_every_merged_table_has_the_row_key_this_names` asserts every entry
+/// against the real schema, so this cannot drift.
+fn row_key(table: &str) -> &'static str {
+    match table {
+        // One row per owner: the bulk attempt already covers the whole set.
+        "finance_shares" | "user_settings" | "life_profiles" | "ai_user_configs" => "owner_id",
+        "bot_message_targets" => "event_id",
+        "matrix_links" => "mxid",
+        "account_rooms" => "room_id",
+        _ => "id",
+    }
+}
+
+fn is_unique_violation(err: &sqlx::Error) -> bool {
+    matches!(err, sqlx::Error::Database(e) if e.is_unique_violation())
+}
+
+/// Moves every row of `table` from one owner to another, skipping rows that
+/// would collide with one the destination already has.
+///
+/// This replaces SQLite's `UPDATE OR IGNORE`, which **PostgreSQL has no
+/// equivalent of**. The behaviour being preserved is specific and easy to get
+/// wrong: the non-colliding rows must still move, and only the colliding ones
+/// stay behind for the caller to discard. An all-or-nothing retry would throw
+/// away rows that could have moved — if `from` has categories "food" and
+/// "travel" while `into` already has "food", "travel" must still transfer.
+///
+/// So: attempt the whole set inside a savepoint, which is one round trip and
+/// the common case. Only a unique violation makes it roll back and move rows
+/// one at a time, each in its own savepoint. Nothing here enumerates which
+/// tables have which constraints — the database reports the collision, so a
+/// constraint added later needs no change. That matters: the comment this
+/// replaced named four such tables when the schema actually has seven.
+///
+/// Keys are compared as text so one path covers `BIGINT` and `TEXT` primary
+/// keys alike. The fallback is rare and small, so the lost index precision does
+/// not signify.
+pub(crate) async fn move_rows(
+    conn: &mut crate::db::DbTx<'_>,
+    table: &str,
+    column: &str,
+    from: &str,
+    into: &str,
+) -> Result<i64, sqlx::Error> {
+    crate::tx_execute!(conn, "SAVEPOINT merge_move")?;
+    let bulk = crate::tx_execute!(
+        conn,
+        &format!("UPDATE {table} SET {column} = ? WHERE {column} = ?"),
+        into,
+        from
+    );
+
+    match bulk {
+        Ok(moved) => {
+            crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_move")?;
+            Ok(moved as i64)
+        }
+        Err(err) if is_unique_violation(&err) => {
+            crate::tx_execute!(conn, "ROLLBACK TO SAVEPOINT merge_move")?;
+            crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_move")?;
+
+            let key = row_key(table);
+            let keys: Vec<String> = crate::tx_scalar_all!(
+                conn,
+                String,
+                &format!("SELECT CAST({key} AS TEXT) FROM {table} WHERE {column} = ?"),
+                from
+            )?;
+
+            let mut moved = 0i64;
+            for value in keys {
+                crate::tx_execute!(conn, "SAVEPOINT merge_row")?;
+                let one = crate::tx_execute!(
+                    conn,
+                    &format!(
+                        "UPDATE {table} SET {column} = ? \
+                         WHERE {column} = ? AND CAST({key} AS TEXT) = ?"
+                    ),
+                    into,
+                    from,
+                    &value
+                );
+                match one {
+                    Ok(n) => {
+                        crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_row")?;
+                        moved += n as i64;
+                    }
+                    Err(e) if is_unique_violation(&e) => {
+                        // The destination already holds the equivalent row.
+                        // Leave this one; the caller discards the leftovers.
+                        crate::tx_execute!(conn, "ROLLBACK TO SAVEPOINT merge_row")?;
+                        crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_row")?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(moved)
+        }
+        Err(err) => Err(err),
+    }
+}
+
 pub struct MergeRepository;
 
 impl MergeRepository {
@@ -162,7 +267,7 @@ impl MergeRepository {
             });
         }
 
-        let mut tx = pool.sqlite_or_err()?.begin().await?;
+        let mut tx = pool.begin().await?;
         let outcome = Self::merge_within(&mut tx, from, into).await?;
         tx.commit().await?;
 
@@ -175,7 +280,7 @@ impl MergeRepository {
     /// is the only way to assert that a merge leaves nothing behind when it
     /// cannot finish.
     pub(crate) async fn merge_within(
-        conn: &mut sqlx::SqliteConnection,
+        conn: &mut crate::db::DbTx<'_>,
         from: &str,
         into: &str,
     ) -> Result<MergeOutcome, sqlx::Error> {
@@ -183,37 +288,30 @@ impl MergeRepository {
         let mut discarded = 0i64;
 
         for table in OWNED_TABLES {
-            // `OR IGNORE` because three of these tables have a unique index on
-            // `(owner_id, …)`: settings are one row per owner, categories are
-            // unique by name, holdings by symbol, cash by currency. Where both
-            // accounts have the equivalent row the destination's is kept, and
-            // the source's is dropped rather than colliding and aborting the
-            // whole merge.
-            let updated = sqlx::query(&format!(
-                "UPDATE OR IGNORE {table} SET owner_id = ? WHERE owner_id = ?"
-            ))
-            .bind(into)
-            .bind(from)
-            .execute(&mut *conn)
-            .await?
-            .rows_affected() as i64;
+            // Several of these tables carry a unique index scoped to the
+            // owner, so where both accounts hold the equivalent row the
+            // destination's is kept and the source's is left for the discard
+            // below. `move_rows` explains why that cannot be one statement.
+            let updated = move_rows(&mut *conn, table, "owner_id", from, into).await?;
 
             moved.set(table, updated);
 
-            let leftover: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .fetch_one(&mut *conn)
-                    .await
-                    .unwrap_or(0);
+            let leftover: i64 = crate::tx_scalar_one!(
+                &mut *conn,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                from
+            )
+            .unwrap_or(0);
 
             if leftover > 0 {
                 // Rows the destination already had an equivalent of. Removed so
                 // the source account can be deleted without stranding them.
-                sqlx::query(&format!("DELETE FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .execute(&mut *conn)
-                    .await?;
+                crate::tx_execute!(
+                    &mut *conn,
+                    &format!("DELETE FROM {table} WHERE owner_id = ?"),
+                    from
+                )?;
                 discarded += leftover;
             }
         }
@@ -228,31 +326,26 @@ impl MergeRepository {
         // Anything else pointing at the absorbed account follows it, so nothing
         // is left referring to an id that is about to disappear.
         //
-        // `OR IGNORE` for the same reason as above: `account_rooms` is keyed by
+        // Same collision handling as above: `account_rooms` is keyed by
         // `(account_id, room_id)`, so a room both accounts had cached would
-        // otherwise collide and abort the whole merge.
+        // otherwise abort the whole merge.
         for table in ACCOUNT_ID_FOLLOWS {
-            sqlx::query(&format!(
-                "UPDATE OR IGNORE {table} SET account_id = ? WHERE account_id = ?"
-            ))
-            .bind(into)
-            .bind(from)
-            .execute(&mut *conn)
-            .await?;
+            move_rows(&mut *conn, table, "account_id", from, into).await?;
 
-            let leftover: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE account_id = ?"
-            ))
-            .bind(from)
-            .fetch_one(&mut *conn)
-            .await
+            let leftover: i64 = crate::tx_scalar_one!(
+                &mut *conn,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?"),
+                from
+            )
             .unwrap_or(0);
 
             if leftover > 0 {
-                sqlx::query(&format!("DELETE FROM {table} WHERE account_id = ?"))
-                    .bind(from)
-                    .execute(&mut *conn)
-                    .await?;
+                crate::tx_execute!(
+                    &mut *conn,
+                    &format!("DELETE FROM {table} WHERE account_id = ?"),
+                    from
+                )?;
                 discarded += leftover;
             }
         }
@@ -272,16 +365,10 @@ impl MergeRepository {
                 format!("DELETE FROM {table} WHERE account_id = ?")
             };
 
-            sqlx::query(&statement)
-                .bind(from)
-                .execute(&mut *conn)
-                .await?;
+            crate::tx_execute!(&mut *conn, &statement, from)?;
         }
 
-        sqlx::query("DELETE FROM accounts WHERE id = ?")
-            .bind(from)
-            .execute(&mut *conn)
-            .await?;
+        crate::tx_execute!(&mut *conn, "DELETE FROM accounts WHERE id = ?", from)?;
 
         Ok(MergeOutcome { moved, discarded })
     }
@@ -292,6 +379,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
@@ -576,7 +664,7 @@ mod tests {
         crate::db_execute!(&pool, "INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)", &from).unwrap();
         crate::db_execute!(
             &pool,
-            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok1', 1)",
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok1', TRUE)",
             &from
         )
         .unwrap();
@@ -628,7 +716,7 @@ mod tests {
 
         crate::db_execute!(
             &pool,
-            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok123', 1)",
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok123', TRUE)",
             &from
         )
         .unwrap();
@@ -943,7 +1031,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mut tx = pool.sqlite_or_err().unwrap().begin().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
         MergeRepository::merge_within(&mut tx, &from, &into)
             .await
             .unwrap();
@@ -1081,7 +1169,7 @@ mod tests {
             .unwrap();
         add_todo(&pool, &from, "should not move").await;
 
-        let mut tx = pool.sqlite_or_err().unwrap().begin().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
         MergeRepository::merge_within(&mut tx, &from, &into)
             .await
             .unwrap();
@@ -1095,5 +1183,88 @@ mod tests {
                 .is_some(),
             "the source account must still exist after a rolled-back merge"
         );
+    }
+
+    /// `row_key` names a column per table, and a wrong name would only surface
+    /// when a merge actually hit a collision — the rare path. This asserts each
+    /// name against the real schema instead, by selecting it.
+    ///
+    /// Deriving the check from the migrated database rather than repeating the
+    /// list is the point: rename a key column and this fails, where a duplicate
+    /// list would silently agree with itself.
+    #[tokio::test]
+    async fn test_every_merged_table_has_the_row_key_this_names() {
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        for table in crate::accounts::OWNED_TABLES
+            .iter()
+            .chain(crate::accounts::ACCOUNT_ID_FOLLOWS.iter())
+        {
+            let key = super::row_key(table);
+            let probe = format!("SELECT {key} FROM {table} LIMIT 0");
+            crate::db_execute!(&pool, &probe).unwrap_or_else(|err| {
+                panic!("row_key({table}) = {key} is not a column on {table}: {err}")
+            });
+        }
+    }
+
+    /// The behaviour `UPDATE OR IGNORE` provided and `move_rows` has to keep:
+    /// a colliding row must not stop the others from moving.
+    #[tokio::test]
+    async fn test_a_collision_does_not_block_the_rows_that_can_move() {
+        let pool =
+            crate::db::DbPool::Sqlite(sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap());
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        // `finance_categories` is unique on (owner_id, name). Both owners have
+        // "food"; only the source has "travel".
+        for (owner, name) in [
+            ("acct_from", "food"),
+            ("acct_from", "travel"),
+            ("acct_into", "food"),
+        ] {
+            crate::db_execute!(
+                &pool,
+                "INSERT INTO finance_categories (owner_id, name) VALUES (?, ?)",
+                owner,
+                name
+            )
+            .unwrap();
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        let moved = super::move_rows(
+            &mut tx,
+            "finance_categories",
+            "owner_id",
+            "acct_from",
+            "acct_into",
+        )
+        .await
+        .expect("a collision must not fail the move");
+        tx.commit().await.unwrap();
+
+        assert_eq!(moved, 1, "only `travel` can move");
+
+        let names: Vec<String> = crate::db_scalar_all!(
+            &pool,
+            String,
+            "SELECT name FROM finance_categories WHERE owner_id = ? ORDER BY name",
+            "acct_into"
+        )
+        .unwrap();
+        assert_eq!(names, vec!["food".to_string(), "travel".to_string()]);
+
+        // The colliding row stays put for the caller to discard.
+        let left: Vec<String> = crate::db_scalar_all!(
+            &pool,
+            String,
+            "SELECT name FROM finance_categories WHERE owner_id = ?",
+            "acct_from"
+        )
+        .unwrap();
+        assert_eq!(left, vec!["food".to_string()]);
     }
 }

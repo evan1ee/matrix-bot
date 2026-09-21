@@ -2,7 +2,7 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::FromRow;
 use utoipa::ToSchema;
 
 use super::cash_repo;
@@ -366,6 +366,7 @@ impl HistoryRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

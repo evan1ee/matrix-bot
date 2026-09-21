@@ -15,7 +15,6 @@
 
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::models::{Category, Transaction};
@@ -370,6 +369,7 @@ pub async fn delete_category(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

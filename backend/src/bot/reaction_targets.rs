@@ -2,7 +2,6 @@
 //! that can be interacted with via reactions.
 
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 /// A tracked message target linked to a domain entity.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct BotMessageTarget {
@@ -420,6 +419,7 @@ pub async fn try_record_from_reply(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup_pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

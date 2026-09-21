@@ -11,7 +11,6 @@
 use crate::accounts::{LinkOutcome, LinkRepository, MergeRepository};
 use crate::db::Database;
 use crate::utils::html::html_escape as escape;
-use sqlx::SqlitePool;
 
 /// Where a completed link should record a merge awaiting confirmation.
 pub type PendingMerges = tokio::sync::RwLock<std::collections::HashMap<String, String>>;
@@ -102,6 +101,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> Database {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

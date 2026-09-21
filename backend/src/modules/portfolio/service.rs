@@ -23,7 +23,6 @@
 
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
@@ -353,6 +352,7 @@ pub async fn withdraw_cash(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

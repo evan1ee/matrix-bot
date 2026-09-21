@@ -5,7 +5,6 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -291,6 +290,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {

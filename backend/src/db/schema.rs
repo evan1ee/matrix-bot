@@ -1,5 +1,4 @@
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::info;
 
 pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::Error> {
@@ -55,6 +54,7 @@ pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     /// Reads `sqlite_master`, so it is SQLite-only on purpose. The PostgreSQL
     /// equivalent queries `information_schema` and arrives with the live
@@ -294,5 +294,104 @@ mod tests {
         assert!(updated.is_some(), "rows_affected must be reported");
 
         crate::db::pool::drop_pg_schema("repo_check").await;
+    }
+
+    /// The stage 6 acceptance test: transactions, savepoints and the
+    /// `UPDATE OR IGNORE` replacement, on a real PostgreSQL.
+    ///
+    /// `move_rows` is the riskiest thing in the migration — it emulates a
+    /// SQLite-only statement with savepoints and a per-row fallback, and its
+    /// interesting path only runs when a unique constraint actually fires.
+    /// PostgreSQL also aborts a whole transaction on a failed statement unless
+    /// a savepoint catches it, which SQLite does not, so this cannot be
+    /// inferred from the SQLite run.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_a_merge_collision_resolves_on_a_live_postgres() {
+        let pool = crate::db::pool::connect_pg_schema("merge_check").await;
+        create_schema(&pool).await.unwrap();
+
+        for (owner, name) in [
+            ("acct_from", "food"),
+            ("acct_from", "travel"),
+            ("acct_into", "food"),
+        ] {
+            crate::db_execute!(
+                &pool,
+                "INSERT INTO finance_categories (owner_id, name) VALUES (?, ?)",
+                owner,
+                name
+            )
+            .unwrap();
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        let moved = crate::accounts::merge::move_rows(
+            &mut tx,
+            "finance_categories",
+            "owner_id",
+            "acct_from",
+            "acct_into",
+        )
+        .await
+        .expect("a unique violation must be caught by the savepoint, not abort the transaction");
+        tx.commit().await.unwrap();
+
+        assert_eq!(moved, 1, "only the non-colliding row moves");
+
+        let names: Vec<String> = crate::db_scalar_all!(
+            &pool,
+            String,
+            "SELECT name FROM finance_categories WHERE owner_id = ? ORDER BY name",
+            "acct_into"
+        )
+        .unwrap();
+        assert_eq!(names, vec!["food".to_string(), "travel".to_string()]);
+
+        crate::db::pool::drop_pg_schema("merge_check").await;
+    }
+
+    /// The whole boot path on PostgreSQL: `Database::connect`, which runs
+    /// `create_schema` *and* `backfill`, then an ordinary write and read.
+    ///
+    /// This is the claim "the bot runs on PostgreSQL" reduced to a test. Every
+    /// other live test exercises one layer; this one starts from a connection
+    /// string, as the process does.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_the_bot_boots_against_a_live_postgres() {
+        // A dedicated schema so this neither sees nor leaves shared state.
+        let scoped = {
+            let base = crate::db::pool::pg_test_url();
+            let admin = crate::db::pool::connect_pool(&base, 1).await.unwrap();
+            crate::db_execute!(&admin, "DROP SCHEMA IF EXISTS boot_check CASCADE").unwrap();
+            crate::db_execute!(&admin, "CREATE SCHEMA boot_check").unwrap();
+            let sep = if base.contains('?') { "&" } else { "?" };
+            format!("{base}{sep}options=-c%20search_path%3Dboot_check")
+        };
+
+        let db = crate::db::Database::connect(&scoped, 2)
+            .await
+            .expect("Database::connect must run every migration on PostgreSQL");
+
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
+            "acct_boot",
+            "Evan",
+            "unclaimed"
+        )
+        .expect("an ordinary write must work after boot");
+
+        let status: String = crate::db_scalar_one!(
+            &db.pool,
+            String,
+            "SELECT status FROM accounts WHERE id = ?",
+            "acct_boot"
+        )
+        .expect("an ordinary read must work after boot");
+        assert_eq!(status, "unclaimed");
+
+        crate::db::pool::drop_pg_schema("boot_check").await;
     }
 }

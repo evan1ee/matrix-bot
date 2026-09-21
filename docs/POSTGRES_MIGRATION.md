@@ -59,14 +59,13 @@ design is unsound and every model would need a second driver-specific mapping.
 | 3 | `pool.rs`: connect either driver from `DATABASE_URL` | **done** — see below |
 | 4 | Dialect-aware DDL across the 20 `schema_*.rs` files | **done** — see below |
 | 5 | Convert 553 query sites, module by module | **done** — see below |
-| 6 | Convert the 5 production transaction sites | todo |
+| 6 | Convert the 5 production transaction sites | **done** — see below |
 | 7 | Test harness runs both dialects; CI Postgres service | todo |
 | 8 | Docs, `.env.example`, `docker-compose.yml` | todo |
 
-Stage 5 is the bulk. It is deliberately incremental: `DbPool::sqlite_or_err()`
-is scaffolding that lets unconverted modules keep compiling and passing while
-repositories move one at a time. **It and its test are deleted when the last
-caller goes** — that count reaching zero is the completion signal for stage 5.
+Stages 3–6 are done and **the scaffolding is gone**: `DbPool::sqlite_or_err()`,
+`Database::sqlite_pool()` and the boot-time refusal of a Postgres URL were all
+deleted in stage 6. Pointing `DATABASE_URL` at PostgreSQL now works.
 
 ## Known dialect gaps to resolve in stages 4–6
 
@@ -99,6 +98,8 @@ Baseline at stage 4: **709 passed, 0 failed, 11 ignored**, plus 3 live
 PostgreSQL tests passing against PostgreSQL 18.6.
 Baseline at stage 5: **711 passed, 0 failed, 12 ignored**, plus 4 live
 PostgreSQL tests including a real repository round-trip.
+Baseline at stage 6: **713 passed, 0 failed, 14 ignored**, plus 6 live
+PostgreSQL tests including a full boot. `cargo check` is warning-free.
 
 ## Stage 3 notes
 
@@ -231,3 +232,56 @@ test. That count reaching zero is still the completion signal.
    returned the wrong type. The compiler caught it; a looser signature would not
    have. Two call sites were also corrupted into `api_&state.db.pool` by `sed`
    treating `&` in the replacement as "the whole match".
+
+## Stage 6 notes
+
+**PostgreSQL is now a supported target.** `Database::connect` no longer refuses
+it, `sqlite_or_err()` and `sqlite_pool()` are deleted, and
+`test_the_bot_boots_against_a_live_postgres` runs the whole boot path —
+`Database::connect`, every migration, `backfill`, then an ordinary write and
+read. That test is the claim reduced to something that either passes or does
+not.
+
+`DbTx` mirrors `DbPool`: an enum over `Transaction<'_, Sqlite>` and
+`Transaction<'_, Postgres>`, with a `tx_*` macro family. Those two are different
+types with no shared trait covering both `commit` and use as an executor, which
+is why transactions could not ride along with stage 5.
+
+### Replacing `UPDATE OR IGNORE`
+
+This was the piece flagged from the start, and it needed re-deriving rather than
+translating. SQLite's `UPDATE OR IGNORE` moves the rows it can and silently
+skips those that would violate a unique constraint. PostgreSQL has no
+equivalent, and it aborts the whole transaction on a failed statement unless a
+savepoint catches it.
+
+`accounts::merge::move_rows` attempts the bulk update inside a savepoint — one
+round trip, the common case — and only on a unique violation rolls back and
+moves rows one at a time, each in its own savepoint. An all-or-nothing retry
+would have been wrong in a way that loses data: if `from` has "food" and
+"travel" while `into` already has "food", **"travel" must still transfer**.
+
+Nothing there enumerates which tables have which constraints; the database
+reports the collision. That was deliberate — the comment being replaced named
+four unique-constrained tables when the schema actually has seven, so an
+enumeration had already drifted once.
+
+`row_key` does name one column per table for the per-row fallback, and
+`test_every_merged_table_has_the_row_key_this_names` checks each name by
+selecting it against a migrated database rather than repeating the list.
+Both guards were mutation-tested: flattening `row_key` to `"id"` fails the
+guard, and making the fallback all-or-nothing fails the collision test.
+
+`INSERT OR IGNORE` is likewise SQLite-only and became `ON CONFLICT DO NOTHING`,
+which both accept.
+
+### Also fixed here
+
+A boolean-as-integer literal my stage 5 sweep missed: it caught `is_direct = 0`
+in comparisons but not `VALUES (?, ?, ?, 0)` in inserts. Two such sites, plus
+two in test fixtures.
+
+`cargo fix` was a mistake worth recording: run to clear unused imports, it
+removed `use sqlx::SqlitePool` from 76 files where only the `#[cfg(test)]`
+module used it, breaking the test build. The right fix was to move those imports
+*into* the test modules, which is where they belong.

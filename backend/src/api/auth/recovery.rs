@@ -8,7 +8,6 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
@@ -177,6 +176,7 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {

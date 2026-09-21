@@ -1,5 +1,4 @@
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -317,6 +316,7 @@ async fn save(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

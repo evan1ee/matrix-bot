@@ -17,7 +17,6 @@
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::UserId;
 use matrix_sdk::Client;
-use sqlx::SqlitePool;
 use tracing::{error, warn};
 
 use crate::accounts::{AccountRepository, SecurityEventKind, SecurityEventRepository};
@@ -150,6 +149,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, SecurityEventRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> Database {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

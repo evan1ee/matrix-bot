@@ -7,7 +7,6 @@
 //! is the whole opt-in, and `api::step_up_tests` — which drives the real router
 //! — fails if a route in here forgets it.
 
-use sqlx::SqlitePool;
 pub mod audit;
 pub mod links;
 pub mod passkeys;
@@ -33,6 +32,7 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::{Path, State};
     use axum::Json;
+    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

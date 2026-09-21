@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -269,6 +268,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[sqlx::test]
     async fn test_set_reminder_with_local_time(sqlite: SqlitePool) {

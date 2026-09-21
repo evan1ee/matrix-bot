@@ -3,7 +3,6 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures_util::stream::StreamExt;
-use sqlx::SqlitePool;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
@@ -65,6 +64,7 @@ mod tests {
     use crate::accounts::{AccountRepository, SessionRepository};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_sse_handler_creation() {

@@ -4,7 +4,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -373,6 +372,7 @@ mod tests {
     use crate::modules::portfolio::cash_repo;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::service::MAX_NOTE_LEN;
+    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

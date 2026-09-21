@@ -22,7 +22,6 @@
 use crate::db::DbPool;
 use bcrypt::{hash, verify};
 use chrono::{Duration, Utc};
-use sqlx::SqlitePool;
 
 /// How many codes are issued at once.
 pub const RECOVERY_CODE_COUNT: usize = 10;
@@ -300,6 +299,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

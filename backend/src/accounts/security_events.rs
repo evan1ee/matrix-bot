@@ -12,7 +12,6 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 /// What happened. Stored verbatim, so a new variant needs no migration.
@@ -151,6 +150,7 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

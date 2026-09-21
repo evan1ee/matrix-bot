@@ -1,5 +1,4 @@
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 pub mod alerts;
 pub mod cash;
 pub mod net_worth;
@@ -398,6 +397,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

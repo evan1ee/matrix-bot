@@ -1,7 +1,5 @@
 use crate::db::DbPool;
-use crate::db_scalar_optional;
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -44,30 +42,30 @@ impl RoomRepository {
         Ok(rooms)
     }
 
-    /// Replaces cached rooms for an account in SQLite.
+    /// Replaces the cached rooms for an account, atomically.
     pub async fn save_cached_rooms(
         pool: &DbPool,
         account_id: &str,
         rooms: &[JoinedRoomInfo],
     ) -> Result<(), sqlx::Error> {
-        let mut tx = pool.sqlite_or_err()?.begin().await?;
+        let mut tx = pool.begin().await?;
 
-        sqlx::query("DELETE FROM account_rooms WHERE account_id = ?;")
-            .bind(account_id)
-            .execute(&mut *tx)
-            .await?;
+        crate::tx_execute!(
+            &mut tx,
+            "DELETE FROM account_rooms WHERE account_id = ?",
+            account_id
+        )?;
 
         for room in rooms {
-            sqlx::query(
+            crate::tx_execute!(
+                &mut tx,
                 "INSERT INTO account_rooms (account_id, room_id, name, is_direct, updated_at) \
-                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP);",
-            )
-            .bind(account_id)
-            .bind(&room.room_id)
-            .bind(&room.name)
-            .bind(room.is_direct)
-            .execute(&mut *tx)
-            .await?;
+                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                account_id,
+                &room.room_id,
+                &room.name,
+                room.is_direct
+            )?;
         }
 
         tx.commit().await?;
@@ -186,6 +184,7 @@ pub async fn resolve_target_room(pool: &DbPool, account_id: &str, query: Option<
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_room_repository_crud_and_resolution() {

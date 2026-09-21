@@ -1,7 +1,6 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -398,6 +397,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

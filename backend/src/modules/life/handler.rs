@@ -1,5 +1,4 @@
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use super::models::normalize_mood;
@@ -215,6 +214,7 @@ async fn handle_log(
 mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
+    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

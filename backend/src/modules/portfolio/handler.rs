@@ -1,5 +1,4 @@
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -269,6 +268,7 @@ mod tests {
     use super::*;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::view::{format_quantity, signed_amount};
+    use sqlx::SqlitePool;
 
     #[test]
     fn test_format_quantity_trims_trailing_zeros() {

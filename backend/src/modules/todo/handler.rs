@@ -7,7 +7,6 @@ use crate::modules::todo::mutate::{
 use crate::modules::todo::repository::TodoRepository;
 use crate::modules::todo::view::{format_todo_list, handle_list_room, handle_list_user, PAGE_SIZE};
 use crate::utils::html_escape;
-use sqlx::SqlitePool;
 
 pub use crate::modules::todo::mutate::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
@@ -97,6 +96,7 @@ pub async fn handle_todo_command(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup_test_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

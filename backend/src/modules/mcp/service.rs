@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
 use super::adapter;

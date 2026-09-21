@@ -1,7 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
 use std::str::FromStr;
 use tracing::info;
 
@@ -109,20 +108,6 @@ impl Database {
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self> {
         info!("Connecting to database at {}", database_url);
 
-        // The PostgreSQL rollout is not finished: the schema in `db/schema*.rs`
-        // is still SQLite-only DDL and most repositories still reach
-        // `sqlite_pool()`. Booting against Postgres would create nothing and
-        // then fail per-query, which is a far worse experience than refusing
-        // here. See `docs/POSTGRES_MIGRATION.md`; this guard, and the
-        // scaffolding accessor below, are deleted together when stage 5 lands.
-        if Dialect::from_url(database_url) == Dialect::Postgres {
-            bail!(
-                "PostgreSQL support is still being rolled out and is not usable yet \
-                 (see docs/POSTGRES_MIGRATION.md). Point DATABASE_URL at SQLite, \
-                 e.g. sqlite://data/bot_data.db?mode=rwc"
-            );
-        }
-
         let pool = connect_pool(database_url, max_connections).await?;
 
         schema::run_migrations(&pool)
@@ -130,19 +115,6 @@ impl Database {
             .context("Failed to execute database migrations")?;
 
         Ok(Self { pool })
-    }
-
-    /// The SQLite pool, for the repositories not yet converted to the
-    /// dual-dialect macros.
-    ///
-    /// **Migration scaffolding**, and the reason 406 repository signatures can
-    /// stay `&SqlitePool` while modules convert one at a time. It cannot
-    /// observe a Postgres pool today because `connect` refuses that URL above;
-    /// the two are removed in the same commit.
-    pub fn sqlite_pool(&self) -> &SqlitePool {
-        self.pool
-            .sqlite_or_err()
-            .expect("Database::connect refuses Postgres until the rollout completes")
     }
 }
 
@@ -187,18 +159,19 @@ mod tests {
         assert_eq!(pool.dialect(), Dialect::Sqlite);
     }
 
-    /// Until the rollout completes, a Postgres URL must be refused at boot with
-    /// an explanation, not accepted into a process that would then fail on
-    /// every query. Delete this test with the guard it pins.
+    /// The refusal that used to live here is gone: every repository, the
+    /// schema and the transactions now speak both dialects, so a Postgres URL
+    /// is a supported configuration rather than a half-working one. What
+    /// remains is that an unreachable server fails as a connection error.
     #[tokio::test]
-    async fn test_postgres_is_refused_at_boot_while_the_rollout_is_unfinished() {
-        let err = Database::connect("postgres://localhost/whatever", 1)
+    async fn test_a_postgres_url_is_no_longer_refused_before_connecting() {
+        let err = Database::connect("postgres://127.0.0.1:1/nonexistent", 1)
             .await
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("still being rolled out"),
-            "the refusal must say why, got: {err}"
+            err.contains("PostgreSQL"),
+            "must fail on the connection, not on a policy refusal, got: {err}"
         );
     }
 

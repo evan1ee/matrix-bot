@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use crate::modules::settings::models::UserSettings;
-use sqlx::SqlitePool;
 
 pub struct SettingsRepository;
 
@@ -93,6 +92,7 @@ impl SettingsRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn pool() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

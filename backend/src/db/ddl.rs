@@ -15,7 +15,6 @@
 //! migration time, which is boot. Adding a construct means adding a token here,
 //! not hoping a rule generalises.
 
-use sqlx::SqlitePool;
 use std::borrow::Cow;
 
 use crate::db::dialect::Dialect;
@@ -167,6 +166,7 @@ macro_rules! db_ddl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[test]
     fn test_sql_without_tokens_is_borrowed() {

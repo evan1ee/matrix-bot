@@ -7,7 +7,6 @@
 use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::due_reminder::{self, ReminderPlan};
@@ -69,6 +68,7 @@ mod tests {
     use crate::modules::reminder::repository::ReminderRepository;
     use crate::modules::todo::models::TodoPriority;
     use crate::modules::todo::repository::TodoRepository;
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

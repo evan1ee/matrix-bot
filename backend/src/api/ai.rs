@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -355,6 +354,7 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     async fn setup_state() -> (ApiState, String) {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

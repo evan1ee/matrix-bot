@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::{Duration, NaiveDate};
-use sqlx::SqlitePool;
 use std::collections::HashSet;
 
 use super::models::{
@@ -290,6 +289,7 @@ impl HabitsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

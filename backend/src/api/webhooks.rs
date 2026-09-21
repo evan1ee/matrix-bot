@@ -4,7 +4,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use sqlx::SqlitePool;
 
 use crate::api::auth::extractor::VerifiedUser;
 use crate::api::auth::types::{ApiState, AuthUser};
@@ -451,6 +450,7 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
@@ -488,7 +488,7 @@ mod tests {
         // Pre-populate account_rooms for authorized room
         crate::db_execute!(
             &state.db.pool,
-            "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
+            "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, FALSE)",
             &acct,
             "!ops:matrix.org",
             "Ops Room"

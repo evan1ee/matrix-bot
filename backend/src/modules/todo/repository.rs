@@ -1,7 +1,6 @@
 use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 
@@ -360,6 +359,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use chrono::Duration;
+    use sqlx::SqlitePool;
 
     async fn setup_test_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

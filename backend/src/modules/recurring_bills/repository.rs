@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::{Months, NaiveDateTime, TimeZone, Utc};
-use sqlx::SqlitePool;
 
 use super::models::{CreateBillPayload, RecurringBill, UpdateBillPayload};
 use crate::events::EventBroadcaster;
@@ -260,6 +259,7 @@ pub fn advance_due_date(current_due_at: &str, frequency: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_recurring_bill_crud() {

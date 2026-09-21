@@ -3,7 +3,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -157,6 +156,7 @@ mod step_up_tests {
     use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use sqlx::SqlitePool;
     use tower::ServiceExt;
 
     const ORIGIN: &str = "http://localhost:8080";

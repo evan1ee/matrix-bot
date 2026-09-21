@@ -179,7 +179,7 @@ pub async fn is_room_authorized_for_account(
                     for mxid in linked {
                         if let Ok(uid) = UserId::parse(&mxid) {
                             if is_joined_member(&room, &uid).await {
-                                let _ = crate::db_execute!(pool, "INSERT OR IGNORE INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)", account_id, room_id, room.name().unwrap_or_else(|| room_id.to_string()));
+                                let _ = crate::db_execute!(pool, "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, FALSE) ON CONFLICT DO NOTHING", account_id, room_id, room.name().unwrap_or_else(|| room_id.to_string()));
                                 return true;
                             }
                         }

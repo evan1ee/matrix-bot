@@ -5,7 +5,6 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -284,6 +283,7 @@ mod tests {
     use crate::modules::reminder::models::ReminderSource;
     use crate::modules::reminder::repository::ReminderRepository;
     use crate::modules::todo::due_reminder;
+    use sqlx::SqlitePool;
 
     /// `total` must count only the requested completion state.
     ///

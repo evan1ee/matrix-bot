@@ -19,7 +19,6 @@ use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::todo::due_reminder;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::todo::repository::TodoRepository;
-use sqlx::SqlitePool;
 
 /// Maximum allowed length for task description text.
 pub const MAX_TASK_TEXT_LEN: usize = 500;
@@ -360,6 +359,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use chrono::{Duration, Utc};
+    use sqlx::SqlitePool;
 
     async fn setup() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

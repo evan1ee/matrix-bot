@@ -1,10 +1,8 @@
-use crate::db::DbPool;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use sqlx::SqlitePool;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -312,9 +310,11 @@ pub async fn pay_bill(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use crate::db::DbPool;
     use crate::events::EventBroadcaster;
     use crate::modules::reminder::models::ReminderSource;
     use crate::modules::reminder::repository::ReminderRepository;
+    use sqlx::SqlitePool;
 
     fn state_with(pool: DbPool) -> ApiState {
         ApiState::new(

@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::{Duration, Utc};
-use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::accounts::session::hash_token;
@@ -122,6 +121,7 @@ impl McpTokenRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_mcp_token_lifecycle() {

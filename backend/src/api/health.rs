@@ -1,6 +1,5 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::ApiState;
@@ -54,6 +53,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_health_check() {

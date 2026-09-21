@@ -15,7 +15,6 @@
 
 use async_trait::async_trait;
 use matrix_sdk::Client;
-use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -401,6 +400,7 @@ mod tests {
     use super::*;
     use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> Database {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

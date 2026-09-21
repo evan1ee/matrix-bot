@@ -1,5 +1,4 @@
 use axum::{extract::State, Json};
-use sqlx::SqlitePool;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
@@ -83,6 +82,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {

@@ -1,6 +1,5 @@
 use crate::accounts::{display_name_for_mxid, Account, STATUS_UNCLAIMED};
 use crate::db::DbPool;
-use sqlx::SqlitePool;
 
 pub struct AccountRepository;
 
@@ -102,7 +101,7 @@ impl AccountRepository {
 
         let claimed = crate::db_execute!(
             pool,
-            "INSERT OR IGNORE INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
             mxid,
             &candidate
         )?;
@@ -126,6 +125,7 @@ mod tests {
     use super::*;
     use crate::accounts::STATUS_ACTIVE;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

@@ -2,7 +2,6 @@ use crate::db::Database;
 use crate::modules::mcp::{adapter, models, prompts, repository::McpTokenRepository, resources};
 use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
-use sqlx::SqlitePool;
 
 pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<String> {
     if ctx.command != "mcp" {
@@ -153,6 +152,7 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {

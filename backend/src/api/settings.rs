@@ -1,6 +1,5 @@
 use axum::{extract::State, Json};
 use serde::Deserialize;
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -158,6 +157,7 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
+    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

@@ -1,6 +1,5 @@
 use axum::{extract::State, Json};
 use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
-use sqlx::SqlitePool;
 
 use crate::api::auth::{ApiState, AuthUser};
 use crate::db::rooms::RoomRepository;
@@ -67,6 +66,7 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

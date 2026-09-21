@@ -12,7 +12,6 @@
 
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 use webauthn_rs::prelude::Passkey;
 
 /// A registered passkey, as the account settings screen shows it.
@@ -267,6 +266,7 @@ pub enum DeleteOutcome {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

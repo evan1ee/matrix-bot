@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use chrono::NaiveDate;
-use sqlx::SqlitePool;
 
 use super::models::{LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView};
 
@@ -342,6 +341,7 @@ impl LifeRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     async fn setup_test_db() -> DbPool {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

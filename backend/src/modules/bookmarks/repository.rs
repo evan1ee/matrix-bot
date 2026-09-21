@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use super::models::{Bookmark, BookmarkQuery, BookmarkStats, DomainCount, UpdateBookmarkInput};
 
@@ -381,6 +380,7 @@ impl BookmarksRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     async fn setup_db() -> (DbPool, String) {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());

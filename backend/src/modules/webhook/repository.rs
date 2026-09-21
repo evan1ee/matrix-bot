@@ -1,7 +1,6 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::modules::webhook::models::{Webhook, WebhookOutboxItem};
@@ -357,6 +356,7 @@ impl WebhookRepository {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use sqlx::SqlitePool;
 
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
 

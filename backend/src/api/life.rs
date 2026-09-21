@@ -1,11 +1,9 @@
-use crate::db::DbPool;
 use axum::{
     extract::{Path, State},
     Json,
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 use crate::api::auth::{ApiState, AuthUser};
@@ -374,7 +372,9 @@ mod tests {
     use super::*;
     use crate::db::schema_life::run_life_schema;
     use crate::db::Database;
+    use crate::db::DbPool;
     use crate::events::EventBroadcaster;
+    use sqlx::SqlitePool;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::DbPool::Sqlite(SqlitePool::connect("sqlite::memory:").await.unwrap());
