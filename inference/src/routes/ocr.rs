@@ -19,6 +19,27 @@ pub struct OcrScanBlock {
     pub score: f32,
 }
 
+/// Maps an `OcrError` to the HTTP status that describes whose fault it is.
+///
+/// `ImageDecode` is a client error -- the caller sent bytes that are not a
+/// decodable image -- so it is `400`, not `500`. `MissingModel` and
+/// `ModelDownload` mean the server isn't ready to serve OCR at all, so both
+/// are `503`. `Inference` and `Join` are genuine server-side failures.
+///
+/// Matched exhaustively on purpose: a new `OcrError` variant must be given a
+/// status here explicitly, rather than silently falling back to `500`.
+fn status_for(err: &crate::paddle::OcrError) -> StatusCode {
+    use crate::paddle::OcrError;
+
+    match err {
+        OcrError::ImageDecode(_) => StatusCode::BAD_REQUEST,
+        OcrError::MissingModel(_) => StatusCode::SERVICE_UNAVAILABLE,
+        OcrError::ModelDownload(_) => StatusCode::SERVICE_UNAVAILABLE,
+        OcrError::Inference(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        OcrError::Join(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 /// `POST /ocr` — raw image bytes in, recognised text out.
 ///
 /// The body is the image exactly as the caller received it; the caller does no
@@ -45,7 +66,7 @@ pub async fn scan(
         .await
         .map_err(|e| {
             warn!("PaddleOCR inference failed: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            (status_for(&e), e.to_string())
         })?;
 
     Ok(Json(OcrScanBody {
@@ -94,6 +115,36 @@ mod tests {
 
         let err = result.expect_err("absent models should be an error");
         assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_status_for_image_decode_is_bad_request() {
+        let err = crate::paddle::OcrError::ImageDecode("bad bytes".to_string());
+        assert_eq!(status_for(&err), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_status_for_missing_model_is_service_unavailable() {
+        let err = crate::paddle::OcrError::MissingModel("det model".to_string());
+        assert_eq!(status_for(&err), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_status_for_model_download_is_service_unavailable() {
+        let err = crate::paddle::OcrError::ModelDownload("network error".to_string());
+        assert_eq!(status_for(&err), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_status_for_inference_is_internal_server_error() {
+        let err = crate::paddle::OcrError::Inference("onnx runtime error".to_string());
+        assert_eq!(status_for(&err), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_status_for_join_is_internal_server_error() {
+        let err = crate::paddle::OcrError::Join("worker panicked".to_string());
+        assert_eq!(status_for(&err), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]
