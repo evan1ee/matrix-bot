@@ -8,7 +8,6 @@ use utoipa::ToSchema;
 
 use crate::api::auth::types::{ApiState, AuthUser};
 use crate::error::ApiError;
-use crate::modules::ocr::paddle;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OcrScanResponse {
@@ -79,10 +78,15 @@ pub async fn scan_image(
 
     info!("Running web OCR scan on {} image bytes", bytes.len());
 
-    let ocr_result = match paddle::run_ocr(bytes, state.ocr_config.model_dir.clone()).await {
-        Ok(res) => res,
+    let ocr_result = match state.ocr.scan(bytes).await {
+        Ok(scan) => scan,
+        Err(crate::services::ocr::OcrServiceError::NotConfigured) => {
+            return Err(ApiError::service_unavailable(
+                "OCR service is not configured on this server",
+            ));
+        }
         Err(err) => {
-            warn!("PaddleOCR extraction failed: {:?}", err);
+            warn!("OCR extraction failed: {:?}", err);
             return Err(ApiError::internal(format!(
                 "OCR extraction failed: {}",
                 err
@@ -99,10 +103,10 @@ pub async fn scan_image(
         })
         .collect();
 
-    let structured = extract_receipt_fields(&ocr_result.combined_text);
+    let structured = extract_receipt_fields(&ocr_result.text);
 
     Ok(Json(OcrScanResponse {
-        raw_text: ocr_result.combined_text,
+        raw_text: ocr_result.text,
         blocks,
         structured: Some(structured),
     }))

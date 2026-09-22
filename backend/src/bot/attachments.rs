@@ -6,8 +6,6 @@
 //! in both places, and the branches had already drifted in how they built their
 //! configuration.
 
-use std::path::Path;
-
 use futures_util::FutureExt;
 use matrix_sdk::{
     room::Room,
@@ -33,7 +31,7 @@ use crate::modules::voice::VoiceConfig;
 enum Attachment<'a> {
     Image {
         content: &'a ImageMessageEventContent,
-        model_dir: &'a Path,
+        ocr: &'a crate::services::ocr::OcrClient,
     },
     Audio {
         content: &'a AudioMessageEventContent,
@@ -44,14 +42,11 @@ enum Attachment<'a> {
 impl<'a> Attachment<'a> {
     fn from_msgtype(
         msgtype: &'a MessageType,
-        ocr_model_dir: &'a Path,
+        ocr: &'a crate::services::ocr::OcrClient,
         voice_config: &'a VoiceConfig,
     ) -> Option<Self> {
         match msgtype {
-            MessageType::Image(content) => Some(Self::Image {
-                content,
-                model_dir: ocr_model_dir,
-            }),
+            MessageType::Image(content) => Some(Self::Image { content, ocr }),
             MessageType::Audio(content) => Some(Self::Audio {
                 content,
                 voice_config,
@@ -172,7 +167,7 @@ impl<'a> Attachment<'a> {
         reporter: &StageReporter,
     ) -> String {
         match self {
-            Self::Image { content, model_dir } => {
+            Self::Image { content, ocr } => {
                 crate::modules::ocr::process_image_event(
                     db,
                     ai,
@@ -181,7 +176,7 @@ impl<'a> Attachment<'a> {
                     owner_id,
                     Some(&content.body),
                     media_bytes,
-                    model_dir,
+                    ocr,
                     Some(reporter),
                 )
                 .await
@@ -216,12 +211,10 @@ pub async fn handle_attachment(
     db: &Database,
     ai_config: &AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
-    ocr_model_dir: &Path,
+    ocr: &crate::services::ocr::OcrClient,
     voice_config: &VoiceConfig,
 ) {
-    let Some(attachment) =
-        Attachment::from_msgtype(&ev.content.msgtype, ocr_model_dir, voice_config)
-    else {
+    let Some(attachment) = Attachment::from_msgtype(&ev.content.msgtype, ocr, voice_config) else {
         return;
     };
 

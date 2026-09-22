@@ -130,6 +130,7 @@ pub struct ApiState {
     /// than linger as a standing authorisation to absorb an account.
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     pub ocr_config: crate::modules::ocr::OcrConfig,
+    pub ocr: crate::services::ocr::OcrClient,
     pub voice_config: crate::modules::voice::VoiceConfig,
     /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
     pub ai: crate::config::AiEnvConfig,
@@ -195,6 +196,7 @@ impl ApiState {
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             ocr_config: crate::modules::ocr::OcrConfig::default(),
+            ocr: crate::services::ocr::OcrClient::new(None),
             voice_config: crate::modules::voice::VoiceConfig::default(),
             ai: crate::config::AiEnvConfig::default(),
         }
@@ -249,8 +251,9 @@ impl ApiState {
             pending_merges: handles.pending_merges,
             ocr_config: crate::modules::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
-                model_dir: config.ocr_model_dir.clone(),
+                base_url: config.ocr_base_url.clone(),
             },
+            ocr: crate::services::ocr::OcrClient::new(config.ocr_base_url.clone()),
             voice_config: crate::modules::voice::VoiceConfig {
                 enabled: config.voice_enabled,
                 model_dir: config.voice_model_dir.clone(),
@@ -426,7 +429,7 @@ mod tests {
             cookie_secure: true,
             web_url: "https://bot.example.com".to_string(),
             ocr_enabled: false,
-            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            ocr_base_url: None,
             voice_enabled: false,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),

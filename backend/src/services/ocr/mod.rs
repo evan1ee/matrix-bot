@@ -113,7 +113,9 @@ mod tests {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("ephemeral port should bind");
-        let addr = listener.local_addr().expect("listener should have an address");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have an address");
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -148,7 +150,10 @@ mod tests {
         let base = spawn_server(app).await;
         let client = OcrClient::new(Some(base));
 
-        let scan = client.scan(vec![1, 2, 3]).await.expect("scan should succeed");
+        let scan = client
+            .scan(vec![1, 2, 3])
+            .await
+            .expect("scan should succeed");
 
         assert_eq!(scan.text, "SHAKE SHACK\nTotal $16.50");
         assert_eq!(scan.blocks.len(), 2);
@@ -169,7 +174,10 @@ mod tests {
         let base = spawn_server(app).await;
         let client = OcrClient::new(Some(base));
 
-        let err = client.scan(vec![1, 2, 3]).await.expect_err("503 should be an error");
+        let err = client
+            .scan(vec![1, 2, 3])
+            .await
+            .expect_err("503 should be an error");
 
         match err {
             OcrServiceError::Upstream { status, message } => {
@@ -185,7 +193,10 @@ mod tests {
         // Port 1 on loopback refuses immediately rather than hanging.
         let client = OcrClient::new(Some("http://127.0.0.1:1".to_string()));
 
-        let err = client.scan(vec![1, 2, 3]).await.expect_err("a refused connection should error");
+        let err = client
+            .scan(vec![1, 2, 3])
+            .await
+            .expect_err("a refused connection should error");
 
         assert!(matches!(err, OcrServiceError::Unreachable(_)));
     }
@@ -199,7 +210,10 @@ mod tests {
         let base = spawn_server(app).await;
         let client = OcrClient::new(Some(format!("{}/", base)));
 
-        let scan = client.scan(vec![1]).await.expect("a trailing slash should be tolerated");
+        let scan = client
+            .scan(vec![1])
+            .await
+            .expect("a trailing slash should be tolerated");
 
         assert_eq!(scan.text, "ok");
     }

@@ -36,7 +36,7 @@ pub fn register_handlers(
             return;
         }
     };
-    let ocr_model_dir = config.ocr_model_dir.clone();
+    let ocr_client = crate::services::ocr::OcrClient::new(config.ocr_base_url.clone());
     let voice_config = crate::modules::voice::VoiceConfig {
         enabled: config.voice_enabled,
         model_dir: config.voice_model_dir.clone(),
@@ -49,7 +49,7 @@ pub fn register_handlers(
         let db = db.clone();
         let broadcaster = broadcaster.clone();
         let pending_merges = pending_merges.clone();
-        let ocr_model_dir = ocr_model_dir.clone();
+        let ocr_client = ocr_client.clone();
         let voice_config = voice_config.clone();
         let ai_config = ai_config.clone();
 
@@ -77,7 +77,7 @@ pub fn register_handlers(
                         &db,
                         &ai_config,
                         broadcaster.as_ref(),
-                        &ocr_model_dir,
+                        &ocr_client,
                         &voice_config,
                     )
                     .await;

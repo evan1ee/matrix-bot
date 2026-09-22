@@ -1,5 +1,4 @@
 use matrix_sdk::room::Room;
-use std::path::Path;
 use tracing::{info, warn};
 
 use crate::db::Database;
@@ -7,10 +6,9 @@ use crate::events::EventBroadcaster;
 use crate::utils::html::html_escape;
 
 pub mod models;
-pub mod paddle;
 pub mod prompt;
 
-pub use models::{OcrConfig, OcrError, OcrResult, OcrTextBlock};
+pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 
 /// Processes an incoming Matrix image attachment:
 /// 1. Runs PaddleOCR detection and text recognition on the decrypted image bytes.
@@ -26,7 +24,7 @@ pub async fn process_image_event(
     owner_id: &str,
     caption: Option<&str>,
     image_bytes: &[u8],
-    model_dir: &Path,
+    ocr: &crate::services::ocr::OcrClient,
     stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
     if image_bytes.is_empty() {
@@ -47,8 +45,14 @@ pub async fn process_image_event(
         image_bytes.len()
     );
 
-    let ocr_result = match paddle::run_ocr(image_bytes.to_vec(), model_dir.to_path_buf()).await {
-        Ok(res) => res,
+    let ocr_result: OcrResult = match ocr.scan(image_bytes.to_vec()).await {
+        Ok(scan) => scan.into(),
+        Err(crate::services::ocr::OcrServiceError::NotConfigured) => {
+            return "⚠️ <b>图片处理不可用</b><br/>\
+                    • <b>原因:</b> 本部署未配置文字识别服务<br/>\
+                    • <b>建议:</b> 请直接输入文字，或联系管理员启用 OCR。"
+                .to_string();
+        }
         Err(err) => {
             warn!("OCR extraction failed for owner {}: {:?}", owner_id, err);
             return format!(
