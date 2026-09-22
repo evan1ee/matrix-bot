@@ -474,7 +474,7 @@ npm --prefix frontend run generate-api  # -> frontend/src/types/api.ts
 
 ## 🏗️ Layout
 
-Cargo workspace with one member, plus a separate npm frontend and iOS integration guides.
+Cargo workspace with two members, plus a separate npm frontend and iOS integration guides.
 
 ```
 backend/                      # crate `matrix-bot`: bot + embedded API, one binary
@@ -502,7 +502,11 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
+    ├── services/             # HTTP clients to sibling services
+    │   └── ocr/               #   client to the inference crate's POST /ocr
     └── utils/
+inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
+│                              # models (OCR now; STT/TTS later), a separate binary and image
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
 docs/                         # documentation, roadmap, architecture reviews, guides
