@@ -50,4 +50,44 @@ mod tests {
             }
         );
     }
+
+    #[tokio::test]
+    async fn test_get_health_through_the_router_returns_200_and_the_body() {
+        use axum::body::{to_bytes, Body};
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let config = InferenceConfig {
+            port: 0,
+            ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+        };
+        let state = AppState {
+            config: Arc::new(config),
+        };
+        let router = crate::routes::build_router(state);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: HealthResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            body,
+            HealthResponse {
+                stt: false,
+                tts: false,
+                ocr: false,
+            }
+        );
+    }
 }
