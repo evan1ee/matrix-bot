@@ -10,11 +10,6 @@ jobs:
   backend:
     name: Backend CI (check, test, format, openapi)
     runs-on: ubuntu-latest
-
-    env:
-      # Where the cached archive lands; the build script reads this
-      # instead of downloading. See the fetch step below.
-      SHERPA_ONNX_ARCHIVE_DIR: ${{ runner.temp }}/sherpa-archive
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +43,9 @@ jobs:
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "archive=sherpa-onnx-v$version-linux-x64-shared-lib.tar.bz2" >> "$GITHUB_OUTPUT"
+          # Exported here rather than in a job-level `env:` block, because the
+          # `runner` context is not available there — only in steps.
+          echo "SHERPA_ONNX_ARCHIVE_DIR=$RUNNER_TEMP/sherpa-archive" >> "$GITHUB_ENV"
 
       - name: Cache the sherpa-onnx prebuilt archive
         uses: actions/cache@v4
@@ -60,7 +58,7 @@ jobs:
       - name: Fetch the sherpa-onnx archive if the cache missed
         run: |
           set -euo pipefail
-          dir="${{ runner.temp }}/sherpa-archive"
+          dir="$RUNNER_TEMP/sherpa-archive"
           name="${{ steps.sherpa.outputs.archive }}"
           mkdir -p "$dir"
           if [ -f "$dir/$name" ]; then
@@ -118,9 +116,6 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
       # The #[ignore]d live tests read this one.
       PG_TEST_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
-      # Where the cached sherpa-onnx archive lands; the build script
-      # reads this instead of downloading. See the fetch step below.
-      SHERPA_ONNX_ARCHIVE_DIR: ${{ runner.temp }}/sherpa-archive
 
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +145,9 @@ jobs:
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "archive=sherpa-onnx-v$version-linux-x64-shared-lib.tar.bz2" >> "$GITHUB_OUTPUT"
+          # Exported here rather than in a job-level `env:` block, because the
+          # `runner` context is not available there — only in steps.
+          echo "SHERPA_ONNX_ARCHIVE_DIR=$RUNNER_TEMP/sherpa-archive" >> "$GITHUB_ENV"
 
       - name: Cache the sherpa-onnx prebuilt archive
         uses: actions/cache@v4
@@ -162,7 +160,7 @@ jobs:
       - name: Fetch the sherpa-onnx archive if the cache missed
         run: |
           set -euo pipefail
-          dir="${{ runner.temp }}/sherpa-archive"
+          dir="$RUNNER_TEMP/sherpa-archive"
           name="${{ steps.sherpa.outputs.archive }}"
           mkdir -p "$dir"
           if [ -f "$dir/$name" ]; then
