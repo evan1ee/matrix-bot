@@ -284,4 +284,29 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// `ensure_models` must not attempt a network download when every model
+    /// file is already on disk -- otherwise a healthy, fully-provisioned
+    /// deployment would still touch the network (and potentially fail) on
+    /// every boot. This is the one path through `ensure_models` that a test
+    /// can exercise without network access: every other path needs a real or
+    /// mocked download, which this crate has neither the fixtures nor a mock
+    /// HTTP dependency for today.
+    #[tokio::test]
+    async fn test_ensure_models_is_a_no_op_when_everything_is_already_present() {
+        let dir = std::env::temp_dir().join(format!("ocr-ensure-noop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir should be creatable");
+
+        std::fs::write(dir.join(DET_MODEL_NAME), b"x").unwrap();
+        std::fs::write(dir.join(CLS_MODEL_NAME), b"x").unwrap();
+        std::fs::write(dir.join(REC_MODEL_NAME), b"x").unwrap();
+
+        let result = ensure_models(&dir).await;
+        assert!(result.is_ok());
+
+        // Untouched: ensure_models must not have rewritten the files it found.
+        assert_eq!(std::fs::read(dir.join(DET_MODEL_NAME)).unwrap(), b"x");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

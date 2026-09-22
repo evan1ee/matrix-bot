@@ -41,8 +41,9 @@ WORKDIR /app
 
 COPY --from=build /src/target/release/matrix-bot-inference /usr/local/bin/matrix-bot-inference
 
-# Models are downloaded on first use into this directory, which is a volume so
-# the download survives a container replacement.
+# Models are downloaded at startup (see inference/src/main.rs) into this
+# directory, which is a volume so the download survives a container
+# replacement and is not repeated on every restart.
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 
