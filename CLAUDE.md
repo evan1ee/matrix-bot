@@ -36,7 +36,10 @@ Cargo workspace at the root with two members, plus a separate npm frontend:
 ```bash
 # Backend (run from repo root — paths below are cwd-relative)
 cargo check                      # must be warning-free
-cargo test                       # 377 tests, all in-crate #[cfg(test)] modules
+cargo test                       # backend suite only, all in-crate #[cfg(test)] modules —
+                                  # default-members = ["backend"] means bare `cargo test`
+                                  # never touches the inference crate
+cargo test -p matrix-bot-inference  # the inference crate's suite; not covered by bare `cargo test`
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot's session verified?
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
@@ -264,8 +267,10 @@ On the frontend, `core/settings.ts` is the single source — `useSettings()` rea
 ### Voice replies (`!say`, offline text-to-speech)
 
 `modules/tts/` speaks a reply into the room as a native Matrix voice message.
-One engine, one code path, no trait — matching `modules/ocr` (PaddleOCR only)
-and `modules/voice` (sherpa only). sherpa-onnx is already a dependency for
+One engine, one code path, no trait — matching `modules/voice` (sherpa only).
+`modules/ocr` used to be this shape too (PaddleOCR only); it is now an HTTP
+client to the inference crate's `POST /ocr`, not an engine at all, so the
+comparison no longer applies to it. sherpa-onnx is already a dependency for
 speech *to* text, and the prebuilt C API it ships already contains Kokoro TTS
 with espeak-ng grapheme-to-phoneme and per-language lexicons, so text to speech
 needed no new dependency, no second ML runtime, and no hand-written phonemiser.

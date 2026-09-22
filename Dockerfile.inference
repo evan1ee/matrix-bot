@@ -21,7 +21,7 @@ RUN mkdir -p backend/src backend/src/bin inference/src && \
     echo "fn main() {}" > inference/src/main.rs && \
     mkdir -p backend/web/dist && touch backend/web/dist/index.html && \
     cargo build --release -p matrix-bot-inference && \
-    rm -rf inference/src target/release/deps/matrix_bot_inference*
+    rm -rf inference/src target/release/deps/matrix_bot_inference* target/release/matrix-bot-inference*
 
 COPY backend ./backend
 COPY inference ./inference
