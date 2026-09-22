@@ -1,0 +1,53 @@
+use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
+
+use super::AppState;
+
+/// Per-capability model presence. A capability reports `false` when its model
+/// files are absent, which is how an operator tells "not installed" from
+/// "installed but failing".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HealthResponse {
+    pub stt: bool,
+    pub tts: bool,
+    pub ocr: bool,
+}
+
+/// Reports which models are installed. `stt` and `tts` are hardcoded false
+/// until those capabilities land; see the STT and TTS plans.
+pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        stt: false,
+        tts: false,
+        ocr: crate::paddle::models_present(&state.config.ocr_model_dir),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::InferenceConfig;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_health_reports_ocr_absent_when_models_are_missing() {
+        let config = InferenceConfig {
+            port: 0,
+            ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+        };
+        let state = AppState {
+            config: Arc::new(config),
+        };
+
+        let Json(body) = health(State(state)).await;
+
+        assert_eq!(
+            body,
+            HealthResponse {
+                stt: false,
+                tts: false,
+                ocr: false,
+            }
+        );
+    }
+}
