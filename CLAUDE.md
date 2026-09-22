@@ -20,9 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-Cargo workspace at the root with a single member, plus a separate npm frontend:
+Cargo workspace at the root with two members, plus a separate npm frontend:
 
 - `backend/` — Rust crate `matrix-bot`: Matrix bot + embedded Axum REST API in one binary.
+- `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting the local ONNX models (OCR now; STT/TTS later).
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `data/` — runtime SQLite DB + Matrix SDK crypto store (gitignored).
 
@@ -92,6 +93,26 @@ A fresh login does **not** pin a device ID. It used to (`MATRIX_BOT_MAIN_DEVICE`
 Two measured facts about matrix-sdk 0.7 drive the shape of that code. `Recovery::recover` returns `Ok` even when secret storage held no self-signing key and nothing was signed (`SecretStore::import_secrets` gates signing on `has_self_signing`, and a missing secret reads as `None`, not an error). And `Device::is_cross_signed_by_owner()` on our *own* device keeps reporting false for at least a second after the signature is uploaded and re-queried, across restarts, even though `/keys/query` shows it — so the outcome is taken from `Device::verify()` returning `Ok` (the signature reached the server), never from a local re-read. Consequently the bot re-signs on most boots; that is intended and idempotent.
 
 The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified_on_the_homeserver` — `#[ignore]`d because it needs credentials, a network, and a bot that has run at least once. It reads the token the running bot saved and asks `/keys/query`, applying Element's own rule via `device_is_cross_signed`; it never logs in, because a second login would mint another device and leave the running session's token to be reasoned about separately.
+
+### Two crates, one deployment
+
+The workspace has two members. `backend/` builds `matrix-bot`; `inference/`
+builds `matrix-bot-inference`, an Axum server that hosts the local ONNX
+models. `default-members = ["backend"]` keeps bare `cargo run` meaning the
+bot, and `cargo test -p matrix-bot` is the everyday suite —
+`cargo test --workspace` additionally builds the crate carrying the native ML
+dependencies, which is why CI scopes the backend jobs explicitly.
+
+OCR reaches the inference server over HTTP via `services/ocr`. An unset
+`OCR_BASE_URL`, or an unreachable server, degrades image handling alone: the
+bot still boots, and `docker run` with a volume still yields a working bot
+without OCR.
+
+`backend/src/services/` is the boundary this split created. `modules/` is what
+the application does; `services/` is how external capabilities are reached.
+Nothing in `services/` may import from `modules/` — `services::ocr::OcrScan`
+is a separate type from `modules::ocr::OcrResult` for exactly that reason,
+with a `From` impl in the module doing the mapping.
 
 ### Backend module plugin system
 

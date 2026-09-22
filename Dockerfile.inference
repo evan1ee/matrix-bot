@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+
+# ---- Stage 1: build ---------------------------------------------------------
+FROM rust:1-bookworm AS build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY backend/Cargo.toml ./backend/Cargo.toml
+COPY inference/Cargo.toml ./inference/Cargo.toml
+
+# Dependency layer: dummy sources for both members so the workspace resolves,
+# built for the inference bin only.
+RUN mkdir -p backend/src backend/src/bin inference/src && \
+    echo "pub fn dummy() {}" > backend/src/lib.rs && \
+    echo "fn main() {}" > backend/src/main.rs && \
+    echo "fn main() {}" > backend/src/bin/generate_openapi.rs && \
+    echo "fn main() {}" > inference/src/main.rs && \
+    mkdir -p backend/web/dist && touch backend/web/dist/index.html && \
+    cargo build --release -p matrix-bot-inference && \
+    rm -rf inference/src target/release/deps/matrix_bot_inference*
+
+COPY backend ./backend
+COPY inference ./inference
+
+RUN cargo build --release -p matrix-bot-inference
+
+# ---- Stage 2: runtime -------------------------------------------------------
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd -g 10001 app \
+ && useradd -u 10001 -g app -s /usr/sbin/nologin app
+
+WORKDIR /app
+
+COPY --from=build /src/target/release/matrix-bot-inference /usr/local/bin/matrix-bot-inference
+
+# Models are downloaded on first use into this directory, which is a volume so
+# the download survives a container replacement.
+RUN mkdir -p /app/data && chown -R app:app /app
+USER app
+
+ENV INFERENCE_PORT=8090 \
+    OCR_MODEL_DIR=/app/data/ocr_models
+
+EXPOSE 8090
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://127.0.0.1:8090/health || exit 1
+
+CMD ["matrix-bot-inference"]
