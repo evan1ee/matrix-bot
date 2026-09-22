@@ -17,6 +17,24 @@ jobs:
         with:
           components: rustfmt
 
+      # Installed explicitly rather than assumed from the runner image.
+      # GitHub's ubuntu-latest happens to ship these, so this job worked without
+      # them; a self-hosted act_runner's default image (node:20-bullseye) does
+      # not, and the build fails on a missing cmake. release.yml has installed
+      # the same three for its Linux target all along.
+      #
+      # cmake builds the vendored libopus inside opusic-sys; reqwest pulls in
+      # native-tls, which needs the OpenSSL headers and pkg-config to find them.
+      - name: Install Linux build dependencies
+        run: |
+          set -eu
+          # A GitHub runner is a non-root user with sudo; a container-based
+          # act_runner is usually root with no sudo installed. Assuming either
+          # one would repeat the mistake this step exists to fix.
+          if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+          $sudo apt-get update
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
+
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v2-rust"
@@ -121,6 +139,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # Installed explicitly rather than assumed from the runner image.
+      # GitHub's ubuntu-latest happens to ship these, so this job worked without
+      # them; a self-hosted act_runner's default image (node:20-bullseye) does
+      # not, and the build fails on a missing cmake. release.yml has installed
+      # the same three for its Linux target all along.
+      #
+      # cmake builds the vendored libopus inside opusic-sys; reqwest pulls in
+      # native-tls, which needs the OpenSSL headers and pkg-config to find them.
+      - name: Install Linux build dependencies
+        run: |
+          set -eu
+          # A GitHub runner is a non-root user with sudo; a container-based
+          # act_runner is usually root with no sudo installed. Assuming either
+          # one would repeat the mistake this step exists to fix.
+          if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+          $sudo apt-get update
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
 
       - uses: Swatinem/rust-cache@v2
         with:
