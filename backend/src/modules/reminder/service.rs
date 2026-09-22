@@ -75,6 +75,17 @@ impl std::fmt::Display for ReminderError {
     }
 }
 
+/// Wraps a database error, logging it on the way past.
+///
+/// `Display` renders every `Db` variant as "Internal error", which is right for
+/// a user — `security.md` says not to leak database detail — but it meant the
+/// cause was discarded entirely. A CI failure reading `success: "Internal
+/// error"` and nothing else cost far more to diagnose than this line costs.
+fn db_error(context: &str, err: anyhow::Error) -> ReminderError {
+    tracing::error!("reminder {context} failed: {err:?}");
+    ReminderError::Db(err)
+}
+
 fn validate(message: &str, trigger_at: DateTime<Utc>) -> Result<(), ReminderError> {
     if message.trim().is_empty() {
         return Err(ReminderError::EmptyMessage);
@@ -110,7 +121,7 @@ pub async fn create(
         None,
     )
     .await
-    .map_err(ReminderError::Db)?;
+    .map_err(|e| db_error("create", e))?;
 
     if let Some(b) = broadcaster {
         b.send(SystemEvent::ReminderCreated(reminder.clone()));
@@ -128,12 +139,12 @@ pub async fn cancel(
 ) -> Result<Reminder, ReminderError> {
     let reminder = ReminderRepository::find_owned(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?
+        .map_err(|e| db_error("find_owned", e))?
         .ok_or(ReminderError::NotFound)?;
 
     let cancelled = ReminderRepository::cancel(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?;
+        .map_err(|e| db_error("cancel", e))?;
     if !cancelled {
         // Owned but not pending (already triggered/cancelled/failed): cancel
         // is not a valid move on it, so this is a not-found from the caller's
@@ -168,7 +179,7 @@ pub async fn reschedule(
 ) -> Result<Reminder, ReminderError> {
     let existing = ReminderRepository::find_owned(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?
+        .map_err(|e| db_error("find_owned", e))?
         .ok_or(ReminderError::NotFound)?;
 
     ReminderRepository::update_pending(
@@ -180,12 +191,12 @@ pub async fn reschedule(
         RecurrencePattern::from_str_or_default(&existing.recurrence),
     )
     .await
-    .map_err(ReminderError::Db)?
+    .map_err(|e| db_error("update_pending", e))?
     .ok_or(ReminderError::NotFound)?;
 
     let updated = ReminderRepository::find_owned(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?
+        .map_err(|e| db_error("find_owned", e))?
         .ok_or(ReminderError::NotFound)?;
 
     if let Some(b) = broadcaster {
@@ -209,16 +220,16 @@ pub async fn mark_triggered(
 ) -> Result<Reminder, ReminderError> {
     ReminderRepository::find_owned(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?
+        .map_err(|e| db_error("find_owned", e))?
         .ok_or(ReminderError::NotFound)?;
 
     ReminderRepository::mark_triggered(pool, id)
         .await
-        .map_err(ReminderError::Db)?;
+        .map_err(|e| db_error("mark_triggered", e))?;
 
     let updated = ReminderRepository::find_owned(pool, owner_id, id)
         .await
-        .map_err(ReminderError::Db)?
+        .map_err(|e| db_error("find_owned", e))?
         .ok_or(ReminderError::NotFound)?;
 
     if let Some(b) = broadcaster {
@@ -237,7 +248,7 @@ pub async fn clear_history(
 ) -> Result<(), ReminderError> {
     ReminderRepository::clear_user_history(pool, owner_id)
         .await
-        .map_err(ReminderError::Db)?;
+        .map_err(|e| db_error("clear_user_history", e))?;
 
     if let Some(b) = broadcaster {
         b.send(SystemEvent::ReminderHistoryCleared {
