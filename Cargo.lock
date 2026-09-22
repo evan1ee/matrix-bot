@@ -2560,6 +2560,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "image",
+ "ort",
+ "ort-sys",
+ "paddle-ocr-rs",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
