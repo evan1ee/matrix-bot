@@ -27,17 +27,28 @@ RUN apt-get update \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY backend/Cargo.toml ./backend/Cargo.toml
+COPY inference/Cargo.toml ./inference/Cargo.toml
 
+# Cargo loads every workspace member's manifest before building anything, even
+# with `default-members` restricting the bare `cargo build`, so `inference`'s
+# manifest and a dummy source file both have to be here even though this image
+# never builds that crate's binary — see Dockerfile.inference for the same
+# pattern in the other direction.
+#
 # Pre-build dependency layer with dummy source files to cache crates across source edits
-RUN mkdir -p backend/src && \
+RUN mkdir -p backend/src backend/src/bin inference/src && \
     echo "pub fn dummy() {}" > backend/src/lib.rs && \
     echo "fn main() {}" > backend/src/main.rs && \
-    mkdir -p backend/src/bin && \
     echo "fn main() {}" > backend/src/bin/generate_openapi.rs && \
+    echo "fn main() {}" > inference/src/main.rs && \
     mkdir -p backend/web/dist && \
     touch backend/web/dist/index.html && \
     cargo build --release --bin matrix-bot && \
     rm -rf backend/src target/release/deps/matrix_bot* target/release/matrix-bot*
+# inference/src stays as the dummy: this image never builds that crate's
+# binary, nothing re-populates it (there is no `COPY inference ./inference`
+# below), and removing it here would make the final `cargo build` below fail
+# to load the workspace, exactly as the manifest-only version of this bug did.
 
 COPY backend ./backend
 
