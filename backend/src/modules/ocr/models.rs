@@ -38,8 +38,21 @@ impl From<crate::services::ocr::OcrScan> for OcrResult {
 ///
 /// `base_url` absent means OCR is not available in this deployment; the
 /// feature degrades and nothing else is affected.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct OcrConfig {
     pub enabled: bool,
     pub base_url: Option<String>,
+}
+
+impl Default for OcrConfig {
+    fn default() -> Self {
+        // `#[derive(Default)]` would give `enabled: false`, which silently
+        // disables `/ocr/scan` for anyone constructing this via `..Default::default()`
+        // -- the actual deployment default is enabled, matching `OCR_ENABLED=true`
+        // in `.env.example`; `base_url` presence is what actually gates the feature.
+        Self {
+            enabled: true,
+            base_url: None,
+        }
+    }
 }
