@@ -13,8 +13,8 @@
 //! So the decisions live here and the transports parse and render. This
 //! module returns data and typed errors; it renders nothing.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::models::{Category, Transaction};
@@ -137,7 +137,7 @@ fn validate_note(note: Option<&str>) -> Result<(), FinanceError> {
 /// `UnknownCategory` instead (the Matrix command's anti-typo rule) — see
 /// `NewTransaction::create_missing_category` for why the transports differ.
 async fn resolve_category(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     name: Option<&str>,
     create_missing: bool,
@@ -179,7 +179,7 @@ async fn resolve_category(
 /// Records a transaction: validates, resolves its category, writes, then
 /// broadcasts.
 pub async fn create_transaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     input: NewTransaction<'_>,
@@ -230,7 +230,7 @@ pub async fn create_transaction(
 /// the merged values are what get written — mirroring what
 /// `api/finance.rs::update_transaction` did before this existed.
 pub async fn update_transaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -291,7 +291,7 @@ pub async fn update_transaction(
 
 /// Deletes an owned transaction, then broadcasts.
 pub async fn delete_transaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -318,7 +318,7 @@ pub async fn delete_transaction(
 
 /// Creates a category, then broadcasts.
 pub async fn create_category(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
@@ -345,7 +345,7 @@ pub async fn create_category(
 /// Deletes an owned category, un-categorising its transactions, then
 /// broadcasts. Returns how many transactions were left uncategorised.
 pub async fn delete_category(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id: i64,
@@ -370,8 +370,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

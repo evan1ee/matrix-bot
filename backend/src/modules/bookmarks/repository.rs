@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use super::models::{Bookmark, BookmarkQuery, BookmarkStats, DomainCount, UpdateBookmarkInput};
 
@@ -7,7 +7,7 @@ pub struct BookmarksRepository;
 
 impl BookmarksRepository {
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         url: &str,
         title: &str,
@@ -19,41 +19,39 @@ impl BookmarksRepository {
         reading_time_minutes: i64,
         tags: &str,
     ) -> Result<Bookmark> {
-        let bookmark = sqlx::query_as::<_, Bookmark>(
+        let bookmark = crate::db_fetch_one!(
+            pool,
+            Bookmark,
             r#"
             INSERT INTO bookmarks (
                 owner_id, url, title, description, author, image_url,
                 domain, reader_content, reading_time_minutes, is_favorite,
                 is_archived, tags, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, FALSE, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
                       is_archived, tags, created_at, updated_at
             "#,
-        )
-        .bind(owner_id)
-        .bind(url)
-        .bind(title)
-        .bind(description)
-        .bind(author)
-        .bind(image_url)
-        .bind(domain)
-        .bind(reader_content)
-        .bind(reading_time_minutes)
-        .bind(tags)
-        .fetch_one(pool)
-        .await?;
+            owner_id,
+            url,
+            title,
+            description,
+            author,
+            image_url,
+            domain,
+            reader_content,
+            reading_time_minutes,
+            tags
+        )?;
 
         Ok(bookmark)
     }
 
-    pub async fn find_by_id(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Option<Bookmark>> {
-        let row = sqlx::query_as::<_, Bookmark>(
+    pub async fn find_by_id(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<Bookmark>> {
+        let row = crate::db_fetch_optional!(
+            pool,
+            Bookmark,
             r#"
             SELECT id, owner_id, url, title, description, author, image_url,
                    domain, reader_content, reading_time_minutes, is_favorite,
@@ -61,17 +59,15 @@ impl BookmarksRepository {
             FROM bookmarks
             WHERE id = ? AND owner_id = ?
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
         Ok(row)
     }
 
     pub async fn list(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         query: &BookmarkQuery,
     ) -> Result<Vec<Bookmark>> {
@@ -87,16 +83,16 @@ impl BookmarksRepository {
 
         if let Some(archived) = query.archived {
             sql.push_str(if archived {
-                " AND is_archived = 1"
+                " AND is_archived = TRUE"
             } else {
-                " AND is_archived = 0"
+                " AND is_archived = FALSE"
             });
         }
         if let Some(favorite) = query.favorite {
             sql.push_str(if favorite {
-                " AND is_favorite = 1"
+                " AND is_favorite = TRUE"
             } else {
-                " AND is_favorite = 0"
+                " AND is_favorite = FALSE"
             });
         }
         if let Some(ref domain) = query.domain {
@@ -117,47 +113,52 @@ impl BookmarksRepository {
 
         sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
 
-        let mut q = sqlx::query_as::<_, Bookmark>(&sql).bind(owner_id);
+        // The filters are optional, so the bind count is decided here and the
+        // values are handed to `db_fetch_all_dyn!` in the same order the `WHERE`
+        // clause above was assembled. `limit`/`offset` stay fixed trailing binds.
+        let mut binds: Vec<String> = vec![owner_id.to_string()];
 
         if let Some(ref domain) = query.domain {
             if !domain.trim().is_empty() {
-                q = q.bind(domain.trim());
+                binds.push(domain.trim().to_string());
             }
         }
         if let Some(ref tag) = query.tag {
             let t = tag.trim();
             if !t.is_empty() {
-                let pattern = format!("%{t}%");
-                q = q.bind(pattern).bind(t);
+                binds.push(format!("%{t}%"));
+                binds.push(t.to_string());
             }
         }
         if let Some(ref search) = query.search {
             let s = search.trim();
             if !s.is_empty() {
                 let pattern = format!("%{s}%");
-                q = q.bind(pattern.clone()).bind(pattern.clone()).bind(pattern);
+                binds.push(pattern.clone());
+                binds.push(pattern.clone());
+                binds.push(pattern);
             }
         }
 
-        let items = q.bind(limit).bind(offset).fetch_all(pool).await?;
+        let items = crate::db_fetch_all_dyn!(pool, Bookmark, &sql, binds, limit, offset)?;
         Ok(items)
     }
 
-    pub async fn count(pool: &SqlitePool, owner_id: &str, query: &BookmarkQuery) -> Result<i64> {
+    pub async fn count(pool: &DbPool, owner_id: &str, query: &BookmarkQuery) -> Result<i64> {
         let mut sql = String::from("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ?");
 
         if let Some(archived) = query.archived {
             sql.push_str(if archived {
-                " AND is_archived = 1"
+                " AND is_archived = TRUE"
             } else {
-                " AND is_archived = 0"
+                " AND is_archived = FALSE"
             });
         }
         if let Some(favorite) = query.favorite {
             sql.push_str(if favorite {
-                " AND is_favorite = 1"
+                " AND is_favorite = TRUE"
             } else {
-                " AND is_favorite = 0"
+                " AND is_favorite = FALSE"
             });
         }
         if let Some(ref domain) = query.domain {
@@ -176,34 +177,37 @@ impl BookmarksRepository {
             }
         }
 
-        let mut q = sqlx::query_as::<_, (i64,)>(&sql).bind(owner_id);
+        // Same filter order as `list` above; see the note there.
+        let mut binds: Vec<String> = vec![owner_id.to_string()];
 
         if let Some(ref domain) = query.domain {
             if !domain.trim().is_empty() {
-                q = q.bind(domain.trim());
+                binds.push(domain.trim().to_string());
             }
         }
         if let Some(ref tag) = query.tag {
             let t = tag.trim();
             if !t.is_empty() {
-                let pattern = format!("%{t}%");
-                q = q.bind(pattern).bind(t);
+                binds.push(format!("%{t}%"));
+                binds.push(t.to_string());
             }
         }
         if let Some(ref search) = query.search {
             let s = search.trim();
             if !s.is_empty() {
                 let pattern = format!("%{s}%");
-                q = q.bind(pattern.clone()).bind(pattern.clone()).bind(pattern);
+                binds.push(pattern.clone());
+                binds.push(pattern.clone());
+                binds.push(pattern);
             }
         }
 
-        let (total,) = q.fetch_one(pool).await?;
+        let (total,) = crate::db_fetch_one_dyn!(pool, (i64,), &sql, binds)?;
         Ok(total)
     }
 
     pub async fn update(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
         input: &UpdateBookmarkInput,
@@ -225,102 +229,110 @@ impl BookmarksRepository {
             .map(|t| t.join(","))
             .unwrap_or(existing.tags);
 
-        let updated = sqlx::query_as::<_, Bookmark>(
+        let updated = crate::db_fetch_one!(
+            pool,
+            Bookmark,
             r#"
             UPDATE bookmarks
-            SET title = ?, description = ?, is_favorite = ?, is_archived = ?, tags = ?, updated_at = datetime('now')
+            SET title = ?, description = ?, is_favorite = ?, is_archived = ?, tags = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
                       is_archived, tags, created_at, updated_at
             "#,
-        )
-        .bind(title)
-        .bind(description)
-        .bind(is_favorite)
-        .bind(is_archived)
-        .bind(tags_str)
-        .bind(id)
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            title,
+            description,
+            is_favorite,
+            is_archived,
+            tags_str,
+            id,
+            owner_id
+        )?;
 
         Ok(updated)
     }
 
-    pub async fn toggle_favorite(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Bookmark> {
-        let updated = sqlx::query_as::<_, Bookmark>(
+    pub async fn toggle_favorite(pool: &DbPool, id: i64, owner_id: &str) -> Result<Bookmark> {
+        let updated = crate::db_fetch_one!(
+            pool,
+            Bookmark,
             r#"
             UPDATE bookmarks
-            SET is_favorite = NOT is_favorite, updated_at = datetime('now')
+            SET is_favorite = NOT is_favorite, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
                       is_archived, tags, created_at, updated_at
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
         Ok(updated)
     }
 
-    pub async fn toggle_archived(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Bookmark> {
-        let updated = sqlx::query_as::<_, Bookmark>(
+    pub async fn toggle_archived(pool: &DbPool, id: i64, owner_id: &str) -> Result<Bookmark> {
+        let updated = crate::db_fetch_one!(
+            pool,
+            Bookmark,
             r#"
             UPDATE bookmarks
-            SET is_archived = NOT is_archived, updated_at = datetime('now')
+            SET is_archived = NOT is_archived, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, url, title, description, author, image_url,
                       domain, reader_content, reading_time_minutes, is_favorite,
                       is_archived, tags, created_at, updated_at
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
         Ok(updated)
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<bool> {
-        let res = sqlx::query("DELETE FROM bookmarks WHERE id = ? AND owner_id = ?")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+    pub async fn delete(pool: &DbPool, id: i64, owner_id: &str) -> Result<bool> {
+        let res = crate::db_execute!(
+            pool,
+            "DELETE FROM bookmarks WHERE id = ? AND owner_id = ?",
+            id,
+            owner_id
+        )?;
 
-        Ok(res.rows_affected() > 0)
+        Ok(res > 0)
     }
 
-    pub async fn get_stats(pool: &SqlitePool, owner_id: &str) -> Result<BookmarkStats> {
-        let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ?")
-            .bind(owner_id)
-            .fetch_one(pool)
-            .await?;
+    pub async fn get_stats(pool: &DbPool, owner_id: &str) -> Result<BookmarkStats> {
+        let total: (i64,) = crate::db_fetch_one!(
+            pool,
+            _,
+            "SELECT COUNT(*) FROM bookmarks WHERE owner_id = ?",
+            owner_id
+        )?;
 
-        let unread: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 0")
-                .bind(owner_id)
-                .fetch_one(pool)
-                .await?;
+        let unread: (i64,) = crate::db_fetch_one!(
+            pool,
+            _,
+            "SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = FALSE",
+            owner_id
+        )?;
 
-        let archived: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = 1")
-                .bind(owner_id)
-                .fetch_one(pool)
-                .await?;
+        let archived: (i64,) = crate::db_fetch_one!(
+            pool,
+            _,
+            "SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_archived = TRUE",
+            owner_id
+        )?;
 
-        let favorite: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_favorite = 1")
-                .bind(owner_id)
-                .fetch_one(pool)
-                .await?;
+        let favorite: (i64,) = crate::db_fetch_one!(
+            pool,
+            _,
+            "SELECT COUNT(*) FROM bookmarks WHERE owner_id = ? AND is_favorite = TRUE",
+            owner_id
+        )?;
 
-        let domain_rows = sqlx::query_as::<_, (String, i64)>(
+        let domain_rows = crate::db_fetch_all!(
+            pool,
+            (String, i64),
             r#"
             SELECT domain, COUNT(*) as cnt
             FROM bookmarks
@@ -329,22 +341,20 @@ impl BookmarksRepository {
             ORDER BY cnt DESC
             LIMIT 10
             "#,
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         let top_domains = domain_rows
             .into_iter()
             .map(|(domain, count)| DomainCount { domain, count })
             .collect();
 
-        let tag_rows = sqlx::query_as::<_, (String,)>(
+        let tag_rows = crate::db_fetch_all!(
+            pool,
+            (String,),
             "SELECT tags FROM bookmarks WHERE owner_id = ? AND tags != ''",
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         let mut unique_tags = std::collections::BTreeSet::new();
         for (tags_str,) in tag_rows {
@@ -371,8 +381,8 @@ impl BookmarksRepository {
 mod tests {
     use super::*;
 
-    async fn setup_db() -> (SqlitePool, String) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_db() -> (DbPool, String) {
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")

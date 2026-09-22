@@ -32,13 +32,12 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::{Path, State};
     use axum::Json;
-    use sqlx::SqlitePool;
 
     async fn state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -96,11 +95,12 @@ mod tests {
         let mine = signed_in(&state, "mine").await;
         let theirs = signed_in(&state, "theirs").await;
 
-        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
-            .bind(&theirs.account_id)
-            .execute(&state.db.pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &state.db.pool,
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
+            &theirs.account_id
+        )
+        .unwrap();
 
         let err = unlink(
             State(state.clone()),
@@ -132,13 +132,12 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &state.db.pool,
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('web', ?, 'victim', 'private', 'medium', 0)",
+             VALUES ('web', ?, 'victim', 'private', 'medium', FALSE)",
+            &victim
         )
-        .bind(&victim)
-        .execute(&state.db.pool)
-        .await
         .unwrap();
 
         let err = confirm_merge(
@@ -152,10 +151,12 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
 
-        let owner: String = sqlx::query_scalar("SELECT owner_id FROM todos WHERE text = 'private'")
-            .fetch_one(&state.db.pool)
-            .await
-            .unwrap();
+        let owner: String = crate::db_scalar_one!(
+            &state.db.pool,
+            _,
+            "SELECT owner_id FROM todos WHERE text = 'private'"
+        )
+        .unwrap();
         assert_eq!(owner, victim, "the victim's row must not have moved");
     }
 
@@ -168,14 +169,13 @@ mod tests {
             .unwrap();
 
         for text in ["one", "two"] {
-            sqlx::query(
+            crate::db_execute!(
+                &state.db.pool,
                 "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-                 VALUES ('!r:x', ?, 'evan', ?, 'medium', 0)",
+                 VALUES ('!r:x', ?, 'evan', ?, 'medium', FALSE)",
+                &old,
+                text
             )
-            .bind(&old)
-            .bind(text)
-            .execute(&state.db.pool)
-            .await
             .unwrap();
         }
 
@@ -205,13 +205,12 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
 
-        sqlx::query(
+        crate::db_execute!(
+            &state.db.pool,
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
              VALUES ('only', ?, '{}', 'Only key')",
+            &user.account_id
         )
-        .bind(&user.account_id)
-        .execute(&state.db.pool)
-        .await
         .unwrap();
 
         let err = delete_passkey(
@@ -371,13 +370,12 @@ mod tests {
         let mine = signed_in(&state, "mine").await;
         let theirs = signed_in(&state, "theirs").await;
 
-        sqlx::query(
+        crate::db_execute!(
+            &state.db.pool,
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
              VALUES ('theirs', ?, '{}', 'Their key')",
+            &theirs.account_id
         )
-        .bind(&theirs.account_id)
-        .execute(&state.db.pool)
-        .await
         .unwrap();
         SecurityEventRepository::record(
             &state.db.pool,

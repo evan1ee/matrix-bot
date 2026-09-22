@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::modules::webhook::models::{Webhook, WebhookOutboxItem};
@@ -22,79 +22,72 @@ pub struct WebhookRepository;
 impl WebhookRepository {
     /// Creates a new webhook, generating an unhashed token returned once.
     pub async fn create(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         name: &str,
         default_room_id: &str,
     ) -> Result<(Webhook, String), sqlx::Error> {
-        let raw_random = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(24)))")
-            .fetch_one(pool)
-            .await?;
+        let raw_random = crate::utils::random::random_hex(24);
         let raw_token = format!("whk_{raw_random}");
         let token_hash = hash_token(&raw_token);
         let token_prefix = raw_token.chars().take(10).collect::<String>();
         let id = format!("whk_{}", Uuid::new_v4());
 
-        let webhook = sqlx::query_as::<_, Webhook>(
+        let webhook = crate::db_fetch_one!(
+            pool,
+            Webhook,
             r#"
-            INSERT INTO webhooks (
-                id, owner_id, name, token_hash, token_prefix, default_room_id,
-                is_active, total_delivered_count, failure_count, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, CURRENT_TIMESTAMP)
+            INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id, is_active, total_delivered_count, failure_count, created_at) VALUES (?, ?, ?, ?, ?, ?, TRUE, 0, 0, CURRENT_TIMESTAMP)
             RETURNING *;
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .bind(name)
-        .bind(token_hash)
-        .bind(token_prefix)
-        .bind(default_room_id)
-        .fetch_one(pool)
-        .await?;
+            id,
+            owner_id,
+            name,
+            token_hash,
+            token_prefix,
+            default_room_id
+        )?;
 
         Ok((webhook, raw_token))
     }
 
     pub async fn find_by_token_hash(
-        pool: &SqlitePool,
+        pool: &DbPool,
         token_hash: &str,
     ) -> Result<Option<Webhook>, sqlx::Error> {
-        sqlx::query_as::<_, Webhook>(
-            "SELECT * FROM webhooks WHERE token_hash = ? AND is_active = 1;",
+        crate::db_fetch_optional!(
+            pool,
+            Webhook,
+            "SELECT * FROM webhooks WHERE token_hash = ? AND is_active = TRUE;",
+            token_hash
         )
-        .bind(token_hash)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn find_by_id(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<Option<Webhook>, sqlx::Error> {
-        sqlx::query_as::<_, Webhook>("SELECT * FROM webhooks WHERE id = ? AND owner_id = ?;")
-            .bind(id)
-            .bind(owner_id)
-            .fetch_optional(pool)
-            .await
+        crate::db_fetch_optional!(
+            pool,
+            Webhook,
+            "SELECT * FROM webhooks WHERE id = ? AND owner_id = ?;",
+            id,
+            owner_id
+        )
     }
 
-    pub async fn list_by_owner(
-        pool: &SqlitePool,
-        owner_id: &str,
-    ) -> Result<Vec<Webhook>, sqlx::Error> {
-        sqlx::query_as::<_, Webhook>(
+    pub async fn list_by_owner(pool: &DbPool, owner_id: &str) -> Result<Vec<Webhook>, sqlx::Error> {
+        crate::db_fetch_all!(
+            pool,
+            Webhook,
             "SELECT * FROM webhooks WHERE owner_id = ? ORDER BY created_at DESC;",
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn update(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
         name: Option<&str>,
@@ -110,67 +103,66 @@ impl WebhookRepository {
         let new_room = default_room_id.unwrap_or(&existing.default_room_id);
         let new_active = is_active.unwrap_or(existing.is_active);
 
-        let updated = sqlx::query_as::<_, Webhook>(
+        let updated = crate::db_fetch_optional!(
+            pool,
+            Webhook,
             r#"
             UPDATE webhooks
             SET name = ?, default_room_id = ?, is_active = ?
             WHERE id = ? AND owner_id = ?
             RETURNING *;
             "#,
-        )
-        .bind(new_name)
-        .bind(new_room)
-        .bind(new_active)
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            new_name,
+            new_room,
+            new_active,
+            id,
+            owner_id
+        )?;
 
         Ok(updated)
     }
 
     pub async fn rotate_token(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<Option<(Webhook, String)>, sqlx::Error> {
-        let raw_random = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(24)))")
-            .fetch_one(pool)
-            .await?;
+        let raw_random = crate::utils::random::random_hex(24);
         let raw_token = format!("whk_{raw_random}");
         let token_hash = hash_token(&raw_token);
         let token_prefix = raw_token.chars().take(10).collect::<String>();
 
-        let updated = sqlx::query_as::<_, Webhook>(
+        let updated = crate::db_fetch_optional!(
+            pool,
+            Webhook,
             r#"
             UPDATE webhooks
             SET token_hash = ?, token_prefix = ?
             WHERE id = ? AND owner_id = ?
             RETURNING *;
             "#,
-        )
-        .bind(token_hash)
-        .bind(token_prefix)
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            token_hash,
+            token_prefix,
+            id,
+            owner_id
+        )?;
 
         Ok(updated.map(|w| (w, raw_token)))
     }
 
-    pub async fn delete(pool: &SqlitePool, id: &str, owner_id: &str) -> Result<bool, sqlx::Error> {
-        let res = sqlx::query("DELETE FROM webhooks WHERE id = ? AND owner_id = ?;")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
-        Ok(res.rows_affected() > 0)
+    pub async fn delete(pool: &DbPool, id: &str, owner_id: &str) -> Result<bool, sqlx::Error> {
+        let res = crate::db_execute!(
+            pool,
+            "DELETE FROM webhooks WHERE id = ? AND owner_id = ?;",
+            id,
+            owner_id
+        )?;
+        Ok(res > 0)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn enqueue_outbox(
-        pool: &SqlitePool,
+        pool: &DbPool,
         webhook_id: &str,
         owner_id: &str,
         room_id: &str,
@@ -182,7 +174,9 @@ impl WebhookRepository {
         let id = format!("outbox_{}", Uuid::new_v4());
         let now = Utc::now();
 
-        let item = sqlx::query_as::<_, WebhookOutboxItem>(
+        let item = crate::db_fetch_one!(
+            pool,
+            WebhookOutboxItem,
             r#"
             INSERT INTO webhook_outbox (
                 id, webhook_id, owner_id, room_id, severity, title,
@@ -192,133 +186,130 @@ impl WebhookRepository {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, 10, ?, ?)
             RETURNING *;
             "#,
-        )
-        .bind(id)
-        .bind(webhook_id)
-        .bind(owner_id)
-        .bind(room_id)
-        .bind(severity)
-        .bind(title)
-        .bind(html_body)
-        .bind(plain_body)
-        .bind(now)
-        .bind(now)
-        .fetch_one(pool)
-        .await?;
+            id,
+            webhook_id,
+            owner_id,
+            room_id,
+            severity,
+            title,
+            html_body,
+            plain_body,
+            now,
+            now
+        )?;
 
-        sqlx::query("UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP WHERE id = ?;")
-            .bind(webhook_id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            webhook_id
+        )?;
 
         Ok(item)
     }
 
     pub async fn fetch_pending_outbox(
-        pool: &SqlitePool,
+        pool: &DbPool,
         limit: i64,
     ) -> Result<Vec<WebhookOutboxItem>, sqlx::Error> {
         let now = Utc::now();
-        sqlx::query_as::<_, WebhookOutboxItem>(
+        crate::db_fetch_all!(
+            pool,
+            WebhookOutboxItem,
             r#"
             SELECT * FROM webhook_outbox
             WHERE status IN ('pending', 'sending') AND next_attempt_at <= ?
             ORDER BY created_at ASC
             LIMIT ?;
             "#,
+            now,
+            limit
         )
-        .bind(now)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn mark_outbox_delivered(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         webhook_id: &str,
     ) -> Result<(), sqlx::Error> {
         let now = Utc::now();
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE webhook_outbox
             SET status = 'delivered', delivered_at = ?
             WHERE id = ?;
             "#,
-        )
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            now,
+            id
+        )?;
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "UPDATE webhooks SET total_delivered_count = total_delivered_count + 1 WHERE id = ?;",
-        )
-        .bind(webhook_id)
-        .execute(pool)
-        .await?;
+            webhook_id
+        )?;
 
         Ok(())
     }
 
     pub async fn mark_outbox_retry(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         webhook_id: &str,
         attempts: i64,
         next_attempt_at: DateTime<Utc>,
         last_error: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE webhook_outbox
             SET status = 'pending', attempts = ?, next_attempt_at = ?, last_error = ?
             WHERE id = ?;
             "#,
-        )
-        .bind(attempts)
-        .bind(next_attempt_at)
-        .bind(last_error)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            attempts,
+            next_attempt_at,
+            last_error,
+            id
+        )?;
 
-        sqlx::query("UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = ?;")
-            .bind(webhook_id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = ?;",
+            webhook_id
+        )?;
 
         Ok(())
     }
 
     pub async fn mark_outbox_failed(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         webhook_id: &str,
         last_error: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE webhook_outbox
             SET status = 'failed', last_error = ?
             WHERE id = ?;
             "#,
-        )
-        .bind(last_error)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            last_error,
+            id
+        )?;
 
-        sqlx::query("UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = ?;")
-            .bind(webhook_id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "UPDATE webhooks SET failure_count = failure_count + 1 WHERE id = ?;",
+            webhook_id
+        )?;
 
         Ok(())
     }
 
     pub async fn list_outbox_by_webhook(
-        pool: &SqlitePool,
+        pool: &DbPool,
         webhook_id: &str,
         owner_id: &str,
         limit: i64,
@@ -326,34 +317,34 @@ impl WebhookRepository {
     ) -> Result<Vec<WebhookOutboxItem>, sqlx::Error> {
         let limit = limit.clamp(1, 100);
         let offset = offset.max(0);
-        sqlx::query_as::<_, WebhookOutboxItem>(
+        crate::db_fetch_all!(
+            pool,
+            WebhookOutboxItem,
             r#"
             SELECT * FROM webhook_outbox
             WHERE webhook_id = ? AND owner_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?;
             "#,
+            webhook_id,
+            owner_id,
+            limit,
+            offset
         )
-        .bind(webhook_id)
-        .bind(owner_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn count_outbox_by_webhook(
-        pool: &SqlitePool,
+        pool: &DbPool,
         webhook_id: &str,
         owner_id: &str,
     ) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar::<_, i64>(
+        crate::db_scalar_one!(
+            pool,
+            i64,
             "SELECT COUNT(*) FROM webhook_outbox WHERE webhook_id = ? AND owner_id = ?;",
+            webhook_id,
+            owner_id
         )
-        .bind(webhook_id)
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await
     }
 }
 
@@ -364,8 +355,8 @@ mod tests {
 
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
 
-    async fn setup_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

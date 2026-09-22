@@ -82,14 +82,13 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -103,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cached_rooms_crud_and_list() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         // Create account
@@ -146,7 +145,7 @@ mod tests {
 
         // Test list_rooms hits cache directly without bot client
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

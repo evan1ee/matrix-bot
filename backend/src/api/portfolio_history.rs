@@ -50,11 +50,11 @@ mod tests {
     use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AuthUser) {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             broadcaster,
             None,
             "http://localhost:8008".to_string(),

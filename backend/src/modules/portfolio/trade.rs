@@ -1,7 +1,7 @@
 //! Portfolio trading operations (buy, sell, record) with atomic database transactions.
 
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use crate::modules::portfolio::models::{
     cost_of, realized_pl_minor, weighted_avg_cost_minor, BuyOutcome, CashBalance, Holding,
@@ -15,7 +15,7 @@ const CASH_COLUMNS: &str = "id, owner_id, currency, currency_exponent, balance_m
 
 #[allow(clippy::too_many_arguments)]
 pub async fn buy_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -27,13 +27,15 @@ pub async fn buy_at(
 ) -> Result<BuyOutcome> {
     let mut tx = pool.begin().await?;
 
-    let existing = sqlx::query_as::<_, Holding>(&format!(
-        "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-    ))
-    .bind(owner_id)
-    .bind(symbol)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let existing = crate::tx_fetch_optional!(
+        &mut tx,
+        Holding,
+        &format!(
+            "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
+        ),
+        owner_id,
+        symbol
+    )?;
 
     if let Some(ref h) = existing {
         if h.currency != currency {
@@ -44,13 +46,13 @@ pub async fn buy_at(
     }
 
     let needed = cost_of(quantity_minor, price_minor);
-    let cash_row: Option<(i64, i64)> = sqlx::query_as(
+    let cash_row: Option<(i64, i64)> = crate::tx_fetch_optional!(
+        &mut tx,
+        _,
         "SELECT id, balance_minor FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?",
-    )
-    .bind(owner_id)
-    .bind(currency)
-    .fetch_optional(&mut *tx)
-    .await?;
+        owner_id,
+        currency
+    )?;
 
     let (cash_id, balance) = match cash_row {
         Some(row) => row,
@@ -69,47 +71,31 @@ pub async fn buy_at(
         });
     }
 
-    sqlx::query(
-        "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    )
-    .bind(needed)
-    .bind(cash_id)
-    .execute(&mut *tx)
-    .await?;
+    crate::tx_execute!(&mut tx, "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", needed, cash_id)?;
 
-    let cash = sqlx::query_as::<_, CashBalance>(&format!(
-        "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"
-    ))
-    .bind(cash_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let cash = crate::tx_fetch_one!(
+        &mut tx,
+        CashBalance,
+        &format!("SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"),
+        cash_id
+    )?;
 
     let holding = match existing {
         None => {
             let created_at = executed_at.unwrap_or_else(chrono::Utc::now);
-            sqlx::query(
-                "INSERT INTO portfolio_holdings \
+            crate::tx_execute!(&mut tx, "INSERT INTO portfolio_holdings \
                  (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note, created_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
-            )
-            .bind(owner_id)
-            .bind(symbol)
-            .bind(quantity_minor)
-            .bind(price_minor)
-            .bind(currency)
-            .bind(currency_exponent)
-            .bind(note)
-            .bind(created_at)
-            .execute(&mut *tx)
-            .await?;
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)", owner_id, symbol, quantity_minor, price_minor, currency, currency_exponent, note, created_at)?;
 
-            sqlx::query_as::<_, Holding>(&format!(
+            crate::tx_fetch_one!(
+                &mut tx,
+                Holding,
+                &format!(
                 "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-            ))
-            .bind(owner_id)
-            .bind(symbol)
-            .fetch_one(&mut *tx)
-            .await?
+            ),
+                owner_id,
+                symbol
+            )?
         }
         Some(existing) => {
             let new_quantity = existing.quantity_minor + quantity_minor;
@@ -121,32 +107,17 @@ pub async fn buy_at(
             );
 
             if let Some(text) = note {
-                sqlx::query(
-                    "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                )
-                .bind(new_quantity)
-                .bind(new_avg_cost)
-                .bind(text)
-                .bind(existing.id)
-                .execute(&mut *tx)
-                .await?;
+                crate::tx_execute!(&mut tx, "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", new_quantity, new_avg_cost, text, existing.id)?;
             } else {
-                sqlx::query(
-                    "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                )
-                .bind(new_quantity)
-                .bind(new_avg_cost)
-                .bind(existing.id)
-                .execute(&mut *tx)
-                .await?;
+                crate::tx_execute!(&mut tx, "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", new_quantity, new_avg_cost, existing.id)?;
             }
 
-            sqlx::query_as::<_, Holding>(&format!(
-                "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"
-            ))
-            .bind(existing.id)
-            .fetch_one(&mut *tx)
-            .await?
+            crate::tx_fetch_one!(
+                &mut tx,
+                Holding,
+                &format!("SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"),
+                existing.id
+            )?
         }
     };
 
@@ -174,7 +145,7 @@ pub async fn buy_at(
 /// A buy executed now. See [`buy_at`] to backdate one.
 #[allow(clippy::too_many_arguments)]
 pub async fn buy(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -198,7 +169,7 @@ pub async fn buy(
 }
 
 pub async fn sell_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -207,13 +178,15 @@ pub async fn sell_at(
 ) -> Result<SellOutcome> {
     let mut tx = pool.begin().await?;
 
-    let existing = sqlx::query_as::<_, Holding>(&format!(
-        "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-    ))
-    .bind(owner_id)
-    .bind(symbol)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let existing = crate::tx_fetch_optional!(
+        &mut tx,
+        Holding,
+        &format!(
+            "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
+        ),
+        owner_id,
+        symbol
+    )?;
 
     let Some(existing) = existing else {
         return Ok(SellOutcome::NotFound);
@@ -228,53 +201,42 @@ pub async fn sell_at(
     let realized = realized_pl_minor(quantity_minor, sell_price_minor, existing.avg_cost_minor);
     let proceeds = cost_of(quantity_minor, sell_price_minor);
 
-    sqlx::query(
-        "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
+    crate::tx_execute!(&mut tx, "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
          ON CONFLICT(owner_id, currency) DO UPDATE SET \
-            balance_minor = balance_minor + excluded.balance_minor, \
-            updated_at = CURRENT_TIMESTAMP",
-    )
-    .bind(owner_id)
-    .bind(&existing.currency)
-    .bind(existing.currency_exponent)
-    .bind(proceeds)
-    .execute(&mut *tx)
-    .await?;
+            balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor, \
+            updated_at = CURRENT_TIMESTAMP", owner_id, &existing.currency, existing.currency_exponent, proceeds)?;
 
-    let cash = sqlx::query_as::<_, CashBalance>(&format!(
+    let cash = crate::tx_fetch_one!(
+        &mut tx,
+        CashBalance,
+        &format!(
         "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?"
-    ))
-    .bind(owner_id)
-    .bind(&existing.currency)
-    .fetch_one(&mut *tx)
-    .await?;
+    ),
+        owner_id,
+        &existing.currency
+    )?;
 
     let remaining = existing.quantity_minor - quantity_minor;
     let outcome = if remaining == 0 {
-        sqlx::query("DELETE FROM portfolio_holdings WHERE id = ?")
-            .bind(existing.id)
-            .execute(&mut *tx)
-            .await?;
+        crate::tx_execute!(
+            &mut tx,
+            "DELETE FROM portfolio_holdings WHERE id = ?",
+            existing.id
+        )?;
         SellOutcome::Closed {
             realized_pl_minor: realized,
             cash,
         }
     } else {
-        sqlx::query(
-            "UPDATE portfolio_holdings SET quantity_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        )
-        .bind(remaining)
-        .bind(existing.id)
-        .execute(&mut *tx)
-        .await?;
+        crate::tx_execute!(&mut tx, "UPDATE portfolio_holdings SET quantity_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", remaining, existing.id)?;
 
-        let holding = sqlx::query_as::<_, Holding>(&format!(
-            "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"
-        ))
-        .bind(existing.id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let holding = crate::tx_fetch_one!(
+            &mut tx,
+            Holding,
+            &format!("SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"),
+            existing.id
+        )?;
 
         SellOutcome::Reduced {
             holding,
@@ -306,7 +268,7 @@ pub async fn sell_at(
 
 /// A sale executed now. See [`sell_at`] to backdate one.
 pub async fn sell(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -325,7 +287,7 @@ pub async fn sell(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding_action(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,
@@ -338,13 +300,15 @@ pub async fn record_holding_action(
 ) -> Result<Result<Holding, String>> {
     let mut tx = pool.begin().await?;
 
-    let existing = sqlx::query_as::<_, Holding>(&format!(
-        "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-    ))
-    .bind(owner_id)
-    .bind(symbol)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let existing = crate::tx_fetch_optional!(
+        &mut tx,
+        Holding,
+        &format!(
+            "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
+        ),
+        owner_id,
+        symbol
+    )?;
 
     if let Some(ref h) = existing {
         if h.currency != currency {
@@ -357,29 +321,19 @@ pub async fn record_holding_action(
     let holding = match existing {
         None => {
             let created_at = executed_at.unwrap_or_else(chrono::Utc::now);
-            sqlx::query(
-                "INSERT INTO portfolio_holdings \
+            crate::tx_execute!(&mut tx, "INSERT INTO portfolio_holdings \
                  (owner_id, symbol, quantity_minor, avg_cost_minor, currency, currency_exponent, current_price_minor, price_updated_at, note, created_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
-            )
-            .bind(owner_id)
-            .bind(symbol)
-            .bind(quantity_minor)
-            .bind(price_minor)
-            .bind(currency)
-            .bind(currency_exponent)
-            .bind(note)
-            .bind(created_at)
-            .execute(&mut *tx)
-            .await?;
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)", owner_id, symbol, quantity_minor, price_minor, currency, currency_exponent, note, created_at)?;
 
-            sqlx::query_as::<_, Holding>(&format!(
+            crate::tx_fetch_one!(
+                &mut tx,
+                Holding,
+                &format!(
                 "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-            ))
-            .bind(owner_id)
-            .bind(symbol)
-            .fetch_one(&mut *tx)
-            .await?
+            ),
+                owner_id,
+                symbol
+            )?
         }
         Some(existing) => {
             let new_quantity = existing.quantity_minor + quantity_minor;
@@ -391,32 +345,17 @@ pub async fn record_holding_action(
             );
 
             if let Some(text) = note {
-                sqlx::query(
-                    "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                )
-                .bind(new_quantity)
-                .bind(new_avg_cost)
-                .bind(text)
-                .bind(existing.id)
-                .execute(&mut *tx)
-                .await?;
+                crate::tx_execute!(&mut tx, "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", new_quantity, new_avg_cost, text, existing.id)?;
             } else {
-                sqlx::query(
-                    "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                )
-                .bind(new_quantity)
-                .bind(new_avg_cost)
-                .bind(existing.id)
-                .execute(&mut *tx)
-                .await?;
+                crate::tx_execute!(&mut tx, "UPDATE portfolio_holdings SET quantity_minor = ?, avg_cost_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", new_quantity, new_avg_cost, existing.id)?;
             }
 
-            sqlx::query_as::<_, Holding>(&format!(
-                "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"
-            ))
-            .bind(existing.id)
-            .fetch_one(&mut *tx)
-            .await?
+            crate::tx_fetch_one!(
+                &mut tx,
+                Holding,
+                &format!("SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ?"),
+                existing.id
+            )?
         }
     };
 
@@ -447,7 +386,7 @@ pub async fn record_holding_action(
 /// calling it a purchase would put a trade in the ledger that never happened.
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol: &str,
     quantity_minor: i64,

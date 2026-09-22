@@ -149,12 +149,11 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, SecurityEventRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> Database {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database { pool: pool }
     }
 
     /// With no Matrix client the event must still be recorded. An account with

@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::modules::finance::models::{Category, CategoryTotal, CurrencySummary, Transaction};
 
@@ -18,7 +18,7 @@ impl FinanceRepository {
 
     /// Finds an existing category by name or creates a new one.
     pub async fn find_or_create_category(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         name: &str,
     ) -> Result<Option<Category>> {
@@ -32,57 +32,59 @@ impl FinanceRepository {
     /// that name — the unique index is what enforces it, so two concurrent
     /// writers cannot both win.
     pub async fn create_category(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         name: &str,
     ) -> Result<Option<Category>> {
-        let result = sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES (?, ?)")
-            .bind(owner_id)
-            .bind(name)
-            .execute(pool)
-            .await;
+        let result = crate::db_scalar_one!(
+            pool,
+            i64,
+            "INSERT INTO finance_categories (owner_id, name) VALUES (?, ?) RETURNING id",
+            owner_id,
+            name
+        );
 
         let id = match result {
-            Ok(res) => res.last_insert_rowid(),
+            Ok(id) => id,
             Err(sqlx::Error::Database(err)) if err.is_unique_violation() => return Ok(None),
             Err(err) => return Err(err.into()),
         };
 
-        let category = sqlx::query_as::<_, Category>(
+        let category = crate::db_fetch_one!(
+            pool,
+            Category,
             "SELECT id, owner_id, name, created_at FROM finance_categories WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
+            id
+        )?;
 
         Ok(Some(category))
     }
 
-    pub async fn list_categories(pool: &SqlitePool, owner_id: &str) -> Result<Vec<Category>> {
-        let categories = sqlx::query_as::<_, Category>(
+    pub async fn list_categories(pool: &DbPool, owner_id: &str) -> Result<Vec<Category>> {
+        let categories = crate::db_fetch_all!(
+            pool,
+            Category,
             "SELECT id, owner_id, name, created_at FROM finance_categories \
-             WHERE owner_id = ? ORDER BY name COLLATE NOCASE ASC",
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+             WHERE owner_id = ? ORDER BY LOWER(name) ASC",
+            owner_id
+        )?;
 
         Ok(categories)
     }
 
     pub async fn find_category_by_name(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         name: &str,
     ) -> Result<Option<Category>> {
-        let category = sqlx::query_as::<_, Category>(
+        let category = crate::db_fetch_one!(
+            pool,
+            Category,
             "SELECT id, owner_id, name, created_at FROM finance_categories \
-             WHERE owner_id = ? AND name = ? COLLATE NOCASE",
+             WHERE owner_id = ? AND LOWER(name) = LOWER(?)",
+            owner_id,
+            name
         )
-        .bind(owner_id)
-        .bind(name)
-        .fetch_one(pool)
-        .await
         .ok();
 
         Ok(category)
@@ -93,36 +95,32 @@ impl FinanceRepository {
     /// Financial records are never destroyed as a side effect of tidying up the
     /// category list. Returns how many rows were left uncategorised so the
     /// caller can say so.
-    pub async fn delete_category(
-        pool: &SqlitePool,
-        owner_id: &str,
-        id: i64,
-    ) -> Result<Option<u64>> {
-        let owns: Option<(i64,)> =
-            sqlx::query_as("SELECT id FROM finance_categories WHERE id = ? AND owner_id = ?")
-                .bind(id)
-                .bind(owner_id)
-                .fetch_optional(pool)
-                .await?;
+    pub async fn delete_category(pool: &DbPool, owner_id: &str, id: i64) -> Result<Option<u64>> {
+        let owns: Option<(i64,)> = crate::db_fetch_optional!(
+            pool,
+            _,
+            "SELECT id FROM finance_categories WHERE id = ? AND owner_id = ?",
+            id,
+            owner_id
+        )?;
 
         if owns.is_none() {
             return Ok(None);
         }
 
-        let orphaned = sqlx::query(
+        let orphaned = crate::db_execute!(
+            pool,
             "UPDATE transactions SET category_id = NULL WHERE category_id = ? AND owner_id = ?",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+            id,
+            owner_id
+        )?;
 
-        sqlx::query("DELETE FROM finance_categories WHERE id = ? AND owner_id = ?")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+        crate::db_execute!(
+            pool,
+            "DELETE FROM finance_categories WHERE id = ? AND owner_id = ?",
+            id,
+            owner_id
+        )?;
 
         Ok(Some(orphaned))
     }
@@ -131,7 +129,7 @@ impl FinanceRepository {
 
     #[allow(clippy::too_many_arguments)]
     pub async fn create_transaction(
-        pool: &SqlitePool,
+        pool: &DbPool,
         room_id: &str,
         owner_id: &str,
         sender_name: &str,
@@ -145,67 +143,68 @@ impl FinanceRepository {
         source_id: Option<i64>,
         occurred_at: DateTime<Utc>,
     ) -> Result<Transaction> {
-        let res = sqlx::query(
+        let res = crate::db_scalar_one!(
+            pool,
+            i64,
             r#"
             INSERT INTO transactions
                 (room_id, owner_id, sender_name, direction, amount_minor, currency,
                  currency_exponent, category_id, note, source_kind, source_id, occurred_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             "#,
-        )
-        .bind(room_id)
-        .bind(owner_id)
-        .bind(sender_name)
-        .bind(direction)
-        .bind(amount_minor)
-        .bind(currency)
-        .bind(currency_exponent)
-        .bind(category_id)
-        .bind(note)
-        .bind(source_kind)
-        .bind(source_id)
-        .bind(occurred_at)
-        .execute(pool)
-        .await?;
+            room_id,
+            owner_id,
+            sender_name,
+            direction,
+            amount_minor,
+            currency,
+            currency_exponent,
+            category_id,
+            note,
+            source_kind,
+            source_id,
+            occurred_at
+        )?;
 
-        Self::find(pool, res.last_insert_rowid())
+        Self::find(pool, res)
             .await?
             .ok_or_else(|| anyhow::anyhow!("inserted transaction vanished before it could be read"))
     }
 
-    pub async fn find(pool: &SqlitePool, id: i64) -> Result<Option<Transaction>> {
-        let tx = sqlx::query_as::<_, Transaction>(&format!(
-            "SELECT {TX_COLUMNS} FROM transactions t \
+    pub async fn find(pool: &DbPool, id: i64) -> Result<Option<Transaction>> {
+        let tx = crate::db_fetch_optional!(
+            pool,
+            Transaction,
+            &format!(
+                "SELECT {TX_COLUMNS} FROM transactions t \
              LEFT JOIN finance_categories c ON c.id = t.category_id WHERE t.id = ?"
-        ))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+            ),
+            id
+        )?;
 
         Ok(tx)
     }
 
     /// Looks up a transaction the caller owns. `owner_id` is the only key.
-    pub async fn find_owned(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<Option<Transaction>> {
-        let tx = sqlx::query_as::<_, Transaction>(&format!(
-            "SELECT {TX_COLUMNS} FROM transactions t \
+    pub async fn find_owned(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<Transaction>> {
+        let tx = crate::db_fetch_optional!(
+            pool,
+            Transaction,
+            &format!(
+                "SELECT {TX_COLUMNS} FROM transactions t \
              LEFT JOIN finance_categories c ON c.id = t.category_id \
              WHERE t.id = ? AND t.owner_id = ?"
-        ))
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            ),
+            id,
+            owner_id
+        )?;
 
         Ok(tx)
     }
 
     pub async fn list(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         direction: Option<&str>,
         limit: i64,
@@ -223,16 +222,18 @@ impl FinanceRepository {
              ORDER BY t.occurred_at DESC, t.id DESC LIMIT ? OFFSET ?"
         );
 
-        let mut query = sqlx::query_as::<_, Transaction>(&sql).bind(owner_id);
-        if let Some(dir) = direction {
-            query = query.bind(dir);
-        }
-
-        let items = query.bind(limit).bind(offset).fetch_all(pool).await?;
+        // The filter is optional, and a macro call cannot bind conditionally, so
+        // the branch is explicit. The SQL is unchanged either way.
+        let items = match direction {
+            Some(dir) => {
+                crate::db_fetch_all!(pool, Transaction, &sql, owner_id, dir, limit, offset)?
+            }
+            None => crate::db_fetch_all!(pool, Transaction, &sql, owner_id, limit, offset)?,
+        };
         Ok(items)
     }
 
-    pub async fn count(pool: &SqlitePool, owner_id: &str, direction: Option<&str>) -> Result<i64> {
+    pub async fn count(pool: &DbPool, owner_id: &str, direction: Option<&str>) -> Result<i64> {
         let filter = if direction.is_some() {
             "AND direction = ?"
         } else {
@@ -240,12 +241,10 @@ impl FinanceRepository {
         };
         let sql = format!("SELECT COUNT(*) FROM transactions WHERE owner_id = ? {filter}");
 
-        let mut query = sqlx::query_scalar::<_, i64>(&sql).bind(owner_id);
-        if let Some(dir) = direction {
-            query = query.bind(dir);
-        }
-
-        Ok(query.fetch_one(pool).await?)
+        Ok(match direction {
+            Some(dir) => crate::db_scalar_one!(pool, i64, &sql, owner_id, dir)?,
+            None => crate::db_scalar_one!(pool, i64, &sql, owner_id)?,
+        })
     }
 
     // One parameter per column, which is what an INSERT is. Clippy's threshold is 7
@@ -254,7 +253,7 @@ impl FinanceRepository {
     // build that struct inline at the call site instead. No clarity is gained.
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         direction: &str,
         amount_minor: i64,
@@ -264,38 +263,34 @@ impl FinanceRepository {
         note: Option<&str>,
         occurred_at: DateTime<Utc>,
     ) -> Result<Option<Transaction>> {
-        let result = sqlx::query(
+        let result = crate::db_execute!(
+            pool,
             r#"
             UPDATE transactions
             SET direction = ?, amount_minor = ?, currency = ?, currency_exponent = ?,
                 category_id = ?, note = ?, occurred_at = ?
             WHERE id = ?
             "#,
-        )
-        .bind(direction)
-        .bind(amount_minor)
-        .bind(currency)
-        .bind(currency_exponent)
-        .bind(category_id)
-        .bind(note)
-        .bind(occurred_at)
-        .bind(id)
-        .execute(pool)
-        .await?;
+            direction,
+            amount_minor,
+            currency,
+            currency_exponent,
+            category_id,
+            note,
+            occurred_at,
+            id
+        )?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::find(pool, id).await
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM transactions WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
+    pub async fn delete(pool: &DbPool, id: i64) -> Result<bool> {
+        let result = crate::db_execute!(pool, "DELETE FROM transactions WHERE id = ?", id)?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
     /// Totals for a period, grouped by currency and then category.
@@ -303,26 +298,26 @@ impl FinanceRepository {
     /// Currencies are never added together: without a rate source, summing EUR
     /// and JPY produces a number that means nothing.
     pub async fn summary(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<CurrencySummary>> {
-        let rows = sqlx::query_as::<_, (String, i64, Option<String>, String, i64)>(
+        let rows = crate::db_fetch_all!(
+            pool,
+            (String, i64, Option<String>, String, i64),
             r#"
-            SELECT t.currency, t.currency_exponent, c.name, t.direction, SUM(t.amount_minor)
+            SELECT t.currency, t.currency_exponent, c.name, t.direction, CAST(SUM(t.amount_minor) AS BIGINT)
             FROM transactions t
             LEFT JOIN finance_categories c ON c.id = t.category_id
             WHERE t.owner_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
             GROUP BY t.currency, t.currency_exponent, c.name, t.direction
             ORDER BY t.currency ASC
             "#,
-        )
-        .bind(owner_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(pool)
-        .await?;
+            owner_id,
+            from,
+            to
+        )?;
 
         let mut summaries: Vec<CurrencySummary> = Vec::new();
 
@@ -382,8 +377,8 @@ mod tests {
     use crate::db::schema::run_migrations;
     use chrono::Duration;
 
-    async fn setup() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -392,7 +387,7 @@ mod tests {
     // shape for the same reason.
     #[allow(clippy::too_many_arguments)]
     async fn log(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner: &str,
         direction: &str,
         minor: i64,

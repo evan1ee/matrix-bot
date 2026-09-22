@@ -101,12 +101,11 @@ mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> Database {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database { pool: pool }
     }
 
     #[tokio::test]
@@ -130,10 +129,8 @@ mod tests {
         let reply = handle_link_command(&db, &code, "@evan:mbm.one", true, None).await;
         assert!(reply.contains("Linked"), "{reply}");
 
-        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let accounts: i64 =
+            crate::db_scalar_one!(&db.pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(
             accounts, 1,
             "no throwaway account may be created for the MXID"
@@ -173,14 +170,13 @@ mod tests {
             .await
             .unwrap();
         for text in ["one", "two", "three"] {
-            sqlx::query(
+            crate::db_execute!(
+                &db.pool,
                 "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-                 VALUES ('!r:x', ?, 'evan', ?, 'medium', 0)",
+                 VALUES ('!r:x', ?, 'evan', ?, 'medium', FALSE)",
+                &old,
+                text
             )
-            .bind(&old)
-            .bind(text)
-            .execute(&db.pool)
-            .await
             .unwrap();
         }
 
@@ -213,11 +209,12 @@ mod tests {
         let theirs = AccountRepository::create(&db.pool, "theirs", STATUS_ACTIVE)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
-            .bind(&theirs)
-            .execute(&db.pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
+            &theirs
+        )
+        .unwrap();
 
         let mine = AccountRepository::create(&db.pool, "mine", STATUS_ACTIVE)
             .await

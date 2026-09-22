@@ -9,7 +9,7 @@
 //! never been set has genuinely unknown value, and rendering that as 0 would be
 //! a lie the user cannot distinguish from a real loss.
 
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use crate::modules::finance::money::format_amount;
@@ -51,7 +51,7 @@ pub fn signed_amount(minor: i64, exponent: u32) -> String {
     format!("{}{}", sign, format_amount(minor.abs(), exponent))
 }
 
-pub async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
+pub async fn handle_list(pool: &DbPool, owner_id: &str) -> String {
     match PortfolioRepository::list(pool, owner_id).await {
         Ok(holdings) if holdings.is_empty() => {
             "📈 No holdings yet. Add one with <code>!portfolio buy AAPL 10 @ 150.00</code>."
@@ -103,7 +103,7 @@ pub fn format_holding_line(h: &Holding) -> String {
     format!("{}{}{}", base, priced, note)
 }
 
-pub async fn handle_summary(pool: &SqlitePool, owner_id: &str) -> String {
+pub async fn handle_summary(pool: &DbPool, owner_id: &str) -> String {
     match PortfolioRepository::summary(pool, owner_id).await {
         Ok(summaries) if summaries.is_empty() => "📊 No holdings recorded yet.".to_string(),
         Ok(summaries) => {

@@ -6,6 +6,7 @@
 //! - 😝: Delay +1 Day (postpones task due date or reminder trigger by 24h)
 //! - 🎉: Celebrate Completion (completes item and replies with celebration)
 
+use crate::db::DbPool;
 use chrono::{Duration, Utc};
 use matrix_sdk::{
     room::Room,
@@ -19,7 +20,6 @@ use matrix_sdk::{
     },
     Client, RoomState,
 };
-use sqlx::SqlitePool;
 use tracing::{error, info, warn};
 
 use crate::bot::reaction_targets::{delete_target_by_entity, get_target, BotMessageTarget};
@@ -173,7 +173,7 @@ pub fn register_reaction_handler(
 }
 
 pub async fn apply_reaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     action: AllowedReaction,
     broadcaster: Option<&EventBroadcaster>,
@@ -187,7 +187,7 @@ pub async fn apply_reaction(
 }
 
 async fn handle_done(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -246,7 +246,7 @@ async fn handle_done(
 }
 
 async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -278,16 +278,15 @@ async fn handle_delete(
             // message's item gone", not "cancel an active plan" — so this
             // stays a direct, unconditional status flip. See the Part A
             // report for the full reasoning.
-            let res = sqlx::query(
+            let res = crate::db_execute!(
+                pool,
                 "UPDATE reminders SET status = 'cancelled' WHERE id = ? AND owner_id = ?",
-            )
-            .bind(target.entity_id)
-            .bind(&target.owner_id)
-            .execute(pool)
-            .await;
+                target.entity_id,
+                &target.owner_id
+            );
 
             match res {
-                Ok(r) if r.rows_affected() > 0 => {
+                Ok(r) if r > 0 => {
                     let _ = delete_target_by_entity(pool, "reminder", target.entity_id).await;
                     if let Some(bc) = broadcaster {
                         bc.send(SystemEvent::ReminderCancelled {
@@ -319,7 +318,7 @@ async fn handle_delete(
 }
 
 async fn handle_delay(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -406,7 +405,7 @@ async fn handle_delay(
 }
 
 async fn handle_celebrate(
-    pool: &SqlitePool,
+    pool: &DbPool,
     target: &BotMessageTarget,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<ReactionOutcome> {
@@ -494,8 +493,8 @@ mod tests {
     use crate::modules::reminder::models::{RecurrencePattern, ReminderSource};
     use crate::modules::todo::models::TodoPriority;
 
-    async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_pool() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

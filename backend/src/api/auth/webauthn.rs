@@ -115,11 +115,7 @@ pub async fn register_start(
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id =
-        sqlx::query_scalar::<_, String>("SELECT 'acct_' || lower(hex(randomblob(16)))")
-            .fetch_one(&state.db.pool)
-            .await
-            .map_err(|err| ApiError::internal(format!("could not mint an account id: {err}")))?;
+    let account_id = crate::utils::random::new_account_id();
 
     let handle = crate::accounts::account_id_to_handle(&account_id)
         .ok_or_else(|| ApiError::internal("minted an account id with no handle"))?;
@@ -253,14 +249,13 @@ pub async fn register_finish(
         })?;
 
     // Activate or create the account.
-    sqlx::query(
+    crate::db_execute!(
+        &state.db.pool,
         "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, 'active') \
          ON CONFLICT(id) DO UPDATE SET status = 'active'",
+        &account_id,
+        &display_name
     )
-    .bind(&account_id)
-    .bind(&display_name)
-    .execute(&state.db.pool)
-    .await
     .map_err(|err| {
         ApiError::internal(format!("could not activate or create the account: {err}"))
     })?;
@@ -487,13 +482,12 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             secret.map(str::to_string),
             "https://mbm.one".to_string(),
@@ -623,10 +617,8 @@ mod tests {
         .await
         .unwrap();
 
-        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&state.db.pool)
-            .await
-            .unwrap();
+        let accounts: i64 =
+            crate::db_scalar_one!(&state.db.pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
         assert_eq!(
             accounts, 0,
             "the account is written only when the ceremony finishes"

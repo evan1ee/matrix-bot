@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use super::repository::FootprintRepository;
@@ -6,7 +6,7 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html::html_escape;
 
 pub async fn handle_footprint_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     _room_id: &str,
     owner_id: &str,
@@ -36,7 +36,7 @@ pub async fn handle_footprint_command(
     }
 }
 
-async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
+async fn handle_list(pool: &DbPool, owner_id: &str) -> String {
     let footprints =
         match FootprintRepository::list_by_owner(pool, owner_id, None, None, None).await {
             Ok(list) => list,
@@ -109,7 +109,7 @@ async fn handle_list(pool: &SqlitePool, owner_id: &str) -> String {
 }
 
 async fn handle_add(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args: &str,
@@ -187,7 +187,7 @@ async fn handle_add(
 }
 
 async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     id_str: &str,

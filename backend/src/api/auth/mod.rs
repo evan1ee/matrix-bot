@@ -20,15 +20,14 @@ mod tests {
     use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
-    use sqlx::SqlitePool;
 
     const ORIGIN: &str = "http://localhost:8080";
 
     async fn state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -170,11 +169,12 @@ mod tests {
         let state = state().await;
         let (account, token) = signed_in(&state, "evan").await;
 
-        sqlx::query("DELETE FROM accounts WHERE id = ?")
-            .bind(&account)
-            .execute(&state.db.pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &state.db.pool,
+            "DELETE FROM accounts WHERE id = ?",
+            &account
+        )
+        .unwrap();
 
         let err = extract(&state, Method::GET, Some(&token), None)
             .await

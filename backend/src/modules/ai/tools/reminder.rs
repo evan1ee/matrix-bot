@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -10,7 +10,7 @@ use crate::modules::settings::repository::SettingsRepository;
 use serde_json::json;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -268,9 +268,13 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
 
     #[sqlx::test]
-    async fn test_set_reminder_with_local_time(pool: SqlitePool) {
+    async fn test_set_reminder_with_local_time(sqlite: SqlitePool) {
+        // `#[sqlx::test]` can only hand out a SqlitePool; wrap it so the body
+        // talks to the same dual-dialect pool every other test uses.
+        let pool = DbPool::Sqlite(sqlite);
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // Dated relative to the run: the service rejects a trigger time that has
@@ -305,7 +309,10 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_set_reminder_with_z_suffix(pool: SqlitePool) {
+    async fn test_set_reminder_with_z_suffix(sqlite: SqlitePool) {
+        // `#[sqlx::test]` can only hand out a SqlitePool; wrap it so the body
+        // talks to the same dual-dialect pool every other test uses.
+        let pool = DbPool::Sqlite(sqlite);
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // When an LLM sends a local time formatted as ISO-8601 with Z
@@ -336,7 +343,10 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_set_reminder_resolves_account_display_name(pool: SqlitePool) {
+    async fn test_set_reminder_resolves_account_display_name(sqlite: SqlitePool) {
+        // `#[sqlx::test]` can only hand out a SqlitePool; wrap it so the body
+        // talks to the same dual-dialect pool every other test uses.
+        let pool = DbPool::Sqlite(sqlite);
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let acct_id = crate::accounts::AccountRepository::create(

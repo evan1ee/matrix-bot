@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use super::cash_repo;
 use crate::modules::portfolio::models::{Holding, PortfolioCurrencySummary};
@@ -20,38 +20,39 @@ pub use crate::modules::portfolio::models::{BuyOutcome, SellOutcome, WithdrawOut
 pub struct PortfolioRepository;
 
 impl PortfolioRepository {
-    pub async fn find(pool: &SqlitePool, owner_id: &str, symbol: &str) -> Result<Option<Holding>> {
-        let holding = sqlx::query_as::<_, Holding>(&format!(
+    pub async fn find(pool: &DbPool, owner_id: &str, symbol: &str) -> Result<Option<Holding>> {
+        let holding = crate::db_fetch_optional!(
+            pool,
+            Holding,
+            &format!(
             "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?"
-        ))
-        .bind(owner_id)
-        .bind(symbol)
-        .fetch_optional(pool)
-        .await?;
+        ),
+            owner_id,
+            symbol
+        )?;
 
         Ok(holding)
     }
 
     /// Looks up a holding the caller owns, by numeric id — the REST layer's key.
-    pub async fn find_owned(pool: &SqlitePool, id: i64, owner_id: &str) -> Result<Option<Holding>> {
-        let holding = sqlx::query_as::<_, Holding>(&format!(
-            "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ? AND owner_id = ?"
-        ))
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+    pub async fn find_owned(pool: &DbPool, id: i64, owner_id: &str) -> Result<Option<Holding>> {
+        let holding = crate::db_fetch_optional!(
+            pool,
+            Holding,
+            &format!(
+                "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE id = ? AND owner_id = ?"
+            ),
+            id,
+            owner_id
+        )?;
 
         Ok(holding)
     }
 
-    pub async fn list(pool: &SqlitePool, owner_id: &str) -> Result<Vec<Holding>> {
-        let holdings = sqlx::query_as::<_, Holding>(&format!(
+    pub async fn list(pool: &DbPool, owner_id: &str) -> Result<Vec<Holding>> {
+        let holdings = crate::db_fetch_all!(pool, Holding, &format!(
             "SELECT {HOLDING_COLUMNS} FROM portfolio_holdings WHERE owner_id = ? ORDER BY symbol ASC"
-        ))
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+        ), owner_id)?;
 
         Ok(holdings)
     }
@@ -59,45 +60,37 @@ impl PortfolioRepository {
     // ---- holdings ----------------------------------------------------------
 
     pub async fn set_price(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         symbol: &str,
         price_minor: i64,
     ) -> Result<Option<Holding>> {
-        let result = sqlx::query(
-            "UPDATE portfolio_holdings \
+        let result = crate::db_execute!(pool, "UPDATE portfolio_holdings \
              SET current_price_minor = ?, price_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP \
-             WHERE owner_id = ? AND symbol = ?",
-        )
-        .bind(price_minor)
-        .bind(owner_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?;
+             WHERE owner_id = ? AND symbol = ?", price_minor, owner_id, symbol)?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::find(pool, owner_id, symbol).await
     }
 
     pub async fn set_note(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         symbol: &str,
         note: Option<&str>,
     ) -> Result<Option<Holding>> {
-        let result = sqlx::query(
+        let result = crate::db_execute!(
+            pool,
             "UPDATE portfolio_holdings SET note = ?, updated_at = CURRENT_TIMESTAMP \
              WHERE owner_id = ? AND symbol = ?",
-        )
-        .bind(note)
-        .bind(owner_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?;
+            note,
+            owner_id,
+            symbol
+        )?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Ok(None);
         }
         Self::find(pool, owner_id, symbol).await
@@ -106,7 +99,7 @@ impl PortfolioRepository {
     /// Renames a holding's ticker symbol. Rejects duplicates if the target symbol
     /// is already owned by this user under a different holding row.
     pub async fn update_symbol(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         id: i64,
         new_symbol: &str,
@@ -122,16 +115,9 @@ impl PortfolioRepository {
             }
         }
 
-        let result = sqlx::query(
-            "UPDATE portfolio_holdings SET symbol = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?",
-        )
-        .bind(&normalized)
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+        let result = crate::db_execute!(pool, "UPDATE portfolio_holdings SET symbol = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?", &normalized, id, owner_id)?;
 
-        if result.rows_affected() == 0 {
+        if result == 0 {
             return Err(anyhow::anyhow!("Holding not found or access denied"));
         }
 
@@ -145,24 +131,21 @@ impl PortfolioRepository {
     /// symbol, a test entry), not a sale. Deliberately does not touch cash:
     /// only `buy` and `sell`, which represent an actual money-for-shares
     /// exchange, do that.
-    pub async fn delete(pool: &SqlitePool, owner_id: &str, symbol: &str) -> Result<bool> {
-        let result =
-            sqlx::query("DELETE FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?")
-                .bind(owner_id)
-                .bind(symbol)
-                .execute(pool)
-                .await?;
+    pub async fn delete(pool: &DbPool, owner_id: &str, symbol: &str) -> Result<bool> {
+        let result = crate::db_execute!(
+            pool,
+            "DELETE FROM portfolio_holdings WHERE owner_id = ? AND symbol = ?",
+            owner_id,
+            symbol
+        )?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
     /// Totals per currency across every holding and cash balance. Currencies
     /// are never combined. A currency seeded only by cash (a deposit with
     /// nothing bought yet) still appears, with zero holdings.
-    pub async fn summary(
-        pool: &SqlitePool,
-        owner_id: &str,
-    ) -> Result<Vec<PortfolioCurrencySummary>> {
+    pub async fn summary(pool: &DbPool, owner_id: &str) -> Result<Vec<PortfolioCurrencySummary>> {
         let holdings = Self::list(pool, owner_id).await?;
         let cash_balances = cash_repo::list_cash(pool, owner_id).await?;
         Ok(crate::modules::portfolio::models::build_summaries(
@@ -179,8 +162,8 @@ mod tests {
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
     use crate::modules::portfolio::trade;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -206,13 +189,13 @@ mod tests {
 
     /// Every buy test needs cash on hand first now that buying is gated on it;
     /// this deposits comfortably more than any single test spends.
-    async fn fund(pool: &SqlitePool, owner_id: &str, currency: &str) {
+    async fn fund(pool: &DbPool, owner_id: &str, currency: &str) {
         cash_repo::deposit_cash(pool, owner_id, currency, 2, 100_000_000)
             .await
             .unwrap();
     }
 
-    async fn fund_jpy(pool: &SqlitePool, owner_id: &str) {
+    async fn fund_jpy(pool: &DbPool, owner_id: &str) {
         cash_repo::deposit_cash(pool, owner_id, "JPY", 0, 100_000_000)
             .await
             .unwrap();
@@ -255,10 +238,8 @@ mod tests {
         assert_eq!(holding.avg_cost_minor, 16000, "expected $160.00 average");
 
         // Still exactly one row for this symbol, not two.
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_holdings")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM portfolio_holdings").unwrap();
         assert_eq!(count, 1);
     }
 
@@ -672,10 +653,9 @@ mod tests {
         assert_eq!(second.balance_minor, 150000);
 
         // Still exactly one row for this owner+currency.
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_cash_balances")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM portfolio_cash_balances")
+                .unwrap();
         assert_eq!(count, 1);
     }
 

@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use reqwest::Client;
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
@@ -10,7 +10,7 @@ use crate::utils::html::html_escape;
 
 pub async fn handle_save_command(
     ctx: &CommandContext,
-    pool: &SqlitePool,
+    pool: &DbPool,
     http_client: Option<&Client>,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -88,7 +88,7 @@ pub async fn handle_save_command(
     }
 }
 
-pub async fn handle_list_command(ctx: &CommandContext, pool: &SqlitePool) -> String {
+pub async fn handle_list_command(ctx: &CommandContext, pool: &DbPool) -> String {
     let tag = if ctx.raw_args.trim().is_empty() {
         None
     } else {
@@ -136,7 +136,7 @@ pub async fn handle_list_command(ctx: &CommandContext, pool: &SqlitePool) -> Str
 
 pub async fn handle_bookmark_subcommands(
     ctx: &CommandContext,
-    pool: &SqlitePool,
+    pool: &DbPool,
     http_client: Option<&Client>,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -238,8 +238,8 @@ pub fn format_help() -> String {
 mod tests {
     use super::*;
 
-    async fn setup_db() -> (SqlitePool, String) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_db() -> (DbPool, String) {
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")

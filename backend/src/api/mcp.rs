@@ -217,10 +217,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_handler_ping() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -237,17 +239,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_tokens_api_flow() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
         crate::db::schema_auth::create_tables(&pool).await.unwrap();
         crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+        )
+        .unwrap();
 
         let (raw, token) = McpTokenRepository::create(&pool, "acct_test", "API Test", None)
             .await

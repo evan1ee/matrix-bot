@@ -450,13 +450,12 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::new(32),
             None,
             "https://matrix.org".to_string(),
@@ -486,14 +485,13 @@ mod tests {
         assert!(unauth.is_err());
 
         // Pre-populate account_rooms for authorized room
-        sqlx::query(
-            "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, 0)",
+        crate::db_execute!(
+            &state.db.pool,
+            "INSERT INTO account_rooms (account_id, room_id, name, is_direct) VALUES (?, ?, ?, FALSE)",
+            &acct,
+            "!ops:matrix.org",
+            "Ops Room"
         )
-        .bind(&acct)
-        .bind("!ops:matrix.org")
-        .bind("Ops Room")
-        .execute(&state.db.pool)
-        .await
         .unwrap();
 
         // 1. Create Webhook (authorized)

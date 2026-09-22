@@ -1,6 +1,6 @@
 //! Trade command handling for portfolio (buy, record/import, sell).
 
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use crate::events::EventBroadcaster;
@@ -66,7 +66,7 @@ pub fn parse_buy(args: &str, default_currency: &str) -> Result<ParsedBuy, String
 }
 
 pub async fn handle_buy(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -149,7 +149,7 @@ pub async fn handle_buy(
 }
 
 pub async fn handle_record(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -244,7 +244,7 @@ pub fn parse_sell(
 }
 
 pub async fn handle_sell(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -404,7 +404,7 @@ mod tests {
     /// through `service::buy`, a note of any length reached the database.
     #[tokio::test]
     async fn test_a_matrix_buy_enforces_the_note_limit() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);

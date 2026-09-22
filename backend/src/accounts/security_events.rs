@@ -9,9 +9,9 @@
 //! DM fails, the action it describes has already happened — refusing it after
 //! the fact would be worse than a missing line in a list.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 /// What happened. Stored verbatim, so a new variant needs no migration.
@@ -105,18 +105,18 @@ pub struct SecurityEventRepository;
 impl SecurityEventRepository {
     /// Records an event. Errors are logged and swallowed — see the module note.
     pub async fn record(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         kind: SecurityEventKind,
         detail: Option<&str>,
     ) {
-        let result =
-            sqlx::query("INSERT INTO security_events (account_id, kind, detail) VALUES (?, ?, ?)")
-                .bind(account_id)
-                .bind(kind.as_str())
-                .bind(detail)
-                .execute(pool)
-                .await;
+        let result = crate::db_execute!(
+            pool,
+            "INSERT INTO security_events (account_id, kind, detail) VALUES (?, ?, ?)",
+            account_id,
+            kind.as_str(),
+            detail
+        );
 
         if let Err(err) = result {
             tracing::error!(
@@ -130,18 +130,18 @@ impl SecurityEventRepository {
 
     /// The account's recent history, newest first.
     pub async fn list(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         limit: i64,
     ) -> Result<Vec<SecurityEvent>, sqlx::Error> {
-        sqlx::query_as::<_, SecurityEvent>(
+        crate::db_fetch_all!(
+            pool,
+            SecurityEvent,
             "SELECT id, kind, detail, created_at FROM security_events \
              WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+            account_id,
+            limit
         )
-        .bind(account_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
     }
 }
 
@@ -151,8 +151,8 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -210,7 +210,7 @@ mod tests {
     /// Recording must not be able to fail an action that already happened.
     #[tokio::test]
     async fn test_recording_against_a_broken_table_does_not_panic() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         // No migrations: the table does not exist.
         SecurityEventRepository::record(&pool, "acct_a", SecurityEventKind::SignedIn, None).await;
     }

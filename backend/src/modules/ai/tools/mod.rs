@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 pub mod bills;
 pub mod bookmarks;
 pub mod definitions;
@@ -13,7 +14,6 @@ pub mod webhooks;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
-use sqlx::SqlitePool;
 
 pub struct ToolRegistry;
 
@@ -23,7 +23,7 @@ impl ToolRegistry {
     }
 
     pub async fn execute_tool(
-        pool: &SqlitePool,
+        pool: &DbPool,
         broadcaster: Option<&EventBroadcaster>,
         owner_id: &str,
         room_id: &str,

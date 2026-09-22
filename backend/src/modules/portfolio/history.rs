@@ -1,7 +1,8 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::FromRow;
 use utoipa::ToSchema;
 
 use super::cash_repo;
@@ -45,7 +46,7 @@ pub struct HistoryRepository;
 
 impl HistoryRepository {
     pub async fn record_snapshot(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         snapshot_date: &str,
         currency: &str,
@@ -55,7 +56,8 @@ impl HistoryRepository {
     ) -> Result<()> {
         let total_net_worth_minor = holdings_value_minor + cash_minor;
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO portfolio_daily_snapshots (
                 owner_id, snapshot_date, currency, currency_exponent,
@@ -67,24 +69,19 @@ impl HistoryRepository {
                 total_net_worth_minor = excluded.total_net_worth_minor,
                 currency_exponent = excluded.currency_exponent;
             "#,
-        )
-        .bind(owner_id)
-        .bind(snapshot_date)
-        .bind(currency)
-        .bind(currency_exponent)
-        .bind(holdings_value_minor)
-        .bind(cash_minor)
-        .bind(total_net_worth_minor)
-        .execute(pool)
-        .await?;
+            owner_id,
+            snapshot_date,
+            currency,
+            currency_exponent,
+            holdings_value_minor,
+            cash_minor,
+            total_net_worth_minor
+        )?;
 
         Ok(())
     }
 
-    pub async fn capture_current_snapshot_for_owner(
-        pool: &SqlitePool,
-        owner_id: &str,
-    ) -> Result<()> {
+    pub async fn capture_current_snapshot_for_owner(pool: &DbPool, owner_id: &str) -> Result<()> {
         let holdings = PortfolioRepository::list(pool, owner_id).await?;
         let cash_list = cash_repo::list_cash(pool, owner_id).await?;
         let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -139,7 +136,7 @@ impl HistoryRepository {
     }
 
     pub async fn get_history(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         timeframe: &str,
         currency: &str,
@@ -157,7 +154,9 @@ impl HistoryRepository {
 
         let cutoff_date = (now - Duration::days(days)).format("%Y-%m-%d").to_string();
 
-        let mut snapshots = sqlx::query_as::<_, DailySnapshot>(
+        let mut snapshots = crate::db_fetch_all!(
+            pool,
+            DailySnapshot,
             r#"
             SELECT id, owner_id, snapshot_date, currency, currency_exponent,
                    holdings_value_minor, cash_minor, total_net_worth_minor, created_at
@@ -165,12 +164,10 @@ impl HistoryRepository {
             WHERE owner_id = ? AND currency = ? AND snapshot_date >= ?
             ORDER BY snapshot_date ASC;
             "#,
-        )
-        .bind(owner_id)
-        .bind(&norm_currency)
-        .bind(&cutoff_date)
-        .fetch_all(pool)
-        .await?;
+            owner_id,
+            &norm_currency,
+            &cutoff_date
+        )?;
 
         // Also fetch current live status to ensure today is always up to date
         let holdings = PortfolioRepository::list(pool, owner_id).await?;
@@ -304,18 +301,18 @@ impl HistoryRepository {
 
             // If no prior snapshots exist, generate backfilled starting points from audit activity log
             if points.is_empty() {
-                let audit_entries = sqlx::query_as::<_, (DateTime<Utc>, i64, String)>(
+                let audit_entries = crate::db_fetch_all!(
+                    pool,
+                    (DateTime<Utc>, i64, String),
                     r#"
                     SELECT created_at, amount_minor, action
                     FROM portfolio_audit_log
                     WHERE owner_id = ? AND currency = ?
                     ORDER BY created_at ASC;
                     "#,
+                    owner_id,
+                    &norm_currency
                 )
-                .bind(owner_id)
-                .bind(&norm_currency)
-                .fetch_all(pool)
-                .await
                 .unwrap_or_default();
 
                 if !audit_entries.is_empty() {
@@ -370,8 +367,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

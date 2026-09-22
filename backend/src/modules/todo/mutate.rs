@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use chrono::Utc;
 use chrono_tz::Tz;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::events::EventBroadcaster;
@@ -20,7 +20,7 @@ pub const DUE_USAGE: &str =
      <code>!todo due 1 none</code> to clear)";
 
 pub async fn handle_add(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -104,7 +104,7 @@ pub async fn handle_add(
 }
 
 pub async fn handle_done(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args_body: &str,
@@ -164,7 +164,7 @@ pub async fn handle_done(
 }
 
 pub async fn handle_edit(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args_body: &str,
@@ -219,7 +219,7 @@ pub async fn handle_edit(
 }
 
 pub async fn handle_priority(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args_body: &str,
@@ -270,7 +270,7 @@ pub async fn handle_priority(
 }
 
 pub async fn handle_due(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -402,7 +402,7 @@ pub async fn handle_due(
 }
 
 pub async fn handle_clear(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -443,7 +443,7 @@ pub async fn handle_clear(
 }
 
 pub async fn handle_delete(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     args_body: &str,
@@ -484,8 +484,8 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::{EventBroadcaster, SystemEvent};
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

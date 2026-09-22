@@ -11,6 +11,7 @@
 use crate::accounts::session::COOKIE_NAME;
 use crate::accounts::{AccountRepository, SessionRepository};
 use crate::api::auth::types::AuthUser;
+use crate::db::DbPool;
 
 /// A credential presented by a request.
 pub enum Credential<'a> {
@@ -84,7 +85,7 @@ pub(crate) fn cookie_value<'a>(header_value: &'a str, name: &str) -> Option<&'a 
 /// an account that no longer exists. The caller turns that into a 401; the
 /// distinction between the three reasons is deliberately not exposed.
 pub async fn resolve(
-    pool: &sqlx::SqlitePool,
+    pool: &DbPool,
     credential: &Credential<'_>,
 ) -> Result<Option<AuthUser>, sqlx::Error> {
     match credential {

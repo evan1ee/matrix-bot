@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use uuid::Uuid;
 
 use super::models::{AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput};
@@ -7,19 +7,19 @@ pub struct AiRepository;
 
 impl AiRepository {
     pub async fn get_user_config(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Option<AiUserConfig>, sqlx::Error> {
-        let mut config = sqlx::query_as::<_, AiUserConfig>(
+        let mut config = crate::db_fetch_optional!(
+            pool,
+            AiUserConfig,
             r#"
             SELECT owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
             FROM ai_user_configs
             WHERE owner_id = ?
             "#,
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            owner_id
+        )?;
 
         if let Some(ref mut cfg) = config {
             cfg.has_api_key = cfg
@@ -33,16 +33,17 @@ impl AiRepository {
     }
 
     pub async fn upsert_user_config(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         input: &UpdateAiConfigInput,
     ) -> Result<AiUserConfig, sqlx::Error> {
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_user_configs (
                 owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id) DO UPDATE SET
                 api_base_url = COALESCE(excluded.api_base_url, ai_user_configs.api_base_url),
                 api_key = CASE
@@ -54,18 +55,16 @@ impl AiRepository {
                 system_prompt = COALESCE(excluded.system_prompt, ai_user_configs.system_prompt),
                 temperature = COALESCE(excluded.temperature, ai_user_configs.temperature),
                 max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             "#,
-        )
-        .bind(owner_id)
-        .bind(&input.api_base_url)
-        .bind(&input.api_key)
-        .bind(&input.model_name)
-        .bind(&input.system_prompt)
-        .bind(input.temperature)
-        .bind(input.max_tokens)
-        .execute(pool)
-        .await?;
+            owner_id,
+            &input.api_base_url,
+            &input.api_key,
+            &input.model_name,
+            &input.system_prompt,
+            input.temperature,
+            input.max_tokens
+        )?;
 
         Self::get_user_config(pool, owner_id)
             .await?
@@ -73,27 +72,34 @@ impl AiRepository {
     }
 
     pub async fn get_or_create_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
-        // Look for recent conversation
-        let existing = sqlx::query_as::<_, AiConversation>(
+        // The cutoff is computed here rather than in SQL. `strftime` is
+        // SQLite-only, and `updated_at` is a TEXT column in the
+        // `YYYY-MM-DD HH:MM:SS` shape `CAST(CURRENT_TIMESTAMP AS TEXT)`
+        // produces, so a lexicographic comparison against the same shape means
+        // the same thing on both databases.
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+
+        let existing = crate::db_fetch_optional!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
-            WHERE owner_id = ? AND room_id = ?
-              AND (strftime('%s', 'now') - strftime('%s', updated_at)) <= ?
+            WHERE owner_id = ? AND room_id = ? AND updated_at >= ?
             ORDER BY updated_at DESC
             LIMIT 1
             "#,
-        )
-        .bind(owner_id)
-        .bind(room_id)
-        .bind(max_age_seconds)
-        .fetch_optional(pool)
-        .await?;
+            owner_id,
+            room_id,
+            &cutoff
+        )?;
 
         if let Some(conv) = existing {
             return Ok(conv);
@@ -101,17 +107,16 @@ impl AiRepository {
 
         // Otherwise create new conversation
         let id = format!("conv_{}", Uuid::new_v4().simple());
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             "#,
-        )
-        .bind(&id)
-        .bind(owner_id)
-        .bind(room_id)
-        .execute(pool)
-        .await?;
+            &id,
+            owner_id,
+            room_id
+        )?;
 
         Self::get_conversation(pool, &id, owner_id)
             .await?
@@ -119,29 +124,31 @@ impl AiRepository {
     }
 
     pub async fn get_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<Option<AiConversation>, sqlx::Error> {
-        sqlx::query_as::<_, AiConversation>(
+        crate::db_fetch_optional!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
             WHERE id = ? AND owner_id = ?
             "#,
+            id,
+            owner_id
         )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn list_conversations(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         limit: i64,
     ) -> Result<Vec<AiConversation>, sqlx::Error> {
-        sqlx::query_as::<_, AiConversation>(
+        crate::db_fetch_all!(
+            pool,
+            AiConversation,
             r#"
             SELECT id, owner_id, room_id, created_at, updated_at
             FROM ai_conversations
@@ -149,49 +156,45 @@ impl AiRepository {
             ORDER BY updated_at DESC
             LIMIT ?
             "#,
+            owner_id,
+            limit
         )
-        .bind(owner_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn delete_conversation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: &str,
         owner_id: &str,
     ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query(
+        let result = crate::db_execute!(
+            pool,
             r#"
             DELETE FROM ai_conversations
             WHERE id = ? AND owner_id = ?
             "#,
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(pool)
-        .await?;
+            id,
+            owner_id
+        )?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
-    pub async fn touch_conversation(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    pub async fn touch_conversation(pool: &DbPool, id: &str) -> Result<(), sqlx::Error> {
+        crate::db_execute!(
+            pool,
             r#"
             UPDATE ai_conversations
-            SET updated_at = CURRENT_TIMESTAMP
+            SET updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ?
             "#,
-        )
-        .bind(id)
-        .execute(pool)
-        .await?;
+            id
+        )?;
 
         Ok(())
     }
 
     pub async fn add_message(
-        pool: &SqlitePool,
+        pool: &DbPool,
         conversation_id: &str,
         role: &str,
         content: &str,
@@ -199,41 +202,42 @@ impl AiRepository {
         tool_name: Option<&str>,
     ) -> Result<AiMessage, sqlx::Error> {
         let id = format!("msg_{}", Uuid::new_v4().simple());
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             r#"
             INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT))
             "#,
-        )
-        .bind(&id)
-        .bind(conversation_id)
-        .bind(role)
-        .bind(content)
-        .bind(tool_call_id)
-        .bind(tool_name)
-        .execute(pool)
-        .await?;
+            &id,
+            conversation_id,
+            role,
+            content,
+            tool_call_id,
+            tool_name
+        )?;
 
         Self::touch_conversation(pool, conversation_id).await?;
 
-        sqlx::query_as::<_, AiMessage>(
+        crate::db_fetch_one!(
+            pool,
+            AiMessage,
             r#"
             SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
             FROM ai_messages
             WHERE id = ?
             "#,
+            &id
         )
-        .bind(&id)
-        .fetch_one(pool)
-        .await
     }
 
     pub async fn get_recent_messages(
-        pool: &SqlitePool,
+        pool: &DbPool,
         conversation_id: &str,
         limit: i64,
     ) -> Result<Vec<AiMessage>, sqlx::Error> {
-        let mut messages = sqlx::query_as::<_, AiMessage>(
+        let mut messages = crate::db_fetch_all!(
+            pool,
+            AiMessage,
             r#"
             SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
             FROM ai_messages
@@ -241,11 +245,9 @@ impl AiRepository {
             ORDER BY created_at DESC
             LIMIT ?
             "#,
-        )
-        .bind(conversation_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+            conversation_id,
+            limit
+        )?;
 
         messages.reverse();
         Ok(messages)

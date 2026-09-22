@@ -1,8 +1,25 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use chrono_tz::Tz;
 use std::time::Duration;
 
 /// Formats a std::time::Duration into human readable string e.g. "10s", "5m 30s", "2h 15m"
+/// Now, truncated to the precision a database can actually store.
+///
+/// PostgreSQL's `TIMESTAMPTZ` holds microseconds; `DateTime<Utc>` holds
+/// nanoseconds. A value written and read back therefore differs in the last
+/// three digits on PostgreSQL and not on SQLite, which is invisible in
+/// production — nothing compares stored instants for exact equality — but makes
+/// a test that round-trips `Utc::now()` pass on one database and fail on the
+/// other.
+///
+/// Tests that assert on a round-tripped timestamp use this so they are
+/// asserting on scheduling, not on a storage precision they do not care about.
+pub fn now_at_storage_precision() -> DateTime<Utc> {
+    let now = Utc::now();
+    now.with_nanosecond(now.timestamp_subsec_micros() * 1_000)
+        .unwrap_or(now)
+}
+
 pub fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {

@@ -1,12 +1,12 @@
+use crate::db::DbPool;
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::net_worth::NetWorthService;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     name: &str,
     _args: &serde_json::Value,

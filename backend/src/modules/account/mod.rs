@@ -400,12 +400,11 @@ mod tests {
     use super::*;
     use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
-    use sqlx::SqlitePool;
 
     async fn db() -> Database {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
-        Database { pool }
+        Database { pool: pool }
     }
 
     fn module() -> AccountModule {
@@ -571,12 +570,13 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query("UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?")
-            .bind(chrono::Utc::now() - chrono::Duration::minutes(1))
-            .bind(&account)
-            .execute(&db.pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &db.pool,
+            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+            chrono::Utc::now() - chrono::Duration::minutes(1),
+            &account
+        )
+        .unwrap();
 
         assert_eq!(
             redeem_matured_recovery(&db, None, &code).await.unwrap(),
@@ -626,16 +626,13 @@ mod tests {
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
-        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)")
-            .bind(&account)
-            .execute(&db.pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ('pk1', ?, '{}', 'MacBook'), ('pk2', ?, '{}', 'iPhone')")
-            .bind(&account)
-            .bind(&account)
-            .execute(&db.pool)
-            .await
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
+            &account
+        )
+        .unwrap();
+        crate::db_execute!(&db.pool, "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ('pk1', ?, '{}', 'MacBook'), ('pk2', ?, '{}', 'iPhone')", &account, &account)
             .unwrap();
 
         // List passkeys

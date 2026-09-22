@@ -1,10 +1,9 @@
-use sqlx::SqlitePool;
-
 use super::client::ResolvedAiConfig;
+use crate::db::DbPool;
 use crate::utils::html::html_escape;
 
 pub async fn build_system_prompt(
-    pool: &SqlitePool,
+    pool: &DbPool,
     resolved_config: &ResolvedAiConfig,
     owner_id: &str,
     room_id: &str,

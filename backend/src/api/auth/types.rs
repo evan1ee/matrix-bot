@@ -324,10 +324,7 @@ impl ApiState {
     /// Expired entries are swept here rather than by a timer: ceremonies only
     /// accumulate when someone starts one, so the work belongs on that path.
     pub async fn stash_ceremony(&self, ceremony: Ceremony) -> Result<String, ApiError> {
-        let id = sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(16)))")
-            .fetch_one(&self.db.pool)
-            .await
-            .map_err(|err| ApiError::internal(format!("could not start a ceremony: {err}")))?;
+        let id = crate::utils::random::random_hex(16);
 
         let now = Instant::now();
         let mut ceremonies = self.webauthn_ceremonies.write().await;
@@ -448,12 +445,12 @@ mod tests {
     /// derives every one of them instead.
     #[tokio::test]
     async fn test_from_config_takes_every_security_default_from_config() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         let config = production_config();
 
         let state = ApiState::from_config(
             &config,
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )
@@ -491,7 +488,7 @@ mod tests {
     /// every passkey login failing.
     #[tokio::test]
     async fn test_from_config_refuses_a_malformed_origin() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         let config = Config {
             webauthn_origin: "not-a-url".to_string(),
             ..production_config()
@@ -499,7 +496,7 @@ mod tests {
 
         assert!(ApiState::from_config(
             &config,
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::bot::handles::BotHandles::default(),
         )

@@ -11,9 +11,9 @@
 //! want as a [`ReminderPlan`] and share this one reconciler, so a second module
 //! wanting due reminders does not mean a second copy of these rules.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::reminder::models::{RecurrencePattern, ReminderSource};
@@ -60,7 +60,7 @@ pub struct ReminderPlan<'a> {
 /// `broadcaster` is optional because the Matrix command path has no access to
 /// one; see the note in `modules/todo/handler.rs`.
 pub async fn sync(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     plan: &ReminderPlan<'_>,
 ) -> Result<SyncOutcome> {
@@ -112,7 +112,7 @@ pub async fn sync(
 
 /// Cancels the linked reminder if one is pending, broadcasting the change.
 pub async fn tear_down(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     source: ReminderSource,
     source_id: i64,

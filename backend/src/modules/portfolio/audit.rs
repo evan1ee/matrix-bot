@@ -5,11 +5,11 @@
 //! hash of the preceding entry (`prev_hash`), forming a tamper-evident blockchain-style
 //! ledger. SQLite triggers additionally enforce immutability at the database engine level.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
 use utoipa::ToSchema;
 
 pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -85,7 +85,7 @@ pub fn compute_entry_hash(
 /// Records a cryptographically hash-chained audit entry for a portfolio operation.
 #[allow(clippy::too_many_arguments)]
 pub async fn record_audit_entry(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     action: &str,
     symbol: Option<&str>,
@@ -101,12 +101,12 @@ pub async fn record_audit_entry(
     let now = custom_timestamp.unwrap_or_else(Utc::now);
     let epoch_ms = now.timestamp_millis();
 
-    let prev_hash = sqlx::query_scalar::<_, String>(
+    let prev_hash = crate::db_scalar_optional!(
+        pool,
+        String,
         "SELECT entry_hash FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1",
-    )
-    .bind(owner_id)
-    .fetch_optional(pool)
-    .await?
+        owner_id
+    )?
     .unwrap_or_else(|| GENESIS_HASH.to_string());
 
     let entry_hash = compute_entry_hash(
@@ -124,36 +124,36 @@ pub async fn record_audit_entry(
         epoch_ms,
     );
 
-    let result = sqlx::query(
+    let result = crate::db_scalar_one!(
+        pool,
+        i64,
         "INSERT INTO portfolio_audit_log \
          (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency, \
           currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(owner_id)
-    .bind(action)
-    .bind(symbol)
-    .bind(quantity_minor)
-    .bind(price_minor)
-    .bind(amount_minor)
-    .bind(currency)
-    .bind(currency_exponent)
-    .bind(realized_pl_minor)
-    .bind(note)
-    .bind(&prev_hash)
-    .bind(&entry_hash)
-    .bind(now)
-    .execute(pool)
-    .await?;
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        owner_id,
+        action,
+        symbol,
+        quantity_minor,
+        price_minor,
+        amount_minor,
+        currency,
+        currency_exponent,
+        realized_pl_minor,
+        note,
+        &prev_hash,
+        &entry_hash,
+        now
+    )?;
 
-    let inserted_id = result.last_insert_rowid();
+    let inserted_id = result;
 
-    let entry = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE id = ?"
-    ))
-    .bind(inserted_id)
-    .fetch_one(pool)
-    .await?;
+    let entry = crate::db_fetch_one!(
+        pool,
+        PortfolioAuditEntry,
+        &format!("SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE id = ?"),
+        inserted_id
+    )?;
 
     Ok(entry)
 }
@@ -179,57 +179,63 @@ pub async fn record_audit_entry(
 /// undoes the `DROP TRIGGER` with everything else, so the trigger cannot be
 /// left off.
 pub async fn absorb_ledger(
-    conn: &mut sqlx::SqliteConnection,
+    conn: &mut crate::db::DbTx<'_>,
     from: &str,
     into: &str,
 ) -> Result<i64, sqlx::Error> {
-    let moved: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
-            .bind(from)
-            .fetch_one(&mut *conn)
-            .await?;
+    let moved: i64 = crate::tx_scalar_one!(
+        &mut *conn,
+        _,
+        "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?",
+        from
+    )?;
 
     if moved == 0 {
         return Ok(0);
     }
 
-    sqlx::query("DROP TRIGGER IF EXISTS prevent_portfolio_audit_update")
-        .execute(&mut *conn)
-        .await?;
+    // `crate::db::ddl` is the single source for these statements so the schema
+    // and this drop/restore pair cannot drift apart. The dialect comes from the
+    // transaction itself, so the guard is dropped and restored in whichever
+    // form the live database understands.
+    crate::tx_execute!(
+        &mut *conn,
+        &crate::db::ddl::drop_audit_update_trigger(conn.dialect())
+    )?;
 
-    sqlx::query("UPDATE portfolio_audit_log SET owner_id = ? WHERE owner_id = ?")
-        .bind(into)
-        .bind(from)
-        .execute(&mut *conn)
-        .await?;
+    crate::tx_execute!(
+        &mut *conn,
+        "UPDATE portfolio_audit_log SET owner_id = ? WHERE owner_id = ?",
+        into,
+        from
+    )?;
 
     // Placeholder hashes below are overwritten by the rebuild pass that
     // follows; there is no INSERT trigger, so this row is allowed to land
     // with them briefly incorrect.
-    sqlx::query(
+    crate::tx_execute!(
+        &mut *conn,
         "INSERT INTO portfolio_audit_log \
          (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency, \
           currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at) \
          VALUES (?, 'merge', NULL, NULL, NULL, 0, '', 2, NULL, ?, ?, '', ?)",
-    )
-    .bind(into)
-    .bind(format!(
-        "Absorbed {moved} ledger entries from account {from}"
-    ))
-    .bind(GENESIS_HASH)
-    .bind(Utc::now())
-    .execute(&mut *conn)
-    .await?;
+        into,
+        format!("Absorbed {moved} ledger entries from account {from}"),
+        GENESIS_HASH,
+        Utc::now()
+    )?;
 
     // Ordered by `id` ascending: ids come from a single global autoincrement,
     // so id order is insertion order across both accounts, which gives a
     // chronologically coherent merged history.
-    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
-    ))
-    .bind(into)
-    .fetch_all(&mut *conn)
-    .await?;
+    let entries = crate::tx_fetch_all!(
+        &mut *conn,
+        PortfolioAuditEntry,
+        &format!(
+            "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
+        ),
+        into
+    )?;
 
     let mut prev = GENESIS_HASH.to_string();
     for entry in &entries {
@@ -249,26 +255,27 @@ pub async fn absorb_ledger(
             epoch_ms,
         );
 
-        sqlx::query("UPDATE portfolio_audit_log SET prev_hash = ?, entry_hash = ? WHERE id = ?")
-            .bind(&prev)
-            .bind(&entry_hash)
-            .bind(entry.id)
-            .execute(&mut *conn)
-            .await?;
+        crate::tx_execute!(
+            &mut *conn,
+            "UPDATE portfolio_audit_log SET prev_hash = ?, entry_hash = ? WHERE id = ?",
+            &prev,
+            &entry_hash,
+            entry.id
+        )?;
 
         prev = entry_hash;
     }
 
-    sqlx::query(crate::db::schema_portfolio::AUDIT_UPDATE_TRIGGER)
-        .execute(&mut *conn)
-        .await?;
+    for statement in crate::db::ddl::audit_update_trigger(conn.dialect()) {
+        crate::tx_execute!(&mut *conn, &statement)?;
+    }
 
     Ok(moved)
 }
 
 /// Retrieves the paginated audit activity log for an owner in reverse chronological order.
 pub async fn list_audit_entries(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     limit: i64,
     offset: i64,
@@ -276,17 +283,19 @@ pub async fn list_audit_entries(
     let limit = limit.clamp(1, 100);
     let offset = offset.max(0);
 
-    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log \
+    let entries = crate::db_fetch_all!(
+        pool,
+        PortfolioAuditEntry,
+        &format!(
+            "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log \
          WHERE owner_id = ? \
          ORDER BY id DESC \
          LIMIT ? OFFSET ?"
-    ))
-    .bind(owner_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+        ),
+        owner_id,
+        limit,
+        offset
+    )?;
 
     Ok(entries)
 }
@@ -302,16 +311,15 @@ pub struct AuditVerificationResult {
 }
 
 /// Verifies the cryptographic integrity of an owner's audit log from genesis to head.
-pub async fn verify_audit_chain(
-    pool: &SqlitePool,
-    owner_id: &str,
-) -> Result<AuditVerificationResult> {
-    let entries = sqlx::query_as::<_, PortfolioAuditEntry>(&format!(
-        "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
-    ))
-    .bind(owner_id)
-    .fetch_all(pool)
-    .await?;
+pub async fn verify_audit_chain(pool: &DbPool, owner_id: &str) -> Result<AuditVerificationResult> {
+    let entries = crate::db_fetch_all!(
+        pool,
+        PortfolioAuditEntry,
+        &format!(
+            "SELECT {AUDIT_COLUMNS} FROM portfolio_audit_log WHERE owner_id = ? ORDER BY id ASC"
+        ),
+        owner_id
+    )?;
 
     if entries.is_empty() {
         return Ok(AuditVerificationResult {
@@ -392,8 +400,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn pool() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -490,18 +498,16 @@ mod tests {
         .unwrap();
 
         // Direct UPDATE must be rejected by trigger
-        let update_res =
-            sqlx::query("UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?")
-                .bind(e.id)
-                .execute(&pool)
-                .await;
+        let update_res = crate::db_execute!(
+            &pool,
+            "UPDATE portfolio_audit_log SET amount_minor = 999999 WHERE id = ?",
+            e.id
+        );
         assert!(update_res.is_err(), "Trigger must abort UPDATE");
 
         // Direct DELETE must be rejected by trigger
-        let delete_res = sqlx::query("DELETE FROM portfolio_audit_log WHERE id = ?")
-            .bind(e.id)
-            .execute(&pool)
-            .await;
+        let delete_res =
+            crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log WHERE id = ?", e.id);
         assert!(delete_res.is_err(), "Trigger must abort DELETE");
     }
 

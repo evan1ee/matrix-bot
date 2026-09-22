@@ -152,7 +152,6 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
 
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
@@ -172,8 +171,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_refuses_public_room() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let db = Database { pool };
+        let pool = crate::db::pool::test_pool().await;
+        let db = Database { pool: pool };
         let ctx = dummy_ctx("mcp", "token", false);
 
         let reply = handle_command(&ctx, &db).await.unwrap();
@@ -183,16 +182,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_auth::create_tables(&pool).await.unwrap();
         crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+        )
+        .unwrap();
 
-        let db = Database { pool };
+        let db = Database { pool: pool };
         let ctx = dummy_ctx("mcp", "token Claude Laptop", true);
 
         let reply = handle_command(&ctx, &db).await.unwrap();

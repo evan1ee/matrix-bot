@@ -1,5 +1,4 @@
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::events::EventBroadcaster;
 use crate::modules::settings::SettingsRepository;
 use crate::modules::todo::mutate::{
@@ -12,7 +11,7 @@ use crate::utils::html_escape;
 pub use crate::modules::todo::mutate::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
 pub async fn handle_todo_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -98,8 +97,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }

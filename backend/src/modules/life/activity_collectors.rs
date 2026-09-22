@@ -1,7 +1,7 @@
 //! Per-module query collectors for life day activity feed.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::modules::life::activity::{ActivityEvent, ActivityStats};
 
@@ -38,7 +38,7 @@ pub(crate) fn push_event(
 }
 
 pub(crate) async fn query_todos(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -52,14 +52,14 @@ pub(crate) async fn query_todos(
         created_at: Option<DateTime<Utc>>,
     }
 
-    let rows = sqlx::query_as::<_, TodoRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        TodoRow,
         "SELECT text, priority, completed, created_at \
-         FROM todos WHERE owner_id = ? AND date(created_at) = ?",
+         FROM todos WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ?",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in &rows {
@@ -89,15 +89,15 @@ pub(crate) async fn query_todos(
     }
 
     // Todos due on this date (but created on a different date)
-    let due_rows = sqlx::query_as::<_, TodoRow>(
+    let due_rows = crate::db_fetch_all!(
+        pool,
+        TodoRow,
         "SELECT text, priority, completed, created_at \
-         FROM todos WHERE owner_id = ? AND date(due_at) = ? AND date(created_at) != ?",
+         FROM todos WHERE owner_id = ? AND CAST(date(due_at) AS TEXT) = ? AND CAST(date(created_at) AS TEXT) != ?",
+        owner,
+        date,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in due_rows {
@@ -119,7 +119,7 @@ pub(crate) async fn query_todos(
 }
 
 pub(crate) async fn query_finance(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -136,18 +136,18 @@ pub(crate) async fn query_finance(
         occurred_at: DateTime<Utc>,
     }
 
-    let rows = sqlx::query_as::<_, TxRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        TxRow,
         "SELECT t.direction, t.amount_minor, t.currency, t.currency_exponent, \
                 c.name AS category_name, t.note, t.occurred_at \
          FROM transactions t \
          LEFT JOIN finance_categories c ON c.id = t.category_id \
-         WHERE t.owner_id = ? AND date(t.occurred_at) = ? \
+         WHERE t.owner_id = ? AND CAST(date(t.occurred_at) AS TEXT) = ? \
          ORDER BY t.occurred_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {
@@ -188,7 +188,7 @@ pub(crate) async fn query_finance(
 }
 
 pub(crate) async fn query_portfolio(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -205,17 +205,17 @@ pub(crate) async fn query_portfolio(
         created_at: Option<DateTime<Utc>>,
     }
 
-    let rows = sqlx::query_as::<_, AuditRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        AuditRow,
         "SELECT action, symbol, quantity_minor, amount_minor, \
                 currency, currency_exponent, created_at \
          FROM portfolio_audit_log \
-         WHERE owner_id = ? AND date(created_at) = ? \
+         WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ? \
          ORDER BY created_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {
@@ -256,7 +256,7 @@ pub(crate) async fn query_portfolio(
 }
 
 pub(crate) async fn query_habits(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -269,17 +269,17 @@ pub(crate) async fn query_habits(
         created_at: Option<DateTime<Utc>>,
     }
 
-    let rows = sqlx::query_as::<_, HabitRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        HabitRow,
         "SELECT h.name AS habit_name, hl.note, hl.created_at \
          FROM habit_logs hl \
          JOIN habits h ON h.id = hl.habit_id \
          WHERE hl.owner_id = ? AND hl.log_date = ? \
          ORDER BY hl.created_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {
@@ -297,7 +297,7 @@ pub(crate) async fn query_habits(
 }
 
 pub(crate) async fn query_reminders(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -310,16 +310,16 @@ pub(crate) async fn query_reminders(
         status: String,
     }
 
-    let rows = sqlx::query_as::<_, ReminderRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        ReminderRow,
         "SELECT message, trigger_at, status \
          FROM reminders \
-         WHERE owner_id = ? AND date(trigger_at) = ? \
+         WHERE owner_id = ? AND CAST(date(trigger_at) AS TEXT) = ? \
          ORDER BY trigger_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {
@@ -342,7 +342,7 @@ pub(crate) async fn query_reminders(
 }
 
 pub(crate) async fn query_bookmarks(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -355,16 +355,16 @@ pub(crate) async fn query_bookmarks(
         created_at: Option<DateTime<Utc>>,
     }
 
-    let rows = sqlx::query_as::<_, BookmarkRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        BookmarkRow,
         "SELECT title, domain, created_at \
          FROM bookmarks \
-         WHERE owner_id = ? AND date(created_at) = ? \
+         WHERE owner_id = ? AND CAST(date(created_at) AS TEXT) = ? \
          ORDER BY created_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {
@@ -382,7 +382,7 @@ pub(crate) async fn query_bookmarks(
 }
 
 pub(crate) async fn query_footprints(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner: &str,
     date: &str,
     events: &mut Vec<ActivityEvent>,
@@ -396,16 +396,16 @@ pub(crate) async fn query_footprints(
         created_at: Option<DateTime<Utc>>,
     }
 
-    let rows = sqlx::query_as::<_, FootprintRow>(
+    let rows = crate::db_fetch_all!(
+        pool,
+        FootprintRow,
         "SELECT title, city, country, created_at \
          FROM footprints \
          WHERE owner_id = ? AND arrival_date = ? \
          ORDER BY created_at",
+        owner,
+        date
     )
-    .bind(owner)
-    .bind(date)
-    .fetch_all(pool)
-    .await
     .unwrap_or_default();
 
     for row in rows {

@@ -94,12 +94,11 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                 last_sweep = tokio::time::Instant::now();
                 debug!("Running scheduled portfolio price refresh sweep");
 
-                let owners = match sqlx::query_scalar::<_, String>(
-                    "SELECT DISTINCT owner_id FROM portfolio_holdings;",
-                )
-                .fetch_all(&ctx.db.pool)
-                .await
-                {
+                let owners = match crate::db_scalar_all!(
+                    &ctx.db.pool,
+                    String,
+                    "SELECT DISTINCT owner_id FROM portfolio_holdings;"
+                ) {
                     Ok(list) => list,
                     Err(err) => {
                         warn!("Failed querying owners for portfolio price sweep: {}", err);

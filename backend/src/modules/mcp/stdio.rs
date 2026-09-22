@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{error, info};
 
@@ -6,7 +6,7 @@ use super::protocol::{error_codes, JsonRpcRequest, JsonRpcResponse};
 use super::service::McpService;
 
 /// Runs the MCP server in STDIO mode for local CLI subprocesses (Claude Desktop, Cursor, etc.).
-pub async fn run_stdio(pool: &SqlitePool, owner_id: &str) -> anyhow::Result<()> {
+pub async fn run_stdio(pool: &DbPool, owner_id: &str) -> anyhow::Result<()> {
     eprintln!(
         "[MCP] Starting matrix-bot MCP server in STDIO mode for owner '{}'...",
         owner_id

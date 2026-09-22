@@ -1,5 +1,4 @@
-use sqlx::SqlitePool;
-
+use crate::db::DbPool;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::{
     exponent_for, looks_like_currency, normalise_currency, parse_amount,
@@ -10,7 +9,7 @@ use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 pub async fn handle_alert_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -34,7 +33,7 @@ pub async fn handle_alert_command(
     handle_create_alert(pool, owner_id, trimmed, broadcaster).await
 }
 
-async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
+async fn handle_list_alerts(pool: &DbPool, owner_id: &str) -> String {
     let alerts = match AlertsRepository::list_for_owner(pool, owner_id).await {
         Ok(list) => list,
         Err(err) => {
@@ -56,7 +55,7 @@ async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
         } else {
             "<strong>Active</strong>"
         };
-        let target_fmt = (a.target_price_minor as f64) / 10f64.powi(a.currency_exponent);
+        let target_fmt = (a.target_price_minor as f64) / 10f64.powi(a.currency_exponent as i32);
         out.push_str(&format!(
             "<li>#{} <strong>{}</strong> {} {:.2} {} — {}</li>",
             a.id,
@@ -72,7 +71,7 @@ async fn handle_list_alerts(pool: &SqlitePool, owner_id: &str) -> String {
 }
 
 async fn handle_cancel_alert(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     raw_id: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -101,7 +100,7 @@ async fn handle_cancel_alert(
 }
 
 async fn handle_create_alert(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -130,15 +129,15 @@ async fn handle_create_alert(
             Ok(c) => c,
             Err(e) => return format!("<p>{}</p>", html_escape(&e.to_string())),
         };
-        let exp = exponent_for(&cur);
+        let exp = i64::from(exponent_for(&cur));
         (cur, exp)
     } else {
         let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-        let exp = exponent_for(&settings.currency);
+        let exp = i64::from(exponent_for(&settings.currency));
         (settings.currency, exp)
     };
 
-    let target_price_minor = match parse_amount(raw_price, exponent) {
+    let target_price_minor = match parse_amount(raw_price, exponent as u32) {
         Ok(p) if p > 0 => p,
         _ => return "<p>Invalid price. Enter a positive decimal number, e.g. <code>150.00</code>.</p>".to_string(),
     };
@@ -149,7 +148,7 @@ async fn handle_create_alert(
         &symbol,
         target_price_minor,
         &currency,
-        exponent as i32,
+        exponent,
         condition,
     )
     .await

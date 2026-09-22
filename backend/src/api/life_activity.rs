@@ -40,11 +40,11 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::db::Database;
+    use crate::db::DbPool;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
-    async fn create_test_state() -> (ApiState, SqlitePool) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn create_test_state() -> (ApiState, DbPool) {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);
@@ -64,7 +64,7 @@ mod tests {
             account_id: account_id.to_string(),
             display_name: account_id.to_string(),
             session_id_hash: "sess_hash".to_string(),
-            last_verified_at: chrono::Utc::now(),
+            last_verified_at: crate::utils::time::now_at_storage_precision(),
             restricted_until: None,
         }
     }
@@ -91,12 +91,8 @@ mod tests {
     async fn test_todo_created_on_date_appears_in_feed() {
         let (state, pool) = create_test_state().await;
 
-        sqlx::query(
-            "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) \
-             VALUES ('!r', 'user1', 'Alice', 'Buy groceries', 'high', 0, '2026-09-06 09:15:00')",
-        )
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) \
+             VALUES ('!r', 'user1', 'Alice', 'Buy groceries', 'high', FALSE, '2026-09-06 09:15:00')")
         .unwrap();
 
         let user = test_user("user1");
@@ -120,13 +116,12 @@ mod tests {
     async fn test_finance_transaction_appears_in_feed() {
         let (state, pool) = create_test_state().await;
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, \
              currency, currency_exponent, occurred_at) \
-             VALUES ('!r', 'user1', 'Alice', 'expense', 4250, 'USD', 2, '2026-09-06 10:30:00')",
+             VALUES ('!r', 'user1', 'Alice', 'expense', 4250, 'USD', 2, '2026-09-06 10:30:00')"
         )
-        .execute(&pool)
-        .await
         .unwrap();
 
         let user = test_user("user1");
@@ -162,12 +157,8 @@ mod tests {
         let (state, pool) = create_test_state().await;
 
         // Trip from 2026-09-04 to 2026-09-14
-        sqlx::query(
-            "INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at) \
-             VALUES ('user1', 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57')",
-        )
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at) \
+             VALUES ('user1', 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57')")
         .unwrap();
 
         let user = test_user("user1");

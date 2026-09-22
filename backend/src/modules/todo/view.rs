@@ -1,7 +1,7 @@
 //! HTML view rendering and listing sub-handlers for the To-Do module.
 
+use crate::db::DbPool;
 use chrono_tz::Tz;
-use sqlx::SqlitePool;
 use tracing::error;
 
 use crate::modules::todo::models::TodoItem;
@@ -11,7 +11,7 @@ use crate::utils::{format_datetime, html_escape, priority_badge};
 pub const PAGE_SIZE: i64 = 25;
 
 pub async fn handle_list_room(
-    pool: &SqlitePool,
+    pool: &DbPool,
     room_id: &str,
     args_body: &str,
     tz: &Tz,
@@ -30,7 +30,7 @@ pub async fn handle_list_room(
 }
 
 pub async fn handle_list_user(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     sender_name: &str,
     args_body: &str,

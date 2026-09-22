@@ -310,14 +310,14 @@ pub async fn pay_bill(
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
+    use crate::db::DbPool;
     use crate::events::EventBroadcaster;
     use crate::modules::reminder::models::ReminderSource;
     use crate::modules::reminder::repository::ReminderRepository;
-    use sqlx::SqlitePool;
 
-    fn state_with(pool: SqlitePool) -> ApiState {
+    fn state_with(pool: DbPool) -> ApiState {
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -353,7 +353,7 @@ mod tests {
     /// re-arms for the next period, and deleting it takes the reminder with it.
     #[tokio::test]
     async fn test_bill_lead_time_schedules_rearms_and_tears_down() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
@@ -447,7 +447,7 @@ mod tests {
     /// bill behind carrying a reminder that could not be scheduled.
     #[tokio::test]
     async fn test_lead_time_is_validated_at_the_boundary() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
@@ -489,10 +489,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_recurring_bills_api_flow() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

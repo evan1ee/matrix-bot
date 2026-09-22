@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
-use sqlx::SqlitePool;
 
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use crate::modules::briefing::ticker::{
@@ -25,7 +25,7 @@ pub fn format_briefing_header(now_utc: DateTime<Utc>, settings: &UserSettings) -
 
 /// Gathers all productivity and market data to construct the Morning Briefing.
 pub async fn generate_briefing(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     settings: &UserSettings,
 ) -> Result<BriefingPayload> {

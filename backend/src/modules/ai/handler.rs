@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -32,7 +32,7 @@ pub struct AiTurnResult {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
@@ -67,7 +67,7 @@ pub async fn handle_ai_command(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command_with_stage(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<matrix_sdk::Client>>>>,
@@ -152,7 +152,7 @@ pub async fn handle_ai_command_with_stage(
 }
 
 pub async fn run_ai_turn(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -175,7 +175,7 @@ pub async fn run_ai_turn(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn_with_stage(
-    pool: &SqlitePool,
+    pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,

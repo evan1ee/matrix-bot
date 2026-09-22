@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::ai::models::ToolDefinition;
@@ -10,7 +10,7 @@ use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
@@ -54,9 +54,9 @@ pub async fn execute_tool(
                     .as_ref()
                     .map(|h| h.currency.clone())
                     .unwrap_or(default_cur);
-                let exp = exponent_for(&currency);
+                let exp = i64::from(exponent_for(&currency));
                 let target_price_minor =
-                    parse_amount(&price_str, exp).map_err(|e| e.to_string())?;
+                    parse_amount(&price_str, exp as u32).map_err(|e| e.to_string())?;
 
                 let alert = AlertsRepository::create(
                     pool,
@@ -64,7 +64,7 @@ pub async fn execute_tool(
                     &symbol,
                     target_price_minor,
                     &currency,
-                    exp as i32,
+                    exp,
                     condition,
                 )
                 .await

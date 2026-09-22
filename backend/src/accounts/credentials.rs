@@ -10,8 +10,8 @@
 //! authenticator, which is exactly why this replaces `password_hash`: there is
 //! no longer anything in the database worth stealing to sign in as someone.
 
+use crate::db::DbPool;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 use webauthn_rs::prelude::Passkey;
 
 /// A registered passkey, as the account settings screen shows it.
@@ -52,7 +52,7 @@ pub struct CredentialRepository;
 
 impl CredentialRepository {
     pub async fn add(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         passkey: &Passkey,
         label: &str,
@@ -61,36 +61,35 @@ impl CredentialRepository {
         let json = serde_json::to_string(passkey)
             .map_err(|err| sqlx::Error::Protocol(format!("could not serialise passkey: {err}")))?;
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
              VALUES (?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(account_id)
-        .bind(&json)
-        .bind(label)
-        .execute(pool)
-        .await?;
+            &id,
+            account_id,
+            &json,
+            label
+        )?;
 
         Ok(id)
     }
 
     pub async fn list_for_account(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<StoredCredential>, sqlx::Error> {
-        sqlx::query_as::<_, StoredCredential>(
+        crate::db_fetch_all!(
+            pool,
+            StoredCredential,
             "SELECT id, account_id, passkey_json, label, created_at, last_used_at \
              FROM webauthn_credentials WHERE account_id = ? ORDER BY created_at",
+            account_id
         )
-        .bind(account_id)
-        .fetch_all(pool)
-        .await
     }
 
     /// Every passkey an account can authenticate with.
     pub async fn passkeys_for_account(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<Passkey>, sqlx::Error> {
         Ok(Self::list_for_account(pool, account_id)
@@ -101,16 +100,16 @@ impl CredentialRepository {
     }
 
     pub async fn find(
-        pool: &SqlitePool,
+        pool: &DbPool,
         credential_id: &str,
     ) -> Result<Option<StoredCredential>, sqlx::Error> {
-        sqlx::query_as::<_, StoredCredential>(
+        crate::db_fetch_optional!(
+            pool,
+            StoredCredential,
             "SELECT id, account_id, passkey_json, label, created_at, last_used_at \
              FROM webauthn_credentials WHERE id = ?",
+            credential_id
         )
-        .bind(credential_id)
-        .fetch_optional(pool)
-        .await
     }
 
     /// Writes back a credential whose counter moved, and stamps its last use.
@@ -119,53 +118,49 @@ impl CredentialRepository {
     /// a successful assertion that advanced it has to be persisted — dropping
     /// the update would silently disable that protection.
     pub async fn record_use(
-        pool: &SqlitePool,
+        pool: &DbPool,
         credential_id: &str,
         passkey: &Passkey,
     ) -> Result<(), sqlx::Error> {
         let json = serde_json::to_string(passkey)
             .map_err(|err| sqlx::Error::Protocol(format!("could not serialise passkey: {err}")))?;
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "UPDATE webauthn_credentials SET passkey_json = ?, last_used_at = ? WHERE id = ?",
-        )
-        .bind(&json)
-        .bind(Utc::now())
-        .bind(credential_id)
-        .execute(pool)
-        .await?;
+            &json,
+            Utc::now(),
+            credential_id
+        )?;
 
         Ok(())
     }
 
     pub async fn rename(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         credential_id: &str,
         label: &str,
     ) -> Result<bool, sqlx::Error> {
-        let affected = sqlx::query(
+        let affected = crate::db_execute!(
+            pool,
             "UPDATE webauthn_credentials SET label = ? WHERE id = ? AND account_id = ?",
-        )
-        .bind(label)
-        .bind(credential_id)
-        .bind(account_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+            label,
+            credential_id,
+            account_id
+        )?;
 
         Ok(affected > 0)
     }
 
     /// How many passkeys an account has.
-    pub async fn count_for_account(
-        pool: &SqlitePool,
-        account_id: &str,
-    ) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar("SELECT COUNT(*) FROM webauthn_credentials WHERE account_id = ?")
-            .bind(account_id)
-            .fetch_one(pool)
-            .await
+    pub async fn count_for_account(pool: &DbPool, account_id: &str) -> Result<i64, sqlx::Error> {
+        crate::db_scalar_one!(
+            pool,
+            _,
+            "SELECT COUNT(*) FROM webauthn_credentials WHERE account_id = ?",
+            account_id
+        )
     }
 
     /// Removes a passkey, refusing to remove the last one.
@@ -174,33 +169,31 @@ impl CredentialRepository {
     /// through recovery — a lockout the user performed on themselves, one click
     /// from a settings screen. They must add a replacement first.
     pub async fn delete(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         credential_id: &str,
     ) -> Result<DeleteOutcome, sqlx::Error> {
         if Self::count_for_account(pool, account_id).await? <= 1 {
             // If the account has a linked Matrix identity, removing the last passkey
             // does NOT lock the user out: the Matrix account is the primary identity.
-            let has_matrix_link = sqlx::query_scalar::<_, i64>(
+            let has_matrix_link = crate::db_scalar_one!(
+                pool,
+                i64,
                 "SELECT COUNT(*) FROM matrix_links WHERE account_id = ?",
-            )
-            .bind(account_id)
-            .fetch_one(pool)
-            .await?
-                > 0;
+                account_id
+            )? > 0;
 
             if !has_matrix_link {
                 return Ok(DeleteOutcome::WouldLockOut);
             }
         }
 
-        let affected =
-            sqlx::query("DELETE FROM webauthn_credentials WHERE id = ? AND account_id = ?")
-                .bind(credential_id)
-                .bind(account_id)
-                .execute(pool)
-                .await?
-                .rows_affected();
+        let affected = crate::db_execute!(
+            pool,
+            "DELETE FROM webauthn_credentials WHERE id = ? AND account_id = ?",
+            credential_id,
+            account_id
+        )?;
 
         Ok(if affected > 0 {
             DeleteOutcome::Removed
@@ -215,50 +208,44 @@ pub struct EnrollmentRepository;
 impl EnrollmentRepository {
     /// Issues a single-use token to enroll a passkey for `account_id`.
     pub async fn issue(
-        pool: &SqlitePool,
+        pool: &DbPool,
         account_id: &str,
         ttl_minutes: i64,
     ) -> Result<String, sqlx::Error> {
-        let token = format!(
-            "pk_{}",
-            sqlx::query_scalar::<_, String>("SELECT lower(hex(randomblob(20)))")
-                .fetch_one(pool)
-                .await?
-        );
+        let token = format!("pk_{}", crate::utils::random::random_hex(20));
         let now = Utc::now();
         let expires_at = now + chrono::Duration::minutes(ttl_minutes);
 
-        sqlx::query(
+        crate::db_execute!(
+            pool,
             "INSERT INTO passkey_enrollment_tokens (token, account_id, created_at, expires_at) \
              VALUES (?, ?, ?, ?)",
-        )
-        .bind(&token)
-        .bind(account_id)
-        .bind(now)
-        .bind(expires_at)
-        .execute(pool)
-        .await?;
+            &token,
+            account_id,
+            now,
+            expires_at
+        )?;
 
         Ok(token)
     }
 
     /// Validates an enrollment token, marks it consumed, and returns the target account_id.
     pub async fn validate_and_consume(
-        pool: &SqlitePool,
+        pool: &DbPool,
         token: &str,
     ) -> Result<Option<String>, sqlx::Error> {
         let now = Utc::now();
-        let account_id = sqlx::query_scalar::<_, String>(
+        let account_id = crate::db_scalar_optional!(
+            pool,
+            String,
             "UPDATE passkey_enrollment_tokens \
              SET consumed_at = ? \
              WHERE token = ? AND consumed_at IS NULL AND expires_at > ? \
              RETURNING account_id",
-        )
-        .bind(now)
-        .bind(token)
-        .bind(now)
-        .fetch_optional(pool)
-        .await?;
+            now,
+            token,
+            now
+        )?;
 
         Ok(account_id)
     }
@@ -277,8 +264,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -286,15 +273,14 @@ mod tests {
     /// Inserts a credential row directly. Building a real `Passkey` needs an
     /// authenticator, so the shape of the blob is irrelevant to the ownership
     /// and lockout rules under test here.
-    async fn add_raw(pool: &SqlitePool, id: &str, account_id: &str) {
-        sqlx::query(
+    async fn add_raw(pool: &DbPool, id: &str, account_id: &str) {
+        crate::db_execute!(
+            pool,
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
              VALUES (?, ?, '{}', 'test key')",
+            id,
+            account_id
         )
-        .bind(id)
-        .bind(account_id)
-        .execute(pool)
-        .await
         .unwrap();
     }
 
@@ -427,9 +413,7 @@ mod tests {
         add_raw(&pool, "cred_only", "acct_primary").await;
 
         // Insert matrix link
-        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', 'acct_primary')")
-            .execute(&pool)
-            .await
+        crate::db_execute!(&pool, "INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', 'acct_primary')")
             .unwrap();
 
         // Deleting the only passkey succeeds because Matrix is primary identity

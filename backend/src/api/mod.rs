@@ -156,7 +156,6 @@ mod step_up_tests {
     use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use sqlx::SqlitePool;
     use tower::ServiceExt;
 
     const ORIGIN: &str = "http://localhost:8080";
@@ -192,7 +191,7 @@ mod step_up_tests {
     ];
 
     async fn app_with_session(verified_minutes_ago: i64) -> (Router, String) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
         let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
@@ -202,15 +201,16 @@ mod step_up_tests {
             .await
             .unwrap();
 
-        sqlx::query("UPDATE sessions SET last_verified_at = ? WHERE account_id = ?")
-            .bind(chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago))
-            .bind(&account)
-            .execute(&pool)
-            .await
-            .unwrap();
+        crate::db_execute!(
+            &pool,
+            "UPDATE sessions SET last_verified_at = ? WHERE account_id = ?",
+            chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
+            &account
+        )
+        .unwrap();
 
         let state = auth::ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),

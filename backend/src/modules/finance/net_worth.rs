@@ -4,10 +4,10 @@
 //! units without modification, and converts totals dynamically into the user's primary
 //! target currency using daily ECB / Yahoo FX reference rates.
 
+use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use utoipa::ToSchema;
 
@@ -44,7 +44,7 @@ pub struct NetWorthService;
 
 impl NetWorthService {
     pub async fn compute_net_worth(
-        pool: &SqlitePool,
+        pool: &DbPool,
         http_client: &reqwest::Client,
         owner_id: &str,
         primary_currency: &str,
@@ -54,43 +54,43 @@ impl NetWorthService {
         let rates = get_rates(http_client).await;
 
         // 1. Ledger Cash from transactions (all-time net: income - expense)
-        let tx_rows = sqlx::query_as::<_, (String, i64, Option<i64>)>(
+        let tx_rows = crate::db_fetch_all!(
+            pool,
+            (String, i64, Option<i64>),
             r#"
             SELECT currency, currency_exponent,
-                   SUM(CASE WHEN direction = 'income' THEN amount_minor ELSE -amount_minor END)
+                   CAST(SUM(CASE WHEN direction = 'income' THEN amount_minor ELSE -amount_minor END) AS BIGINT)
             FROM transactions
             WHERE owner_id = ?
             GROUP BY currency, currency_exponent
             "#,
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         // 2. Cash Deposits from portfolio_cash_balances
-        let cash_rows = sqlx::query_as::<_, (String, i64, i64)>(
+        let cash_rows = crate::db_fetch_all!(
+            pool,
+            (String, i64, i64),
             r#"
             SELECT currency, currency_exponent, balance_minor
             FROM portfolio_cash_balances
             WHERE owner_id = ?
             "#,
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
         .unwrap_or_default();
 
         // 3. Portfolio Holdings market value
-        let holding_rows = sqlx::query_as::<_, (String, i64, i64, Option<i64>)>(
+        let holding_rows = crate::db_fetch_all!(
+            pool,
+            (String, i64, i64, Option<i64>),
             r#"
             SELECT currency, currency_exponent, quantity_minor, current_price_minor
             FROM holdings
             WHERE owner_id = ?
             "#,
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
         .unwrap_or_default();
 
         struct PillarAccumulator {
@@ -240,33 +240,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_net_worth_aggregation() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = crate::db::DbPool::Sqlite(
+            SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .unwrap(),
+        );
 
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         // Insert a transaction (ledger cash: $50.00 USD)
-        sqlx::query(
-            r#"
+        crate::db_execute!(&pool, r#"
             INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, occurred_at)
             VALUES ('web', 'user1', 'User', 'income', 5000, 'USD', 2, CURRENT_TIMESTAMP)
-            "#,
-        )
-        .execute(&pool)
-        .await
+            "#)
         .unwrap();
 
         // Insert cash balance ($100.00 USD)
-        sqlx::query(
-            r#"
+        crate::db_execute!(&pool, r#"
             INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor)
             VALUES ('user1', 'USD', 2, 10000)
-            "#,
-        )
-        .execute(&pool)
-        .await
+            "#)
         .unwrap();
 
         let client = reqwest::Client::new();

@@ -23,9 +23,8 @@
 //! deliberate reach into a feature module — the rule about what a ledger means
 //! across a merge belongs with the ledger, not here.
 
-use sqlx::SqlitePool;
-
 use crate::accounts::{ACCOUNT_ID_DISCARDED, ACCOUNT_ID_FOLLOWS, OWNED_TABLES};
+use crate::db::DbPool;
 
 /// How many rows each table would contribute to a merge.
 ///
@@ -114,20 +113,127 @@ pub struct MergeOutcome {
     pub discarded: i64,
 }
 
+/// The column identifying one row within an owner's set.
+///
+/// Used only by the per-row fallback in `move_rows`. Most tables have `id`; the
+/// exceptions are keyed by something else, and
+/// `test_every_merged_table_has_the_row_key_this_names` asserts every entry
+/// against the real schema, so this cannot drift.
+fn row_key(table: &str) -> &'static str {
+    match table {
+        // One row per owner: the bulk attempt already covers the whole set.
+        "finance_shares" | "user_settings" | "life_profiles" | "ai_user_configs" => "owner_id",
+        "bot_message_targets" => "event_id",
+        "matrix_links" => "mxid",
+        "account_rooms" => "room_id",
+        _ => "id",
+    }
+}
+
+fn is_unique_violation(err: &sqlx::Error) -> bool {
+    matches!(err, sqlx::Error::Database(e) if e.is_unique_violation())
+}
+
+/// Moves every row of `table` from one owner to another, skipping rows that
+/// would collide with one the destination already has.
+///
+/// This replaces SQLite's `UPDATE OR IGNORE`, which **PostgreSQL has no
+/// equivalent of**. The behaviour being preserved is specific and easy to get
+/// wrong: the non-colliding rows must still move, and only the colliding ones
+/// stay behind for the caller to discard. An all-or-nothing retry would throw
+/// away rows that could have moved — if `from` has categories "food" and
+/// "travel" while `into` already has "food", "travel" must still transfer.
+///
+/// So: attempt the whole set inside a savepoint, which is one round trip and
+/// the common case. Only a unique violation makes it roll back and move rows
+/// one at a time, each in its own savepoint. Nothing here enumerates which
+/// tables have which constraints — the database reports the collision, so a
+/// constraint added later needs no change. That matters: the comment this
+/// replaced named four such tables when the schema actually has seven.
+///
+/// Keys are compared as text so one path covers `BIGINT` and `TEXT` primary
+/// keys alike. The fallback is rare and small, so the lost index precision does
+/// not signify.
+pub(crate) async fn move_rows(
+    conn: &mut crate::db::DbTx<'_>,
+    table: &str,
+    column: &str,
+    from: &str,
+    into: &str,
+) -> Result<i64, sqlx::Error> {
+    crate::tx_execute!(conn, "SAVEPOINT merge_move")?;
+    let bulk = crate::tx_execute!(
+        conn,
+        &format!("UPDATE {table} SET {column} = ? WHERE {column} = ?"),
+        into,
+        from
+    );
+
+    match bulk {
+        Ok(moved) => {
+            crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_move")?;
+            Ok(moved as i64)
+        }
+        Err(err) if is_unique_violation(&err) => {
+            crate::tx_execute!(conn, "ROLLBACK TO SAVEPOINT merge_move")?;
+            crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_move")?;
+
+            let key = row_key(table);
+            let keys: Vec<String> = crate::tx_scalar_all!(
+                conn,
+                String,
+                &format!("SELECT CAST({key} AS TEXT) FROM {table} WHERE {column} = ?"),
+                from
+            )?;
+
+            let mut moved = 0i64;
+            for value in keys {
+                crate::tx_execute!(conn, "SAVEPOINT merge_row")?;
+                let one = crate::tx_execute!(
+                    conn,
+                    &format!(
+                        "UPDATE {table} SET {column} = ? \
+                         WHERE {column} = ? AND CAST({key} AS TEXT) = ?"
+                    ),
+                    into,
+                    from,
+                    &value
+                );
+                match one {
+                    Ok(n) => {
+                        crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_row")?;
+                        moved += n as i64;
+                    }
+                    Err(e) if is_unique_violation(&e) => {
+                        // The destination already holds the equivalent row.
+                        // Leave this one; the caller discards the leftovers.
+                        crate::tx_execute!(conn, "ROLLBACK TO SAVEPOINT merge_row")?;
+                        crate::tx_execute!(conn, "RELEASE SAVEPOINT merge_row")?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(moved)
+        }
+        Err(err) => Err(err),
+    }
+}
+
 pub struct MergeRepository;
 
 impl MergeRepository {
     /// Counts what a merge from `from` into `into` would move.
-    pub async fn preview(pool: &SqlitePool, from: &str) -> Result<MergePreview, sqlx::Error> {
+    pub async fn preview(pool: &DbPool, from: &str) -> Result<MergePreview, sqlx::Error> {
         let mut preview = MergePreview::default();
 
         for table in OWNED_TABLES {
-            let count: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(0);
+            let count: i64 = crate::db_scalar_one!(
+                pool,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                from
+            )
+            .unwrap_or(0);
 
             preview.set(table, count);
         }
@@ -135,12 +241,13 @@ impl MergeRepository {
         // Counted even though the generic loop cannot move it, so the number a
         // user is shown before confirming matches what the merge reports after.
         for table in crate::accounts::OWNER_ID_MERGED_SEPARATELY {
-            let count: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(0);
+            let count: i64 = crate::db_scalar_one!(
+                pool,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                from
+            )
+            .unwrap_or(0);
 
             preview.set(table, count);
         }
@@ -152,11 +259,7 @@ impl MergeRepository {
     ///
     /// Refuses to merge an account into itself, which would otherwise delete a
     /// live account after "moving" all its rows to where they already were.
-    pub async fn merge(
-        pool: &SqlitePool,
-        from: &str,
-        into: &str,
-    ) -> Result<MergeOutcome, sqlx::Error> {
+    pub async fn merge(pool: &DbPool, from: &str, into: &str) -> Result<MergeOutcome, sqlx::Error> {
         if from == into {
             return Ok(MergeOutcome {
                 moved: MergePreview::default(),
@@ -177,7 +280,7 @@ impl MergeRepository {
     /// is the only way to assert that a merge leaves nothing behind when it
     /// cannot finish.
     pub(crate) async fn merge_within(
-        conn: &mut sqlx::SqliteConnection,
+        conn: &mut crate::db::DbTx<'_>,
         from: &str,
         into: &str,
     ) -> Result<MergeOutcome, sqlx::Error> {
@@ -185,37 +288,30 @@ impl MergeRepository {
         let mut discarded = 0i64;
 
         for table in OWNED_TABLES {
-            // `OR IGNORE` because three of these tables have a unique index on
-            // `(owner_id, …)`: settings are one row per owner, categories are
-            // unique by name, holdings by symbol, cash by currency. Where both
-            // accounts have the equivalent row the destination's is kept, and
-            // the source's is dropped rather than colliding and aborting the
-            // whole merge.
-            let updated = sqlx::query(&format!(
-                "UPDATE OR IGNORE {table} SET owner_id = ? WHERE owner_id = ?"
-            ))
-            .bind(into)
-            .bind(from)
-            .execute(&mut *conn)
-            .await?
-            .rows_affected() as i64;
+            // Several of these tables carry a unique index scoped to the
+            // owner, so where both accounts hold the equivalent row the
+            // destination's is kept and the source's is left for the discard
+            // below. `move_rows` explains why that cannot be one statement.
+            let updated = move_rows(&mut *conn, table, "owner_id", from, into).await?;
 
             moved.set(table, updated);
 
-            let leftover: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .fetch_one(&mut *conn)
-                    .await
-                    .unwrap_or(0);
+            let leftover: i64 = crate::tx_scalar_one!(
+                &mut *conn,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                from
+            )
+            .unwrap_or(0);
 
             if leftover > 0 {
                 // Rows the destination already had an equivalent of. Removed so
                 // the source account can be deleted without stranding them.
-                sqlx::query(&format!("DELETE FROM {table} WHERE owner_id = ?"))
-                    .bind(from)
-                    .execute(&mut *conn)
-                    .await?;
+                crate::tx_execute!(
+                    &mut *conn,
+                    &format!("DELETE FROM {table} WHERE owner_id = ?"),
+                    from
+                )?;
                 discarded += leftover;
             }
         }
@@ -230,31 +326,26 @@ impl MergeRepository {
         // Anything else pointing at the absorbed account follows it, so nothing
         // is left referring to an id that is about to disappear.
         //
-        // `OR IGNORE` for the same reason as above: `account_rooms` is keyed by
+        // Same collision handling as above: `account_rooms` is keyed by
         // `(account_id, room_id)`, so a room both accounts had cached would
-        // otherwise collide and abort the whole merge.
+        // otherwise abort the whole merge.
         for table in ACCOUNT_ID_FOLLOWS {
-            sqlx::query(&format!(
-                "UPDATE OR IGNORE {table} SET account_id = ? WHERE account_id = ?"
-            ))
-            .bind(into)
-            .bind(from)
-            .execute(&mut *conn)
-            .await?;
+            move_rows(&mut *conn, table, "account_id", from, into).await?;
 
-            let leftover: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM {table} WHERE account_id = ?"
-            ))
-            .bind(from)
-            .fetch_one(&mut *conn)
-            .await
+            let leftover: i64 = crate::tx_scalar_one!(
+                &mut *conn,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?"),
+                from
+            )
             .unwrap_or(0);
 
             if leftover > 0 {
-                sqlx::query(&format!("DELETE FROM {table} WHERE account_id = ?"))
-                    .bind(from)
-                    .execute(&mut *conn)
-                    .await?;
+                crate::tx_execute!(
+                    &mut *conn,
+                    &format!("DELETE FROM {table} WHERE account_id = ?"),
+                    from
+                )?;
                 discarded += leftover;
             }
         }
@@ -274,16 +365,10 @@ impl MergeRepository {
                 format!("DELETE FROM {table} WHERE account_id = ?")
             };
 
-            sqlx::query(&statement)
-                .bind(from)
-                .execute(&mut *conn)
-                .await?;
+            crate::tx_execute!(&mut *conn, &statement, from)?;
         }
 
-        sqlx::query("DELETE FROM accounts WHERE id = ?")
-            .bind(from)
-            .execute(&mut *conn)
-            .await?;
+        crate::tx_execute!(&mut *conn, "DELETE FROM accounts WHERE id = ?", from)?;
 
         Ok(MergeOutcome { moved, discarded })
     }
@@ -295,30 +380,25 @@ mod tests {
     use crate::accounts::{AccountRepository, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::db::schema::run_migrations;
 
-    async fn db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
 
-    async fn add_todo(pool: &SqlitePool, owner: &str, text: &str) {
-        sqlx::query(
+    async fn add_todo(pool: &DbPool, owner: &str, text: &str) {
+        crate::db_execute!(
+            pool,
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('!r:x', ?, 'someone', ?, 'medium', 0)",
+             VALUES ('!r:x', ?, 'someone', ?, 'medium', FALSE)",
+            owner,
+            text
         )
-        .bind(owner)
-        .bind(text)
-        .execute(pool)
-        .await
         .unwrap();
     }
 
-    async fn owner_of(pool: &SqlitePool, text: &str) -> String {
-        sqlx::query_scalar("SELECT owner_id FROM todos WHERE text = ?")
-            .bind(text)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+    async fn owner_of(pool: &DbPool, text: &str) -> String {
+        crate::db_scalar_one!(pool, _, "SELECT owner_id FROM todos WHERE text = ?", text).unwrap()
     }
 
     #[tokio::test]
@@ -330,12 +410,11 @@ mod tests {
 
         add_todo(&pool, &from, "one").await;
         add_todo(&pool, &from, "two").await;
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
@@ -418,31 +497,29 @@ mod tests {
             .unwrap();
 
         for (owner, tz) in [(&from, "Asia/Tokyo"), (&into, "Europe/Berlin")] {
-            sqlx::query(
+            crate::db_execute!(
+                &pool,
                 "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, ?, 'USD')",
+                owner,
+                tz
             )
-            .bind(owner)
-            .bind(tz)
-            .execute(&pool)
-            .await
             .unwrap();
         }
 
         let outcome = MergeRepository::merge(&pool, &from, &into).await.unwrap();
         assert_eq!(outcome.discarded, 1, "the source's settings row is dropped");
 
-        let tz: String =
-            sqlx::query_scalar("SELECT timezone FROM user_settings WHERE owner_id = ?")
-                .bind(&into)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let tz: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT timezone FROM user_settings WHERE owner_id = ?",
+            &into
+        )
+        .unwrap();
         assert_eq!(tz, "Europe/Berlin", "the surviving account's choice wins");
 
-        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_settings")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let rows: i64 =
+            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM user_settings").unwrap();
         assert_eq!(rows, 1, "the absorbed row must not be stranded");
     }
 
@@ -539,80 +616,59 @@ mod tests {
 
         // Put one row in every owned table.
         add_todo(&pool, &from, "todo").await;
-        sqlx::query("INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', ?, 'a', 'm', CURRENT_TIMESTAMP)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, occurred_at) VALUES ('web', ?, 'a', 'expense', 100, 'USD', CURRENT_TIMESTAMP)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO recurring_bills (room_id, owner_id, sender_name, name, category, amount_minor, currency, next_due_at) VALUES ('web', ?, 'a', 'rent', 'home', 100, 'USD', CURRENT_TIMESTAMP)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) VALUES (?, 'AAPL', 100000000, 15000, 'USD')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES (?, 'USD', 5000)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES (?, '2026-09-06', 'USD', 100, 100, 200)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES (?, 'AAPL', 20000, 'USD', 'ABOVE')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO finance_categories (owner_id, name) VALUES (?, 'food')")
-            .bind(&from)
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query(
+        crate::db_execute!(&pool, "INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', ?, 'a', 'm', CURRENT_TIMESTAMP)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, occurred_at) VALUES ('web', ?, 'a', 'expense', 100, 'USD', CURRENT_TIMESTAMP)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO recurring_bills (room_id, owner_id, sender_name, name, category, amount_minor, currency, next_due_at) VALUES ('web', ?, 'a', 'rent', 'home', 100, 'USD', CURRENT_TIMESTAMP)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) VALUES (?, 'AAPL', 100000000, 15000, 'USD')", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES (?, 'USD', 5000)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES (?, '2026-09-06', 'USD', 100, 100, 200)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES (?, 'AAPL', 20000, 'USD', 'ABOVE')", &from).unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_categories (owner_id, name) VALUES (?, 'food')",
+            &from
+        )
+        .unwrap();
+        crate::db_execute!(
+            &pool,
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
-        sqlx::query("INSERT INTO bookmarks (owner_id, url, title, domain) VALUES (?, 'https://example.com', 'Example', 'example.com')")
-            .bind(&from).execute(&pool).await.unwrap();
-        let habit_id: i64 = sqlx::query_scalar("INSERT INTO habits (owner_id, name, frequency) VALUES (?, 'Exercise', 'daily') RETURNING id")
-            .bind(&from).fetch_one(&pool).await.unwrap();
-        sqlx::query(
+        crate::db_execute!(&pool, "INSERT INTO bookmarks (owner_id, url, title, domain) VALUES (?, 'https://example.com', 'Example', 'example.com')", &from).unwrap();
+        let habit_id: i64 = crate::db_scalar_one!(&pool, _, "INSERT INTO habits (owner_id, name, frequency) VALUES (?, 'Exercise', 'daily') RETURNING id", &from).unwrap();
+        crate::db_execute!(
+            &pool,
             "INSERT INTO habit_logs (habit_id, owner_id, log_date) VALUES (?, ?, '2026-09-06')",
+            habit_id,
+            &from
         )
-        .bind(habit_id)
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
-        sqlx::query("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES (?, '2026-09-06', 'happy')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES (?, '1990-01-01', 90)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query(
+        crate::db_execute!(&pool, "INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES (?, '2026-09-06', 'happy')", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES (?, '1990-01-01', 90)", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES (?, 'Paris', 48.8566, 2.3522, '2026-09-06')", &from).unwrap();
+        crate::db_execute!(
+            &pool,
             "INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', ?, '!r:x')",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
-        sqlx::query("INSERT INTO ai_user_configs (owner_id, model_name) VALUES (?, 'gemini')")
-            .bind(&from)
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', ?, 'hook', 'thash', 'pref', '!r:x')")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)")
-            .bind(&from).execute(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok1', 1)",
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO ai_user_configs (owner_id, model_name) VALUES (?, 'gemini')",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
-             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')",
+        crate::db_execute!(&pool, "INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', ?, 'hook', 'thash', 'pref', '!r:x')", &from).unwrap();
+        crate::db_execute!(&pool, "INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', ?, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)", &from).unwrap();
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok1', TRUE)",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
+        .unwrap();
+        crate::db_execute!(&pool, "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
+             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')", &from)
         .unwrap();
 
         let preview = MergeRepository::preview(&pool, &from).await.unwrap();
@@ -621,23 +677,25 @@ mod tests {
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
         for table in OWNED_TABLES {
-            let stranded: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(&from)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let stranded: i64 = crate::db_scalar_one!(
+                &pool,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                &from
+            )
+            .unwrap();
             assert_eq!(
                 stranded, 0,
                 "{table} still has rows owned by the absorbed account"
             );
 
-            let arrived: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(&into)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let arrived: i64 = crate::db_scalar_one!(
+                &pool,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                &into
+            )
+            .unwrap();
             assert_eq!(arrived, 1, "{table} did not receive its row");
         }
     }
@@ -655,45 +713,42 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok123', 1)",
+        crate::db_execute!(
+            &pool,
+            "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES (?, 'tok123', TRUE)",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
-             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')",
-        )
-        .bind(&from)
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
+             VALUES ('ev1', '!r:x', 'todo', 1, ?, 'a todo')", &from)
         .unwrap();
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let share_owner: String =
-            sqlx::query_scalar("SELECT owner_id FROM finance_shares WHERE token = 'tok123'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let share_owner: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT owner_id FROM finance_shares WHERE token = 'tok123'"
+        )
+        .unwrap();
         assert_eq!(share_owner, into);
 
-        let target_owner: String =
-            sqlx::query_scalar("SELECT owner_id FROM bot_message_targets WHERE event_id = 'ev1'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let target_owner: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT owner_id FROM bot_message_targets WHERE event_id = 'ev1'"
+        )
+        .unwrap();
         assert_eq!(target_owner, into);
 
         for table in ["finance_shares", "bot_message_targets"] {
-            let stranded: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"))
-                    .bind(&from)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let stranded: i64 = crate::db_scalar_one!(
+                &pool,
+                _,
+                &format!("SELECT COUNT(*) FROM {table} WHERE owner_id = ?"),
+                &from
+            )
+            .unwrap();
             assert_eq!(stranded, 0, "{table} still references the absorbed account");
         }
     }
@@ -746,23 +801,25 @@ mod tests {
             .await
             .expect("a merge must succeed and absorb the audit ledger");
 
-        let stranded: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
-                .bind(&from)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let stranded: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?",
+            &from
+        )
+        .unwrap();
         assert_eq!(
             stranded, 0,
             "no ledger row may still reference the absorbed account"
         );
 
-        let arrived: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
-                .bind(&into)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let arrived: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?",
+            &into
+        )
+        .unwrap();
         assert_eq!(arrived, 4, "1 + 2 entries plus the merge marker");
     }
 
@@ -838,12 +895,12 @@ mod tests {
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let markers: Vec<(i64, Option<String>)> = sqlx::query_as(
+        let markers: Vec<(i64, Option<String>)> = crate::db_fetch_all!(
+            &pool,
+            _,
             "SELECT id, note FROM portfolio_audit_log WHERE owner_id = ? AND action = 'merge'",
+            &into
         )
-        .bind(&into)
-        .fetch_all(&pool)
-        .await
         .unwrap();
         assert_eq!(
             markers.len(),
@@ -859,12 +916,13 @@ mod tests {
             "note must say how many entries were absorbed"
         );
 
-        let max_id: i64 =
-            sqlx::query_scalar("SELECT MAX(id) FROM portfolio_audit_log WHERE owner_id = ?")
-                .bind(&into)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let max_id: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT MAX(id) FROM portfolio_audit_log WHERE owner_id = ?",
+            &into
+        )
+        .unwrap();
         assert_eq!(
             *marker_id, max_id,
             "the marker must be the last entry in the chain"
@@ -893,11 +951,11 @@ mod tests {
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let result =
-            sqlx::query("UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?")
-                .bind(&into)
-                .execute(&pool)
-                .await;
+        let result = crate::db_execute!(
+            &pool,
+            "UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?",
+            &into
+        );
         assert!(
             result.is_err(),
             "the immutability trigger must still be active after a merge"
@@ -926,23 +984,24 @@ mod tests {
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?")
-                .bind(&into)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ?",
+            &into
+        )
+        .unwrap();
         assert_eq!(
             count, 1,
             "no marker row may be appended for an empty ledger"
         );
 
-        let marker_count: i64 = sqlx::query_scalar(
+        let marker_count: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = ? AND action = 'merge'",
+            &into
         )
-        .bind(&into)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(marker_count, 0);
 
@@ -977,21 +1036,22 @@ mod tests {
             .unwrap();
         tx.rollback().await.unwrap();
 
-        let result =
-            sqlx::query("UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?")
-                .bind(&from)
-                .execute(&pool)
-                .await;
+        let result = crate::db_execute!(
+            &pool,
+            "UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = ?",
+            &from
+        );
         assert!(
             result.is_err(),
             "the trigger must still be active after a rolled-back merge"
         );
 
-        let owner: String =
-            sqlx::query_scalar("SELECT owner_id FROM portfolio_audit_log WHERE action = 'deposit'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let owner: String = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT owner_id FROM portfolio_audit_log WHERE action = 'deposit'"
+        )
+        .unwrap();
         assert_eq!(
             owner, from,
             "the ledger must still belong to the source account"
@@ -1011,54 +1071,40 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')",
-        )
-        .bind(&from)
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')", &from)
         .unwrap();
-        sqlx::query(
-            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')",
-        )
-        .bind(&into)
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!shared:x', 'Shared')", &into)
         .unwrap();
-        sqlx::query(
-            "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!only-from:x', 'Only from')",
-        )
-        .bind(&from)
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, "INSERT INTO account_rooms (account_id, room_id, name) VALUES (?, '!only-from:x', 'Only from')", &from)
         .unwrap();
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let shared_count: i64 = sqlx::query_scalar(
+        let shared_count: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM account_rooms WHERE account_id = ? AND room_id = '!shared:x'",
+            &into
         )
-        .bind(&into)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(shared_count, 1, "the shared room must appear exactly once");
 
-        let moved_count: i64 = sqlx::query_scalar(
+        let moved_count: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
             "SELECT COUNT(*) FROM account_rooms WHERE account_id = ? AND room_id = '!only-from:x'",
+            &into
         )
-        .bind(&into)
-        .fetch_one(&pool)
-        .await
         .unwrap();
         assert_eq!(moved_count, 1, "the source-only room must follow");
 
-        let leftover: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM account_rooms WHERE account_id = ?")
-                .bind(&from)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let leftover: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM account_rooms WHERE account_id = ?",
+            &from
+        )
+        .unwrap();
         assert_eq!(
             leftover, 0,
             "no row may still reference the absorbed account"
@@ -1077,31 +1123,32 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
+        crate::db_execute!(
+            &pool,
             "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix) \
              VALUES ('tok1', ?, 'my token', 'hash123', 'mcp_')",
+            &from
         )
-        .bind(&from)
-        .execute(&pool)
-        .await
         .unwrap();
 
         MergeRepository::merge(&pool, &from, &into).await.unwrap();
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?")
-                .bind(&from)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?",
+            &from
+        )
+        .unwrap();
         assert_eq!(remaining, 0, "a credential must not follow a merge");
 
-        let survivor_has_it: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?")
-                .bind(&into)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let survivor_has_it: i64 = crate::db_scalar_one!(
+            &pool,
+            _,
+            "SELECT COUNT(*) FROM mcp_tokens WHERE account_id = ?",
+            &into
+        )
+        .unwrap();
         assert_eq!(
             survivor_has_it, 0,
             "it must not appear on the survivor either"
@@ -1135,5 +1182,86 @@ mod tests {
                 .is_some(),
             "the source account must still exist after a rolled-back merge"
         );
+    }
+
+    /// `row_key` names a column per table, and a wrong name would only surface
+    /// when a merge actually hit a collision — the rare path. This asserts each
+    /// name against the real schema instead, by selecting it.
+    ///
+    /// Deriving the check from the migrated database rather than repeating the
+    /// list is the point: rename a key column and this fails, where a duplicate
+    /// list would silently agree with itself.
+    #[tokio::test]
+    async fn test_every_merged_table_has_the_row_key_this_names() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        for table in crate::accounts::OWNED_TABLES
+            .iter()
+            .chain(crate::accounts::ACCOUNT_ID_FOLLOWS.iter())
+        {
+            let key = super::row_key(table);
+            let probe = format!("SELECT {key} FROM {table} LIMIT 0");
+            crate::db_execute!(&pool, &probe).unwrap_or_else(|err| {
+                panic!("row_key({table}) = {key} is not a column on {table}: {err}")
+            });
+        }
+    }
+
+    /// The behaviour `UPDATE OR IGNORE` provided and `move_rows` has to keep:
+    /// a colliding row must not stop the others from moving.
+    #[tokio::test]
+    async fn test_a_collision_does_not_block_the_rows_that_can_move() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+
+        // `finance_categories` is unique on (owner_id, name). Both owners have
+        // "food"; only the source has "travel".
+        for (owner, name) in [
+            ("acct_from", "food"),
+            ("acct_from", "travel"),
+            ("acct_into", "food"),
+        ] {
+            crate::db_execute!(
+                &pool,
+                "INSERT INTO finance_categories (owner_id, name) VALUES (?, ?)",
+                owner,
+                name
+            )
+            .unwrap();
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        let moved = super::move_rows(
+            &mut tx,
+            "finance_categories",
+            "owner_id",
+            "acct_from",
+            "acct_into",
+        )
+        .await
+        .expect("a collision must not fail the move");
+        tx.commit().await.unwrap();
+
+        assert_eq!(moved, 1, "only `travel` can move");
+
+        let names: Vec<String> = crate::db_scalar_all!(
+            &pool,
+            String,
+            "SELECT name FROM finance_categories WHERE owner_id = ? ORDER BY name",
+            "acct_into"
+        )
+        .unwrap();
+        assert_eq!(names, vec!["food".to_string(), "travel".to_string()]);
+
+        // The colliding row stays put for the caller to discard.
+        let left: Vec<String> = crate::db_scalar_all!(
+            &pool,
+            String,
+            "SELECT name FROM finance_categories WHERE owner_id = ?",
+            "acct_from"
+        )
+        .unwrap();
+        assert_eq!(left, vec!["food".to_string()]);
     }
 }

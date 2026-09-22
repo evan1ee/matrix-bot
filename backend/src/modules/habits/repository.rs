@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use chrono::{Duration, NaiveDate};
-use sqlx::SqlitePool;
 use std::collections::HashSet;
 
 use super::models::{
@@ -10,7 +10,7 @@ pub struct HabitsRepository;
 
 impl HabitsRepository {
     pub async fn create_habit(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         name: &str,
         description: Option<&str>,
@@ -18,81 +18,81 @@ impl HabitsRepository {
         category: &str,
         target_days_per_week: i64,
     ) -> Result<Habit, sqlx::Error> {
-        let habit = sqlx::query_as::<_, Habit>(
+        let habit = crate::db_fetch_one!(
+            pool,
+            Habit,
             r#"
             INSERT INTO habits (owner_id, name, description, frequency, category, target_days_per_week, archived)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, FALSE)
             RETURNING id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             "#,
-        )
-        .bind(owner_id)
-        .bind(name)
-        .bind(description)
-        .bind(frequency)
-        .bind(category)
-        .bind(target_days_per_week)
-        .fetch_one(pool)
-        .await?;
+            owner_id,
+            name,
+            description,
+            frequency,
+            category,
+            target_days_per_week
+        )?;
 
         Ok(habit)
     }
 
     pub async fn find_by_id(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
     ) -> Result<Option<Habit>, sqlx::Error> {
-        sqlx::query_as::<_, Habit>(
+        crate::db_fetch_optional!(
+            pool,
+            Habit,
             r#"
             SELECT id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             FROM habits
             WHERE id = ? AND owner_id = ?
             "#,
+            id,
+            owner_id
         )
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn find_by_name(
-        pool: &SqlitePool,
+        pool: &DbPool,
         name: &str,
         owner_id: &str,
     ) -> Result<Option<Habit>, sqlx::Error> {
-        sqlx::query_as::<_, Habit>(
+        crate::db_fetch_optional!(
+            pool,
+            Habit,
             r#"
             SELECT id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             FROM habits
-            WHERE LOWER(name) = LOWER(?) AND owner_id = ? AND archived = 0
+            WHERE LOWER(name) = LOWER(?) AND owner_id = ? AND archived = FALSE
             LIMIT 1
             "#,
+            name,
+            owner_id
         )
-        .bind(name)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn find_all_by_owner(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Vec<Habit>, sqlx::Error> {
-        sqlx::query_as::<_, Habit>(
+        crate::db_fetch_all!(
+            pool,
+            Habit,
             r#"
             SELECT id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             FROM habits
-            WHERE owner_id = ? AND archived = 0
+            WHERE owner_id = ? AND archived = FALSE
             ORDER BY id ASC
             "#,
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn find_all_with_status(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         today_str: &str,
     ) -> Result<Vec<HabitWithStatus>, sqlx::Error> {
@@ -104,18 +104,18 @@ impl HabitsRepository {
         let mut results = Vec::with_capacity(habits.len());
 
         for habit in habits {
-            let log_rows = sqlx::query_scalar::<_, String>(
+            let log_rows = crate::db_scalar_all!(
+                pool,
+                String,
                 r#"
                 SELECT log_date
                 FROM habit_logs
-                WHERE habit_id = ? AND owner_id = ? AND completed = 1
+                WHERE habit_id = ? AND owner_id = ? AND completed = TRUE
                 ORDER BY log_date ASC
                 "#,
-            )
-            .bind(habit.id)
-            .bind(owner_id)
-            .fetch_all(pool)
-            .await?;
+                habit.id,
+                owner_id
+            )?;
 
             let date_set: HashSet<String> = log_rows.iter().cloned().collect();
             let (current_streak, longest_streak) = calculate_streaks(&log_rows, today_str);
@@ -147,7 +147,7 @@ impl HabitsRepository {
     }
 
     pub async fn update_habit(
-        pool: &SqlitePool,
+        pool: &DbPool,
         id: i64,
         owner_id: &str,
         name: &str,
@@ -156,116 +156,110 @@ impl HabitsRepository {
         category: &str,
         target_days_per_week: i64,
     ) -> Result<Option<Habit>, sqlx::Error> {
-        sqlx::query_as::<_, Habit>(
+        crate::db_fetch_optional!(
+            pool,
+            Habit,
             r#"
             UPDATE habits
-            SET name = ?, description = ?, frequency = ?, category = ?, target_days_per_week = ?, updated_at = CURRENT_TIMESTAMP
+            SET name = ?, description = ?, frequency = ?, category = ?, target_days_per_week = ?, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             WHERE id = ? AND owner_id = ?
             RETURNING id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
             "#,
+            name,
+            description,
+            frequency,
+            category,
+            target_days_per_week,
+            id,
+            owner_id
         )
-        .bind(name)
-        .bind(description)
-        .bind(frequency)
-        .bind(category)
-        .bind(target_days_per_week)
-        .bind(id)
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
-    pub async fn delete_habit(
-        pool: &SqlitePool,
-        id: i64,
-        owner_id: &str,
-    ) -> Result<bool, sqlx::Error> {
-        let rows = sqlx::query("DELETE FROM habits WHERE id = ? AND owner_id = ?")
-            .bind(id)
-            .bind(owner_id)
-            .execute(pool)
-            .await?;
+    pub async fn delete_habit(pool: &DbPool, id: i64, owner_id: &str) -> Result<bool, sqlx::Error> {
+        let rows = crate::db_execute!(
+            pool,
+            "DELETE FROM habits WHERE id = ? AND owner_id = ?",
+            id,
+            owner_id
+        )?;
 
-        Ok(rows.rows_affected() > 0)
+        Ok(rows > 0)
     }
 
     pub async fn toggle_log(
-        pool: &SqlitePool,
+        pool: &DbPool,
         habit_id: i64,
         owner_id: &str,
         log_date: &str,
         note: Option<&str>,
     ) -> Result<bool, sqlx::Error> {
         // Check existing log
-        let existing = sqlx::query_scalar::<_, bool>(
+        let existing = crate::db_scalar_optional!(
+            pool,
+            bool,
             r#"
             SELECT completed
             FROM habit_logs
             WHERE habit_id = ? AND owner_id = ? AND log_date = ?
             "#,
-        )
-        .bind(habit_id)
-        .bind(owner_id)
-        .bind(log_date)
-        .fetch_optional(pool)
-        .await?;
+            habit_id,
+            owner_id,
+            log_date
+        )?;
 
         match existing {
             Some(completed) => {
                 let new_state = !completed;
-                sqlx::query(
+                crate::db_execute!(
+                    pool,
                     r#"
                     UPDATE habit_logs
                     SET completed = ?
                     WHERE habit_id = ? AND owner_id = ? AND log_date = ?
                     "#,
-                )
-                .bind(new_state)
-                .bind(habit_id)
-                .bind(owner_id)
-                .bind(log_date)
-                .execute(pool)
-                .await?;
+                    new_state,
+                    habit_id,
+                    owner_id,
+                    log_date
+                )?;
                 Ok(new_state)
             }
             None => {
-                sqlx::query(
+                crate::db_execute!(
+                    pool,
                     r#"
-                    INSERT INTO habit_logs (habit_id, owner_id, log_date, completed, note)
-                    VALUES (?, ?, ?, 1, ?)
+                    INSERT INTO habit_logs (habit_id, owner_id, log_date, completed, note) VALUES (?, ?, ?, TRUE, ?)
                     "#,
-                )
-                .bind(habit_id)
-                .bind(owner_id)
-                .bind(log_date)
-                .bind(note)
-                .execute(pool)
-                .await?;
+                    habit_id,
+                    owner_id,
+                    log_date,
+                    note
+                )?;
                 Ok(true)
             }
         }
     }
 
     pub async fn get_heatmap(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Vec<HeatmapDay>, sqlx::Error> {
-        sqlx::query_as::<_, HeatmapDay>(
+        crate::db_fetch_all!(
+            pool,
+            HeatmapDay,
             r#"
             SELECT log_date as date, COUNT(*) as count
             FROM habit_logs
-            WHERE owner_id = ? AND completed = 1
+            WHERE owner_id = ? AND completed = TRUE
             GROUP BY log_date
             ORDER BY log_date ASC
             "#,
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn get_summary_stats(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         today_str: &str,
     ) -> Result<HabitStatsSummary, sqlx::Error> {
@@ -295,8 +289,8 @@ impl HabitsRepository {
 mod tests {
     use super::*;
 
-    async fn setup_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_habits::create_tables(&pool)
             .await
             .unwrap();

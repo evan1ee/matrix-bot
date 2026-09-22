@@ -173,14 +173,12 @@ mod tests {
     use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use crate::modules::finance::repository::FinanceRepository;
-    use chrono::Utc;
-    use sqlx::SqlitePool;
 
     async fn test_state() -> ApiState {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -208,7 +206,7 @@ mod tests {
             Some("Stipend"),
             None,
             None,
-            Utc::now(),
+            crate::utils::time::now_at_storage_precision(),
         )
         .await
         .unwrap();

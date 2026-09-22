@@ -189,7 +189,8 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
 mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
-    use sqlx::{Row, SqlitePool};
+    use crate::db::DbPool;
+    use sqlx::Row;
     use std::collections::BTreeSet;
 
     #[test]
@@ -236,18 +237,20 @@ mod tests {
     }
 
     /// Every table in the schema that has `column`.
-    async fn tables_with_column(pool: &SqlitePool, column: &str) -> BTreeSet<String> {
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    async fn tables_with_column(pool: &DbPool, column: &str) -> BTreeSet<String> {
+        let tables: Vec<String> = crate::db_scalar_all!(
+            pool,
+            _,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         )
-        .fetch_all(pool)
-        .await
         .unwrap();
 
         let mut found = BTreeSet::new();
         for table in tables {
+            // `PRAGMA table_info` is SQLite-only introspection; this guard test
+            // runs on SQLite by construction.
             let has_column = sqlx::query(&format!("PRAGMA table_info({table})"))
-                .fetch_all(pool)
+                .fetch_all(pool.sqlite_or_err().unwrap())
                 .await
                 .unwrap()
                 .iter()
@@ -267,8 +270,8 @@ mod tests {
             .collect()
     }
 
-    async fn migrated_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn migrated_pool() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -281,6 +284,9 @@ mod tests {
     /// classified as following a merge or explicitly not, or this fails.
     #[tokio::test]
     async fn test_owned_tables_and_exceptions_match_the_schema() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
+            return;
+        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "owner_id").await;
         let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
@@ -309,6 +315,9 @@ mod tests {
     /// a row pointing at an account id that the merge is about to delete.
     #[tokio::test]
     async fn test_account_id_tables_are_all_classified() {
+        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
+            return;
+        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "account_id").await;
         let classified = declared(&[

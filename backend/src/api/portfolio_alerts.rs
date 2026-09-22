@@ -67,9 +67,9 @@ pub async fn create_alert(
     let raw_currency = payload.currency.as_deref().unwrap_or("USD");
     let currency =
         normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let exponent = exponent_for(&currency);
+    let exponent = i64::from(exponent_for(&currency));
 
-    let target_price_minor = parse_amount(&payload.target_price, exponent)
+    let target_price_minor = parse_amount(&payload.target_price, exponent as u32)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     if target_price_minor <= 0 {
@@ -83,7 +83,7 @@ pub async fn create_alert(
         &symbol,
         target_price_minor,
         &currency,
-        exponent as i32,
+        exponent,
         payload.condition,
     )
     .await
@@ -136,11 +136,11 @@ mod tests {
     use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AuthUser) {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
-            crate::db::Database { pool },
+            crate::db::Database { pool: pool },
             broadcaster,
             None,
             "http://localhost:8008".to_string(),

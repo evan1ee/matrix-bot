@@ -7112,7 +7112,7 @@
           },
           "currency_exponent": {
             "type": "integer",
-            "format": "int32",
+            "format": "int64",
             "nullable": true
           },
           "due_day": {
@@ -9018,7 +9018,7 @@
           },
           "currency_exponent": {
             "type": "integer",
-            "format": "int32"
+            "format": "int64"
           },
           "id": {
             "type": "integer",
@@ -9244,7 +9244,7 @@
           },
           "currency_exponent": {
             "type": "integer",
-            "format": "int32"
+            "format": "int64"
           },
           "due_day": {
             "type": "integer",

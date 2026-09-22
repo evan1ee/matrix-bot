@@ -6,7 +6,7 @@
 //! purchase, so this file is only the commands a user runs to move money in
 //! and out.
 
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use super::cash_repo;
@@ -37,7 +37,7 @@ pub fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
 /// a portfolio deposit or withdrawal used to write straight to
 /// `FinanceRepository` and never announce itself to an open browser.
 pub async fn record_portfolio_cash_transaction(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     action: &str,
@@ -99,7 +99,7 @@ fn parse_cash_amount(args: &str, default_currency: &str) -> Result<(i64, String,
 }
 
 pub async fn handle_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -119,7 +119,7 @@ pub async fn handle_cash(
     }
 }
 
-async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
+async fn show_cash(pool: &DbPool, owner_id: &str) -> String {
     match cash_repo::list_cash(pool, owner_id).await {
         Ok(balances) if balances.is_empty() => {
             "💵 No cash on record. Add some with <code>!portfolio cash deposit 1000 USD</code>."
@@ -144,7 +144,7 @@ async fn show_cash(pool: &SqlitePool, owner_id: &str) -> String {
 }
 
 async fn handle_cash_deposit(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -198,7 +198,7 @@ async fn handle_cash_deposit(
 }
 
 async fn handle_cash_withdraw(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -286,7 +286,7 @@ mod tests {
     /// service.
     #[tokio::test]
     async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();

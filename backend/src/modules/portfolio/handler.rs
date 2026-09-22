@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use crate::db::DbPool;
 use tracing::error;
 
 use crate::events::{EventBroadcaster, SystemEvent};
@@ -11,7 +11,7 @@ use crate::modules::portfolio::view::{handle_list, handle_summary, usage};
 use crate::utils::html_escape;
 
 pub async fn handle_portfolio_command(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -86,7 +86,7 @@ fn strip_command<'a>(lower: &str, body: &'a str, name: &str) -> Option<&'a str> 
 }
 
 async fn handle_price(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -139,7 +139,7 @@ async fn handle_price(
 }
 
 async fn handle_refresh(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
@@ -175,7 +175,7 @@ async fn handle_refresh(
 }
 
 async fn handle_note(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -217,7 +217,7 @@ async fn handle_note(
 }
 
 async fn handle_remove(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     symbol_raw: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_refresh_empty_holdings() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
@@ -299,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_record_holding_without_cash() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
 
         let reply = handle_portfolio_command(

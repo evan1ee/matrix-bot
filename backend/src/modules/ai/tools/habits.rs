@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use chrono::Utc;
 use serde_json::json;
-use sqlx::SqlitePool;
 
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::ai::models::ToolDefinition;
@@ -8,7 +8,7 @@ use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,

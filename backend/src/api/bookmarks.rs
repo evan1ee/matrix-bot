@@ -282,17 +282,16 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::events::EventBroadcaster;
-    use sqlx::SqlitePool;
 
     async fn setup_state() -> (ApiState, String) {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema::run_migrations(&pool).await.unwrap();
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
                 .await
                 .unwrap();
         let state = ApiState::new(
-            Database { pool },
+            Database { pool: pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

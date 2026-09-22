@@ -1,7 +1,7 @@
 //! Cash balance persistence and atomic credit/debit operations.
 
+use crate::db::DbPool;
 use anyhow::Result;
-use sqlx::SqlitePool;
 
 use crate::modules::portfolio::models::{CashBalance, WithdrawOutcome};
 
@@ -9,18 +9,20 @@ pub const CASH_COLUMNS: &str =
     "id, owner_id, currency, currency_exponent, balance_minor, updated_at";
 
 pub async fn get_cash_or_zero(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     currency_exponent: i64,
 ) -> Result<CashBalance> {
-    let found = sqlx::query_as::<_, CashBalance>(&format!(
+    let found = crate::db_fetch_optional!(
+        pool,
+        CashBalance,
+        &format!(
         "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?"
-    ))
-    .bind(owner_id)
-    .bind(currency)
-    .fetch_optional(pool)
-    .await?;
+    ),
+        owner_id,
+        currency
+    )?;
 
     Ok(found.unwrap_or(CashBalance {
         id: 0,
@@ -32,43 +34,32 @@ pub async fn get_cash_or_zero(
     }))
 }
 
-pub async fn list_cash(pool: &SqlitePool, owner_id: &str) -> Result<Vec<CashBalance>> {
-    let balances = sqlx::query_as::<_, CashBalance>(&format!(
+pub async fn list_cash(pool: &DbPool, owner_id: &str) -> Result<Vec<CashBalance>> {
+    let balances = crate::db_fetch_all!(pool, CashBalance, &format!(
         "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE owner_id = ? ORDER BY currency ASC"
-    ))
-    .bind(owner_id)
-    .fetch_all(pool)
-    .await?;
+    ), owner_id)?;
 
     Ok(balances)
 }
 
 pub async fn credit_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     currency_exponent: i64,
     amount_minor: i64,
 ) -> Result<CashBalance> {
-    sqlx::query(
-        "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
+    crate::db_execute!(pool, "INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at) \
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
          ON CONFLICT(owner_id, currency) DO UPDATE SET \
-            balance_minor = balance_minor + excluded.balance_minor, \
-            updated_at = CURRENT_TIMESTAMP",
-    )
-    .bind(owner_id)
-    .bind(currency)
-    .bind(currency_exponent)
-    .bind(amount_minor)
-    .execute(pool)
-    .await?;
+            balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor, \
+            updated_at = CURRENT_TIMESTAMP", owner_id, currency, currency_exponent, amount_minor)?;
 
     get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
 }
 
 pub async fn deposit_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     currency_exponent: i64,
@@ -86,7 +77,7 @@ pub async fn deposit_cash(
 }
 
 pub async fn deposit_cash_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     currency_exponent: i64,
@@ -113,18 +104,18 @@ pub async fn deposit_cash_at(
 }
 
 pub async fn debit_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     amount_minor: i64,
 ) -> Result<WithdrawOutcome> {
-    let existing: Option<(i64, i64)> = sqlx::query_as(
+    let existing: Option<(i64, i64)> = crate::db_fetch_optional!(
+        pool,
+        _,
         "SELECT id, balance_minor FROM portfolio_cash_balances WHERE owner_id = ? AND currency = ?",
-    )
-    .bind(owner_id)
-    .bind(currency)
-    .fetch_optional(pool)
-    .await?;
+        owner_id,
+        currency
+    )?;
 
     let (id, balance) = match existing {
         Some(row) => row,
@@ -137,26 +128,20 @@ pub async fn debit_cash(
         });
     }
 
-    sqlx::query(
-        "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    )
-    .bind(amount_minor)
-    .bind(id)
-    .execute(pool)
-    .await?;
+    crate::db_execute!(pool, "UPDATE portfolio_cash_balances SET balance_minor = balance_minor - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", amount_minor, id)?;
 
-    let updated = sqlx::query_as::<_, CashBalance>(&format!(
-        "SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_one(pool)
-    .await?;
+    let updated = crate::db_fetch_one!(
+        pool,
+        CashBalance,
+        &format!("SELECT {CASH_COLUMNS} FROM portfolio_cash_balances WHERE id = ?"),
+        id
+    )?;
 
     Ok(WithdrawOutcome::Ok(updated))
 }
 
 pub async fn withdraw_cash(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     amount_minor: i64,
@@ -165,7 +150,7 @@ pub async fn withdraw_cash(
 }
 
 pub async fn withdraw_cash_at(
-    pool: &SqlitePool,
+    pool: &DbPool,
     owner_id: &str,
     currency: &str,
     amount_minor: i64,

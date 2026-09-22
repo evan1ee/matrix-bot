@@ -1,5 +1,5 @@
+use crate::db::DbPool;
 use chrono::NaiveDate;
-use sqlx::SqlitePool;
 
 use super::models::{LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView};
 
@@ -7,65 +7,65 @@ pub struct LifeRepository;
 
 impl LifeRepository {
     pub async fn get_profile(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Option<LifeProfile>, sqlx::Error> {
-        sqlx::query_as::<_, LifeProfile>(
+        crate::db_fetch_optional!(
+            pool,
+            LifeProfile,
             r#"
             SELECT owner_id, birth_date, expected_lifespan_years, created_at, updated_at
             FROM life_profiles
             WHERE owner_id = ?
             "#,
+            owner_id
         )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn upsert_profile(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         birth_date: &str,
         expected_lifespan_years: i64,
     ) -> Result<LifeProfile, sqlx::Error> {
-        sqlx::query_as::<_, LifeProfile>(
+        crate::db_fetch_one!(
+            pool,
+            LifeProfile,
             r#"
             INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years, created_at, updated_at)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id) DO UPDATE SET
                 birth_date = excluded.birth_date,
                 expected_lifespan_years = excluded.expected_lifespan_years,
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING owner_id, birth_date, expected_lifespan_years, created_at, updated_at
             "#,
+            owner_id,
+            birth_date,
+            expected_lifespan_years
         )
-        .bind(owner_id)
-        .bind(birth_date)
-        .bind(expected_lifespan_years)
-        .fetch_one(pool)
-        .await
     }
 
     pub async fn get_day_log(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         log_date: &str,
     ) -> Result<Option<LifeDayLog>, sqlx::Error> {
-        sqlx::query_as::<_, LifeDayLog>(
+        crate::db_fetch_optional!(
+            pool,
+            LifeDayLog,
             r#"
             SELECT id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             FROM life_day_logs
             WHERE owner_id = ? AND log_date = ?
             "#,
+            owner_id,
+            log_date
         )
-        .bind(owner_id)
-        .bind(log_date)
-        .fetch_optional(pool)
-        .await
     }
 
     pub async fn upsert_day_log(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         log_date: &str,
         mood: &str,
@@ -74,91 +74,90 @@ impl LifeRepository {
         note: Option<&str>,
         time_allocation: Option<&str>,
     ) -> Result<LifeDayLog, sqlx::Error> {
-        sqlx::query_as::<_, LifeDayLog>(
+        crate::db_fetch_one!(
+            pool,
+            LifeDayLog,
             r#"
             INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id, log_date) DO UPDATE SET
                 mood = excluded.mood,
                 weather = excluded.weather,
                 activities = excluded.activities,
                 note = excluded.note,
                 time_allocation = COALESCE(excluded.time_allocation, life_day_logs.time_allocation),
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             "#,
+            owner_id,
+            log_date,
+            mood,
+            weather,
+            activities,
+            note,
+            time_allocation
         )
-        .bind(owner_id)
-        .bind(log_date)
-        .bind(mood)
-        .bind(weather)
-        .bind(activities)
-        .bind(note)
-        .bind(time_allocation)
-        .fetch_one(pool)
-        .await
     }
 
     pub async fn update_time_allocation(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         log_date: &str,
         time_allocation: &str,
     ) -> Result<LifeDayLog, sqlx::Error> {
-        sqlx::query_as::<_, LifeDayLog>(
+        crate::db_fetch_one!(
+            pool,
+            LifeDayLog,
             r#"
             INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
-            VALUES (?, ?, '', NULL, NULL, NULL, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, '', NULL, NULL, NULL, ?, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
             ON CONFLICT(owner_id, log_date) DO UPDATE SET
                 time_allocation = excluded.time_allocation,
-                updated_at = datetime('now')
+                updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
             RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             "#,
+            owner_id,
+            log_date,
+            time_allocation
         )
-        .bind(owner_id)
-        .bind(log_date)
-        .bind(time_allocation)
-        .fetch_one(pool)
-        .await
     }
 
     pub async fn delete_day_log(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         log_date: &str,
     ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query(
+        let result = crate::db_execute!(
+            pool,
             r#"
             DELETE FROM life_day_logs
             WHERE owner_id = ? AND log_date = ?
             "#,
-        )
-        .bind(owner_id)
-        .bind(log_date)
-        .execute(pool)
-        .await?;
+            owner_id,
+            log_date
+        )?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(result > 0)
     }
 
     pub async fn get_year_view(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         year: i64,
     ) -> Result<LifeYearView, sqlx::Error> {
         let prefix = format!("{year}-%");
-        let logs = sqlx::query_as::<_, LifeDayLog>(
+        let logs = crate::db_fetch_all!(
+            pool,
+            LifeDayLog,
             r#"
             SELECT id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
             FROM life_day_logs
             WHERE owner_id = ? AND log_date LIKE ?
             ORDER BY log_date ASC
             "#,
-        )
-        .bind(owner_id)
-        .bind(&prefix)
-        .fetch_all(pool)
-        .await?;
+            owner_id,
+            &prefix
+        )?;
 
         let total_logged_days = logs.len() as i64;
 
@@ -170,27 +169,29 @@ impl LifeRepository {
     }
 
     pub async fn get_horizon_days(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
     ) -> Result<Vec<LifeHorizonDay>, sqlx::Error> {
-        sqlx::query_as::<_, LifeHorizonDay>(
+        crate::db_fetch_all!(
+            pool,
+            LifeHorizonDay,
             r#"
             WITH user_activities AS (
-                SELECT date(created_at) AS act_date FROM todos WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM todos WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT date(due_at) AS act_date FROM todos WHERE owner_id = ? AND due_at IS NOT NULL
+                SELECT CAST(date(due_at) AS TEXT) AS act_date FROM todos WHERE owner_id = ? AND due_at IS NOT NULL
                 UNION ALL
-                SELECT date(occurred_at) AS act_date FROM transactions WHERE owner_id = ? AND occurred_at IS NOT NULL
+                SELECT CAST(date(occurred_at) AS TEXT) AS act_date FROM transactions WHERE owner_id = ? AND occurred_at IS NOT NULL
                 UNION ALL
-                SELECT date(created_at) AS act_date FROM portfolio_audit_log WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM portfolio_audit_log WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT log_date AS act_date FROM habit_logs WHERE owner_id = ? AND log_date IS NOT NULL
+                SELECT CAST(log_date AS TEXT) AS act_date FROM habit_logs WHERE owner_id = ? AND log_date IS NOT NULL
                 UNION ALL
-                SELECT date(trigger_at) AS act_date FROM reminders WHERE owner_id = ? AND trigger_at IS NOT NULL
+                SELECT CAST(date(trigger_at) AS TEXT) AS act_date FROM reminders WHERE owner_id = ? AND trigger_at IS NOT NULL
                 UNION ALL
-                SELECT date(created_at) AS act_date FROM bookmarks WHERE owner_id = ? AND created_at IS NOT NULL
+                SELECT CAST(date(created_at) AS TEXT) AS act_date FROM bookmarks WHERE owner_id = ? AND created_at IS NOT NULL
                 UNION ALL
-                SELECT arrival_date AS act_date FROM footprints WHERE owner_id = ? AND arrival_date IS NOT NULL
+                SELECT CAST(arrival_date AS TEXT) AS act_date FROM footprints WHERE owner_id = ? AND arrival_date IS NOT NULL
             ),
             activity_counts AS (
                 SELECT act_date, COUNT(*) AS cnt 
@@ -215,38 +216,38 @@ impl LifeRepository {
             WHERE all_dates.d_date IS NOT NULL AND all_dates.d_date != ''
             ORDER BY all_dates.d_date ASC
             "#,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id,
+            owner_id
         )
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await
     }
 
     pub async fn get_stats(
-        pool: &SqlitePool,
+        pool: &DbPool,
         owner_id: &str,
         today_date_str: &str,
     ) -> Result<LifeProfileStats, sqlx::Error> {
         let profile = Self::get_profile(pool, owner_id).await?;
 
-        let total_logged: (i64,) = sqlx::query_as(
+        let total_logged: (i64,) = crate::db_fetch_one!(
+            pool,
+            _,
             r#"
             SELECT COUNT(*) FROM life_day_logs WHERE owner_id = ? AND mood != ''
             "#,
-        )
-        .bind(owner_id)
-        .fetch_one(pool)
-        .await?;
+            owner_id
+        )?;
 
-        let dominant_mood_row: Option<(String,)> = sqlx::query_as(
+        let dominant_mood_row: Option<(String,)> = crate::db_fetch_optional!(
+            pool,
+            _,
             r#"
             SELECT mood FROM life_day_logs
             WHERE owner_id = ? AND mood != ''
@@ -254,22 +255,20 @@ impl LifeRepository {
             ORDER BY COUNT(*) DESC
             LIMIT 1
             "#,
-        )
-        .bind(owner_id)
-        .fetch_optional(pool)
-        .await?;
+            owner_id
+        )?;
 
         let dominant_mood = dominant_mood_row.map(|r| r.0);
 
-        let allocations: Vec<(Option<String>,)> = sqlx::query_as(
+        let allocations: Vec<(Option<String>,)> = crate::db_fetch_all!(
+            pool,
+            _,
             r#"
             SELECT time_allocation FROM life_day_logs
             WHERE owner_id = ? AND time_allocation IS NOT NULL
             "#,
-        )
-        .bind(owner_id)
-        .fetch_all(pool)
-        .await?;
+            owner_id
+        )?;
 
         let mut total_deep_work_hours_acc: f64 = 0.0;
         let mut total_sleep_hours_acc: f64 = 0.0;
@@ -343,8 +342,8 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
 
-    async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn setup_test_db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
         pool
     }
@@ -450,15 +449,9 @@ mod tests {
         let owner = "user_test_activity";
 
         // Insert a todo for a date without a life_day_log
-        sqlx::query(
-            r#"
-            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at)
-            VALUES ('!room:matrix.org', ?, 'Alice', 'Workout task', 'medium', 0, '2026-09-10 10:00:00')
-            "#,
-        )
-        .bind(owner)
-        .execute(&pool)
-        .await
+        crate::db_execute!(&pool, r#"
+            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) VALUES ('!room:matrix.org', ?, 'Alice', 'Workout task', 'medium', FALSE, '2026-09-10 10:00:00')
+            "#, owner)
         .unwrap();
 
         let horizon = LifeRepository::get_horizon_days(&pool, owner)

@@ -12,20 +12,20 @@ use crate::modules::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
 pub async fn run_briefing_tick(ctx: &ModuleContext) {
-    let accounts: Vec<String> =
-        match sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE status = 'active'")
-            .fetch_all(&ctx.db.pool)
-            .await
-        {
-            Ok(list) => list,
-            Err(err) => {
-                error!(
-                    "Error fetching active accounts for morning briefing: {:?}",
-                    err
-                );
-                return;
-            }
-        };
+    let accounts: Vec<String> = match crate::db_scalar_all!(
+        &ctx.db.pool,
+        String,
+        "SELECT id FROM accounts WHERE status = 'active'"
+    ) {
+        Ok(list) => list,
+        Err(err) => {
+            error!(
+                "Error fetching active accounts for morning briefing: {:?}",
+                err
+            );
+            return;
+        }
+    };
 
     let now_utc = Utc::now();
 

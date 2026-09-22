@@ -1,6 +1,6 @@
+use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
-use sqlx::SqlitePool;
 
 use crate::events::EventBroadcaster;
 use crate::modules::ai::models::ToolDefinition;
@@ -30,7 +30,7 @@ fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
 }
 
 pub async fn execute_tool(
-    pool: &SqlitePool,
+    pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
