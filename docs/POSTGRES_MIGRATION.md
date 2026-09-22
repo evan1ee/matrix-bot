@@ -312,6 +312,24 @@ boolean, bare `TIMESTAMP` for a `DateTime<Utc>`, `INTEGER` where an `i64` is
 read — and each of those was a real defect found only by running against a
 server.
 
+That job runs **inside a container**, which is not cosmetic. A service
+container is reachable at `127.0.0.1` only from a job running directly on the
+runner machine; from a job running *inside* a container it answers to its
+label, `postgres`. GitHub's hosted runner does the former, so `127.0.0.1:5432`
+worked there from the start. A self-hosted Gitea `act_runner` always does the
+latter, and the same workflow failed on it in the most legible way available:
+every one of the 357 database tests panicked with `TEST_DATABASE_URL must point
+at a reachable server`, while the 364 touching no database passed. Pointing the
+suite at a dead port locally reproduced that split to the test — 364 passed,
+357 failed — which is what identified it as connectivity rather than a
+thirty-first dialect defect; against a reachable server the same commit was
+721/721 in 68s, versus 2171s of connection timeouts in CI. Correcting only the
+hostname would have moved the breakage to whichever runner it was not written
+for, so the job is pinned into a container on both. The image has to ship
+Node.js: that is what JavaScript actions execute with inside a job container
+and `act_runner` does not inject it, so a `rust:*` image would fail at the
+first `uses:`.
+
 One self-inflicted bug worth recording: the script that rewrote 84 test setups
 to call `test_pool()` also rewrote the SQLite fallback *inside `test_pool`
 itself*, producing infinite recursion. `rustc` caught it as "recursion in an
