@@ -173,8 +173,9 @@ fn synthesize_sync(model_dir: &Path, speaker_id: i64, text: &str) -> Result<Spee
 ///
 /// Runs on a blocking worker thread. Inference is synchronous and CPU-bound
 /// for seconds at a time; on the runtime thread it would stall the Matrix
-/// sync loop, exactly as `inference/src/sherpa.rs::run_transcription` already
-/// avoids for speech-to-text.
+/// sync loop — the same reason `inference/src/sherpa.rs` runs SenseVoice in
+/// `spawn_blocking`, even though that server has no sync loop of its own to
+/// stall.
 pub async fn synthesize(
     config: &TtsConfig,
     text: &str,

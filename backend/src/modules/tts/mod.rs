@@ -1,10 +1,11 @@
 //! Text-to-speech: `!say <text>` replies with a spoken voice message.
 //!
-//! One engine, one code path, no trait — matching `modules/voice` (SenseVoice
-//! only, now reached over HTTP). `modules/ocr` used to be this shape too
-//! (PaddleOCR only); it is now an HTTP client to the inference crate's
-//! `POST /ocr`, not an engine at all, so the comparison no longer applies to
-//! it. This module is sherpa-onnx's Kokoro TTS engine and nothing else; see
+//! One engine, one code path, no trait. `modules/voice` and `modules/ocr`
+//! used to share that shape (SenseVoice only, PaddleOCR only); both are now
+//! HTTP clients instead — `modules/voice` calls `services::stt`, which works
+//! with any OpenAI-compatible provider, and `modules/ocr` calls the inference
+//! crate's `POST /ocr` — so the comparison no longer holds for either. This
+//! module is sherpa-onnx's Kokoro TTS engine and nothing else; see
 //! `engine.rs` for why it differs from `inference/src/sherpa.rs` in loading
 //! its model once instead of per call.
 

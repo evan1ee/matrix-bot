@@ -512,7 +512,7 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT now; TTS later), a separate binary and image
-contracts/                    # JSON fixtures asserted by both crates for each HTTP wire contract
+contracts/                    # JSON fixtures each crate asserts for the wire formats it speaks
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
 docs/                         # documentation, roadmap, architecture reviews, guides

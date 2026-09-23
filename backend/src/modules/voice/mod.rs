@@ -93,10 +93,10 @@ pub async fn process_audio_event(
         reporter.report_stage("🧠 正在理解与思考...").await;
     }
 
-    // 3. Build semantic AI prompt from transcribed text
+    // 2. Build semantic AI prompt from transcribed text
     let ai_prompt = prompt::build_voice_prompt(&transcription.text, transcription.duration_secs);
 
-    // 4. Run AI turn with full domain tool capabilities
+    // 3. Run AI turn with full domain tool capabilities
     match crate::modules::ai::handler::run_ai_turn_with_stage(
         &db.pool,
         ai,

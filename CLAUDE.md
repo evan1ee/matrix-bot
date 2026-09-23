@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Cargo workspace at the root with two members, plus a separate npm frontend:
 
 - `backend/` — Rust crate `matrix-bot`: Matrix bot + embedded Axum REST API in one binary.
-- `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting the local ONNX models (OCR now; STT/TTS later).
+- `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting the local ONNX models (OCR and speech-to-text now; TTS later).
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `data/` — runtime SQLite DB + Matrix SDK crypto store (gitignored).
 
@@ -112,17 +112,21 @@ text via `services/stt`, which speaks OpenAI's `POST /v1/audio/transcriptions`
 else with that shape, and `STT_API_KEY` is sent as a bearer token. The client
 asks for `response_format=json`, the one format every compatible
 transcription model accepts (OpenAI's `gpt-4o-*-transcribe` models reject
-`verbose_json`); a voice note's duration comes from the Matrix event's own
-`AudioInfo.duration` rather than from the provider. An unset base URL, or an
-unreachable server, degrades that one feature: the bot still boots, and
-`docker run` with a volume still yields a working bot without it.
+`verbose_json`); a voice note's duration prefers the provider's own figure
+when one comes back, falling back to the Matrix event's own
+`AudioInfo.duration` otherwise — a `json` response carries none, so that
+fallback is the usual case. An unset base URL, or an unreachable server,
+degrades that one feature: the bot still boots, and `docker run` with a
+volume still yields a working bot without it.
 
 The inference server provisions models in the background (`provision.rs`),
-after it binds, so `/health` answers at once and each route reports 503 until
-its own files land. Every wire contract between the two crates is a JSON
-fixture in `contracts/` that a test on each side asserts, because the two
-sides' types are separate by design and nothing else would notice a renamed
-field.
+spawned beside the listener rather than awaited in front of it, so `/health`
+answers at once and each route reports 503 until its own files land. Every
+wire contract between the two crates that a client actually consumes is a
+JSON fixture in `contracts/` asserted by both sides — a format only one side
+speaks (the inference server's `verbose_json`, which the bot never requests)
+is asserted by that side alone — because the two crates' types are separate
+by design and nothing else would notice a renamed field.
 
 `backend/src/services/` is the boundary this split created. `modules/` is what
 the application does; `services/` is how external capabilities are reached.
@@ -280,21 +284,24 @@ On the frontend, `core/settings.ts` is the single source — `useSettings()` rea
 ### Voice replies (`!say`, offline text-to-speech)
 
 `modules/tts/` speaks a reply into the room as a native Matrix voice message.
-One engine, one code path, no trait — matching `modules/voice` (sherpa only).
-`modules/ocr` used to be this shape too (PaddleOCR only); it is now an HTTP
-client to the inference crate's `POST /ocr`, not an engine at all, so the
-comparison no longer applies to it. sherpa-onnx is already a dependency for
-speech *to* text, and the prebuilt C API it ships already contains Kokoro TTS
-with espeak-ng grapheme-to-phoneme and per-language lexicons, so text to speech
-needed no new dependency, no second ML runtime, and no hand-written phonemiser.
-The raw ONNX model would have forced one: it takes phoneme ids, not text.
+One engine, one code path, no trait. `modules/voice` and `modules/ocr` used to
+share that shape (SenseVoice only, PaddleOCR only); both are now HTTP clients
+instead — `modules/voice` calls `services::stt`, which works with any
+OpenAI-compatible provider, and `modules/ocr` calls the inference crate's
+`POST /ocr` — so the comparison no longer holds for either. In the backend,
+sherpa-onnx now serves text-to-speech only — speech-to-text runs in the
+inference crate's own sherpa-onnx dependency instead. The same prebuilt C API
+bundles Kokoro TTS with espeak-ng grapheme-to-phoneme and per-language
+lexicons already built in, so text to speech needed no second ML runtime and
+no hand-written phonemiser. The raw ONNX model would have forced one: it
+takes phoneme ids, not text.
 
 `engine.rs` loads the model **once** into a `static OnceLock`, deliberately
 unlike `inference/src/sherpa.rs`, which rebuilds its SenseVoice recogniser on every call.
 That is right there — a small model loading in milliseconds — and wrong here:
-Kokoro is 311 MB and takes seconds. Synthesis itself runs in `spawn_blocking`
-for the same reason speech-to-text does; it is CPU-bound for seconds at a time
-and on the runtime thread it would stall the Matrix sync loop. The
+Kokoro is 311 MB and takes seconds. Synthesis itself runs in `spawn_blocking`:
+it is CPU-bound for seconds at a time, and on the runtime thread it would
+stall the Matrix sync loop. The
 text-normalisation FSTs (`date-zh.fst`, `number-zh.fst`, `phone-zh.fst`) are
 easy to leave out and nothing fails without them — a number is simply read
 digit by digit, or in English.
