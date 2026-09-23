@@ -377,7 +377,11 @@ docker compose logs -f
 docker compose down
 ```
 
-Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts. The inference server's downloaded OCR models persist in `matrix-bot-inference-data`.
+Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts. The inference server's downloaded OCR and speech-to-text models persist in `matrix-bot-inference-data`.
+
+Voice transcription defaults to the bundled `inference` service. To use a
+hosted provider instead, set `STT_BASE_URL`, `STT_API_KEY` and `STT_MODEL` in
+`.env` (for example OpenAI or Groq) — no compose changes needed.
 
 ---
 
@@ -503,10 +507,12 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
     ├── services/             # HTTP clients to sibling services
-    │   └── ocr/               #   client to the inference crate's POST /ocr
+    │   ├── ocr/               #   client to the inference crate's POST /ocr
+    │   └── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
-│                              # models (OCR now; STT/TTS later), a separate binary and image
+│                              # models (OCR, STT now; TTS later), a separate binary and image
+contracts/                    # JSON fixtures asserted by both crates for each HTTP wire contract
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
 docs/                         # documentation, roadmap, architecture reviews, guides

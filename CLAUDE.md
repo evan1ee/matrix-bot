@@ -106,10 +106,23 @@ bot, and `cargo test -p matrix-bot` is the everyday suite —
 `cargo test --workspace` additionally builds the crate carrying the native ML
 dependencies, which is why CI scopes the backend jobs explicitly.
 
-OCR reaches the inference server over HTTP via `services/ocr`. An unset
-`OCR_BASE_URL`, or an unreachable server, degrades image handling alone: the
-bot still boots, and `docker run` with a volume still yields a working bot
-without OCR.
+OCR reaches the inference server over HTTP via `services/ocr`, and speech to
+text via `services/stt`, which speaks OpenAI's `POST /v1/audio/transcriptions`
+— so `STT_BASE_URL` can point at the bundled server, OpenAI, Groq or anything
+else with that shape, and `STT_API_KEY` is sent as a bearer token. The client
+asks for `response_format=json`, the one format every compatible
+transcription model accepts (OpenAI's `gpt-4o-*-transcribe` models reject
+`verbose_json`); a voice note's duration comes from the Matrix event's own
+`AudioInfo.duration` rather than from the provider. An unset base URL, or an
+unreachable server, degrades that one feature: the bot still boots, and
+`docker run` with a volume still yields a working bot without it.
+
+The inference server provisions models in the background (`provision.rs`),
+after it binds, so `/health` answers at once and each route reports 503 until
+its own files land. Every wire contract between the two crates is a JSON
+fixture in `contracts/` that a test on each side asserts, because the two
+sides' types are separate by design and nothing else would notice a renamed
+field.
 
 `backend/src/services/` is the boundary this split created. `modules/` is what
 the application does; `services/` is how external capabilities are reached.
@@ -277,7 +290,7 @@ needed no new dependency, no second ML runtime, and no hand-written phonemiser.
 The raw ONNX model would have forced one: it takes phoneme ids, not text.
 
 `engine.rs` loads the model **once** into a `static OnceLock`, deliberately
-unlike `modules/voice/sherpa.rs`, which rebuilds its recogniser on every call.
+unlike `inference/src/sherpa.rs`, which rebuilds its SenseVoice recogniser on every call.
 That is right there — a small model loading in milliseconds — and wrong here:
 Kokoro is 311 MB and takes seconds. Synthesis itself runs in `spawn_blocking`
 for the same reason speech-to-text does; it is CPU-bound for seconds at a time

@@ -36,6 +36,9 @@ services:
       - AI_PROXY=${AI_PROXY:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - OCR_BASE_URL=${OCR_BASE_URL:-http://inference:8090}
+      - STT_BASE_URL=${STT_BASE_URL:-http://inference:8090/v1}
+      - STT_API_KEY=${STT_API_KEY:-}
+      - STT_MODEL=${STT_MODEL:-sensevoice-small}
     volumes:
       - bot-data:/app/data
     # `required: false` so the default SQLite run does not pull in a database
@@ -90,6 +93,7 @@ services:
     environment:
       - INFERENCE_PORT=8090
       - OCR_MODEL_DIR=/app/data/ocr_models
+      - VOICE_MODEL_DIR=/app/data/voice_models
       - RUST_LOG=info,matrix_bot_inference=info
     volumes:
       - inference-data:/app/data
