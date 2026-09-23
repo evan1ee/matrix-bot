@@ -410,7 +410,10 @@ there is no separate migration step.
 Run directly as a single container without compose. There is no inference
 server here, so `OCR_BASE_URL` stays unset: the bot still boots and every
 other feature works, and an image message just gets a reply saying OCR is
-unavailable.
+unavailable. Voice transcription is likewise unavailable unless `STT_BASE_URL`
+points somewhere; pointing it at a hosted provider instead (with
+`STT_API_KEY` and `STT_MODEL` set) gives voice transcription with no
+inference server at all.
 
 ```bash
 # 1. Create a persistent named volume for SQLite and Matrix crypto store

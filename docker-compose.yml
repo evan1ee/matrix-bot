@@ -35,10 +35,15 @@ services:
       - AI_MODEL=${AI_MODEL:-}
       - AI_PROXY=${AI_PROXY:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
-      - OCR_BASE_URL=${OCR_BASE_URL:-http://inference:8090}
-      - STT_BASE_URL=${STT_BASE_URL:-http://inference:8090/v1}
+      # No colon before the default: `${VAR-default}` keeps an explicitly
+      # empty `.env` value empty (the bot reads empty as "not configured", so
+      # this is how an operator switches the feature off), while an unset
+      # variable still falls back to the bundled inference server.
+      - OCR_BASE_URL=${OCR_BASE_URL-http://inference:8090}
+      - STT_BASE_URL=${STT_BASE_URL-http://inference:8090/v1}
       - STT_API_KEY=${STT_API_KEY:-}
       - STT_MODEL=${STT_MODEL:-sensevoice-small}
+      - VOICE_LANGUAGE=${VOICE_LANGUAGE:-auto}
     volumes:
       - bot-data:/app/data
     # `required: false` so the default SQLite run does not pull in a database
