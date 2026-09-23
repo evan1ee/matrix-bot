@@ -11,12 +11,12 @@ pub use super::config_cmd::{
     handle_set_model, handle_show_config,
 };
 pub use super::error::AiError;
-use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
+use crate::services::llm::{ChatCompletionMessage, ChatCompletionRequest};
 
 pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes

@@ -2,10 +2,10 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::events::EventBroadcaster;
-use crate::modules::ai::models::ToolDefinition;
 use crate::modules::portfolio::models::WithdrawOutcome;
 use crate::modules::portfolio::service;
 use crate::modules::settings::repository::SettingsRepository;
+use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

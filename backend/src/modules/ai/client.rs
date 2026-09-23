@@ -4,7 +4,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use super::models::{AiUserConfig, ChatCompletionRequest, ChatCompletionResponse};
+use super::models::AiUserConfig;
+use crate::services::llm::{ChatCompletionRequest, ChatCompletionResponse};
 
 #[derive(Debug, Error)]
 pub enum AiClientError {
@@ -21,7 +22,7 @@ pub enum AiClientError {
 #[derive(Debug, Clone, Default)]
 pub struct StreamTurnResult {
     pub content: String,
-    pub tool_calls: Vec<super::models::ToolCall>,
+    pub tool_calls: Vec<crate::services::llm::ToolCall>,
 }
 
 #[derive(Debug, Clone)]
@@ -246,7 +247,7 @@ impl AiClient {
         let mut stream = res.bytes_stream();
         let mut buffer = String::new();
         let mut full_content = String::new();
-        let mut tool_calls: Vec<super::models::ToolCall> = Vec::new();
+        let mut tool_calls: Vec<crate::services::llm::ToolCall> = Vec::new();
 
         while let Some(item) = stream.next().await {
             let bytes = item?;
@@ -273,10 +274,10 @@ impl AiClient {
                             for tc in tc_chunks {
                                 let idx = tc.index;
                                 while tool_calls.len() <= idx {
-                                    tool_calls.push(super::models::ToolCall {
+                                    tool_calls.push(crate::services::llm::ToolCall {
                                         id: String::new(),
                                         r#type: "function".to_string(),
-                                        function: super::models::FunctionCall {
+                                        function: crate::services::llm::FunctionCall {
                                             name: String::new(),
                                             arguments: String::new(),
                                         },
@@ -419,12 +420,12 @@ impl AiClient {
 }
 
 /// Parses a single Server-Sent Events line into a `ChatCompletionChunk`.
-pub fn parse_sse_chunk(line: &str) -> Option<super::models::ChatCompletionChunk> {
+pub fn parse_sse_chunk(line: &str) -> Option<crate::services::llm::ChatCompletionChunk> {
     let payload = line.strip_prefix("data:")?.trim();
     if payload == "[DONE]" {
         return None;
     }
-    serde_json::from_str::<super::models::ChatCompletionChunk>(payload).ok()
+    serde_json::from_str::<crate::services::llm::ChatCompletionChunk>(payload).ok()
 }
 
 /// Extracts delta text content from a single Server-Sent Events line.
@@ -434,7 +435,7 @@ pub fn parse_sse_line(line: &str) -> Option<String> {
         return None;
     }
 
-    let chunk = serde_json::from_str::<super::models::ChatCompletionChunk>(payload).ok()?;
+    let chunk = serde_json::from_str::<crate::services::llm::ChatCompletionChunk>(payload).ok()?;
     for choice in chunk.choices {
         if let Some(content) = choice.delta.content {
             if !content.is_empty() {
@@ -464,8 +465,8 @@ pub fn get_ai_client(ai: &crate::config::AiEnvConfig) -> AiClient {
 
 #[cfg(test)]
 mod tests {
-    use super::super::models::{ChatCompletionMessage, ChatCompletionRequest};
     use super::*;
+    use crate::services::llm::{ChatCompletionMessage, ChatCompletionRequest};
     use axum::{
         http::HeaderMap,
         routing::{get, post},

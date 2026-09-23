@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::bot::stage::StageReporter;
 use crate::modules::ai::client::{AiClient, ResolvedAiConfig, StreamTurnResult};
-use crate::modules::ai::models::{ChatCompletionRequest, ToolCall};
+use crate::services::llm::{ChatCompletionRequest, ToolCall};
 
 /// Executes an AI turn with real-time streaming updates to Matrix if a `StageReporter`
 /// is available, falling back cleanly to non-streaming on any transport error.
