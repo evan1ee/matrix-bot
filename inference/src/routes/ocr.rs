@@ -88,6 +88,32 @@ mod tests {
     use crate::config::InferenceConfig;
     use std::sync::Arc;
 
+    const OCR_SCAN_CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/ocr_scan.json"
+    ));
+
+    #[test]
+    fn test_ocr_scan_body_matches_the_shared_wire_contract() {
+        let body = OcrScanBody {
+            text: "SHAKE SHACK\nTotal $16.50".to_string(),
+            blocks: vec![
+                OcrScanBlock {
+                    text: "SHAKE SHACK".to_string(),
+                    score: 0.5,
+                },
+                OcrScanBlock {
+                    text: "Total $16.50".to_string(),
+                    score: 0.75,
+                },
+            ],
+        };
+
+        let expected: serde_json::Value =
+            serde_json::from_str(OCR_SCAN_CONTRACT).expect("the contract is valid JSON");
+        assert_eq!(serde_json::to_value(&body).unwrap(), expected);
+    }
+
     fn state_with_missing_models() -> AppState {
         AppState {
             config: Arc::new(InferenceConfig {
