@@ -10,8 +10,9 @@ use super::AppState;
 use crate::sherpa::VoiceError;
 
 /// The `response_format` values this server supports. OpenAI defines more
-/// (`text`, `srt`, `vtt`); the bot asks only for `verbose_json`, and `json` is
-/// OpenAI's default when the field is absent.
+/// (`text`, `srt`, `vtt`). The bot asks for `json` — OpenAI's default, and the
+/// one format every compatible model accepts — and `verbose_json` is served
+/// for any other OpenAI-compatible client.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ResponseFormat {
     Json,

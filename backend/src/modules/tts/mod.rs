@@ -1,11 +1,12 @@
 //! Text-to-speech: `!say <text>` replies with a spoken voice message.
 //!
-//! One engine, one code path, no trait — matching `modules/voice` (sherpa
-//! only). `modules/ocr` used to be this shape too (PaddleOCR only); it is now
-//! an HTTP client to the inference crate's `POST /ocr`, not an engine at all,
-//! so the comparison no longer applies to it. This module is sherpa-onnx's
-//! Kokoro TTS engine and nothing else; see `engine.rs` for why it differs from
-//! `modules/voice/sherpa.rs` in loading its model once instead of per call.
+//! One engine, one code path, no trait — matching `modules/voice` (SenseVoice
+//! only, now reached over HTTP). `modules/ocr` used to be this shape too
+//! (PaddleOCR only); it is now an HTTP client to the inference crate's
+//! `POST /ocr`, not an engine at all, so the comparison no longer applies to
+//! it. This module is sherpa-onnx's Kokoro TTS engine and nothing else; see
+//! `engine.rs` for why it differs from `inference/src/sherpa.rs` in loading
+//! its model once instead of per call.
 
 use async_trait::async_trait;
 use matrix_sdk::attachment::{AttachmentConfig, AttachmentInfo, BaseAudioInfo};

@@ -99,7 +99,9 @@ fn voice_error_response(err: crate::services::stt::SttServiceError) -> ApiError 
                 status, message
             );
             match status {
-                400 => ApiError::bad_request("The uploaded audio could not be decoded"),
+                400 => ApiError::bad_request(
+                    "The transcription service could not process the uploaded audio",
+                ),
                 503 => ApiError::service_unavailable(
                     "The voice transcription service has no models installed",
                 ),
