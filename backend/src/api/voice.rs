@@ -17,15 +17,16 @@ pub struct VoiceTranscribeResponse {
     pub duration_secs: f32,
 }
 
-/// Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference.
+/// Transcribes an uploaded voice recording through the configured speech-to-text service.
 #[utoipa::path(
     post,
     path = "/api/v1/voice/transcribe",
     tag = "Voice",
     responses(
         (status = 200, description = "Audio transcribed successfully", body = VoiceTranscribeResponse),
-        (status = 400, description = "Invalid or empty audio payload"),
-        (status = 503, description = "Voice transcription engine is disabled")
+        (status = 400, description = "Invalid or empty audio payload, or audio the transcription service could not process"),
+        (status = 500, description = "Voice transcription failed"),
+        (status = 503, description = "Voice transcription is disabled, not configured, or temporarily unavailable")
     ),
     security(("session_cookie" = []))
 )]
@@ -103,7 +104,7 @@ fn voice_error_response(err: crate::services::stt::SttServiceError) -> ApiError 
                     "The transcription service could not process the uploaded audio",
                 ),
                 503 => ApiError::service_unavailable(
-                    "The voice transcription service has no models installed",
+                    "The voice transcription service is temporarily unavailable",
                 ),
                 _ => ApiError::internal("Voice transcription failed"),
             }
