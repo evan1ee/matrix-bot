@@ -24,3 +24,5 @@ opus-decoder = "0.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["test-util"] }
