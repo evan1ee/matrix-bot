@@ -822,8 +822,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
             return; // Skip test if no live key is provided in env
         }
@@ -859,7 +859,7 @@ mod tests {
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -895,8 +895,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
             return;
         }
@@ -906,7 +906,7 @@ mod tests {
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -937,7 +937,7 @@ mod tests {
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -974,8 +974,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
             return;
         }
@@ -985,7 +985,7 @@ mod tests {
         // Turn 1: Add a task
         let turn1 = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -1003,7 +1003,7 @@ mod tests {
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -1030,8 +1030,8 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
             return;
         }
@@ -1040,7 +1040,7 @@ mod tests {
 
         let result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
