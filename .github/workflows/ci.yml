@@ -17,6 +17,24 @@ jobs:
         with:
           components: rustfmt
 
+      # Installed explicitly rather than assumed from the runner image.
+      # GitHub's ubuntu-latest happens to ship these, so this job worked without
+      # them; a self-hosted act_runner's default image (node:20-bullseye) does
+      # not, and the build fails on a missing cmake. release.yml has installed
+      # the same three for its Linux target all along.
+      #
+      # cmake builds the vendored libopus inside opusic-sys; reqwest pulls in
+      # native-tls, which needs the OpenSSL headers and pkg-config to find them.
+      - name: Install Linux build dependencies
+        run: |
+          set -eu
+          # A GitHub runner is a non-root user with sudo; a container-based
+          # act_runner is usually root with no sudo installed. Assuming either
+          # one would repeat the mistake this step exists to fix.
+          if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+          $sudo apt-get update
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
+
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v2-rust"
@@ -94,6 +112,31 @@ jobs:
     name: Backend CI (PostgreSQL dialect)
     runs-on: ubuntu-latest
 
+    # This job runs inside a container, unlike every other job in this file,
+    # and that is the point rather than an incidental preference.
+    #
+    # A service container is reachable at `127.0.0.1` only from a job running
+    # directly on the runner machine, which is what GitHub's hosted runner
+    # does. A job running *inside* a container reaches it at the service's
+    # label instead — `postgres` — since the two share a user-defined bridge
+    # network. A self-hosted act_runner always runs the job in a container, so
+    # the `127.0.0.1` spelling that worked on GitHub failed there for every
+    # database test at once: 357 failed with "TEST_DATABASE_URL must point at
+    # a reachable server" while the 364 touching no database passed.
+    #
+    # Correcting only the hostname would move the breakage to whichever runner
+    # it was not written for, so the job is pinned into a container on both and
+    # one spelling is then right everywhere.
+    #
+    # The image has to carry Node.js: that is what JavaScript actions
+    # (checkout, rust-cache, cache) execute with inside a job container, and
+    # act_runner does not inject it — its own default labels are `node:*`
+    # images for this reason. A `rust:*` image would fail at the first `uses:`.
+    # So Node is what the image is chosen for, and the Rust toolchain is
+    # installed below exactly as in the SQLite job, keeping both on `stable`.
+    # node:20-bookworm builds on buildpack-deps, so git, curl and a C toolchain
+    # are already there and cmake is the only real addition.
+    container: node:20-bookworm
 
     # The same suite, against a real PostgreSQL. The SQLite job above is the
     # fast default; this one exists because SQLite accepts plenty that Postgres
@@ -105,8 +148,9 @@ jobs:
         image: postgres:18
         env:
           POSTGRES_PASSWORD: bot
-        ports:
-          - 5432:5432
+        # No `ports:` mapping. Publishing to the runner's host only helps a job
+        # running on that host; containers on one network already reach each
+        # other's ports directly.
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -115,15 +159,34 @@ jobs:
 
     env:
       # Every test opens its own schema on this server instead of an in-memory
-      # SQLite database.
-      TEST_DATABASE_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
+      # SQLite database. The host is the service's label, per the container
+      # note above — never `127.0.0.1`.
+      TEST_DATABASE_URL: postgres://postgres:bot@postgres:5432/postgres
       # The #[ignore]d live tests read this one.
-      PG_TEST_URL: postgres://postgres:bot@127.0.0.1:5432/postgres
+      PG_TEST_URL: postgres://postgres:bot@postgres:5432/postgres
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # Installed explicitly rather than assumed from the runner image.
+      # GitHub's ubuntu-latest happens to ship these, so this job worked without
+      # them; a self-hosted act_runner's default image (node:20-bullseye) does
+      # not, and the build fails on a missing cmake. release.yml has installed
+      # the same three for its Linux target all along.
+      #
+      # cmake builds the vendored libopus inside opusic-sys; reqwest pulls in
+      # native-tls, which needs the OpenSSL headers and pkg-config to find them.
+      - name: Install Linux build dependencies
+        run: |
+          set -eu
+          # A GitHub runner is a non-root user with sudo; a container-based
+          # act_runner is usually root with no sudo installed. Assuming either
+          # one would repeat the mistake this step exists to fix.
+          if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+          $sudo apt-get update
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
 
       - uses: Swatinem/rust-cache@v2
         with:
