@@ -520,15 +520,20 @@ mod tests {
         }
     }
 
-    /// What the fake provider received: the Authorization header and the JSON body.
-    type Seen = Arc<Mutex<Option<(Option<String>, serde_json::Value)>>>;
+    /// What the fake provider received: the Authorization header, the Accept
+    /// header, and the JSON body.
+    type Seen = Arc<Mutex<Option<(Option<String>, Option<String>, serde_json::Value)>>>;
 
     fn record(seen: &Seen, headers: &HeaderMap, body: serde_json::Value) {
         let auth = headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        *seen.lock().unwrap() = Some((auth, body));
+        let accept = headers
+            .get("accept")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        *seen.lock().unwrap() = Some((auth, accept, body));
     }
 
     #[test]
@@ -654,7 +659,7 @@ mod tests {
             .expect("completion should succeed");
 
         assert_eq!(response.choices[0].message.content.as_deref(), Some("pong"));
-        let (auth, body) = seen
+        let (auth, _accept, body) = seen
             .lock()
             .unwrap()
             .clone()
@@ -670,9 +675,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_completion_non_success_is_an_api_error_with_status_and_body() {
+        let seen: Seen = Arc::default();
         let app = Router::new().route(
             "/chat/completions",
-            post(|| async { (axum::http::StatusCode::TOO_MANY_REQUESTS, "rate limited") }),
+            post({
+                let seen = seen.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let seen = seen.clone();
+                    async move {
+                        record(&seen, &headers, body);
+                        (axum::http::StatusCode::TOO_MANY_REQUESTS, "rate limited")
+                    }
+                }
+            }),
         );
         let base = spawn_server(app).await;
 
@@ -688,6 +703,15 @@ mod tests {
             }
             other => panic!("expected an API error, got {:?}", other),
         }
+        let (auth, _accept, _body) = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the provider was called");
+        assert_eq!(
+            auth, None,
+            "a request with no key sends no Authorization header"
+        );
     }
 
     #[tokio::test]
@@ -717,12 +741,16 @@ mod tests {
         let deltas: Arc<Mutex<Vec<String>>> = Arc::default();
 
         let result = AiClient::new(None)
-            .chat_completion_stream(&config_for(base, None), &request("test-model"), |d| {
-                let deltas = deltas.clone();
-                async move {
-                    deltas.lock().unwrap().push(d);
-                }
-            })
+            .chat_completion_stream(
+                &config_for(base, Some("sk-test")),
+                &request("test-model"),
+                |d| {
+                    let deltas = deltas.clone();
+                    async move {
+                        deltas.lock().unwrap().push(d);
+                    }
+                },
+            )
             .await
             .expect("stream should succeed");
 
@@ -735,12 +763,14 @@ mod tests {
         assert_eq!(result.tool_calls[0].id, "call_1");
         assert_eq!(result.tool_calls[0].function.name, "add_todo");
         assert_eq!(result.tool_calls[0].function.arguments, "{\"a\":1}");
-        let (_, body) = seen
+        let (auth, accept, body) = seen
             .lock()
             .unwrap()
             .clone()
             .expect("the provider was called");
         assert_eq!(body["stream"], true, "streaming forces stream=true");
+        assert_eq!(auth.as_deref(), Some("Bearer sk-test"));
+        assert_eq!(accept.as_deref(), Some("text/event-stream"));
     }
 
     #[tokio::test]
