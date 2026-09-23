@@ -6,6 +6,10 @@ use crate::audio::TARGET_SAMPLE_RATE;
 pub const SENSEVOICE_MODEL_FILE: &str = "model.int8.onnx";
 pub const SENSEVOICE_TOKENS_FILE: &str = "tokens.txt";
 
+/// The `language` values SenseVoice accepts. Anything else makes
+/// `OfflineRecognizer::create` fail, so the route rejects it up front.
+pub const SENSEVOICE_LANGUAGES: &[&str] = &["auto", "zh", "en", "ja", "ko", "yue"];
+
 use thiserror::Error;
 
 /// One transcription, as the route turns it into a response.

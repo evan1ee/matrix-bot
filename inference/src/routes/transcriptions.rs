@@ -59,6 +59,26 @@ struct TranscriptionRequest {
     format: ResponseFormat,
 }
 
+/// Normalises the optional `language` field: blank means absent, case is
+/// folded, and anything SenseVoice cannot do is the caller's error.
+fn parse_language(raw: Option<String>) -> Result<Option<String>, String> {
+    let Some(language) = raw
+        .map(|l| l.trim().to_ascii_lowercase())
+        .filter(|l| !l.is_empty())
+    else {
+        return Ok(None);
+    };
+    if crate::sherpa::SENSEVOICE_LANGUAGES.contains(&language.as_str()) {
+        Ok(Some(language))
+    } else {
+        Err(format!(
+            "Unsupported language '{}'; this server supports {}",
+            language,
+            crate::sherpa::SENSEVOICE_LANGUAGES.join(", ")
+        ))
+    }
+}
+
 /// Reads the multipart form. `model` and every other OpenAI field are accepted
 /// and ignored: this server has exactly one model.
 async fn read_request(
@@ -107,9 +127,7 @@ async fn read_request(
         .filter(|f| !f.is_empty())
         .ok_or_else(|| bad("Missing or empty 'file' field".to_string()))?;
     let format = ResponseFormat::parse(format.as_deref()).map_err(bad)?;
-    let language = language
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty());
+    let language = parse_language(language).map_err(bad)?;
 
     Ok(TranscriptionRequest {
         file,
@@ -262,6 +280,33 @@ mod tests {
             ("response_format", None, b"srt"),
         ])
         .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_parse_language_accepts_supported_values_case_insensitively() {
+        assert_eq!(parse_language(None), Ok(None));
+        assert_eq!(parse_language(Some("  ".to_string())), Ok(None));
+        assert_eq!(
+            parse_language(Some("ZH".to_string())),
+            Ok(Some("zh".to_string()))
+        );
+        assert_eq!(
+            parse_language(Some(" yue ".to_string())),
+            Ok(Some("yue".to_string()))
+        );
+        assert_eq!(
+            parse_language(Some("auto".to_string())),
+            Ok(Some("auto".to_string()))
+        );
+        assert!(parse_language(Some("fr".to_string())).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_an_unsupported_language_is_a_400_not_a_500() {
+        let wav = crate::audio::test_audio::silent_wav_16k_mono(1.0);
+        let status =
+            post_transcription(&[("file", Some("a.wav"), &wav), ("language", None, b"fr")]).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
