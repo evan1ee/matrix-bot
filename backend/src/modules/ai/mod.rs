@@ -5,13 +5,13 @@ use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 
 pub mod alert;
-pub mod client;
 pub mod config_cmd;
 pub mod error;
 pub mod handler;
 pub mod models;
 pub mod prompt;
 pub mod repository;
+pub mod resolved_config;
 pub mod retrospective;
 pub mod search;
 pub mod stream;

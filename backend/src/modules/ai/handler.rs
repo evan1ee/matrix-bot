@@ -4,8 +4,6 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
-pub use super::client::get_ai_client;
-use super::client::ResolvedAiConfig;
 pub use super::config_cmd::{
     format_error, format_help, handle_ai_subcommand, handle_reset, handle_set_history,
     handle_set_model, handle_show_config,
@@ -13,6 +11,7 @@ pub use super::config_cmd::{
 pub use super::error::AiError;
 pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
+use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
@@ -277,7 +276,7 @@ pub async fn run_ai_turn_with_stage(
         });
     }
 
-    let client = get_ai_client(ai);
+    let client = crate::services::llm::shared_client(ai.proxy.as_deref());
     let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
         .into_iter()
         .filter_map(|t| serde_json::to_value(t).ok())

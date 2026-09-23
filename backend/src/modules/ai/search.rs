@@ -1,4 +1,4 @@
-use super::client::ResolvedAiConfig;
+use super::resolved_config::ResolvedAiConfig;
 use crate::bot::quote::QuotedMessage;
 
 /// Returns true if the active AI configuration is using xAI (Grok).

@@ -4,3 +4,5 @@
 //! capabilities are reached. Nothing in here may import from `modules/`.
 
 pub mod llm;
+#[cfg(test)]
+mod test_support;

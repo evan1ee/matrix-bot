@@ -8,14 +8,14 @@ use tracing::error;
 use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
-use crate::modules::ai::client::ResolvedAiConfig;
 use crate::modules::ai::error::AiError;
-use crate::modules::ai::handler::{get_ai_client, run_ai_turn};
+use crate::modules::ai::handler::run_ai_turn;
 use crate::modules::ai::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
     VerifyAiKeyInput, VerifyAiKeyResponse,
 };
 use crate::modules::ai::repository::AiRepository;
+use crate::modules::ai::resolved_config::ResolvedAiConfig;
 use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
 
 /// It used to be a bare `String`, so this always answered 400 — a provider
@@ -317,7 +317,7 @@ pub async fn verify_ai_config(
         .filter(|m| !m.trim().is_empty())
         .unwrap_or(resolved.model_name);
 
-    match get_ai_client(&state.ai)
+    match crate::services::llm::shared_client(state.ai.proxy.as_deref())
         .verify_api_key(&target_base_url, target_key.as_deref(), Some(&target_model))
         .await
     {
