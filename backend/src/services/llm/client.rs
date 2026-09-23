@@ -50,11 +50,18 @@ impl LlmClient {
             if !trimmed.is_empty() {
                 match reqwest::Proxy::all(trimmed) {
                     Ok(proxy) => {
-                        info!("LLM client configured with proxy: {}", trimmed);
+                        info!(
+                            "LLM client configured with proxy: {}",
+                            display_proxy(trimmed)
+                        );
                         builder = builder.proxy(proxy);
                     }
                     Err(err) => {
-                        warn!("Failed to parse AI proxy URL '{}': {}", trimmed, err);
+                        warn!(
+                            "Failed to parse LLM proxy URL {}: {}",
+                            display_proxy(trimmed),
+                            err
+                        );
                     }
                 }
             }
@@ -354,6 +361,20 @@ impl LlmClient {
     }
 }
 
+/// A proxy URL as it may be logged: scheme, host and port only. Credentials
+/// are never shown, and an unparseable value is not echoed at all.
+fn display_proxy(raw: &str) -> String {
+    match reqwest::Url::parse(raw) {
+        Ok(url) => format!(
+            "{}://{}{}",
+            url.scheme(),
+            url.host_str().unwrap_or("?"),
+            url.port().map(|p| format!(":{}", p)).unwrap_or_default()
+        ),
+        Err(_) => "<unparseable proxy URL>".to_string(),
+    }
+}
+
 /// Parses a single Server-Sent Events line into a `ChatCompletionChunk`.
 fn parse_sse_chunk(line: &str) -> Option<super::types::ChatCompletionChunk> {
     let payload = line.strip_prefix("data:")?.trim();
@@ -437,6 +458,20 @@ mod tests {
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
         *seen.lock().unwrap() = Some((auth, accept, body));
+    }
+
+    #[test]
+    fn test_display_proxy_hides_credentials() {
+        assert_eq!(
+            display_proxy("http://user:secret@proxy.local:8080"),
+            "http://proxy.local:8080"
+        );
+        assert_eq!(
+            display_proxy("socks5://proxy.local"),
+            "socks5://proxy.local"
+        );
+        assert_eq!(display_proxy("not a url"), "<unparseable proxy URL>");
+        assert!(!display_proxy("http://user:secret@proxy.local:8080").contains("secret"));
     }
 
     #[test]
