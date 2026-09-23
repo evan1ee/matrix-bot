@@ -188,7 +188,7 @@ mod tests {
         println!("Resolved has API key: {}", config.api_key.is_some());
         let api_key = match config.api_key.as_ref() {
             Some(k) if !k.trim().is_empty() => k.clone(),
-            _ => return, // Skip test if no live key is configured
+            _ => panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env"),
         };
 
         let client = crate::services::llm::LlmClient::new(ai_env.proxy.as_deref());
@@ -256,7 +256,7 @@ mod tests {
             .as_deref()
             .map_or(true, |k| k.trim().is_empty())
         {
-            return; // no live key configured
+            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
         }
 
         let request = crate::services::llm::ChatCompletionRequest {
