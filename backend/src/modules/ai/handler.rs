@@ -823,7 +823,7 @@ mod tests {
         let _ = dotenvy::dotenv();
 
         let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
         if config.api_key.is_none() {
             return; // Skip test if no live key is provided in env
         }
@@ -896,7 +896,7 @@ mod tests {
         let _ = dotenvy::dotenv();
 
         let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
         if config.api_key.is_none() {
             return;
         }
@@ -975,7 +975,7 @@ mod tests {
         let _ = dotenvy::dotenv();
 
         let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
         if config.api_key.is_none() {
             return;
         }
@@ -1031,7 +1031,7 @@ mod tests {
         let _ = dotenvy::dotenv();
 
         let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::from_env(), None);
         if config.api_key.is_none() {
             return;
         }

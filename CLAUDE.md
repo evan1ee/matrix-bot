@@ -102,7 +102,7 @@ The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified
 import from `modules/`. `services/llm` is the LLM transport: any
 OpenAI-compatible chat-completions API reached by base URL alone, plus the
 wire types (`ChatCompletionRequest`, `ToolDefinition`, ...). `modules/ai`
-keeps everything that is the bot's business -- prompts, the tool loop,
+keeps everything that is the bot's business — prompts, the tool loop,
 conversation storage, and `resolved_config.rs`, which merges the env defaults
 with a user's saved AI settings and hands the transport only its
 `endpoint()`. There is deliberately no per-vendor provider enum: base URL
