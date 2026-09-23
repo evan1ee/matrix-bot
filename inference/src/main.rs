@@ -1,8 +1,9 @@
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 mod config;
 mod paddle;
+mod provision;
 mod routes;
 
 #[tokio::main]
@@ -17,23 +18,13 @@ async fn main() -> anyhow::Result<()> {
     let config = config::InferenceConfig::from_env();
     let port = config.port;
 
-    // Provision the OCR models before serving, so a fresh deployment self-heals
-    // instead of permanently 503ing (`routes::ocr::scan` gates on
-    // `models_present` and never downloads). A failure here — no network, a
-    // dead mirror — is deliberately non-fatal: the server still comes up and
-    // `/health` reports `ocr: false` truthfully, rather than crash-looping on
-    // a transient network blip.
-    if let Err(err) = paddle::ensure_models(&config.ocr_model_dir).await {
-        warn!(
-            "OCR model provisioning failed at boot; OCR will report unavailable until this \
-             is resolved: {}",
-            err
-        );
-    }
-
     let state = routes::AppState {
         config: Arc::new(config),
     };
+
+    // Provisioning downloads models and can take minutes; run it beside the
+    // server, not in front of it. See `provision::provision_models`.
+    tokio::spawn(provision::provision_models(state.config.clone()));
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
     info!("Inference server listening on 0.0.0.0:{}", port);
