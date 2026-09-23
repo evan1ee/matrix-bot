@@ -464,8 +464,72 @@ pub fn get_ai_client(ai: &crate::config::AiEnvConfig) -> AiClient {
 
 #[cfg(test)]
 mod tests {
-    use super::super::models::ChatCompletionMessage;
+    use super::super::models::{ChatCompletionMessage, ChatCompletionRequest};
     use super::*;
+    use axum::{
+        http::HeaderMap,
+        routing::{get, post},
+        Json, Router,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// A throwaway server on an ephemeral port; returns its base URL.
+    async fn spawn_server(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("ephemeral port should bind");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have an address");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        format!("http://{}", addr)
+    }
+
+    fn user_message(text: &str) -> ChatCompletionMessage {
+        ChatCompletionMessage {
+            role: "user".to_string(),
+            content: Some(text.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    fn request(model: &str) -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![user_message("ping")],
+            temperature: Some(0.5),
+            max_tokens: Some(16),
+            tools: None,
+            tool_choice: None,
+            stream: None,
+        }
+    }
+
+    fn config_for(base: String, key: Option<&str>) -> ResolvedAiConfig {
+        ResolvedAiConfig {
+            api_base_url: base,
+            api_key: key.map(str::to_owned),
+            model_name: "test-model".to_string(),
+            system_prompt: None,
+            temperature: 0.5,
+            max_tokens: 16,
+        }
+    }
+
+    /// What the fake provider received: the Authorization header and the JSON body.
+    type Seen = Arc<Mutex<Option<(Option<String>, serde_json::Value)>>>;
+
+    fn record(seen: &Seen, headers: &HeaderMap, body: serde_json::Value) {
+        let auth = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        *seen.lock().unwrap() = Some((auth, body));
+    }
 
     #[test]
     fn test_parse_sse_line() {
@@ -557,6 +621,154 @@ mod tests {
         );
         assert_eq!(resolved.temperature, 2.0);
         assert_eq!(resolved.max_tokens, 8192);
+    }
+
+    #[tokio::test]
+    async fn test_chat_completion_posts_to_chat_completions_with_bearer_and_body() {
+        let seen: Seen = Arc::default();
+        let app = Router::new().route(
+            "/chat/completions",
+            post({
+                let seen = seen.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let seen = seen.clone();
+                    async move {
+                        record(&seen, &headers, body);
+                        Json(serde_json::json!({
+                            "id": "c1", "model": "test-model",
+                            "choices": [{
+                                "index": 0,
+                                "message": { "role": "assistant", "content": "pong" },
+                                "finish_reason": "stop"
+                            }]
+                        }))
+                    }
+                }
+            }),
+        );
+        let base = spawn_server(app).await;
+
+        let response = AiClient::new(None)
+            .chat_completion(&config_for(base, Some("sk-test")), &request("test-model"))
+            .await
+            .expect("completion should succeed");
+
+        assert_eq!(response.choices[0].message.content.as_deref(), Some("pong"));
+        let (auth, body) = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the provider was called");
+        assert_eq!(auth.as_deref(), Some("Bearer sk-test"));
+        assert_eq!(body["model"], "test-model");
+        assert_eq!(body["messages"][0]["content"], "ping");
+        assert!(
+            body.get("stream").is_none(),
+            "an unset stream flag is omitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chat_completion_non_success_is_an_api_error_with_status_and_body() {
+        let app = Router::new().route(
+            "/chat/completions",
+            post(|| async { (axum::http::StatusCode::TOO_MANY_REQUESTS, "rate limited") }),
+        );
+        let base = spawn_server(app).await;
+
+        let err = AiClient::new(None)
+            .chat_completion(&config_for(base, None), &request("test-model"))
+            .await
+            .expect_err("a 429 is an error");
+
+        match err {
+            AiClientError::Api { status, message } => {
+                assert_eq!(status, 429);
+                assert!(message.contains("rate limited"));
+            }
+            other => panic!("expected an API error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chat_completion_stream_assembles_text_and_tool_calls() {
+        const SSE: &str = concat!(
+            "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"add_\",\"arguments\":\"{\\\"a\\\":\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"todo\",\"arguments\":\"1}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let seen: Seen = Arc::default();
+        let app = Router::new().route(
+            "/chat/completions",
+            post({
+                let seen = seen.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let seen = seen.clone();
+                    async move {
+                        record(&seen, &headers, body);
+                        ([("content-type", "text/event-stream")], SSE)
+                    }
+                }
+            }),
+        );
+        let base = spawn_server(app).await;
+        let deltas: Arc<Mutex<Vec<String>>> = Arc::default();
+
+        let result = AiClient::new(None)
+            .chat_completion_stream(&config_for(base, None), &request("test-model"), |d| {
+                let deltas = deltas.clone();
+                async move {
+                    deltas.lock().unwrap().push(d);
+                }
+            })
+            .await
+            .expect("stream should succeed");
+
+        assert_eq!(
+            *deltas.lock().unwrap(),
+            vec!["Hel".to_string(), "lo".to_string()]
+        );
+        assert_eq!(result.content, "Hello");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].id, "call_1");
+        assert_eq!(result.tool_calls[0].function.name, "add_todo");
+        assert_eq!(result.tool_calls[0].function.arguments, "{\"a\":1}");
+        let (_, body) = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the provider was called");
+        assert_eq!(body["stream"], true, "streaming forces stream=true");
+    }
+
+    #[tokio::test]
+    async fn test_verify_api_key_accepts_a_200_from_models() {
+        let app = Router::new().route("/models", get(|| async { "[]" }));
+        let base = spawn_server(app).await;
+
+        let result = AiClient::new(None)
+            .verify_api_key(&base, Some("sk-test"), Some("test-model"))
+            .await;
+
+        assert!(result.is_ok(), "{:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_verify_api_key_rejects_a_401_as_invalid_key() {
+        let app = Router::new().route(
+            "/models",
+            get(|| async { (axum::http::StatusCode::UNAUTHORIZED, "bad key") }),
+        );
+        let base = spawn_server(app).await;
+
+        let err = AiClient::new(None)
+            .verify_api_key(&base, Some("sk-wrong"), Some("test-model"))
+            .await
+            .expect_err("a 401 is an invalid key");
+
+        assert!(err.starts_with("Invalid API key (HTTP 401)"), "{}", err);
     }
 
     #[ignore]
