@@ -5,19 +5,25 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::utils::html::html_escape;
 
-pub mod audio;
 pub mod models;
 pub mod prompt;
-pub mod sherpa;
 
-pub use models::{VoiceConfig, VoiceError, VoiceTranscriptionResult};
+pub use models::{VoiceConfig, VoiceTranscriptionResult};
+
+/// The voice note's length, for the prompt. A provider's figure wins when it
+/// sends one; `json` responses carry none, so the Matrix event's own
+/// `info.duration`, set by the sender's client, is the usual source.
+fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duration>) -> f32 {
+    provider
+        .or_else(|| event.map(|d| d.as_secs_f32()))
+        .unwrap_or(0.0)
+}
 
 /// Processes an incoming Matrix audio or voice note message:
-/// 1. Decodes audio bytes (Ogg Opus, WAV, MP3, etc.) into 16kHz mono PCM.
-/// 2. Performs speech-to-text inference with sherpa-onnx and SenseVoiceSmall.
-/// 3. Builds a structured semantic intent prompt with the transcription.
-/// 4. Executes an AI turn with all productivity tools enabled (add_expense, add_todo, create_reminder).
-/// 5. Formats and returns an HTML reply summarizing the actions taken.
+/// Sends the audio to the configured speech-to-text service (`services::stt`).
+/// 2. Builds a structured semantic intent prompt with the transcription.
+/// 3. Executes an AI turn with all productivity tools enabled (add_expense, add_todo, create_reminder).
+/// 4. Formats and returns an HTML reply summarizing the actions taken.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_audio_event(
     db: &Database,
@@ -26,7 +32,10 @@ pub async fn process_audio_event(
     room: &Room,
     owner_id: &str,
     audio_bytes: &[u8],
+    mime_type: Option<&str>,
+    audio_duration: Option<std::time::Duration>,
     config: &VoiceConfig,
+    stt: &crate::services::stt::SttClient,
     stage_reporter: Option<&crate::bot::stage::StageReporter>,
 ) -> String {
     if audio_bytes.is_empty() {
@@ -47,39 +56,26 @@ pub async fn process_audio_event(
         audio_bytes.len()
     );
 
-    // 1. Decode audio into 16kHz mono f32 samples
-    let samples = match audio::decode_audio_to_16k_mono(audio_bytes) {
-        Ok(samples) => samples,
+    let transcription: VoiceTranscriptionResult = match stt
+        .transcribe(audio_bytes.to_vec(), mime_type, config.language_hint())
+        .await
+    {
+        Ok(t) => {
+            let duration_secs = resolve_duration_secs(t.duration, audio_duration);
+            let result: VoiceTranscriptionResult = t.into();
+            VoiceTranscriptionResult {
+                duration_secs,
+                ..result
+            }
+        }
         Err(err) => {
-            warn!("Audio decoding failed for owner {}: {:?}", owner_id, err);
-            return format!(
-                "⚠️ <b>语音转写失败</b><br/>\
-                 • <b>原因:</b> 音频解码失败或格式不兼容（{}）<br/>\
-                 • <b>建议:</b> 请检查麦克风录音权限或尝试重新发送，也可直接输入文字。",
-                html_escape(&err.to_string())
+            warn!(
+                "Voice transcription failed for owner {}: {:?}",
+                owner_id, err
             );
+            return voice_error_message(&err);
         }
     };
-
-    // 2. Run offline speech recognition via sherpa-onnx + SenseVoice
-    let transcription =
-        match sherpa::run_transcription(samples, config.model_dir.clone(), config.language.clone())
-            .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                warn!(
-                    "Voice transcription failed for owner {}: {:?}",
-                    owner_id, err
-                );
-                return format!(
-                    "⚠️ <b>语音转写服务异常</b><br/>\
-                 • <b>原因:</b> 语音识别引擎暂时不可用（{}）<br/>\
-                 • <b>建议:</b> 请稍后重试，或直接输入文字。",
-                    html_escape(&err.to_string())
-                );
-            }
-        };
 
     if transcription.is_empty() {
         return "⚠️ <b>语音未能识别</b><br/>\
@@ -128,6 +124,31 @@ pub async fn process_audio_event(
     }
 }
 
+/// The reply for a failed transcription. Never includes the error's own text:
+/// that carries the service's response body, and on a connection failure the
+/// request URL, neither of which belongs in a chat room. Full detail is in the
+/// `warn!` at the call site.
+fn voice_error_message(err: &crate::services::stt::SttServiceError) -> String {
+    use crate::services::stt::SttServiceError;
+
+    match err {
+        SttServiceError::NotConfigured => "⚠️ <b>语音处理不可用</b><br/>\
+             • <b>原因:</b> 本部署未配置语音识别服务<br/>\
+             • <b>建议:</b> 请直接输入文字，或联系管理员启用语音识别。"
+            .to_string(),
+        SttServiceError::Upstream { status: 400, .. } => "⚠️ <b>语音无法识别</b><br/>\
+             • <b>原因:</b> 语音识别服务无法处理这段音频<br/>\
+             • <b>建议:</b> 请尝试重新录制并发送语音，或直接输入文字。"
+            .to_string(),
+        SttServiceError::Unreachable(_) | SttServiceError::Upstream { .. } => {
+            "⚠️ <b>语音处理不可用</b><br/>\
+             • <b>原因:</b> 语音识别服务当前不可用<br/>\
+             • <b>建议:</b> 请稍后重试，或直接输入文字。"
+                .to_string()
+        }
+    }
+}
+
 fn format_voice_turn_response(
     ai_turn: &crate::modules::ai::handler::AiTurnResult,
     _transcription: &VoiceTranscriptionResult,
@@ -164,5 +185,63 @@ mod tests {
         assert!(html.contains("🤖"));
         assert!(html.contains("grok-4.6 • SenseVoice"));
         assert!(!html.contains("add_todo"));
+    }
+
+    #[test]
+    fn test_no_voice_error_reply_carries_upstream_detail() {
+        use crate::services::stt::SttServiceError;
+        let leaky = "http://inference:8090/v1/audio/transcriptions symphonia-detail";
+        let cases = [
+            (SttServiceError::NotConfigured, "语音处理不可用"),
+            (
+                SttServiceError::Unreachable(leaky.to_string()),
+                "语音处理不可用",
+            ),
+            (
+                SttServiceError::Upstream {
+                    status: 400,
+                    message: leaky.to_string(),
+                },
+                "语音无法识别",
+            ),
+            (
+                SttServiceError::Upstream {
+                    status: 503,
+                    message: leaky.to_string(),
+                },
+                "语音处理不可用",
+            ),
+            (
+                SttServiceError::Upstream {
+                    status: 401,
+                    message: leaky.to_string(),
+                },
+                "语音处理不可用",
+            ),
+        ];
+        for (err, headline) in cases {
+            let html = voice_error_message(&err);
+            assert!(html.contains(headline), "{:?} -> {}", err, html);
+            assert!(!html.contains("inference:8090"), "leaked a URL: {}", html);
+            assert!(
+                !html.contains("symphonia-detail"),
+                "leaked detail: {}",
+                html
+            );
+        }
+    }
+
+    #[test]
+    fn test_duration_prefers_the_provider_then_the_matrix_event() {
+        use std::time::Duration;
+        assert_eq!(
+            resolve_duration_secs(Some(2.5), Some(Duration::from_secs(9))),
+            2.5
+        );
+        assert_eq!(
+            resolve_duration_secs(None, Some(Duration::from_millis(1500))),
+            1.5
+        );
+        assert_eq!(resolve_duration_secs(None, None), 0.0);
     }
 }

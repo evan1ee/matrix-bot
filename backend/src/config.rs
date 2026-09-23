@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::env;
 
+const DEFAULT_STT_MODEL: &str = "sensevoice-small";
+
 /// Whether this process is running as a production deployment.
 ///
 /// Read in two places — the `Secure` cookie flag and the boot-time refusal to
@@ -173,12 +175,19 @@ pub struct Config {
     /// Absent means OCR is unavailable in this deployment: the feature
     /// degrades with a message, and nothing else is affected.
     pub ocr_base_url: Option<String>,
-    /// Whether local sherpa-onnx SenseVoice speech transcription is enabled.
+    /// Whether speech transcription is enabled.
     pub voice_enabled: bool,
-    /// Path to directory containing the SenseVoice ONNX model and tokens.
-    pub voice_model_dir: std::path::PathBuf,
     /// Default speech recognition language (e.g. "auto", "zh", "en", "ja", "ko", "yue").
     pub voice_language: String,
+    /// Base URL of an OpenAI-compatible speech-to-text API, including its
+    /// version prefix (`http://inference:8090/v1`, `https://api.openai.com/v1`).
+    /// Absent means voice transcription is unavailable in this deployment.
+    pub stt_base_url: Option<String>,
+    /// Bearer token for a hosted STT provider. The bundled server needs none.
+    pub stt_api_key: Option<String>,
+    /// Model name sent with every transcription request. The bundled server
+    /// has one model and ignores it.
+    pub stt_model: String,
     /// Whether local sherpa-onnx Kokoro text-to-speech is enabled.
     ///
     /// Unlike `ocr_enabled`/`voice_enabled`, this defaults to `false`: the
@@ -281,11 +290,21 @@ impl Config {
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(true);
 
-        let voice_model_dir = env::var("VOICE_MODEL_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("data/voice_models"));
-
         let voice_language = env::var("VOICE_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
+
+        let stt_base_url = env::var("STT_BASE_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let stt_api_key = env::var("STT_API_KEY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let stt_model = env::var("STT_MODEL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| DEFAULT_STT_MODEL.to_string());
 
         let tts_enabled = env::var("TTS_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -326,8 +345,10 @@ impl Config {
             ocr_enabled,
             ocr_base_url,
             voice_enabled,
-            voice_model_dir,
             voice_language,
+            stt_base_url,
+            stt_api_key,
+            stt_model,
             tts_enabled,
             tts_model_dir,
             tts_speaker_id,
@@ -418,8 +439,10 @@ mod tests {
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
-            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            stt_base_url: None,
+            stt_api_key: None,
+            stt_model: "sensevoice-small".to_string(),
             tts_enabled: false,
             tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
             tts_speaker_id: 0,
@@ -460,8 +483,10 @@ mod tests {
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
-            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            stt_base_url: None,
+            stt_api_key: None,
+            stt_model: "sensevoice-small".to_string(),
             tts_enabled: false,
             tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
             tts_speaker_id: 0,
