@@ -4,6 +4,7 @@
 //! capabilities are reached. Nothing in here may import from `modules/`.
 
 pub mod ocr;
+pub mod stt;
 
 #[cfg(test)]
 mod test_support;
