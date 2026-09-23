@@ -8,9 +8,9 @@ use tracing::warn;
 /// answer a voice note well inside this.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// OpenAI's `verbose_json` transcription, reduced to what the bot reads.
-/// `language` and `duration` are optional because a provider answering plain
-/// `json` sends text only.
+/// OpenAI's `json` transcription response. `language` and `duration` are
+/// optional because `json` carries text only; a provider that includes them
+/// anyway is honoured.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct SttTranscription {
     pub text: String,
@@ -99,7 +99,7 @@ impl SttClient {
         let mut form = reqwest::multipart::Form::new()
             .part("file", file)
             .text("model", self.model.clone())
-            .text("response_format", "verbose_json");
+            .text("response_format", "json");
         if let Some(language) = language {
             form = form.text("language", language.to_string());
         }
@@ -168,9 +168,9 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
 
-    const STT_VERBOSE_CONTRACT: &str = include_str!(concat!(
+    const STT_JSON_CONTRACT: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../contracts/stt_transcription_verbose.json"
+        "/../contracts/stt_transcription_json.json"
     ));
 
     /// What the fake server saw: the Authorization header and every
@@ -212,7 +212,7 @@ mod tests {
                     (
                         StatusCode::OK,
                         [("content-type", "application/json")],
-                        STT_VERBOSE_CONTRACT,
+                        STT_JSON_CONTRACT,
                     )
                 }
             }),
@@ -223,8 +223,8 @@ mod tests {
     fn contract_transcription() -> SttTranscription {
         SttTranscription {
             text: "今天天气真好。".to_string(),
-            language: Some("zh".to_string()),
-            duration: Some(1.5),
+            language: None,
+            duration: None,
         }
     }
 
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sends_the_audio_filename_model_and_verbose_format() {
+    async fn test_sends_the_audio_filename_model_and_json_format() {
         let captured = Arc::new(Mutex::new(Captured::default()));
         let base = capturing_server(captured.clone()).await;
         let client = SttClient::new(Some(base), None, "sensevoice-small".to_string());
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(bytes.as_slice(), &[7u8, 8, 9]);
         assert_eq!(filename.as_deref(), Some("audio.ogg"));
         assert_eq!(seen.field("model").unwrap().2, b"sensevoice-small");
-        assert_eq!(seen.field("response_format").unwrap().2, b"verbose_json");
+        assert_eq!(seen.field("response_format").unwrap().2, b"json");
         assert!(
             seen.field("language").is_none(),
             "no hint means no language field"
@@ -289,16 +289,8 @@ mod tests {
     #[test]
     fn test_the_shared_wire_contract_deserialises_into_stt_transcription() {
         let parsed: SttTranscription =
-            serde_json::from_str(STT_VERBOSE_CONTRACT).expect("the contract should parse");
+            serde_json::from_str(STT_JSON_CONTRACT).expect("the contract should parse");
         assert_eq!(parsed, contract_transcription());
-    }
-
-    #[test]
-    fn test_a_text_only_response_still_parses() {
-        let parsed: SttTranscription = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
-        assert_eq!(parsed.text, "hi");
-        assert_eq!(parsed.language, None);
-        assert_eq!(parsed.duration, None);
     }
 
     #[tokio::test]

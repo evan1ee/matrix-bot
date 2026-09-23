@@ -202,6 +202,10 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../contracts/stt_transcription_verbose.json"
     ));
+    const STT_JSON_CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/stt_transcription_json.json"
+    ));
     const BOUNDARY: &str = "matrix-bot-test-boundary";
 
     fn state_with_missing_models() -> AppState {
@@ -366,11 +370,11 @@ mod tests {
     #[test]
     fn test_json_body_is_text_only() {
         let body = TranscriptionBody::Json(TranscriptionText {
-            text: "hi".to_string(),
+            text: "今天天气真好。".to_string(),
         });
-        assert_eq!(
-            serde_json::to_value(&body).unwrap(),
-            serde_json::json!({ "text": "hi" })
-        );
+
+        let expected: serde_json::Value =
+            serde_json::from_str(STT_JSON_CONTRACT).expect("the contract is valid JSON");
+        assert_eq!(serde_json::to_value(&body).unwrap(), expected);
     }
 }
