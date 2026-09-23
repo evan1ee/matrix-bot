@@ -109,7 +109,7 @@ pub async fn process_audio_event(
     )
     .await
     {
-        Ok(ai_turn) => format_voice_turn_response(&ai_turn, &transcription),
+        Ok(ai_turn) => format_voice_turn_response(&ai_turn, &transcription, stt.model()),
         Err(err) => {
             warn!("AI turn failed for transcribed voice: {}", err);
             format!(
@@ -152,11 +152,12 @@ fn voice_error_message(err: &crate::services::stt::SttServiceError) -> String {
 fn format_voice_turn_response(
     ai_turn: &crate::modules::ai::handler::AiTurnResult,
     _transcription: &VoiceTranscriptionResult,
+    engine_label: &str,
 ) -> String {
     crate::modules::ai::handler::format_response(
         &ai_turn.message,
         &ai_turn.model_used,
-        Some("SenseVoice"),
+        Some(engine_label),
         &ai_turn.tool_calls_executed,
     )
 }
@@ -180,10 +181,10 @@ mod tests {
             duration_secs: 2.8,
         };
 
-        let html = format_voice_turn_response(&ai_turn, &transcription);
+        let html = format_voice_turn_response(&ai_turn, &transcription, "whisper-1");
         assert!(html.contains("Review budget"));
         assert!(html.contains("🤖"));
-        assert!(html.contains("grok-4.6 • SenseVoice"));
+        assert!(html.contains("grok-4.6 • whisper-1"));
         assert!(!html.contains("add_todo"));
     }
 

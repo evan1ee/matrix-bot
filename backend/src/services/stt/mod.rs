@@ -78,6 +78,11 @@ impl SttClient {
         }
     }
 
+    /// The model name sent with each request, for callers that label output.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     /// Sends the audio untouched and returns its transcription.
     ///
     /// The part's filename carries an extension derived from `mime_type`,
