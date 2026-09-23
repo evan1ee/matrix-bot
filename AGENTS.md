@@ -189,3 +189,6 @@ Never commit code that fails compilation, lints, or tests.
 - **Modular Separation of Concerns**: Keep components modular and concerns clearly separated (API, DB, Matrix handler, UI, Events).
 - **Lean on Existing Libraries**: Prefer established dependencies already in the workspace before adding new packages or writing custom implementations.
 - **Long-Term Architectural Craft**: Make architectural decisions for the long term. Do not accept temporary stopgaps that only work for now and are meant to be replaced later.
+- **`services/` never imports from `modules/`.** `modules/` is what the
+  application does; `services/` is how external capabilities are reached. A
+  wire type and a domain type that happen to look alike stay separate.

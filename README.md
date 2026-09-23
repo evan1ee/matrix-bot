@@ -495,6 +495,8 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
+    ├── services/             # external capabilities, never importing from modules/
+    │   └── llm/              #   LlmClient: OpenAI-compatible chat-completions transport
     └── utils/
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)

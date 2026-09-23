@@ -97,6 +97,17 @@ The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified
 
 `modules::BotModule` (in `backend/src/modules/mod.rs`) is the extension point. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`. Registration happens in `bot/mod.rs::new_full` — Core, Todo, Reminder, Finance, Portfolio, Settings. `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules (a deliberate cycle-breaking indirection; keep it if you touch help generation).
 
+`backend/src/services/` is where external capabilities are reached;
+`modules/` is what the application does, and nothing in `services/` may
+import from `modules/`. `services/llm` is the LLM transport: any
+OpenAI-compatible chat-completions API reached by base URL alone, plus the
+wire types (`ChatCompletionRequest`, `ToolDefinition`, ...). `modules/ai`
+keeps everything that is the bot's business -- prompts, the tool loop,
+conversation storage, and `resolved_config.rs`, which merges the env defaults
+with a user's saved AI settings and hands the transport only its
+`endpoint()`. There is deliberately no per-vendor provider enum: base URL
+already reaches xAI, OpenAI, Ollama, vLLM and the rest.
+
 Background work goes through `spawn_background_workers(&ModuleContext)` — that's how the reminder scheduler (5s tick loop) gets the Matrix `Client`, `Database`, and broadcaster.
 
 `bot/dispatcher.rs` accepts a message either when it starts with `!` or when the bot is mentioned, strips the HTML mention pill, and yields a `CommandContext`.
