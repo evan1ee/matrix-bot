@@ -366,6 +366,11 @@ fn parse_sse_chunk(line: &str) -> Option<super::types::ChatCompletionChunk> {
 #[cfg(not(test))]
 static LLM_CLIENT: std::sync::OnceLock<LlmClient> = std::sync::OnceLock::new();
 
+/// The process-wide LLM client, built once so every caller shares one
+/// connection pool. The `proxy` of the FIRST call wins for the life of the
+/// process; later calls' `proxy` arguments are ignored. Every production
+/// caller passes the same `AiEnvConfig::proxy`, so this holds today; a caller
+/// that needs a different proxy must build its own `LlmClient::new`.
 #[cfg(not(test))]
 pub fn shared_client(proxy: Option<&str>) -> LlmClient {
     // Built once and shared: the point of the global is the connection pool, and
@@ -373,6 +378,12 @@ pub fn shared_client(proxy: Option<&str>) -> LlmClient {
     LLM_CLIENT.get_or_init(|| LlmClient::new(proxy)).clone()
 }
 
+/// The process-wide LLM client, built once so every caller shares one
+/// connection pool. The `proxy` of the FIRST call wins for the life of the
+/// process; later calls' `proxy` arguments are ignored. Every production
+/// caller passes the same `AiEnvConfig::proxy`, so this holds today; a caller
+/// that needs a different proxy must build its own `LlmClient::new`. In
+/// tests, a fresh client is built on every call.
 #[cfg(test)]
 pub fn shared_client(proxy: Option<&str>) -> LlmClient {
     LlmClient::new(proxy)
