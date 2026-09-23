@@ -1,10 +1,12 @@
 use std::sync::Arc;
 use tracing::info;
 
+mod audio;
 mod config;
 mod paddle;
 mod provision;
 mod routes;
+mod sherpa;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

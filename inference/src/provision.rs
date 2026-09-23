@@ -5,7 +5,7 @@ use crate::config::InferenceConfig;
 
 /// Downloads any model a capability is missing.
 ///
-/// Spawned after the listener binds rather than awaited before it, so a fresh
+/// Spawned beside the listener rather than awaited in front of it, so a fresh
 /// deployment answers `/health` at once instead of reading unhealthy for the
 /// minutes a download takes. Each route gates on its own `models_present` and
 /// answers 503 until its files land; downloads write to a temporary file and
@@ -16,6 +16,18 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
         Ok(()) => info!("OCR models ready in {:?}", config.ocr_model_dir),
         Err(err) => warn!(
             "OCR model provisioning failed; OCR reports unavailable until this is resolved: {}",
+            err
+        ),
+    }
+
+    match crate::sherpa::ensure_models_downloaded(&config.voice_model_dir).await {
+        Ok(()) => info!(
+            "Speech-to-text models ready in {:?}",
+            config.voice_model_dir
+        ),
+        Err(err) => warn!(
+            "Speech-to-text model provisioning failed; transcription reports unavailable \
+             until this is resolved: {}",
             err
         ),
     }
@@ -35,6 +47,8 @@ mod tests {
             crate::paddle::DET_MODEL_NAME,
             crate::paddle::CLS_MODEL_NAME,
             crate::paddle::REC_MODEL_NAME,
+            crate::sherpa::SENSEVOICE_MODEL_FILE,
+            crate::sherpa::SENSEVOICE_TOKENS_FILE,
         ] {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
@@ -47,6 +61,7 @@ mod tests {
         let config = Arc::new(InferenceConfig {
             port: 0,
             ocr_model_dir: dir.clone(),
+            voice_model_dir: dir.clone(),
         });
 
         tokio::time::timeout(Duration::from_secs(5), provision_models(config))
