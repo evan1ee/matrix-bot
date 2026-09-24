@@ -47,10 +47,16 @@ pub async fn ensure_model_downloaded(model_dir: &Path) -> Result<(), TtsError> {
 /// staging directory, and renames the archive's root into place, so the route
 /// sees either no model or a whole one. The archive and staging directory are
 /// removed whether or not installation succeeds.
+///
+/// A `model_dir` that exists and holds something other than the model is
+/// rejected before the download starts: `retry_until_ready` never gives up,
+/// so paying for the multi-hundred-megabyte download on every retry against
+/// a directory that can never succeed would waste bandwidth forever.
 async fn ensure_model_from(url: &str, model_dir: &Path) -> Result<(), TtsError> {
     if model_present(model_dir) {
         return Ok(());
     }
+    reject_if_occupied(model_dir)?;
 
     let parent = model_dir
         .parent()
@@ -119,22 +125,43 @@ fn install_from_archive(archive: &Path, staging: &Path, model_dir: &Path) -> Res
         )));
     }
 
+    // Backstop against a directory that appeared or changed while the
+    // download was in flight; `ensure_model_from` already checked this
+    // before paying for the download.
+    reject_if_occupied(model_dir)?;
     if model_dir.exists() {
-        let empty = std::fs::read_dir(model_dir)
-            .map_err(|e| install_error("inspect the model directory", e))?
-            .next()
-            .is_none();
-        if !empty {
-            return Err(TtsError::ModelDownload(format!(
-                "{:?} exists but does not hold the model; remove it or point TTS_MODEL_DIR elsewhere",
-                model_dir
-            )));
-        }
         std::fs::remove_dir(model_dir)
             .map_err(|e| install_error("replace the empty model directory", e))?;
     }
 
     std::fs::rename(&root, model_dir).map_err(|e| install_error("move the model into place", e))
+}
+
+/// Whether `model_dir` exists and holds something other than an empty
+/// directory. A missing directory and an empty one are both fine to install
+/// into; anything else was placed there by hand and is not this module's to
+/// delete.
+fn is_occupied(model_dir: &Path) -> Result<bool, TtsError> {
+    if !model_dir.exists() {
+        return Ok(false);
+    }
+    let empty = std::fs::read_dir(model_dir)
+        .map_err(|e| install_error("inspect the model directory", e))?
+        .next()
+        .is_none();
+    Ok(!empty)
+}
+
+/// Rejects `model_dir` if it is occupied by something other than the model,
+/// with the message both callers of `is_occupied` report.
+fn reject_if_occupied(model_dir: &Path) -> Result<(), TtsError> {
+    if is_occupied(model_dir)? {
+        return Err(TtsError::ModelDownload(format!(
+            "{:?} exists but does not hold the model; remove it or point TTS_MODEL_DIR elsewhere",
+            model_dir
+        )));
+    }
+    Ok(())
 }
 
 fn install_error(action: &str, err: std::io::Error) -> TtsError {
@@ -269,14 +296,35 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// A directory someone put there by hand is never deleted to make room.
+    /// A directory someone put there by hand is never deleted to make room,
+    /// and is rejected before the archive is even downloaded: `retry_until_ready`
+    /// never gives up, so a misconfigured directory must not re-download the
+    /// archive on every retry forever.
     #[tokio::test]
     async fn test_an_incomplete_non_empty_model_dir_is_left_alone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
         let root = scratch("occupied");
         let model_dir = root.join("kokoro");
         std::fs::create_dir_all(&model_dir).unwrap();
         std::fs::write(model_dir.join("notes.txt"), b"mine").unwrap();
-        let url = serve_archive(archive_with(&KOKORO_REQUIRED_FILES)).await;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_clone = Arc::clone(&hits);
+        let bytes = archive_with(&KOKORO_REQUIRED_FILES);
+        let app = axum::Router::new().route(
+            "/kokoro.tar.bz2",
+            axum::routing::get(move || {
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let bytes = bytes.clone();
+                async move { bytes }
+            }),
+        );
+        let url = format!(
+            "{}/kokoro.tar.bz2",
+            crate::test_support::spawn_server(app).await
+        );
 
         let result = ensure_model_from(&url, &model_dir).await;
 
@@ -285,7 +333,14 @@ mod tests {
             "{:?}",
             result
         );
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "the archive server must never be contacted for an occupied directory"
+        );
         assert_eq!(std::fs::read(model_dir.join("notes.txt")).unwrap(), b"mine");
+        assert!(!root.join(ARCHIVE_FILE_NAME).exists());
+        assert!(!root.join(STAGING_DIR_NAME).exists());
         std::fs::remove_dir_all(&root).ok();
     }
 }
