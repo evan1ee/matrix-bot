@@ -791,4 +791,36 @@ mod tests {
         let second = enroll_start(State(state.clone()), Json(EnrollStartRequest { token })).await;
         assert!(second.is_err());
     }
+
+    /// The redeeming side enforces first-enrollment-only on its own, because
+    /// it is where the capability is actually granted: a token minted while
+    /// the account had no passkey must not work once it has one.
+    #[tokio::test]
+    async fn test_enroll_start_refuses_an_account_that_already_has_a_passkey() {
+        let state = state_with_secret(None).await;
+        let account_id =
+            AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
+                .await
+                .unwrap();
+        let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
+            .await
+            .unwrap();
+        crate::db_execute!(
+            &state.db.pool,
+            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
+             VALUES ('pk1', ?, '{}', 'MacBook')",
+            &account_id
+        )
+        .unwrap();
+
+        let err = enroll_start(State(state.clone()), Json(EnrollStartRequest { token }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(
+            state.webauthn_ceremonies.read().await.is_empty(),
+            "no registration ceremony may be started"
+        );
+    }
 }

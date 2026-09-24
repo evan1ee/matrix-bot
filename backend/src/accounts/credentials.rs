@@ -230,6 +230,12 @@ impl EnrollmentRepository {
     }
 
     /// Validates an enrollment token, marks it consumed, and returns the target account_id.
+    ///
+    /// Only ever enrolls an account's *first* passkey. A token is minted from
+    /// Matrix, and once a passkey exists, letting the Matrix account alone add
+    /// another would skip the `!recover` fence entirely — so a token for an
+    /// account that has since gained one is refused here, where the capability
+    /// is granted, not only where the link was issued.
     pub async fn validate_and_consume(
         pool: &DbPool,
         token: &str,
@@ -241,6 +247,8 @@ impl EnrollmentRepository {
             "UPDATE passkey_enrollment_tokens \
              SET consumed_at = ? \
              WHERE token = ? AND consumed_at IS NULL AND expires_at > ? \
+               AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c \
+                               WHERE c.account_id = passkey_enrollment_tokens.account_id) \
              RETURNING account_id",
             now,
             token,

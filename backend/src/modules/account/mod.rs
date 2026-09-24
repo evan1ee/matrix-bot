@@ -203,6 +203,28 @@ impl AccountModule {
                 return "Send <code>!passkey add</code> in a direct message — the link contains a single-use token that must not be shown in a shared room.".to_string();
             }
 
+            // First enrollment only. Once a passkey exists, a link from here
+            // would let the Matrix account alone add another and sign in
+            // fully verified — exactly what the `!recover` delay exists to stop.
+            match crate::accounts::CredentialRepository::count_for_account(&db.pool, &ctx.owner_id)
+                .await
+            {
+                Ok(0) => {}
+                Ok(_) => {
+                    return format!(
+                        "This account already has a passkey, so another can only be added \
+                         from a signed-in device at <code>{}</code>.<br/>\
+                         Lost every passkey? Send <code>!recover</code> instead.",
+                        escape(&self.web_url)
+                    );
+                }
+                Err(err) => {
+                    tracing::error!("Could not count passkeys for {}: {:?}", ctx.owner_id, err);
+                    return "Could not generate passkey enrollment link. Try again shortly."
+                        .to_string();
+                }
+            }
+
             match crate::accounts::EnrollmentRepository::issue(&db.pool, &ctx.owner_id, 10).await {
                 Ok(token) => {
                     let enroll_url =
@@ -611,6 +633,49 @@ mod tests {
         let reply = module().handle_command(&dm_ctx, &db, None).await.unwrap();
         assert!(reply.contains("?enroll="));
         assert!(reply.contains("bot.mbm.one"));
+    }
+
+    /// Matrix may mint an account's *first* passkey — for an account with none,
+    /// the Matrix identity is already its only way in. Once a passkey exists,
+    /// an enrollment link would let whoever holds the Matrix account alone add
+    /// their own and sign in fully verified, skipping the `!recover` fence.
+    #[tokio::test]
+    async fn test_passkey_add_is_refused_once_the_account_has_a_passkey() {
+        let db = db().await;
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
+             VALUES ('pk1', ?, '{}', 'MacBook')",
+            &account
+        )
+        .unwrap();
+
+        for (command, args) in [("passkey", "add"), ("passkey", "enroll"), ("web", "")] {
+            let mut dm = ctx(command, &account, true);
+            dm.raw_args = args.into();
+            let reply = module().handle_command(&dm, &db, None).await.unwrap();
+
+            assert!(
+                !reply.contains("?enroll="),
+                "`!{command} {args}` must not hand out a link: {reply}"
+            );
+            assert!(
+                reply.contains("!recover"),
+                "`!{command} {args}` must point at the fenced route: {reply}"
+            );
+        }
+
+        let issued: i64 = crate::db_scalar_one!(
+            &db.pool,
+            _,
+            "SELECT COUNT(*) FROM passkey_enrollment_tokens WHERE account_id = ?",
+            &account
+        )
+        .unwrap();
+        assert_eq!(issued, 0, "no token may be minted for a passkey account");
     }
 
     #[tokio::test]
