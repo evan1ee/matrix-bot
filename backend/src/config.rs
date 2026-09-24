@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use std::env;
 
 const DEFAULT_STT_MODEL: &str = "sensevoice-small";
+const DEFAULT_TTS_MODEL: &str = "kokoro";
+const DEFAULT_TTS_VOICE: &str = "0";
 
 /// Whether this process is running as a production deployment.
 ///
@@ -188,16 +190,22 @@ pub struct Config {
     /// Model name sent with every transcription request. The bundled server
     /// has one model and ignores it.
     pub stt_model: String,
-    /// Whether local sherpa-onnx Kokoro text-to-speech is enabled.
-    ///
-    /// Unlike `ocr_enabled`/`voice_enabled`, this defaults to `false`: the
-    /// Kokoro model directory is 311 MB, and it should not start loading just
-    /// because someone pulled this branch.
-    pub tts_enabled: bool,
-    /// Path to directory containing the Kokoro TTS ONNX model and lexicons.
-    pub tts_model_dir: std::path::PathBuf,
-    /// The Kokoro speaker ID to synthesize with (the model ships 103 of them).
-    pub tts_speaker_id: i32,
+    /// Base URL of a text-to-speech API, including its version prefix
+    /// (`http://inference:8090/v1`, `https://api.openai.com/v1`,
+    /// `https://api.elevenlabs.io/v1`). Absent means `!say` is unavailable in
+    /// this deployment.
+    pub tts_base_url: Option<String>,
+    /// API key for a hosted provider: a bearer token under the OpenAI
+    /// dialect, `xi-api-key` under ElevenLabs. The bundled server needs none.
+    pub tts_api_key: Option<String>,
+    /// Model name sent with each request. The bundled server ignores it.
+    pub tts_model: String,
+    /// The house voice, for anyone who never chose one: a Kokoro speaker id
+    /// for the bundled server, a name such as `alloy` for OpenAI, a voice id
+    /// for ElevenLabs.
+    pub tts_voice: String,
+    /// How requests are shaped for the provider at `tts_base_url`.
+    pub tts_dialect: crate::services::tts::TtsDialect,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -306,18 +314,27 @@ impl Config {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| DEFAULT_STT_MODEL.to_string());
 
-        let tts_enabled = env::var("TTS_ENABLED")
-            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-            .unwrap_or(false);
-
-        let tts_model_dir = env::var("TTS_MODEL_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"));
-
-        let tts_speaker_id: i32 = env::var("TTS_SPEAKER_ID")
+        let tts_base_url = env::var("TTS_BASE_URL")
             .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let tts_api_key = env::var("TTS_API_KEY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let tts_model = env::var("TTS_MODEL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string());
+        let tts_voice = env::var("TTS_VOICE")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string());
+        let tts_dialect =
+            crate::services::tts::TtsDialect::parse(&env::var("TTS_DIALECT").unwrap_or_default())
+                .map_err(|e| anyhow::anyhow!(e))?;
 
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -349,23 +366,24 @@ impl Config {
             stt_base_url,
             stt_api_key,
             stt_model,
-            tts_enabled,
-            tts_model_dir,
-            tts_speaker_id,
+            tts_base_url,
+            tts_api_key,
+            tts_model,
+            tts_voice,
+            tts_dialect,
             trust_forwarded_for,
             ai,
         })
     }
 
-    /// Builds the text-to-speech module's configuration from this `Config`,
-    /// mirroring how `api/auth/types.rs::from_config` builds `OcrConfig` and
-    /// `VoiceConfig` from the same struct.
-    pub fn tts_config(&self) -> crate::modules::tts::TtsConfig {
-        crate::modules::tts::TtsConfig {
-            enabled: self.tts_enabled,
-            model_dir: self.tts_model_dir.clone(),
-            speaker_id: self.tts_speaker_id,
-        }
+    /// The text-to-speech client for this deployment.
+    pub fn tts_client(&self) -> crate::services::tts::TtsClient {
+        crate::services::tts::TtsClient::new(
+            self.tts_base_url.clone(),
+            self.tts_api_key.clone(),
+            self.tts_model.clone(),
+            self.tts_dialect,
+        )
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -443,9 +461,11 @@ mod tests {
             stt_base_url: None,
             stt_api_key: None,
             stt_model: "sensevoice-small".to_string(),
-            tts_enabled: false,
-            tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
-            tts_speaker_id: 0,
+            tts_base_url: None,
+            tts_api_key: None,
+            tts_model: "kokoro".to_string(),
+            tts_voice: "0".to_string(),
+            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };
@@ -487,9 +507,11 @@ mod tests {
             stt_base_url: None,
             stt_api_key: None,
             stt_model: "sensevoice-small".to_string(),
-            tts_enabled: false,
-            tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
-            tts_speaker_id: 0,
+            tts_base_url: None,
+            tts_api_key: None,
+            tts_model: "kokoro".to_string(),
+            tts_voice: "0".to_string(),
+            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };

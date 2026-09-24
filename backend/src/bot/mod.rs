@@ -105,7 +105,8 @@ impl MatrixBot {
         // `modules::tests::test_tts_must_be_registered_before_a_direct_message_catch_all`.
         registry.register(crate::modules::tts::TtsModule::new(
             handles.client.clone(),
-            config.tts_config(),
+            config.tts_client(),
+            config.tts_voice.clone(),
         ));
         registry.register(crate::modules::ai::AiModule::new(
             handles.client.clone(),

@@ -44,6 +44,11 @@ services:
       - STT_API_KEY=${STT_API_KEY:-}
       - STT_MODEL=${STT_MODEL:-sensevoice-small}
       - VOICE_LANGUAGE=${VOICE_LANGUAGE:-auto}
+      - TTS_BASE_URL=${TTS_BASE_URL-http://inference:8090/v1}
+      - TTS_API_KEY=${TTS_API_KEY:-}
+      - TTS_MODEL=${TTS_MODEL:-kokoro}
+      - TTS_VOICE=${TTS_VOICE:-0}
+      - TTS_DIALECT=${TTS_DIALECT:-openai}
     volumes:
       - bot-data:/app/data
     # `required: false` so the default SQLite run does not pull in a database

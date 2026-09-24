@@ -62,16 +62,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # cmake builds the vendored libopus inside opusic-sys, which the !say
-      # voice replies encode Ogg Opus with. The hosted images happen to ship
-      # cmake already, but this job declares its build dependencies rather
-      # than inheriting them, and the arm64 image is the one most likely to
-      # change underneath us.
+      # reqwest's native-tls needs the OpenSSL headers and pkg-config to find
+      # them. This job declares its build dependencies rather than inheriting
+      # them from the runner image.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
 
       - name: Build release binary
         run: cargo build --release --bin matrix-bot --target ${{ matrix.target }}
