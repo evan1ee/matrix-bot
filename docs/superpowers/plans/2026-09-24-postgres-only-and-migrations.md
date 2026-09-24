@@ -881,7 +881,7 @@ Stop it (Ctrl-C) once the log shows "Applying database migrations" followed by t
 
 - [ ] **Step 7: Rehearse on a production copy (release gate)**
 
-Ask the user for a `pg_dump` of production (or for them to run it), restore it locally as in the test's doc comment, and run `test_migrates_a_real_database`. Record the result (pass, or the diff) in the commit message body. Do not merge Task 5 without a passing rehearsal.
+Ask the user for a `pg_dump` of production (or for them to run it), restore it locally as in the test's doc comment, and run `test_migrates_a_real_database`. Record the result (pass, or the diff) in the commit message body. Do not merge Task 5 without a passing rehearsal. See `docs/runbooks/postgres-foundation-cutover.md` for the full durable procedure (this rehearsal plus the pre-boot, first-boot and rollback steps).
 
 - [ ] **Step 8: Docs**
 
