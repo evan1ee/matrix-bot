@@ -5,8 +5,10 @@
 //! being produced as a side effect of the test suite.
 
 pub mod accounts;
+pub mod application;
 pub mod config;
 pub mod db;
+pub mod domain;
 pub mod error;
 pub mod events;
 pub mod infrastructure;

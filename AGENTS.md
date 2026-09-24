@@ -27,6 +27,7 @@ cargo test -p matrix-bot-inference --all-targets   # inference crate; not covere
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot verified?
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
+cargo test -p matrix-bot --test architecture       # enforces dependency rules (domain/application/infrastructure/interface)
 cargo run                                # starts bot + API server
 
 # After changing a sqlx::query!/query_as!/query_scalar! call or a migration,
@@ -178,7 +179,7 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
 - **Persistence and migrations** — `db/migrate.rs::run_migrations` runs `sqlx::migrate!` over versioned SQL files in `backend/migrations/`; `0001_baseline.sql` is an idempotent adoption of the live database's shape, and every migration after it is forward-only. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
 - **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
-- **Target layer-first layout (in progress)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror. The former `api/`, `bot/` and `services/` directories are now `interface/http/`, `interface/channels/matrix/` and `infrastructure/inference/`; `domain/` and `application/` roots arrive next. The move off today's `modules/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
+- **Target layer-first layout (in progress)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror; dependency rules enforced by `backend/tests/architecture.rs`. The former `api/`, `bot/` and `services/` directories are now `interface/http/`, `interface/channels/matrix/` and `infrastructure/inference/`; `domain/` and `application/` roots now exist (empty, awaiting feature moves). The move off today's `modules/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 
 ## Testing and Verification
