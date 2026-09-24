@@ -3174,36 +3174,6 @@
         ]
       }
     },
-    "/api/v1/health": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "operationId": "health_check",
-        "responses": {
-          "200": {
-            "description": "System healthy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "System degraded or database unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/life/days": {
       "post": {
         "tags": [
@@ -6344,6 +6314,60 @@
           }
         }
       }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Always `200`; touches no dependency. Used by the container runtime to",
+        "description": "decide whether to restart the process.",
+        "operationId": "live",
+        "responses": {
+          "200": {
+            "description": "The process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "`200` when the database answers and the Matrix sync loop completed a sync",
+        "description": "within [`MATRIX_SYNC_MAX_AGE`]; `503` otherwise. Used to decide whether to\nroute traffic here, never to restart the process.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "Ready to serve traffic",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7536,6 +7560,17 @@
           }
         }
       },
+      "DatabaseCheck": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
       "DayActivityResponse": {
         "type": "object",
         "required": [
@@ -8005,29 +8040,6 @@
           }
         ]
       },
-      "HealthResponse": {
-        "type": "object",
-        "required": [
-          "status",
-          "service",
-          "version",
-          "db_status"
-        ],
-        "properties": {
-          "db_status": {
-            "type": "string"
-          },
-          "service": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "version": {
-            "type": "string"
-          }
-        }
-      },
       "HeatmapDay": {
         "type": "object",
         "required": [
@@ -8428,6 +8440,17 @@
           }
         }
       },
+      "LiveResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "LoginFinishRequest": {
         "type": "object",
         "required": [
@@ -8482,6 +8505,21 @@
           },
           "session_token": {
             "type": "string"
+          }
+        }
+      },
+      "MatrixSyncCheck": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "last_sync_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "ok": {
+            "type": "boolean"
           }
         }
       },
@@ -9154,6 +9192,36 @@
           "occurred_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "ReadyChecks": {
+        "type": "object",
+        "required": [
+          "database",
+          "matrix_sync"
+        ],
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/DatabaseCheck"
+          },
+          "matrix_sync": {
+            "$ref": "#/components/schemas/MatrixSyncCheck"
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadyChecks"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },

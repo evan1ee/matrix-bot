@@ -111,6 +111,10 @@ pub async fn start_api_server(
         )
         .route("/webhooks/:token", post(webhooks::inbound_webhook))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
+        // Infrastructure surface, not application API: no auth, not under
+        // `/api/v1`, so a load balancer or orchestrator probe needs no session.
+        .route("/health/live", get(health::live))
+        .route("/health/ready", get(health::ready))
         .fallback(static_files::static_handler)
         .layer(cors)
         .layer(TraceLayer::new_for_http())

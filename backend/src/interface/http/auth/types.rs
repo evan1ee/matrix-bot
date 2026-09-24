@@ -129,6 +129,8 @@ pub struct ApiState {
     /// two halves of one flow: a stale entry should evaporate on restart rather
     /// than linger as a standing authorisation to absorb an account.
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
+    /// When the Matrix sync loop last completed a sync, read by `/health/ready`.
+    pub sync_health: crate::interface::channels::matrix::sync_health::SyncHealth,
     pub ocr_config: crate::modules::ocr::OcrConfig,
     pub ocr: crate::infrastructure::inference::ocr::OcrClient,
     pub voice_config: crate::modules::voice::VoiceConfig,
@@ -196,6 +198,7 @@ impl ApiState {
             trust_forwarded_for: false,
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
             ocr_config: crate::modules::ocr::OcrConfig::default(),
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(None),
             voice_config: crate::modules::voice::VoiceConfig::default(),
@@ -255,6 +258,7 @@ impl ApiState {
             trust_forwarded_for: config.trust_forwarded_for,
             webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
             pending_merges: handles.pending_merges,
+            sync_health: handles.sync_health,
             ocr_config: crate::modules::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
                 base_url: config.ocr_base_url.clone(),

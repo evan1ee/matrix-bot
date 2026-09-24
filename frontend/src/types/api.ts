@@ -1007,22 +1007,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["health_check"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/life/days": {
         parameters: {
             query?: never;
@@ -1761,6 +1745,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Always `200`; touches no dependency. Used by the container runtime to
+         * @description decide whether to restart the process.
+         */
+        get: operations["live"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `200` when the database answers and the Matrix sync loop completed a sync
+         * @description within [`MATRIX_SYNC_MAX_AGE`]; `503` otherwise. Used to decide whether to
+         *     route traffic here, never to restart the process.
+         */
+        get: operations["ready"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2167,6 +2192,9 @@ export interface components {
              */
             net_minor: number;
         };
+        DatabaseCheck: {
+            ok: boolean;
+        };
         DayActivityResponse: {
             date: string;
             events: components["schemas"]["ActivityEvent"][];
@@ -2316,12 +2344,6 @@ export interface components {
             /** Format: int64 */
             total_completions: number;
         };
-        HealthResponse: {
-            db_status: string;
-            service: string;
-            status: string;
-            version: string;
-        };
         HeatmapDay: {
             /** Format: int64 */
             count: number;
@@ -2457,6 +2479,9 @@ export interface components {
             /** Format: int64 */
             expires_in_seconds: number;
         };
+        LiveResponse: {
+            status: string;
+        };
         LoginFinishRequest: {
             ceremony_id: string;
             credential: Record<string, never>;
@@ -2477,6 +2502,10 @@ export interface components {
             display_name: string;
             mxid: string;
             session_token: string;
+        };
+        MatrixSyncCheck: {
+            last_sync_at?: string | null;
+            ok: boolean;
         };
         McpTokenSummary: {
             /** Format: date-time */
@@ -2722,6 +2751,14 @@ export interface components {
             note?: string | null;
             /** Format: date-time */
             occurred_at: string;
+        };
+        ReadyChecks: {
+            database: components["schemas"]["DatabaseCheck"];
+            matrix_sync: components["schemas"]["MatrixSyncCheck"];
+        };
+        ReadyResponse: {
+            checks: components["schemas"]["ReadyChecks"];
+            status: string;
         };
         ReceiptExtractionDto: {
             amount?: string | null;
@@ -5641,35 +5678,6 @@ export interface operations {
             };
         };
     };
-    health_check: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description System healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-            /** @description System degraded or database unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
-    };
     upsert_day: {
         parameters: {
             query?: never;
@@ -7980,6 +7988,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    live: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The process is alive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveResponse"];
+                };
+            };
+        };
+    };
+    ready: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready to serve traffic */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
                 };
             };
         };

@@ -36,7 +36,8 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        health::health_check,
+        health::live,
+        health::ready,
         sse::sse_handler,
         auth::webauthn::enroll_start,
         auth::webauthn::register_start,
@@ -178,7 +179,11 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
     components(
         schemas(
             ApiErrorResponse,
-            health::HealthResponse,
+            health::LiveResponse,
+            health::ReadyResponse,
+            health::ReadyChecks,
+            health::DatabaseCheck,
+            health::MatrixSyncCheck,
             auth::webauthn::CeremonyStart,
             auth::webauthn::RegisterStartRequest,
             auth::webauthn::EnrollStartRequest,

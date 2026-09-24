@@ -1,6 +1,7 @@
 use anyhow::Result;
+use chrono::Utc;
 use matrix_sdk::config::SyncSettings;
-use matrix_sdk::Client;
+use matrix_sdk::{Client, LoopCtrl};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -41,6 +42,7 @@ pub mod reaction_targets;
 pub mod reply;
 pub mod self_verify;
 pub mod stage;
+pub mod sync_health;
 pub mod verification;
 
 pub struct MatrixBot {
@@ -160,7 +162,18 @@ impl MatrixBot {
             .await;
 
         tracing::info!("Matrix Bot is active and listening for events...");
-        self.client.sync(SyncSettings::default()).await?;
+
+        // `sync_with_callback` (rather than plain `sync`) is the hook `/health/ready`
+        // needs: it runs the callback after every successful response, which is
+        // this loop's only clean signal that "a sync completed" — the point at
+        // which the client's local state is caught up with the homeserver.
+        let sync_health = self.handles.sync_health.clone();
+        self.client
+            .sync_with_callback(SyncSettings::default(), move |_response| {
+                sync_health.record_sync(Utc::now());
+                async { LoopCtrl::Continue }
+            })
+            .await?;
 
         Ok(())
     }

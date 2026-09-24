@@ -210,7 +210,7 @@ All API endpoints are mounted under `/api/v1`. Authentication is accepted via ei
 
 | Category | Endpoint(s) | Description |
 |---|---|---|
-| **Health** | `GET /health` | Liveness probe and uptime check |
+| **Health** | `GET /health/live`<br>`GET /health/ready` | Liveness (process alive, no dependency checks — drives container restarts) and readiness (database + Matrix sync freshness — drives traffic routing) probes. Infrastructure surface: mounted at the router root, **not** under `/api/v1`, and need no auth. |
 | **Auth** | `POST /auth/passkey/{register,login}/{start,finish}`<br>`POST /auth/matrix/login`<br>`POST /auth/logout`<br>`GET /auth/me`<br>`GET /auth/media`<br>`POST /auth/recovery/redeem` | WebAuthn passkey ceremonies, 1-step Matrix session token exchange for iOS, logout, profile info, authenticated media proxy, and single-use recovery code redemption |
 | **Account** | `GET/PUT/DELETE /account/passkeys[/:id]`<br>`GET /account/matrix`<br>`POST /account/matrix/{link,unlink,confirm-merge}`<br>`GET /account/matrix/pending-merge`<br>`GET /account/sessions`<br>`POST /account/sessions/revoke-others`<br>`DELETE /account/sessions/:id`<br>`POST /account/recovery-codes`<br>`GET /account/recovery-status`<br>`POST /account/recovery/cancel`<br>`GET /account/security-events` | Manage passkeys, link/unlink Matrix MXIDs, review pending merges, inspect and revoke active sessions, generate 10 recovery codes, delayed recovery controls, and immutable security audit logs |
 | **AI Config** | `GET/PUT /account/ai-config` | Per-user LLM provider API keys and model parameters |

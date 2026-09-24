@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 use matrix_sdk::Client;
 
 use crate::interface::channels::matrix::linking::PendingMerges;
+use crate::interface::channels::matrix::sync_health::SyncHealth;
 
 #[derive(Clone, Default)]
 pub struct BotHandles {
@@ -33,4 +34,6 @@ pub struct BotHandles {
     /// of one flow: a stale entry should evaporate on restart rather than
     /// linger as a standing authorisation to absorb an account.
     pub pending_merges: Arc<PendingMerges>,
+    /// When the sync loop last completed a sync, read by `/health/ready`.
+    pub sync_health: SyncHealth,
 }

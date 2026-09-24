@@ -5,9 +5,9 @@ use axum::{
 
 use super::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
-    footprints, habits, health, life, life_activity, mcp, ocr, openapi, portfolio,
-    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
-    reminders, rooms, settings, sse, todos, voice, webhooks,
+    footprints, habits, life, life_activity, mcp, ocr, openapi, portfolio, portfolio_alerts,
+    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
+    settings, sse, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -27,7 +27,6 @@ pub fn api_routes() -> Router<auth::ApiState> {
 
 fn routes_core() -> Router<auth::ApiState> {
     Router::new()
-        .route("/health", get(health::health_check))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         .route("/rooms", get(rooms::list_rooms))
         .route("/rooms/sync", post(rooms::sync_rooms))

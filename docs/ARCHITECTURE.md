@@ -13,6 +13,12 @@ section per area, each covered once.
 
 Those handles are the coupling point, in both directions: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that need homeserver access, and the bot writes into `pending_merges` so a link begun in a Matrix DM can be finished in the web UI. Shutdown is a `broadcast::channel::<()>` fanned out to both halves on Ctrl-C.
 
+`BotHandles` (`interface/channels/matrix/handles.rs`) also carries `sync_health: SyncHealth` — a lock-free `Arc<AtomicI64>` of the last completed sync's unix millis, written by the sync loop's `sync_with_callback` after every successful response and read by `/health/ready`. `sync_with_callback`, not plain `sync`, is the point of the change: it is the only hook that fires once per completed response rather than once for the whole (otherwise-infinite) sync loop, so it is the one place "a sync completed" can be observed and recorded.
+
+## Liveness and readiness probes
+
+`/health/live` (always `200`, touches nothing) and `/health/ready` (`200` when `SELECT 1` succeeds *and* the last recorded sync is within `MATRIX_SYNC_MAX_AGE` — 120s — of now, else `503` with a JSON reason) are mounted at the router root in `interface/http/mod.rs`, not under `/api/v1` and not behind auth — they are infrastructure surface a load balancer or container orchestrator probes, not application API. They deliberately answer different questions: liveness drives container restarts, which cannot fix a downstream outage (a lost database, a homeserver that stopped answering sync) and would only thrash the process while making it worse; readiness drives traffic routing. The former `/api/v1/health` (a single `db_status` field, no Matrix awareness) is retired — this is an intentional public-contract break, not an addition alongside it.
+
 `interface/http/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs (`room.is_direct()`), rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where the bot is not a joined member or *none* of the caller's linked MXIDs is. An account can have several Matrix identities, so "the caller" is a set — an account with no link gets an empty list, which is the honest answer rather than an error.
 
 ## Backend module plugin system
