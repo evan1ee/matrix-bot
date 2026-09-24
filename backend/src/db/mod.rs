@@ -1,4 +1,6 @@
 pub mod backfill;
+#[cfg(test)]
+pub mod catalog;
 pub mod ddl;
 pub mod dialect;
 pub mod executor;
