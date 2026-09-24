@@ -13,7 +13,7 @@ pub mod todo;
 pub mod webhooks;
 
 use crate::events::EventBroadcaster;
-use crate::modules::ai::models::ToolDefinition;
+use crate::services::llm::ToolDefinition;
 
 pub struct ToolRegistry;
 

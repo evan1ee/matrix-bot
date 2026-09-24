@@ -6,13 +6,13 @@ pub mod net_worth;
 use serde_json::json;
 
 use crate::events::EventBroadcaster;
-use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::money::{normalise_currency, parse_amount};
 use crate::modules::portfolio::history::HistoryRepository;
 use crate::modules::portfolio::models::{cost_of, normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::portfolio::service;
 use crate::modules::settings::repository::SettingsRepository;
+use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

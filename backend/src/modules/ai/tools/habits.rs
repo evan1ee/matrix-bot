@@ -3,9 +3,9 @@ use chrono::Utc;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::ai::models::ToolDefinition;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::settings::repository::SettingsRepository;
+use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

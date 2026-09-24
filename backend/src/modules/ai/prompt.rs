@@ -1,4 +1,4 @@
-use super::client::ResolvedAiConfig;
+use super::resolved_config::ResolvedAiConfig;
 use crate::db::DbPool;
 use crate::utils::html::html_escape;
 

@@ -3,12 +3,12 @@ use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 
 use crate::events::EventBroadcaster;
-use crate::modules::ai::models::ToolDefinition;
 use crate::modules::finance::models::Direction;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::finance::service::{self, NewTransaction};
 use crate::modules::settings::repository::SettingsRepository;
+use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

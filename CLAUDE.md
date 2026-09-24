@@ -136,6 +136,16 @@ Nothing in `services/` may import from `modules/` — `services::ocr::OcrScan`
 is a separate type from `modules::ocr::OcrResult` for exactly that reason,
 with a `From` impl in the module doing the mapping.
 
+`services/llm` is the LLM transport: any OpenAI-compatible chat-completions
+API reached by base URL alone, plus the wire types (`ChatCompletionRequest`,
+`ToolDefinition`, ...). `modules/ai` keeps everything that is the bot's
+business — prompts, the tool loop, conversation storage, and
+`resolved_config.rs`, which merges the env defaults with a user's saved AI
+settings and hands the transport only its `endpoint()`. There is deliberately
+no per-vendor provider enum: base URL already reaches xAI, OpenAI, Ollama,
+vLLM and the rest. Text to speech is the one place a dialect exists, because
+ElevenLabs puts the voice in the URL path, which no base URL can express.
+
 ### Backend module plugin system
 
 `modules::BotModule` (in `backend/src/modules/mod.rs`) is the extension point. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`. Registration happens in `bot/mod.rs::new_full` — Core, Todo, Reminder, Finance, Portfolio, Settings. `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules (a deliberate cycle-breaking indirection; keep it if you touch help generation).

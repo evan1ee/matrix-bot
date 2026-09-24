@@ -4,19 +4,18 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub use super::alert::{clear_ai_error_state, is_ai_error_alerted, notify_dev_room_ai_error};
-pub use super::client::get_ai_client;
-use super::client::ResolvedAiConfig;
 pub use super::config_cmd::{
     format_error, format_help, handle_ai_subcommand, handle_reset, handle_set_history,
     handle_set_model, handle_show_config,
 };
 pub use super::error::AiError;
-use super::models::{ChatCompletionMessage, ChatCompletionRequest};
 pub use super::prompt::{format_response, render_bot_footer};
 use super::repository::AiRepository;
+use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
+use crate::services::llm::{ChatCompletionMessage, ChatCompletionRequest};
 
 pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
@@ -277,7 +276,7 @@ pub async fn run_ai_turn_with_stage(
         });
     }
 
-    let client = get_ai_client(ai);
+    let client = crate::services::llm::shared_client(ai.proxy.as_deref());
     let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
         .into_iter()
         .filter_map(|t| serde_json::to_value(t).ok())
@@ -823,10 +822,10 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            return; // Skip test if no live key is provided in env
+            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -860,7 +859,7 @@ mod tests {
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -896,10 +895,10 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            return;
+            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -907,7 +906,7 @@ mod tests {
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -938,7 +937,7 @@ mod tests {
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -975,10 +974,10 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            return;
+            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -986,7 +985,7 @@ mod tests {
         // Turn 1: Add a task
         let turn1 = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -1004,7 +1003,7 @@ mod tests {
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",
@@ -1031,17 +1030,17 @@ mod tests {
         let _ = dotenvy::from_path(&root_env);
         let _ = dotenvy::dotenv();
 
-        let config =
-            ResolvedAiConfig::from_user_config(&crate::config::AiEnvConfig::default(), None);
+        let ai_env = crate::config::AiEnvConfig::from_env();
+        let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            return;
+            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
 
         let result = run_ai_turn(
             &db.pool,
-            &crate::config::AiEnvConfig::default(),
+            &ai_env,
             None,
             &owner,
             "!room:mbm.one",

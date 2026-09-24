@@ -512,10 +512,11 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
-    ├── services/             # HTTP clients to sibling services
-    │   ├── ocr/               #   client to the inference crate's POST /ocr
-    │   ├── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
-    │   └── tts/               #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
+    ├── services/             # external capabilities, never importing from modules/
+    │   ├── llm/              #   LlmClient: OpenAI-compatible chat-completions transport
+    │   ├── ocr/              #   client to the inference crate's POST /ocr
+    │   ├── stt/              #   OpenAI-compatible client to POST /v1/audio/transcriptions
+    │   └── tts/              #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image

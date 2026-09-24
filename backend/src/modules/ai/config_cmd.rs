@@ -2,8 +2,8 @@ use crate::db::DbPool;
 use tracing::error;
 
 use super::alert::clear_ai_error_state;
-use super::client::ResolvedAiConfig;
 use super::repository::AiRepository;
+use super::resolved_config::ResolvedAiConfig;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html::html_escape;
 

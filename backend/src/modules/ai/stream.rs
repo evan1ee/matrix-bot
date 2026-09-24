@@ -5,13 +5,13 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::bot::stage::StageReporter;
-use crate::modules::ai::client::{AiClient, ResolvedAiConfig, StreamTurnResult};
-use crate::modules::ai::models::{ChatCompletionRequest, ToolCall};
+use crate::modules::ai::resolved_config::ResolvedAiConfig;
+use crate::services::llm::{ChatCompletionRequest, LlmClient, StreamedCompletion, ToolCall};
 
 /// Executes an AI turn with real-time streaming updates to Matrix if a `StageReporter`
 /// is available, falling back cleanly to non-streaming on any transport error.
 pub async fn execute_stream_or_complete(
-    client: &AiClient,
+    client: &LlmClient,
     config: &ResolvedAiConfig,
     request: &ChatCompletionRequest,
     stage_reporter: Option<&StageReporter>,
@@ -20,7 +20,7 @@ pub async fn execute_stream_or_complete(
         let throttler = Arc::new(Mutex::new(reporter.throttler()));
         let throttler_clone = throttler.clone();
         match client
-            .chat_completion_stream(config, request, move |delta| {
+            .chat_completion_stream(config.endpoint(), request, move |delta| {
                 let t = throttler_clone.clone();
                 async move {
                     t.lock().await.push_delta(&delta).await;
@@ -28,7 +28,7 @@ pub async fn execute_stream_or_complete(
             })
             .await
         {
-            Ok(StreamTurnResult {
+            Ok(StreamedCompletion {
                 content,
                 tool_calls,
             }) => Ok((content, tool_calls)),
@@ -43,12 +43,12 @@ pub async fn execute_stream_or_complete(
 }
 
 async fn fallback_complete(
-    client: &AiClient,
+    client: &LlmClient,
     config: &ResolvedAiConfig,
     request: &ChatCompletionRequest,
 ) -> Result<(String, Vec<ToolCall>), String> {
     let resp = client
-        .chat_completion(config, request)
+        .chat_completion(config.endpoint(), request)
         .await
         .map_err(|e| e.to_string())?;
 

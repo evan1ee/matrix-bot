@@ -1,7 +1,7 @@
 use super::{
     bills, bookmarks, finance, habits, life, portfolio, reminder, settings, todo, webhooks,
 };
-use crate::modules::ai::models::ToolDefinition;
+use crate::services::llm::ToolDefinition;
 
 /// Aggregates all 47 domain-grouped AI function calling tool definitions.
 pub fn all_tool_definitions() -> Vec<ToolDefinition> {
