@@ -81,8 +81,11 @@ services:
     # 64 MB default is not enough — it surfaces as "could not resize shared
     # memory segment" rather than anything that names the real cause.
     shm_size: 1gb
+    # The postgres:18 image keeps its data in a versioned subdirectory
+    # (/var/lib/postgresql/18/docker) and refuses to start with a mount at the
+    # old /var/lib/postgresql/data path, so the volume goes one level up.
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot} -d ${POSTGRES_DB:-matrix_bot}"]
       interval: 10s
