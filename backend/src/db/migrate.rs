@@ -122,4 +122,31 @@ mod tests {
 
         crate::db::pool::drop_pg_schema("trigger_check").await;
     }
+
+    /// sqlx hashes the raw bytes of each migration file to detect drift. A
+    /// CRLF checkout would record a different checksum than an LF checkout
+    /// of the same migration, producing `VersionMismatch` at boot on
+    /// whichever platform didn't create the applied row. `.gitattributes`
+    /// pins these files to LF; this test catches a future migration that
+    /// slips past that (e.g. added with `core.autocrlf` misconfigured).
+    #[test]
+    fn test_no_migration_file_contains_a_carriage_return() {
+        let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"));
+        let mut checked = 0;
+        for entry in std::fs::read_dir(dir).expect("read migrations dir") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("sql") {
+                continue;
+            }
+            let bytes = std::fs::read(&path).expect("read migration file");
+            assert!(
+                !bytes.contains(&b'\r'),
+                "{} contains a carriage return; migrations must be LF-only \
+                 (see .gitattributes)",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "expected at least one migration file to check");
+    }
 }

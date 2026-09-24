@@ -2,3 +2,11 @@
 # ("/bin/sh" followed by a carriage return) fails as "no such file or
 # directory". Keep them LF on every checkout, whatever core.autocrlf says.
 *.sh text eol=lf
+
+# sqlx hashes the raw bytes of each migration file to detect drift, and the
+# offline query cache is diffed byte-for-byte in CI. A CRLF checkout (e.g.
+# Windows with core.autocrlf=true) would record different checksums than a
+# LF checkout (e.g. release.yml's windows-latest job with git's own CRLF
+# checkout) and fail migrations with VersionMismatch at boot.
+backend/migrations/*.sql text eol=lf
+.sqlx/*.json text eol=lf
