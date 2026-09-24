@@ -127,7 +127,10 @@ macro_rules! db_ddl {
         let __p: &$crate::db::DbPool = $pool;
         let __ddl_src = $sql;
         let __rendered = $crate::db::ddl::render(__ddl_src);
-        sqlx::raw_sql(&__rendered).execute(__p).await.map(|_| ())
+        sqlx::raw_sql(sqlx::AssertSqlSafe(__rendered.into_owned()))
+            .execute(__p)
+            .await
+            .map(|_| ())
     }};
 }
 

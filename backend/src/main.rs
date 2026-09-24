@@ -1,3 +1,7 @@
+// matrix-sdk 0.18's crypto futures nest deeper than the default limit of 128
+// when rustc proves the spawned sync task is `Send`; rustc's own suggestion.
+#![recursion_limit = "256"]
+
 use anyhow::Result;
 use std::time::Duration;
 use tokio::sync::broadcast;

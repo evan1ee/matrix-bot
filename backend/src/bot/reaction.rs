@@ -478,7 +478,7 @@ async fn send_reply(room: &Room, html: &str) -> Option<matrix_sdk::ruma::OwnedEv
     let plain = crate::utils::strip_html(html);
     let content = RoomMessageEventContent::text_html(&plain, html);
     match room.send(content).await {
-        Ok(resp) => Some(resp.event_id),
+        Ok(resp) => Some(resp.response.event_id),
         Err(err) => {
             error!("Failed sending reply to room {}: {:?}", room.room_id(), err);
             None

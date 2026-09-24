@@ -206,13 +206,13 @@ pub async fn resolve_untracked_target(
     owner_id: &str,
 ) -> Option<BotMessageTarget> {
     use matrix_sdk::ruma::events::{
-        room::message::{MessageType, RoomMessageEvent},
-        AnyMessageLikeEvent, AnyTimelineEvent,
+        room::message::{MessageType, SyncRoomMessageEvent},
+        AnySyncMessageLikeEvent, AnySyncTimelineEvent,
     };
     use tracing::{info, warn};
 
     let eid = matrix_sdk::ruma::EventId::parse(target_event_id).ok()?;
-    let timeline_event = match room.event(&eid).await {
+    let timeline_event = match room.event(&eid, None).await {
         Ok(ev) => ev,
         Err(err) => {
             warn!(
@@ -223,10 +223,15 @@ pub async fn resolve_untracked_target(
         }
     };
 
-    let any_event = match timeline_event.event.deserialize() {
-        Ok(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(_))) => {
-            match room.decrypt_event(timeline_event.event.cast_ref()).await {
-                Ok(decrypted) => match decrypted.event.deserialize() {
+    let any_event = match timeline_event.raw().deserialize() {
+        Ok(AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomEncrypted(_))) => {
+            // The match arm above just established this is `m.room.encrypted`;
+            // ruma has no checked cast from the `Any*` enum to that one type.
+            match room
+                .decrypt_event(timeline_event.raw().cast_ref_unchecked(), None)
+                .await
+            {
+                Ok(decrypted) => match decrypted.raw().deserialize() {
                     Ok(ev) => ev,
                     Err(err) => {
                         warn!(
@@ -259,16 +264,16 @@ pub async fn resolve_untracked_target(
 
     // 1. Check if the event is a replacement (edit) or rich reply relating to an already-tracked event
     let body = match any_event {
-        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
-            RoomMessageEvent::Original(ref msg),
+        AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+            SyncRoomMessageEvent::Original(ref msg),
         )) => {
             if let Some(ref relates_to) = msg.content.relates_to {
                 let parent_id = match relates_to {
                     matrix_sdk::ruma::events::room::message::Relation::Replacement(rep) => {
                         Some(rep.event_id.as_str())
                     }
-                    matrix_sdk::ruma::events::room::message::Relation::Reply { in_reply_to } => {
-                        Some(in_reply_to.event_id.as_str())
+                    matrix_sdk::ruma::events::room::message::Relation::Reply(reply) => {
+                        Some(reply.in_reply_to.event_id.as_str())
                     }
                     _ => None,
                 };

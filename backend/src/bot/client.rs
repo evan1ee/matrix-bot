@@ -71,7 +71,7 @@ fn write_private(path: &str, contents: &[u8]) {
 }
 
 /// Reads a previously persisted session, if one is on disk and still parses.
-fn load_session() -> Option<matrix_sdk::matrix_auth::MatrixSession> {
+fn load_session() -> Option<matrix_sdk::authentication::matrix::MatrixSession> {
     let raw = std::fs::read_to_string(SESSION_PATH).ok()?;
     match serde_json::from_str(&raw) {
         Ok(session) => Some(session),
@@ -161,7 +161,7 @@ async fn delete_stale_device(
     };
 
     let mut password = uiaa::Password::new(
-        uiaa::UserIdentifier::UserIdOrLocalpart(config.username.clone()),
+        uiaa::UserIdentifier::Matrix(uiaa::MatrixUserIdentifier::new(config.username.clone())),
         config.password.clone(),
     );
     password.session = uiaa_info.session.clone();
@@ -200,7 +200,11 @@ async fn restore_previous_session(client: &Client) -> bool {
         return false;
     };
 
-    if let Err(err) = client.matrix_auth().restore_session(session).await {
+    if let Err(err) = client
+        .matrix_auth()
+        .restore_session(session, matrix_sdk::store::RoomLoadSettings::default())
+        .await
+    {
         warn!(
             "Could not restore the stored session ({}); logging in again",
             err
@@ -432,6 +436,21 @@ mod tests {
     fn test_full_mxid_username_is_used_as_is() {
         let id = resolve_user_id("@bot:other.example", "mbm.one").unwrap();
         assert_eq!(id.as_str(), "@bot:other.example");
+    }
+
+    /// A session file written by matrix-sdk 0.7 must still load: if it did
+    /// not, the first boot after an SDK upgrade would take the fresh-login path
+    /// and archive a crypto store that was only meant to be migrated in place.
+    #[test]
+    fn test_a_session_file_from_matrix_sdk_0_7_still_parses() {
+        let raw =
+            r#"{"user_id":"@bot:mbm.one","device_id":"ABCDEFGHIJ","access_token":"syt_token"}"#;
+        let session: matrix_sdk::authentication::matrix::MatrixSession =
+            serde_json::from_str(raw).unwrap();
+        assert_eq!(session.meta.user_id.as_str(), "@bot:mbm.one");
+        assert_eq!(session.meta.device_id.as_str(), "ABCDEFGHIJ");
+        assert_eq!(session.tokens.access_token, "syt_token");
+        assert_eq!(session.tokens.refresh_token, None);
     }
 
     #[test]

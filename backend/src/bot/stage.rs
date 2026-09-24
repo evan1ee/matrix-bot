@@ -99,7 +99,7 @@ impl StageReporter {
         if let (Some(room), Some(target_id)) = (&self.room, &self.event_id) {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_text)
-                .make_replacement(metadata, None);
+                .make_replacement(metadata);
             if let Err(err) = room.send(content).await {
                 debug!(
                     "Failed to update stage indicator in room {}: {:?}",
@@ -201,7 +201,7 @@ impl StageIndicator {
     pub async fn start(room: &Room, plain_text: &str, html_text: &str) -> Self {
         let content = RoomMessageEventContent::text_html(plain_text, html_text);
         let event_id = match room.send(content).await {
-            Ok(resp) => Some(resp.event_id),
+            Ok(resp) => Some(resp.response.event_id),
             Err(err) => {
                 warn!(
                     "Failed to post initial stage indicator in room {}: {:?}",
@@ -236,7 +236,7 @@ impl StageIndicator {
         if let Some(ref target_id) = self.event_id {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_text)
-                .make_replacement(metadata, None);
+                .make_replacement(metadata);
             if let Err(err) = self.room.send(content).await {
                 debug!(
                     "Failed to update stage indicator in room {}: {:?}",
@@ -256,9 +256,9 @@ impl StageIndicator {
         if let Some(ref target_id) = self.event_id {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_reply)
-                .make_replacement(metadata, None);
+                .make_replacement(metadata);
             match self.room.send(content).await {
-                Ok(resp) => Some(resp.event_id),
+                Ok(resp) => Some(resp.response.event_id),
                 Err(err) => {
                     error!(
                         "Failed to replace stage indicator with final reply in room {}: {:?}",
@@ -271,7 +271,7 @@ impl StageIndicator {
         } else {
             let content = RoomMessageEventContent::text_html(plain_text, html_reply);
             match self.room.send(content).await {
-                Ok(resp) => Some(resp.event_id),
+                Ok(resp) => Some(resp.response.event_id),
                 Err(err) => {
                     error!(
                         "Failed to send final reply to room {}: {:?}",
@@ -289,7 +289,7 @@ impl StageIndicator {
         if let Some(ref target_id) = self.event_id {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_error, html_error)
-                .make_replacement(metadata, None);
+                .make_replacement(metadata);
             let _ = self.room.send(content).await;
         } else {
             let content = RoomMessageEventContent::text_html(plain_error, html_error);
@@ -334,7 +334,7 @@ mod tests {
         let target_id = EventId::parse("$stage_event:example.org").unwrap();
         let metadata = ReplacementMetadata::new(target_id.clone(), None);
         let content = RoomMessageEventContent::text_html("Listening...", "<i>Listening...</i>")
-            .make_replacement(metadata, None);
+            .make_replacement(metadata);
 
         assert!(content.relates_to.is_some());
     }

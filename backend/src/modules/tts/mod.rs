@@ -18,7 +18,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::settings::SettingsRepository;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
-use crate::services::tts::{SynthesizedSpeech, TtsClient, TtsServiceError};
+use crate::services::tts::{SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX};
 use crate::utils::html::html_escape;
 
 pub mod text;
@@ -134,13 +134,11 @@ impl TtsModule {
             .parse::<mime_guess::mime::Mime>()
             .map_err(|e| format!("Invalid MIME type: {}", e))?;
 
-        let info = AttachmentInfo::Voice {
-            audio_info: BaseAudioInfo {
-                duration: speech.duration,
-                size: UInt::new(speech.audio.len() as u64),
-            },
-            waveform: speech.waveform,
-        };
+        let info = AttachmentInfo::Voice(BaseAudioInfo {
+            duration: speech.duration,
+            size: UInt::new(speech.audio.len() as u64),
+            waveform: speech.waveform.map(normalise_waveform),
+        });
 
         room.send_attachment(
             "voice-message.ogg",
@@ -153,6 +151,16 @@ impl TtsModule {
 
         Ok(())
     }
+}
+
+/// matrix-sdk takes the waveform as fractions of full scale and rescales it to
+/// MSC3246's 0..=1024 buckets itself. Dividing by a power of two is exact in
+/// `f32`, so every bucket reaches the event unchanged.
+fn normalise_waveform(buckets: Vec<u16>) -> Vec<f32> {
+    buckets
+        .into_iter()
+        .map(|b| f32::from(b) / f32::from(WAVEFORM_MAX))
+        .collect()
 }
 
 #[async_trait]
@@ -188,6 +196,18 @@ mod tests {
     use super::*;
     use crate::services::tts::TtsDialect;
     use std::sync::Mutex;
+
+    /// matrix-sdk turns each fraction back into a bucket with
+    /// `(v.clamp(0.0, 1.0) * 1024.0) as u16`; every bucket must survive that.
+    #[test]
+    fn test_normalised_waveform_round_trips_through_the_sdk_rescale() {
+        let buckets: Vec<u16> = (0..=WAVEFORM_MAX).collect();
+        let rescaled: Vec<u16> = normalise_waveform(buckets.clone())
+            .into_iter()
+            .map(|v| (v.clamp(0.0, 1.0) * f32::from(WAVEFORM_MAX)) as u16)
+            .collect();
+        assert_eq!(rescaled, buckets);
+    }
 
     fn module_with(tts: TtsClient, default_voice: &str) -> TtsModule {
         TtsModule::new(Arc::new(RwLock::new(None)), tts, default_voice.to_string())

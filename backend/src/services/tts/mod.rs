@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const DURATION_HEADER: &str = "x-duration-ms";
 const WAVEFORM_HEADER: &str = "x-waveform";
 /// The largest value a Matrix waveform bucket may hold.
-const WAVEFORM_MAX: u16 = 1024;
+pub const WAVEFORM_MAX: u16 = 1024;
 /// Ogg Opus granule positions are always in 48 kHz units (RFC 7845 section 4).
 const OPUS_GRANULE_RATE: u64 = 48_000;
 

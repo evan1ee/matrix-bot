@@ -25,7 +25,7 @@ macro_rules! db_fetch_all {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_all(__p).await
     }};
 }
 
@@ -36,7 +36,7 @@ macro_rules! db_fetch_one {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_one(__p).await
     }};
 }
 
@@ -47,7 +47,7 @@ macro_rules! db_fetch_optional {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_optional(__p).await
     }};
 }
 
@@ -58,7 +58,7 @@ macro_rules! db_scalar_all {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(__p).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_all(__p).await
     }};
 }
 
@@ -69,7 +69,7 @@ macro_rules! db_scalar_one {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(__p).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_one(__p).await
     }};
 }
 
@@ -80,7 +80,7 @@ macro_rules! db_scalar_optional {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(__p).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_optional(__p).await
     }};
 }
 
@@ -96,7 +96,7 @@ macro_rules! db_execute {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query(&__sql)$(.bind($bind))*.execute(__p).await.map(|r| r.rows_affected())
+        sqlx::query(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.execute(__p).await.map(|r| r.rows_affected())
     }};
 }
 
@@ -113,7 +113,7 @@ macro_rules! db_fetch_all_dyn {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+        let mut __q = sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()));
         for __v in $dyn {
             __q = __q.bind(__v);
         }
@@ -129,7 +129,7 @@ macro_rules! db_fetch_one_dyn {
         let __sql_src = $sql;
         let __p: &$crate::db::DbPool = $pool;
         let __sql = $crate::db::executor::__render(__sql_src);
-        let mut __q = sqlx::query_as::<_, $ty>(&__sql);
+        let mut __q = sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()));
         for __v in $dyn {
             __q = __q.bind(__v);
         }
@@ -144,7 +144,7 @@ macro_rules! tx_execute {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query(&__sql)$(.bind($bind))*.execute(&mut **__t).await.map(|r| r.rows_affected())
+        sqlx::query(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.execute(&mut **__t).await.map(|r| r.rows_affected())
     }};
 }
 
@@ -155,7 +155,7 @@ macro_rules! tx_fetch_all {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_all(&mut **__t).await
     }};
 }
 
@@ -166,7 +166,7 @@ macro_rules! tx_fetch_one {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_one(&mut **__t).await
     }};
 }
 
@@ -177,7 +177,7 @@ macro_rules! tx_fetch_optional {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_as::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
+        sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_optional(&mut **__t).await
     }};
 }
 
@@ -188,7 +188,7 @@ macro_rules! tx_scalar_one {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_one(&mut **__t).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_one(&mut **__t).await
     }};
 }
 
@@ -199,7 +199,7 @@ macro_rules! tx_scalar_all {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_all(&mut **__t).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_all(&mut **__t).await
     }};
 }
 
@@ -210,7 +210,7 @@ macro_rules! tx_scalar_optional {
         let __sql_src = $sql;
         let __t: &mut $crate::db::DbTx<'_> = $tx;
         let __sql = $crate::db::executor::__render(__sql_src);
-        sqlx::query_scalar::<_, $ty>(&__sql)$(.bind($bind))*.fetch_optional(&mut **__t).await
+        sqlx::query_scalar::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))$(.bind($bind))*.fetch_optional(&mut **__t).await
     }};
 }
 

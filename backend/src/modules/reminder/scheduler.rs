@@ -76,7 +76,7 @@ async fn deliver_to_matrix(
                 };
                 let _ = crate::bot::reaction_targets::record_target(
                     &ctx.db.pool,
-                    resp.event_id.as_str(),
+                    resp.response.event_id.as_str(),
                     reminder.room_id.as_str(),
                     entity_type,
                     entity_id,
@@ -113,7 +113,7 @@ async fn deliver_to_matrix(
                 };
                 let _ = crate::bot::reaction_targets::record_target(
                     &ctx.db.pool,
-                    resp.event_id.as_str(),
+                    resp.response.event_id.as_str(),
                     reminder.room_id.as_str(),
                     entity_type,
                     entity_id,

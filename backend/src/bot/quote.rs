@@ -1,7 +1,7 @@
 use matrix_sdk::room::Room;
-use matrix_sdk::ruma::events::room::message::{MessageType, Relation, RoomMessageEvent};
-use matrix_sdk::ruma::events::AnyMessageLikeEvent;
-use matrix_sdk::ruma::events::AnyTimelineEvent;
+use matrix_sdk::ruma::events::room::message::{MessageType, Relation, SyncRoomMessageEvent};
+use matrix_sdk::ruma::events::AnySyncMessageLikeEvent;
+use matrix_sdk::ruma::events::AnySyncTimelineEvent;
 use matrix_sdk::ruma::EventId;
 use tracing::warn;
 
@@ -63,7 +63,7 @@ pub fn extract_replied_event_id(
     >,
 ) -> Option<String> {
     match relates_to {
-        Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.to_string()),
+        Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.to_string()),
         Some(Relation::Thread(thread)) => {
             thread.in_reply_to.as_ref().map(|i| i.event_id.to_string())
         }
@@ -77,8 +77,8 @@ pub async fn resolve_quoted_event_from_room(
     event_id_str: &str,
 ) -> Option<QuotedMessage> {
     let eid = EventId::parse(event_id_str).ok()?;
-    let timeline_event = room.event(&eid).await.ok()?;
-    let any_event = match timeline_event.event.deserialize() {
+    let timeline_event = room.event(&eid, None).await.ok()?;
+    let any_event = match timeline_event.raw().deserialize() {
         Ok(ev) => ev,
         Err(err) => {
             warn!(
@@ -90,8 +90,8 @@ pub async fn resolve_quoted_event_from_room(
     };
 
     match any_event {
-        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
-            RoomMessageEvent::Original(msg),
+        AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+            SyncRoomMessageEvent::Original(msg),
         )) => {
             let author = msg.sender.to_string();
             let body = match msg.content.msgtype {

@@ -17,7 +17,10 @@ name = "generate-openapi"
 path = "src/bin/generate_openapi.rs"
 
 [dependencies]
-matrix-sdk = { version = "0.7", features = ["e2e-encryption"] }
+matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"] }
+# matrix-sdk 0.16 dropped its `crypto` re-export; `bot/media.rs` decrypts
+# attachments with `AttachmentDecryptor` directly. Keep in lockstep with matrix-sdk.
+matrix-sdk-crypto = "0.18"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
@@ -33,16 +36,10 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "migrate"] }
-# Dropping sqlx's `sqlite` feature above removed the only crate that asked
-# `libsqlite3-sys` (a transitive dependency of matrix-sdk-sqlite, our
-# still-required crypto store) to vendor and link its own SQLite. Without this,
-# Windows has no system `sqlite3.lib` to link against. This is a build
-# dependency only — the application's own database layer never uses it.
-libsqlite3-sys = { version = "0.27", features = ["bundled"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "chrono", "uuid", "json", "migrate", "macros"] }
 axum = { version = "0.7", features = ["macros", "multipart"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "timeout", "limit"] }
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart", "stream"] }
 utoipa = { version = "4.2", features = ["axum_extras", "chrono"] }
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui"] }
 uuid = "1.24.0"

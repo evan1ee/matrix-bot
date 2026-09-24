@@ -5,9 +5,8 @@
 //! encrypted attachments (AES-CTR) in encrypted rooms.
 
 use anyhow::{anyhow, Context, Result};
-use matrix_sdk::{
-    crypto::AttachmentDecryptor, ruma::events::room::MediaSource, ruma::MxcUri, Client,
-};
+use matrix_sdk::{ruma::events::room::MediaSource, ruma::MxcUri, Client};
+use matrix_sdk_crypto::AttachmentDecryptor;
 use std::io::{Cursor, Read};
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -104,7 +103,7 @@ async fn download_raw_media(client: &Client, uri: &MxcUri) -> Result<Vec<u8>> {
     match client
         .media()
         .get_media_content(
-            &matrix_sdk::media::MediaRequest {
+            &matrix_sdk::media::MediaRequestParameters {
                 source: MediaSource::Plain(uri.to_owned()),
                 format: matrix_sdk::media::MediaFormat::File,
             },
