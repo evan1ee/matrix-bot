@@ -94,7 +94,17 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      - name: Cache sqlx-cli
+        id: cache-sqlx-cli
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/sqlx
+            ~/.cargo/bin/cargo-sqlx
+          key: sqlx-cli-0.9-${{ runner.os }}
+
       - name: Install sqlx-cli
+        if: steps.cache-sqlx-cli.outputs.cache-hit != 'true'
         run: cargo install sqlx-cli --version ^0.9 --no-default-features --features rustls,postgres --locked
 
       # The committed .sqlx/ cache must match both the queries and the schema.
