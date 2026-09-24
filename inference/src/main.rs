@@ -4,6 +4,7 @@ use tracing::info;
 mod audio;
 mod config;
 mod download;
+mod kokoro;
 mod paddle;
 mod provision;
 mod routes;

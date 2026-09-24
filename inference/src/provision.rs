@@ -60,8 +60,8 @@ where
 /// deployment answers `/health` at once instead of reading unhealthy for the
 /// minutes a download takes. Each route gates on its own `models_present` and
 /// answers 503 until its files land; downloads write to a temporary file and
-/// rename, so a route never sees a partial model. OCR and STT provision
-/// concurrently, so one retrying forever never holds up the other.
+/// rename, so a route never sees a partial model. OCR, STT and TTS provision
+/// concurrently, so one retrying forever never holds up the others.
 pub async fn provision_models(config: Arc<InferenceConfig>) {
     let ocr_config = Arc::clone(&config);
     let ocr = async move {
@@ -79,7 +79,15 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
         .await;
     };
 
-    tokio::join!(ocr, stt);
+    let tts_config = Arc::clone(&config);
+    let tts = async move {
+        retry_until_ready("Text-to-speech", || {
+            crate::kokoro::ensure_model_downloaded(&tts_config.tts_model_dir)
+        })
+        .await;
+    };
+
+    tokio::join!(ocr, stt, tts);
 }
 
 #[cfg(test)]
@@ -101,6 +109,9 @@ mod tests {
         ] {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
+        for name in crate::kokoro::KOKORO_REQUIRED_FILES {
+            std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
+        }
         dir
     }
 
@@ -111,6 +122,7 @@ mod tests {
             port: 0,
             ocr_model_dir: dir.clone(),
             voice_model_dir: dir.clone(),
+            tts_model_dir: dir.clone(),
         });
 
         tokio::time::timeout(Duration::from_secs(5), provision_models(config))

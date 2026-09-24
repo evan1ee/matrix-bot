@@ -2554,6 +2554,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bzip2 0.5.2",
  "futures-util",
  "image",
  "ogg",
@@ -2566,6 +2567,7 @@ dependencies = [
  "serde_json",
  "sherpa-onnx",
  "symphonia",
+ "tar",
  "thiserror 1.0.69",
  "tokio",
  "tower",
