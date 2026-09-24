@@ -217,7 +217,7 @@ Unchanged from the previous roadmap, and now a year older.
   tested, and constructed nowhere**
 - `grep -ri "csv"` — zero hits across backend and frontend
 
-`AGENTS.md` documents this as reserved-but-unbuilt, which is honest. The
+`docs/ARCHITECTURE.md` documents this as reserved-but-unbuilt, which is honest. The
 user-facing copy is not: `!export` directs people to a web button that does not
 exist. Behind `VerifiedUser`, per the reservation's original intent.
 

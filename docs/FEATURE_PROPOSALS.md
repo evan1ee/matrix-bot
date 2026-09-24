@@ -33,7 +33,7 @@ notepad that happens to live in a chat into an actual group tool.
 
 ### Why it is the hard one
 
-`AGENTS.md` is emphatic that `AuthUser::owner_id()` is *the* single ownership
+`docs/ARCHITECTURE.md` is emphatic that `AuthUser::owner_id()` is *the* single ownership
 key, matching `sender_mxid` and nothing else. Shared rows break that: ownership
 becomes "the room", and visibility becomes a membership question that only the
 Matrix client can answer.

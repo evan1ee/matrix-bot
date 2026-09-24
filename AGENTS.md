@@ -21,11 +21,16 @@ cargo run                                # starts bot + API server
 cp data/bot_data.db /tmp/copy.db
 MIGRATE_TEST_DB=/tmp/copy.db cargo test migrates_a_real_database -- --ignored
 
-# Run the suite against PostgreSQL instead of in-memory SQLite (what
-# backend-postgres does in CI)
+# Run the suite against PostgreSQL instead of in-memory SQLite. CI's
+# backend-postgres job does this against a service container; locally, start
+# a matching one first:
+docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
 TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres cargo test -p matrix-bot
 
-# After any #[utoipa::path] or ToSchema change, regenerate both and verify no drift
+# After any #[utoipa::path] or ToSchema change, regenerate both, and commit
+# backend/openapi.json if it changed — CI's drift check fails on any diff.
+# (The crate is a lib `matrix_bot` plus two bins, so generate-openapi reuses
+# the API types; tests never write openapi.json.)
 cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json
 npm --prefix frontend run generate-api
 
@@ -48,7 +53,7 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 - `contracts/` — JSON fixtures each crate asserts its wire formats against.
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `data/` — runtime SQLite DB + Matrix crypto store (gitignored).
-- `docs/` — `ARCHITECTURE.md` (design rationale), `testing-auth-locally.md` (passkeys against `localhost`), roadmap, reviews.
+- `docs/` — `ARCHITECTURE.md` (design rationale); `testing-auth-locally.md` covers running passkeys against `localhost` (virtual authenticator, the `!link` DM flow, SQL to skip the step-up and recovery delays); roadmap, reviews.
 
 ## Working Principles
 
@@ -73,7 +78,7 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 **`contracts/`** — every HTTP wire contract between the two crates lives here as a JSON fixture both sides assert against (or the server side alone, for a server-only format) — a renamed field fails a test, not production.
 
 **Database & SQLx**:
-- **Never call `sqlx::query*` directly.** Use the dual-dialect macros in `backend/src/db/executor.rs`, which holds `DbPool` (an enum over both drivers) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. Write SQL once in SQLite's `?` style; `dialect::render_placeholders` rewrites it to `$1..$n` for Postgres. Compile-time `query!` macros stay banned — they need a DB URL at build time.
+- **Never call `sqlx::query*` directly.** Use the dual-dialect macros in `backend/src/db/executor.rs`, which holds `DbPool` (an enum over both drivers) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. Write SQL once in SQLite's `?` style; `dialect::render_placeholders` rewrites it to `$1..$n` for Postgres. Compile-time `query!` macros stay banned — they need a DB URL at build time, which would defeat both the dual-dialect layer and an offline build.
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
 - Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; `backend-postgres` in CI is blocking.
 
@@ -92,31 +97,46 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
   | `date(x)` compared or unioned with text | `CAST(date(x) AS TEXT)` | PostgreSQL returns a `date` |
   | `substr(timestamp_col, ...)` | `substr(CAST(col AS TEXT), ...)` | `substr` needs text |
   | `ON CONFLICT DO UPDATE SET c = c + excluded.c` | qualify: `tbl.c + excluded.c` | ambiguous on PostgreSQL |
-  | `0`/`1` for a boolean | `TRUE`/`FALSE` | PostgreSQL has a real boolean |
+  | a timestamp column compared to a `String` | bind a `DateTime<Utc>` | no implicit cast |
+  | `0`/`1` for a boolean, in comparisons **and** `VALUES` | `TRUE`/`FALSE` | PostgreSQL has a real boolean |
 
-- Match the column type to the Rust type it is read as (`i64`→`BIGINT`, `i32`→`INTEGER`, `f64`→`DOUBLE PRECISION`, `bool`→`BOOLEAN`, `DateTime<Utc>`→`TIMESTAMPTZ`). **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
+- **Match the column type to the Rust type it is read as**, and check both directions when changing either. PostgreSQL is strict where SQLite is not, so a mismatch is invisible locally:
+
+  | Rust | Column |
+  |---|---|
+  | `i64` | `BIGINT` |
+  | `i32` | `INTEGER` (PostgreSQL's `INTEGER` is `i32`, not `i64`) |
+  | `f64` | `DOUBLE PRECISION` (`REAL` is `float4`) |
+  | `bool` | `BOOLEAN` |
+  | `DateTime<Utc>` | `TIMESTAMPTZ` (bare `TIMESTAMP` carries no zone) |
+  | `String` holding a timestamp | `TEXT` with the `{{NOW_TEXT}}` default |
+
+  **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
 - Migrate via `CREATE TABLE IF NOT EXISTS` + best-effort `ALTER TABLE` in `db/schema_*.rs`, orchestrated by `db/schema.rs`. No `sqlx migrate` directory.
 - Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or bot modules to API modules.
 - SQLite pools: `WAL`, `busy_timeout=5000`, `DATABASE_MAX_CONNECTIONS`. Postgres pools take only the connection limit.
+- **Any new owner-keyed table must be added to `OWNED_TABLES`** (`accounts/merge.rs`) — a merge rewrites every table that constant lists; one missing from it isn't a compile error, it's a silent data leak on the next account merge.
 
-**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Escape user input with `html_escape()`; strip HTML for the plain-text fallback with `strip_html()` (`backend/src/utils/html.rs`). Quoted-message context (`CommandContext.quoted`, parsed in `bot/quote.rs`) — AI injects it into prompts; Todo/Reminder use it as the body when none is supplied.
+**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `bot/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
 
-**AI tools & web search** — define tools with the standard OpenAI `type: "function"` schema (`modules/ai/search.rs`); never a provider-specific tool variant. Each domain tool file exports its own `tool_definitions()`; `definitions.rs` just aggregates them. Gate web search by intent (`should_enable_web_search()`) — skip it for routine productivity commands. Search backend: Tavily (`TAVILY_API_KEY`) first, falling back to keyless DuckDuckGo scraping. Execute concurrent tool calls with `futures_util::future::join_all`, not a sequential loop. Long research requests need a generous router timeout (`TimeoutLayer` >= 180s); dedupe immediate retries by checking the conversation's tail message before inserting.
+**AI tools & web search** — define tools with the standard OpenAI `type: "function"` schema (`modules/ai/search.rs`); never a provider-specific tool variant. Each domain tool file exports `pub fn tool_definitions() -> Vec<ToolDefinition>`; `definitions.rs` just aggregates them, and tool executors call domain SQLx repositories directly rather than through pass-through layers. Gate web search by intent (`should_enable_web_search()`) — skip it for routine productivity commands. Search backend: Tavily (`TAVILY_API_KEY`) first, falling back to keyless DuckDuckGo scraping if no key is set or on API errors. Execute concurrent tool calls with `futures_util::future::join_all`, not a sequential loop. Long research requests need a generous router timeout (`TimeoutLayer` >= 180s); dedupe immediate retries by checking the conversation's tail message before inserting.
 
 **AI transport configuration** — settings read exactly one env name each: `AI_ENDPOINT` (base URL incl. `/v1`), `AI_API_KEY`, `AI_MODEL`. Per-user base URLs are an SSRF surface: `AI_ALLOW_PRIVATE_BASE_URL` (off by default) is the only way to allow one that resolves to a private host. The AI transport's own proxy chain (`config.rs`) is `AI_PROXY` → `HTTPS_PROXY`/`https_proxy` → `ALL_PROXY`/`all_proxy` → `HTTP_PROXY`/`http_proxy`. The web-search HTTP client has a **separate, shorter** chain (`modules/ai/search.rs`) — `AI_PROXY` → `HTTPS_PROXY`/`https_proxy` → `ALL_PROXY`/`all_proxy`, with no `HTTP_PROXY` fallback — don't assume the two share one list. Web-search key: `TAVILY_API_KEY`.
 
-**Frontend design system** (`Design.md`) — monochrome-first, Geist Sans for prose/controls, Geist Mono for identifiers (code, paths, timestamps, currency codes). Sentence-case headings, no all-caps overlines. No redundant outer padding or centering containers on module root views — `AppShell` already provides the gutters. No decorative gradients, glow, glassmorphism, pulsing badges, or simulated animation; color only for meaningful state, always paired with a non-color cue. Stat Strip pattern for summary metrics; tables right-align numbers, left-align text. Every control keyboard-accessible (`Escape` closes modals, `Enter` submits single-line forms).
+**Frontend design system** (`Design.md`) — monochrome-first: canvas `bg-white dark:bg-neutral-950`, borders `border-neutral-200 dark:border-neutral-800`, text `text-neutral-900 dark:text-neutral-100`/`text-neutral-500 dark:text-neutral-400`; color only for meaningful state, always paired with a non-color cue. Geist Sans for prose/controls, Geist Mono for identifiers (code, paths, timestamps, currency codes); sentence-case headings, no all-caps overlines. `AppShell` already provides the outer gutters (`px-6 md:px-8 py-6`) — module roots are `<div className="space-y-6">` (or the full-height chat/map variant `flex-1 flex flex-col min-h-0 space-y-4`), never redundant padding or a centering container. No decorative gradients, glow, glassmorphism, stripes, textures, or card-in-card nesting; no pulsing badges or simulated animation — transitions are `transition-colors duration-150`. Stat Strip pattern (`grid grid-cols-2 sm:grid-cols-4 gap-3`) with uppercase mono labels and tabular numbers; tables own the full content width, numbers right-align. Every control has visible labels, clear focus outlines, and full keyboard access (`Escape` closes modals, `Enter` submits single-line forms).
+
+**Timezone-aware rendering** — always pass the zone explicitly when formatting an instant (`formatDateTimeInZone` and friends); never use a bare `toLocaleString`, which silently uses the browser's zone instead of the user's saved one.
 
 ## Module Implementation Checklist
 
 When creating or enhancing a feature module:
 
 1. **Backend directory**: `backend/src/modules/<feature_name>/` with `mod.rs`, `models.rs`, `repository.rs`, `handler.rs`.
-2. **Database migration**: table schema in `backend/src/db/schema.rs` (or a modular `schema_<feature>.rs`).
+2. **Database migration**: table schema in `backend/src/db/schema.rs` (or a modular `schema_<feature>.rs`); if the table is owner-keyed, add it to `OWNED_TABLES` in `accounts/merge.rs` or a merge silently drops it.
 3. **Repository**: SQLx query binding CRUD methods in `repository.rs`.
 4. **Command handler**: parse Matrix commands, enforce length limits (max 500 chars), format HTML output.
-5. **REST API**: handlers in `backend/src/api/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/api/mod.rs`.
+5. **REST API**: handlers in `backend/src/api/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/api/routes.rs::api_routes()`. If a route is sensitive, add `VerifiedUser` to the handler **and** add it to the `SENSITIVE` list in `backend/src/api/mod.rs::step_up_tests` — that test only checks routes already listed, so it won't catch a new one on its own.
 6. **SystemEvents**: variants in `backend/src/events.rs` with `owner_id()`, broadcast on every state change.
 7. **BotModule registration**: implement `BotModule` in `mod.rs`, register in `backend/src/bot/mod.rs`.
 8. **OpenAPI & types**: update `ApiDoc` in `backend/src/api/openapi.rs`, then run the OpenAPI regeneration commands above.
@@ -132,9 +152,9 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Event flow (SSE)** — every mutation broadcasts a `SystemEvent`, delivered per-owner via `owner_id()`. [Details](docs/ARCHITECTURE.md#event-flow-sse).
 - **Matrix session and crypto store** — never keep the crypto store across a fresh login, and never pin a device ID on one, or peers see broken encryption or a silent key rotation. [Details](docs/ARCHITECTURE.md#matrix-session-and-crypto-store).
 - **Verification** — `ensure_self_verified` must run on every boot; never treat `Recovery::recover()`'s `Ok` as "verified". [Details](docs/ARCHITECTURE.md#verification-self-and-peer).
-- **Accounts and ownership** — `owner_id` on every table is an `accounts.id`, resolved from a Matrix link or a web session, never derived any other way. [Details](docs/ARCHITECTURE.md#accounts-one-owner-several-ways-in).
-- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; sensitive routes must require `VerifiedUser`, not just `AuthUser`, or `step_up_tests` fails CI. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
-- **Linking and recovery** — `!link` must be handled before the sender is resolved, or the claim provisions an empty account first; `!recover` is time-fenced to avoid a passkey/Matrix trust circle. [Details](docs/ARCHITECTURE.md#linking-recovery-and-the-matrix-ceiling).
+- **Accounts and ownership** — `owner_id` on every table is an `accounts.id`, resolved from a Matrix link or a web session, never derived any other way. A merge rewrites every table in `OWNED_TABLES`, and sessions never follow a merge — a session belongs to the credential that opened it. [Details](docs/ARCHITECTURE.md#accounts-one-owner-several-ways-in).
+- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; a sensitive route needs `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list (`api/mod.rs`) — the test checks only routes already listed, so both are required. An MCP token never satisfies step-up. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
+- **Linking and recovery** — `!link` must be handled before the sender is resolved (never move it into a `BotModule`), or the claim provisions an empty account first. `!recover` is time-fenced; cancelling it deliberately takes `AuthUser`, not `VerifiedUser`. `WEB_ONLY` gates only `!export`/`!sessions`/`!recoverycodes` — `!passkey add` and `!unlink sessions` act directly from Matrix. [Details](docs/ARCHITECTURE.md#linking-recovery-and-the-matrix-ceiling).
 - **Per-user settings** — timezone/currency, read by every other module; a missing row means defaults, never an error. [Details](docs/ARCHITECTURE.md#per-user-settings-timezone-default-currency).
 - **Voice replies** — `!say` synthesises through `services/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
 - **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `services/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
@@ -149,7 +169,7 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 cargo fmt --all -- --check                        # CI: backend + inference jobs both block on this
 cargo test -p matrix-bot --all-targets             # CI: backend job
 cargo test -p matrix-bot-inference --all-targets   # CI: inference job
-cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json   # CI: OpenAPI drift check
+cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json   # CI's drift check: regenerate, commit the file if it changed, then this must exit 0
 npm --prefix frontend run build                    # CI: frontend job
 npm --prefix frontend run test:e2e                 # not CI-gated yet; still required before shipping a UI change
 ```
@@ -160,16 +180,17 @@ Never commit code that fails compilation, formatting, or tests.
 
 ## Security Rules
 
-- Sensitive API routes require `VerifiedUser`, not just `AuthUser` (see Architecture: Auth).
+- Sensitive API routes require `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list in `api/mod.rs` — the test only checks routes already listed there, so adding `VerifiedUser` alone isn't enough to be caught by CI (see Architecture: Auth). An MCP token never satisfies step-up.
 - Never put a value into SQL text — always bind it, even in dynamically assembled queries (see Conventions: Database & SQLx).
 - Escape all user input embedded in HTML with `html_escape()`.
 - Every `SystemEvent` variant must return a meaningful `owner_id()`, or it leaks across users or is never delivered.
-- Matrix has no route to a privileged action (`WEB_ONLY` in `modules/account/mod.rs`): `!export`, `!unlink`, `!passkey`, `!sessions`, `!recoverycodes` all point to the web app.
-- `!link` is refused outside a DM, and **the code is burned either way** — a public-room code is readable by anyone.
+- `WEB_ONLY` (`modules/account/mod.rs`) gates only `!export`, `!sessions`, `!recoverycodes` — `!passkey add` issues an enrollment link and `!unlink sessions`/`!unlink matrix` act directly from Matrix; only passkey *removal* still redirects to the web dashboard.
+- `!link` is refused outside a DM, and **the code is burned either way** — a public-room code is readable by anyone. Cancelling `!recover` deliberately takes `AuthUser`, not `VerifiedUser`.
 - Only the SHA-256 of a session cookie is stored server-side.
-- CSRF is enforced twice: `SameSite=Strict` plus an `Origin` check on every cookie-authenticated mutation.
+- CSRF is enforced twice: `SameSite=Strict` plus an `Origin` check on every cookie-authenticated mutation. A missing `Origin` on such a mutation is refused; a request carrying an explicit `Authorization: Bearer` credential is exempt.
 - `Config::validate` refuses to boot production on localhost WebAuthn defaults.
 - API payload strings are capped at 500 chars.
+- Any new owner-keyed table must be added to `OWNED_TABLES` (`accounts/merge.rs`), or an account merge silently leaves its rows behind.
 
 ## Gotchas
 
