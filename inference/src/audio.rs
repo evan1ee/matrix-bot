@@ -10,7 +10,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use tracing::{debug, warn};
 
-use super::models::VoiceError;
+use crate::sherpa::VoiceError;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -266,5 +266,40 @@ mod tests {
         let original = vec![0.0, 1.0];
         let res = resample_linear(&original, 8000, 16000);
         assert_eq!(res.len(), 4);
+    }
+
+    #[test]
+    fn test_a_silent_wav_decodes_to_a_second_of_zeroes() {
+        let wav = super::test_audio::silent_wav_16k_mono(1.0);
+
+        let samples = decode_audio_to_16k_mono(&wav).expect("a PCM WAV should decode");
+
+        assert_eq!(samples.len(), 16_000);
+        assert!(samples.iter().all(|s| s.abs() < 1e-6));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_audio {
+    /// A mono 16-bit PCM WAV of silence at 16 kHz: enough for the decoder to
+    /// accept and for SenseVoice to run over, with no audio fixture on disk.
+    pub(crate) fn silent_wav_16k_mono(seconds: f32) -> Vec<u8> {
+        let sample_rate: u32 = 16_000;
+        let data_len = (sample_rate as f32 * seconds) as u32 * 2;
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.resize(44 + data_len as usize, 0);
+        wav
     }
 }

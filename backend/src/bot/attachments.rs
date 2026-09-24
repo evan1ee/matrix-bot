@@ -36,6 +36,7 @@ enum Attachment<'a> {
     Audio {
         content: &'a AudioMessageEventContent,
         voice_config: &'a VoiceConfig,
+        stt: &'a crate::services::stt::SttClient,
     },
 }
 
@@ -44,12 +45,14 @@ impl<'a> Attachment<'a> {
         msgtype: &'a MessageType,
         ocr: &'a crate::services::ocr::OcrClient,
         voice_config: &'a VoiceConfig,
+        stt: &'a crate::services::stt::SttClient,
     ) -> Option<Self> {
         match msgtype {
             MessageType::Image(content) => Some(Self::Image { content, ocr }),
             MessageType::Audio(content) => Some(Self::Audio {
                 content,
                 voice_config,
+                stt,
             }),
             _ => None,
         }
@@ -181,7 +184,11 @@ impl<'a> Attachment<'a> {
                 )
                 .await
             }
-            Self::Audio { voice_config, .. } => {
+            Self::Audio {
+                content,
+                voice_config,
+                stt,
+            } => {
                 crate::modules::voice::process_audio_event(
                     db,
                     ai,
@@ -189,7 +196,13 @@ impl<'a> Attachment<'a> {
                     room,
                     owner_id,
                     media_bytes,
+                    content
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.mimetype.as_deref()),
+                    content.info.as_ref().and_then(|info| info.duration),
                     voice_config,
+                    stt,
                     Some(reporter),
                 )
                 .await
@@ -213,8 +226,10 @@ pub async fn handle_attachment(
     broadcaster: Option<&EventBroadcaster>,
     ocr: &crate::services::ocr::OcrClient,
     voice_config: &VoiceConfig,
+    stt: &crate::services::stt::SttClient,
 ) {
-    let Some(attachment) = Attachment::from_msgtype(&ev.content.msgtype, ocr, voice_config) else {
+    let Some(attachment) = Attachment::from_msgtype(&ev.content.msgtype, ocr, voice_config, stt)
+    else {
         return;
     };
 

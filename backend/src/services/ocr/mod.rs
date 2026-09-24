@@ -103,23 +103,36 @@ impl OcrClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::test_support::spawn_server;
     use axum::{routing::post, Json, Router};
     use serde_json::json;
 
-    /// Starts a throwaway server on an ephemeral port and returns its base URL.
-    /// Uses axum and tokio, both already backend dependencies, rather than
-    /// adding a mock-HTTP crate.
-    async fn spawn_server(app: Router) -> String {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .expect("ephemeral port should bind");
-        let addr = listener
-            .local_addr()
-            .expect("listener should have an address");
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        format!("http://{}", addr)
+    const OCR_SCAN_CONTRACT: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/ocr_scan.json"
+    ));
+
+    #[test]
+    fn test_the_shared_wire_contract_deserialises_into_ocr_scan() {
+        let scan: OcrScan =
+            serde_json::from_str(OCR_SCAN_CONTRACT).expect("the contract should parse");
+
+        assert_eq!(
+            scan,
+            OcrScan {
+                text: "SHAKE SHACK\nTotal $16.50".to_string(),
+                blocks: vec![
+                    OcrScanBlock {
+                        text: "SHAKE SHACK".to_string(),
+                        score: 0.5,
+                    },
+                    OcrScanBlock {
+                        text: "Total $16.50".to_string(),
+                        score: 0.75,
+                    },
+                ],
+            }
+        );
     }
 
     #[tokio::test]

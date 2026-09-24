@@ -41,6 +41,14 @@ WORKDIR /app
 
 COPY --from=build /src/target/release/matrix-bot-inference /usr/local/bin/matrix-bot-inference
 
+# sherpa-onnx is linked as a shared library, so its C API and the ONNX Runtime
+# it was built against ship beside the binary -- the same two files the bot
+# image copies. `ort` (PaddleOCR) links its own ONNX Runtime statically and
+# needs nothing here. ldconfig runs as root, so this precedes `USER app`.
+COPY --from=build /src/target/release/libsherpa-onnx-c-api.so /usr/local/lib/
+COPY --from=build /src/target/release/libonnxruntime.so       /usr/local/lib/
+RUN ldconfig
+
 # Models are downloaded at startup (see inference/src/main.rs) into this
 # directory, which is a volume so the download survives a container
 # replacement and is not repeated on every restart.
@@ -48,7 +56,8 @@ RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 
 ENV INFERENCE_PORT=8090 \
-    OCR_MODEL_DIR=/app/data/ocr_models
+    OCR_MODEL_DIR=/app/data/ocr_models \
+    VOICE_MODEL_DIR=/app/data/voice_models
 
 EXPOSE 8090
 VOLUME ["/app/data"]

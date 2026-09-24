@@ -42,6 +42,12 @@ This document defines the architectural conventions, coding rules, frontend desi
      separate, with a `From` impl in the module. Inverting this collapses the
      boundary on first use.
    - **The 500-line limit applies to `inference/src/` too.**
+   - **Every HTTP wire contract between the crates lives in `contracts/`.** A JSON
+     fixture the server side serialises against, and — for every format its
+     client actually requests — the client side deserialises from too; a
+     server-only format (one the bot never asks for) is asserted by the
+     server alone. Either way, a renamed field fails a test instead of
+     production.
 
 4. **Database & SQLx Persistence Rules**:
    - **Never call `sqlx::query*` directly.** Every query goes through the dual-dialect macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_all!`, `db_scalar_one!`, `db_scalar_optional!`, `db_execute!`, and the `tx_*` family inside a transaction. They take a `&DbPool` (or `&mut DbTx`), dispatch on the live driver, and rewrite `?` placeholders to `$1..$n` for PostgreSQL. Write the SQL once, in SQLite's `?` style. Pass `_` as the row type where it is inferred from context.

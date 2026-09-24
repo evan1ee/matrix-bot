@@ -6092,7 +6092,7 @@
         "tags": [
           "Voice"
         ],
-        "summary": "Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference.",
+        "summary": "Transcribes an uploaded voice recording through the configured speech-to-text service.",
         "operationId": "transcribe_voice",
         "responses": {
           "200": {
@@ -6106,10 +6106,13 @@
             }
           },
           "400": {
-            "description": "Invalid or empty audio payload"
+            "description": "Invalid or empty audio payload, or audio the transcription service could not process"
+          },
+          "500": {
+            "description": "Voice transcription failed"
           },
           "503": {
-            "description": "Voice transcription engine is disabled"
+            "description": "Voice transcription is disabled, not configured, or temporarily unavailable"
           }
         },
         "security": [

@@ -282,6 +282,46 @@ jobs:
         with:
           prefix-key: "v2-inference"
 
+      # sherpa-onnx arrives in this crate with speech-to-text. Same handling as
+      # the backend jobs: rust-cache prunes the prebuilt .so files, so the
+      # build script is forced to re-run, and the archive it fetches is cached
+      # so the download is a cache-miss-only path with retries.
+      - name: Resolve the sherpa-onnx version
+        id: sherpa
+        run: |
+          set -euo pipefail
+          version="$(grep -A1 'name = "sherpa-onnx-sys"' Cargo.lock | grep '^version' | cut -d'"' -f2)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=sherpa-onnx-v$version-linux-x64-shared-lib.tar.bz2" >> "$GITHUB_OUTPUT"
+          echo "SHERPA_ONNX_ARCHIVE_DIR=$RUNNER_TEMP/sherpa-archive" >> "$GITHUB_ENV"
+
+      - name: Cache the sherpa-onnx prebuilt archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sherpa-archive
+          key: sherpa-onnx-${{ steps.sherpa.outputs.version }}-linux-x64-shared
+
+      - name: Fetch the sherpa-onnx archive if the cache missed
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/sherpa-archive"
+          name="${{ steps.sherpa.outputs.archive }}"
+          mkdir -p "$dir"
+          if [ -f "$dir/$name" ]; then
+            echo "archive already cached: $name"
+            exit 0
+          fi
+          curl --proto '=https' --tlsv1.2 --location --fail --show-error --silent \
+               --retry 5 --retry-all-errors --retry-delay 5 \
+               --output "$dir/$name" \
+               "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${{ steps.sherpa.outputs.version }}/$name"
+
+      - name: Clean sherpa-onnx prebuilt cache
+        run: |
+          cargo clean -p sherpa-onnx-sys -p sherpa-onnx || true
+          rm -rf target/sherpa-onnx-prebuilt
+
       - name: Format check
         run: cargo fmt --all -- --check
 

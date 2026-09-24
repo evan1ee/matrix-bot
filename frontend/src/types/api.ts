@@ -1713,7 +1713,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Transcribes an uploaded voice audio recording using local SenseVoiceSmall inference. */
+        /** Transcribes an uploaded voice recording through the configured speech-to-text service. */
         post: operations["transcribe_voice"];
         delete?: never;
         options?: never;
@@ -7817,14 +7817,21 @@ export interface operations {
                     "application/json": components["schemas"]["VoiceTranscribeResponse"];
                 };
             };
-            /** @description Invalid or empty audio payload */
+            /** @description Invalid or empty audio payload, or audio the transcription service could not process */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Voice transcription engine is disabled */
+            /** @description Voice transcription failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Voice transcription is disabled, not configured, or temporarily unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
