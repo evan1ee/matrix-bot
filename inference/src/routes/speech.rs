@@ -57,6 +57,15 @@ fn validate(request: &SpeechRequest) -> Result<(String, i64), String> {
     if input.chars().count() > MAX_INPUT_CHARS {
         return Err(format!("'input' exceeds {} characters", MAX_INPUT_CHARS));
     }
+    // sherpa calls `CString::new(text).unwrap()`, which panics on an embedded
+    // NUL; other control characters serve no purpose in speech either. `\n`,
+    // `\r` and `\t` are allowed through since ordinary text can carry them.
+    if input
+        .chars()
+        .any(|c| c == '\0' || (c.is_control() && !matches!(c, '\n' | '\r' | '\t')))
+    {
+        return Err("'input' contains control characters".to_string());
+    }
 
     let speaker_id = request.voice.trim().parse::<i64>().map_err(|_| {
         format!(
@@ -234,6 +243,7 @@ mod tests {
             serde_json::json!({ "input": long, "voice": "0" }),
             serde_json::json!({ "input": "hi", "voice": "alloy" }),
             serde_json::json!({ "input": "hi", "voice": "0", "response_format": "mp3" }),
+            serde_json::json!({ "input": "hi\u{0000}there", "voice": "0" }),
         ];
         for body in cases {
             assert_eq!(
