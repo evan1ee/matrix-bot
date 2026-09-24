@@ -217,7 +217,7 @@ Unchanged from the previous roadmap, and now a year older.
   tested, and constructed nowhere**
 - `grep -ri "csv"` — zero hits across backend and frontend
 
-`CLAUDE.md` documents this as reserved-but-unbuilt, which is honest. The
+`AGENTS.md` documents this as reserved-but-unbuilt, which is honest. The
 user-facing copy is not: `!export` directs people to a web button that does not
 exist. Behind `VerifiedUser`, per the reservation's original intent.
 
@@ -253,7 +253,7 @@ amount; the scheduler is reusable as-is.
 `time_allocation` grid now landing on `visualizing-life` (§9).
 
 **Household expense splitter — defer.** Room-scoped todos *already* cross the
-ownership boundary that `CLAUDE.md` describes as absolute: `list_by_room` selects
+ownership boundary that `AGENTS.md` describes as absolute: `list_by_room` selects
 on `room_id` with no `owner_id` predicate, and `!todo clear room` deletes every
 completed row in the room regardless of author. Splitting would add a second and
 deeper exception to a model that has one undocumented one already. Settle the

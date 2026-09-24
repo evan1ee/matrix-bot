@@ -3,7 +3,7 @@
 Implementation notes for four candidate features, written against the tree at
 `bdb5f68`. Each section is meant to be enough to start from cold.
 
-These proposals follow the **Design & Implementation Principles** in `CLAUDE.md`:
+These proposals follow the **Working Principles** in `AGENTS.md`:
 no compatibility shims, simplest implementation that meets the requirement, grow
 in layers on top of a product that already works, and lean on dependencies that
 are already here (`matrix-sdk`, `sqlx`, `chrono`) before adding new ones.
@@ -33,7 +33,7 @@ notepad that happens to live in a chat into an actual group tool.
 
 ### Why it is the hard one
 
-`CLAUDE.md` is emphatic that `AuthUser::owner_id()` is *the* single ownership
+`AGENTS.md` is emphatic that `AuthUser::owner_id()` is *the* single ownership
 key, matching `sender_mxid` and nothing else. Shared rows break that: ownership
 becomes "the room", and visibility becomes a membership question that only the
 Matrix client can answer.

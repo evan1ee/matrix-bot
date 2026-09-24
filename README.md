@@ -526,8 +526,8 @@ data/                         # runtime SQLite + Matrix crypto store (gitignored
 docs/                         # documentation, roadmap, architecture reviews, guides
 ```
 
-`AGENTS.md` holds the development conventions; `CLAUDE.md` explains *why* the
-load-bearing parts are shaped the way they are, and is worth reading before
+`AGENTS.md` holds the development conventions and explains *why* the
+load-bearing parts are shaped the way they are — worth reading before
 changing auth, ownership or migrations.
 
 ---
