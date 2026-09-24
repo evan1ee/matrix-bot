@@ -215,7 +215,7 @@ Never commit code that fails compilation, formatting, or tests.
 - `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.
 - Windows: loading the real Kokoro TTS model in a test needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
-- Running the bot binary (`cargo run` / `matrix-bot.exe`) from a git worktree checkout loads the **main checkout's** `.env` — `main.rs` uses `dotenvy::dotenv()`, which searches parent directories and finds the first `.env` it hits, real Matrix credentials included. Override every Matrix-related variable explicitly, or run from a directory with no `.env` in any parent, before ever running the binary from a worktree.
+- `.env` is read from the current working directory only (`main.rs` loads `./.env` via `dotenvy::from_path`, never dotenvy's own upward parent-directory search) — always run the bot binary from the repo root, and note that a git worktree checkout has its own `.env`, distinct from the main checkout's.
 
 ## Definition of Done
 

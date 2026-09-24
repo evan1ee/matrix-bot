@@ -2,7 +2,7 @@
 // when rustc proves the spawned sync task is `Send`; rustc's own suggestion.
 #![recursion_limit = "256"]
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{error, info};
@@ -86,11 +86,25 @@ async fn run_bot_loop(
     }
 }
 
+/// Loads `.env` from the given path only -- never dotenvy's own upward
+/// directory search, which would silently pick up a `.env` from a parent
+/// directory (e.g. the main checkout's real production credentials, when run
+/// from a worktree under it). A missing file is fine (env vars may be set
+/// another way); any other error (e.g. a malformed file) fails startup so a
+/// broken `.env` is never silently ignored.
+fn load_dotenv_from(path: &std::path::Path) -> Result<()> {
+    match dotenvy::from_path(path) {
+        Ok(()) => Ok(()),
+        Err(dotenvy::Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("failed to load {}", path.display())),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load .env from cwd, and also try parent directory if running from backend/
-    dotenvy::dotenv().ok();
-    dotenvy::from_filename("../.env").ok();
+    // Read only ./.env -- run from the repo root. See load_dotenv_from's doc
+    // comment for why this must not search parent directories.
+    load_dotenv_from(std::path::Path::new(".env"))?;
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "mcp" {
@@ -199,4 +213,30 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod dotenv_tests {
+    use super::load_dotenv_from;
+
+    #[test]
+    fn missing_file_is_not_an_error() {
+        let path = std::path::Path::new("this-file-does-not-exist.env");
+        assert!(load_dotenv_from(path).is_ok());
+    }
+
+    #[test]
+    fn malformed_file_is_an_error() {
+        let dir =
+            std::env::temp_dir().join(format!("matrix-bot-dotenv-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        // No `=` -- dotenvy rejects this as a parse error.
+        std::fs::write(&path, "NOT_A_VALID_LINE\n").unwrap();
+
+        let result = load_dotenv_from(&path);
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(result.is_err());
+    }
 }
