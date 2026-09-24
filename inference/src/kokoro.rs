@@ -144,9 +144,9 @@ fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
 /// A request's voice can outlive the model that was loaded when it was
 /// chosen — an operator can swap in a Kokoro model with fewer voices without
 /// revalidating every caller's saved preference. Rather than fail the whole
-/// request, this degrades to the nearest valid voice: negative ids (should
-/// not occur past `validate`'s own check, but never trust a caller-supplied
-/// value) clamp to 0, and ids at or past `num_speakers` clamp to the last
+/// request, this degrades to the nearest valid voice: negative ids, which
+/// `routes/speech.rs::validate` does not reject (it only parses the voice as
+/// an `i64`), clamp to 0, and ids at or past `num_speakers` clamp to the last
 /// valid index. A model reporting zero speakers (unexpected, but the C API
 /// returns a plain `i32`) clamps to 0 rather than underflowing.
 fn clamp_speaker_id(requested: i64, num_speakers: i32) -> i32 {

@@ -197,7 +197,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **Webhooks** | `!webhook list`<br>`!webhook create <name> [room]`<br>`!webhook test <id>`<br>`!webhook revoke <id>` | Inbound webhook endpoints for external services, custom alert cards, and Telegram Bot API emulation |
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
-| **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <0-1023\|none>` | Configure per-user timezone, default currency, and the `!say` speaker voice, applied across all modules |
+| **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
 | **Account** | `!link <code>`<br>`!recover` | Link Matrix account to web/native identity, initiate delayed recovery |
 
 `!export`, `!unlink`, `!passkey`, `!sessions` and `!recoverycodes` are
@@ -287,12 +287,13 @@ AI_MODEL=grok-4.6
 # AI_PROXY=http://127.0.0.1:7897        # Optional proxy for restricted networks
 TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo if unset)
 
-# Text-to-Speech / !say voice replies (Optional — defaults to the bundled inference server's Kokoro)
-TTS_BASE_URL=http://inference:8090/v1  # Local Kokoro (bundled), or a hosted OpenAI-compatible/ElevenLabs endpoint
-TTS_API_KEY=                           # Bearer token, or xi-api-key under TTS_DIALECT=elevenlabs
-TTS_MODEL=kokoro                       # Ignored by the bundled server; required for a hosted provider
-TTS_VOICE=0                            # House default voice; each user can override it in Settings
-TTS_DIALECT=openai                     # openai (default) or elevenlabs
+# Text-to-Speech / !say voice replies (Optional — unset means !say is off;
+# under `docker compose up` this defaults to the bundled inference server's Kokoro)
+# TTS_BASE_URL=http://inference:8090/v1  # Local Kokoro (bundled), or a hosted OpenAI-compatible/ElevenLabs endpoint
+# TTS_API_KEY=                           # Bearer token, or xi-api-key under TTS_DIALECT=elevenlabs
+# TTS_MODEL=kokoro                       # Ignored by the bundled server; required for a hosted provider
+# TTS_VOICE=0                            # House default voice; each user can override it in Settings
+# TTS_DIALECT=openai                     # openai (default) or elevenlabs
 ```
 
 > [!WARNING]
