@@ -13,8 +13,8 @@ pub struct HealthResponse {
     pub ocr: bool,
 }
 
-/// Reports which models are installed. Each flag is that capability's
-/// `models_present` check.
+/// Reports which models are installed. Each flag is that capability's own
+/// presence check (`stt`/`ocr`: `models_present`; `tts`: `model_present`).
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         stt: crate::sherpa::models_present(&state.config.voice_model_dir),

@@ -514,7 +514,8 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
     ├── services/             # HTTP clients to sibling services
     │   ├── ocr/               #   client to the inference crate's POST /ocr
-    │   └── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
+    │   ├── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
+    │   └── tts/               #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image
