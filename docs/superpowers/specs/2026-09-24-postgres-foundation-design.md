@@ -32,7 +32,7 @@ beyond regenerated API types.
 | D2 | Existing data | Adopt the live PostgreSQL database in place | Real data lives there; SQLite data is not carried forward |
 | D3 | IDs | Row PKs stay `BIGINT`; `accounts.id` and every `owner_id` become native `UUID` | Chat commands show short numeric ids (`!todo done 3`); the account id is the one that gains from a real type and FKs |
 | D4 | Query style | `query!`/`query_as!` + committed `.sqlx/` cache, `SQLX_OFFLINE=true` in builds | Type/column mismatches become compile errors — the defect class AGENTS.md's portability tables were written to catch by hand |
-| D5 | sqlx version | Upgrade 0.7 → 0.9 (requires matrix-sdk 0.18 first) | Every query is rewritten anyway; fixes RUSTSEC-2024-0363 and has better offline tooling. sqlx 0.9 and matrix-sdk must agree on `libsqlite3-sys` (Cargo `links` check), hence matrix-sdk 0.18 |
+| D5 | sqlx version | Upgrade 0.7 → 0.9, together with matrix-sdk 0.7 → 0.18 in one step | Every query is rewritten anyway; fixes RUSTSEC-2024-0363 and has better offline tooling. Neither bump builds alone: Cargo's `links = "sqlite3"` check fires for sqlx's `libsqlite3-sys` (via its non-activated `sqlite` feature) even though it isn't enabled, and matrix-sdk 0.7's own `libsqlite3-sys` version collides with it — only matrix-sdk 0.18 resolves to a compatible version |
 | D6 | Layout | Layer-first (roadmap §13) | Chosen explicitly; dependency direction is enforced by an architecture test |
 | D7 | Topology | Single instance, HA-ready | SKIP LOCKED jobs, advisory-lock leader for schedulers and Matrix sync, LISTEN/NOTIFY for SSE — a second replica needs no redesign |
 | D8 | Job queue | Hand-rolled on sqlx | ~300 lines, schema in our migrations, enqueue in the caller's transaction; no pre-1.0 dependency owning our schema |
@@ -45,9 +45,9 @@ beyond regenerated API types.
 backend/
 ├── migrations/
 │   ├── 0001_baseline.sql          # today's 36 tables, idempotent (IF NOT EXISTS)
-│   ├── 0002_account_uuid.sql      # owner_id TEXT 'acct_<uuid>' → UUID + FKs
-│   ├── 0003_jobs.sql
-│   └── 0004_outbox.sql            # outbox_events + outbox_deliveries; drops webhook_outbox
+│   ├── 0002_jobs.sql
+│   ├── 0003_outbox.sql            # outbox_events + outbox_deliveries; drops webhook_outbox
+│   └── 0004_account_uuid.sql      # owner_id TEXT 'acct_<uuid>' → UUID + FKs
 ├── .sqlx/                         # committed offline query cache
 └── src/
     ├── main.rs                    # parse CLI (serve | mcp-stdio), call app::run
@@ -144,7 +144,7 @@ move to the router.
   and gets recorded in `_sqlx_migrations`. Precondition, stated in the release notes:
   the live deployment runs current master once before upgrading, so its schema equals
   the baseline.
-- **`0002_account_uuid.sql`** in one transaction:
+- **`0004_account_uuid.sql`** in one transaction:
   1. Guard: `DO $$ … RAISE EXCEPTION` listing any `owner_id`/`accounts.id` value not
      matching `^acct_[0-9a-f-]{36}$` (the discarded/follows sentinels in
      `ACCOUNT_ID_*` are checked explicitly).
@@ -152,7 +152,7 @@ move to the router.
      on `accounts.id` and every owner-keyed table.
   3. Add `REFERENCES accounts(id) ON DELETE CASCADE` on every `owner_id`.
 - **Audit-log hash chain.** `compute_entry_hash` folds the owner id string into each
-  digest. After 0002 the application renders `AccountId` as the canonical
+  digest. After 0004 the application renders `AccountId` as the canonical
   `acct_<uuid>` string when hashing, so every existing chain still verifies. A test
   pins this with a hash computed before the migration.
 - **Wire format.** `AccountId(Uuid)` serialises as `acct_<uuid>` wherever an account
@@ -163,13 +163,17 @@ move to the router.
   counts per table are unchanged and every audit chain verifies. Required before
   release.
 - Other column-type cleanups (`TEXT` timestamps → `TIMESTAMPTZ`, etc.) are **not** in
-  0002. Each lands in its own migration when its feature is moved (§6 step 5),
+  0004. Each lands in its own migration when its feature is moved (§6 step 6),
   against the field that reads it — per AGENTS.md's one-at-a-time rule.
 
 ### 4.3 Tests
 
-- `#[sqlx::test(migrations = "./migrations")]` gives every test a fresh database.
-  `DATABASE_URL` must point at a server; locally `docker compose --profile postgres up -d`.
+- The test harness stays `test_pool()` (`backend/src/db/pool.rs`) + `run_migrations_unlocked`
+  (`backend/src/db/migrate.rs`): each test gets a pool against a fresh, per-test
+  PostgreSQL schema with migrations applied, rather than `#[sqlx::test]`'s own
+  database-per-test attribute macro.
+  `DATABASE_URL`/`TEST_DATABASE_URL` must point at a server; locally
+  `docker compose --profile postgres up -d`.
 - Tests that need no database stay plain `#[test]` — domain tests in particular.
 - CI: the `backend` and `backend-postgres` jobs merge into one containerised job
   with a `postgres:18` service (the supported version), running
@@ -255,36 +259,50 @@ outbox_deliveries (id BIGINT identity, event_id FK, destination TEXT,   -- 'webh
 
 Each step ends with master green (fmt, tests, OpenAPI drift) and deployable.
 
-1. **sqlx 0.9** — bump, fix API changes, still dual-dialect.
-2. **Postgres-only cut** — drop the `sqlite` feature; `DbPool` wraps `PgPool` only;
+1. **Postgres-only cut** — drop the `sqlite` feature; `DbPool` wraps `PgPool` only;
    macros keep their call sites but lose the SQLite arm; SQLite `DATABASE_URL`
    refused at boot; tests run on PostgreSQL only; CI jobs merged.
-3. **Versioned migrations** — 0001 baseline, 0002 account UUID, `AccountId` type,
-   rehearsal test; `schema*.rs`, `ddl.rs`, `backfill.rs` deleted.
-4. **Layer skeleton** — `app.rs`, `domain/ application/ interface/ llm/ jobs/ events/
+2. **matrix-sdk 0.18 + sqlx 0.9, as one step** — neither half can build alone:
+   Cargo's `links = "sqlite3"` check fires for sqlx's `sqlite` support crate
+   (`libsqlite3-sys`) even when the `sqlite` feature itself is off, because the
+   crate is still in the dependency graph, and matrix-sdk 0.7's own
+   `libsqlite3-sys` version collides with it; only matrix-sdk 0.18 resolves to a
+   compatible version. Fix API changes from both bumps together.
+3. **Versioned migrations** — 0001 baseline; `schema*.rs`, `ddl.rs`, `backfill.rs`
+   deleted.
+4. **Compile-checked query pipeline** — `sqlx-cli` 0.9, `.cargo/config.toml`
+   forcing `SQLX_OFFLINE=true`, first query (`health.rs`) converted, `.sqlx/`
+   cache committed, CI drift check (`cargo sqlx prepare --workspace --check`).
+5. **Layer skeleton** — `app.rs`, `domain/ application/ interface/ llm/ jobs/ events/
    infrastructure/` directories, architecture test, health probes, graceful shutdown;
    `api/` → `interface/http/`, `services/` → `infrastructure/inference/`,
    `bot/` → `interface/channels/matrix/`.
-5. **Feature migration**, one feature per change, each moving into the layers and
+6. **Feature migration**, one feature per change, each moving into the layers and
    rewriting its queries with `query!`: settings, todos, reminders, finance,
    recurring bills, portfolio, bookmarks, habits, journal/life, footprints, rooms,
    AI + tools, accounts/auth/recovery, MCP, webhooks. Last change deletes
    `executor.rs`, `dialect*.rs` and the macros.
-6. **Job queue** — 0003, queue/worker/reaper/scheduler, then each loop moved.
-7. **Outbox** — 0004, dispatcher, SSE via LISTEN, webhook deliveries; broadcaster
+7. **Account UUID** — 0004, `owner_id` TEXT → UUID + FKs, `AccountId` type,
+   rehearsal test. Placed after the per-feature `query!` rewrite (step 6) rather
+   than earlier: once every query is compiler-checked, the type change is
+   compiler-guided — a `cargo check` failure enumerates every call site the
+   column touches, instead of relying on the portability discipline that
+   compile-time checking now replaces.
+8. **Job queue** — 0002, queue/worker/reaper/scheduler, then each loop moved.
+9. **Outbox** — 0003, dispatcher, SSE via LISTEN, webhook deliveries; broadcaster
    and `webhook_outbox` removed.
-8. **Docs** — AGENTS.md (drop the portability tables and macro rules; add layer rules,
-   `cargo sqlx prepare`, migration rules) and `docs/ARCHITECTURE.md`.
+10. **Docs** — AGENTS.md (drop the portability tables and macro rules; add layer
+    rules, `cargo sqlx prepare`, migration rules) and `docs/ARCHITECTURE.md`.
 
 ## 7. Risks
 
 | Risk | Mitigation |
 |---|---|
-| 0002 fails on production data | Guard clause names bad rows; rehearsal on a `pg_dump` copy is a release gate |
+| 0004 fails on production data | Guard clause names bad rows; rehearsal on a `pg_dump` copy is a release gate |
 | Audit chains break after the UUID change | Hash input keeps `acct_<uuid>`; pinned by a test with a pre-migration digest |
 | `.sqlx` cache drifts | `cargo sqlx prepare --check` in CI |
 | 760 tests now need PostgreSQL locally | `docker compose --profile postgres`; `#[sqlx::test]` handles per-test databases |
-| Long feature-migration tail leaves two styles side by side | Macros stay working until step 5's final change deletes them; each feature change is self-contained |
+| Long feature-migration tail leaves two styles side by side | Macros stay working until step 6's final change deletes them; each feature change is self-contained |
 | Jobs double-run on a second replica | SKIP LOCKED + dedupe keys + advisory-lock scheduler |
 
 ## 8. Acceptance

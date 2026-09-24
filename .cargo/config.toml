@@ -1,0 +1,5 @@
+[env]
+# Compile-checked queries read the committed .sqlx/ cache, never a live
+# database: a developer's .env DATABASE_URL must not be queried at build time.
+# `cargo sqlx prepare` overrides this for its own run.
+SQLX_OFFLINE = "true"

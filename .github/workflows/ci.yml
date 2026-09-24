@@ -93,6 +93,17 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --version ^0.9 --no-default-features --features rustls,postgres --locked
+
+      # The committed .sqlx/ cache must match both the queries and the schema.
+      - name: Verify the sqlx offline cache
+        env:
+          DATABASE_URL: postgres://postgres:bot@postgres:5432/postgres
+        run: |
+          sqlx migrate run --source backend/migrations
+          cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets
+
       # Scoped to the bot crate. `--workspace` would drag the inference crate's
       # native ML dependencies back into this job, which is the cost this
       # split exists to remove.

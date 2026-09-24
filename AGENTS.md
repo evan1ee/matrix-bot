@@ -22,6 +22,11 @@ cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
 cargo run                                # starts bot + API server
 
+# After changing a sqlx::query!/query_as!/query_scalar! call or a migration,
+# regenerate the offline cache against a migrated database and commit .sqlx/;
+# CI fails on drift (`cargo sqlx prepare --workspace --check`).
+DATABASE_URL=postgres://postgres:bot@localhost:5432/sqlx_prepare cargo sqlx prepare --workspace -- -p matrix-bot --all-targets
+
 # Rehearse a migration against a restored COPY of production and assert
 # nothing was stranded — run before shipping any migration, never against
 # production itself.
@@ -101,30 +106,9 @@ Design the boundaries carefully, keep the domain deterministic, use Rust's type 
 
 **Database & SQLx**:
 - Treat the database as an infrastructure boundary: convert rows into domain types at the repository edge rather than letting a SQLx row type escape it, keep SQL close to the repository implementation that issues it, prefer compile-time checked queries where practical, and make indexes, constraints, foreign keys, uniqueness, and transaction semantics explicit — a constraint that matters must not depend solely on application code. Never hand-edit the schema outside a migration; review a migration's ordering and rollback implications before applying it; keep a data-rewriting migration separate from plain DDL; never silently change the meaning of historical data.
-- Until the compile-checked `query!` pipeline lands (next task), the `?`-style macros below remain the required interim mechanism; that task replaces this rule and the one after it.
-- **Never call `sqlx::query*` directly.** Use the macros in `backend/src/db/executor.rs`, which holds `DbPool` — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. These are `?`-style macros (PostgreSQL only; being replaced by compile-checked `query!`).
+- New and converted code uses compile-checked `sqlx::query!` / `query_as!` / `query_scalar!`. Builds read the committed `.sqlx/` cache (`SQLX_OFFLINE=true` via `.cargo/config.toml`). After changing a query or a migration, regenerate with `cargo sqlx prepare --workspace -- -p matrix-bot --all-targets` against a migrated database and commit `.sqlx/`; CI fails on drift. The `db_*!`/`tx_*!` macros remain only in code not yet converted — do not add new uses.
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
-- Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; the `backend` job in CI is blocking.
-
-  | Do not write | Write instead | Why |
-  |---|---|---|
-  | `last_insert_rowid()` | `RETURNING id` with `db_scalar_one!` | SQLite-only |
-  | `randomblob(n)` | `utils::random` | SQLite-only, and a token's entropy should not depend on the database |
-  | `datetime('now')`, `strftime(...)` | `CAST(CURRENT_TIMESTAMP AS TEXT)`, or compute it in Rust | SQLite-only |
-  | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` | SQLite-only |
-  | `UPDATE OR IGNORE` | `accounts::merge::move_rows` | PostgreSQL has no equivalent |
-  | `x IS NOT ?` | `x IS DISTINCT FROM ?` | `IS NOT` expects `NULL`/`TRUE` on PostgreSQL |
-  | `COLLATE NOCASE` | `LOWER(...)` | SQLite-only collation |
-  | `PRAGMA`, `sqlite_master` | `information_schema` | SQLite-only |
-  | `SUM(bigint_col)` | `CAST(SUM(...) AS BIGINT)` | PostgreSQL returns `NUMERIC` |
-  | `SELECT 1` read as `i64` | `SELECT CAST(1 AS BIGINT)` | an integer literal is `INT4` |
-  | `date(x)` compared or unioned with text | `CAST(date(x) AS TEXT)` | PostgreSQL returns a `date` |
-  | `substr(timestamp_col, ...)` | `substr(CAST(col AS TEXT), ...)` | `substr` needs text |
-  | `ON CONFLICT DO UPDATE SET c = c + excluded.c` | qualify: `tbl.c + excluded.c` | ambiguous on PostgreSQL |
-  | a timestamp column compared to a `String` | bind a `DateTime<Utc>` | no implicit cast |
-  | `0`/`1` for a boolean, in comparisons **and** `VALUES` | `TRUE`/`FALSE` | PostgreSQL has a real boolean |
-
-- **Match the column type to the Rust type it is read as**, and check both directions when changing either. PostgreSQL is strict where SQLite is not, so a mismatch is invisible locally:
+- **Match the column type to the Rust type it is read as**, and check both directions when changing either:
 
   | Rust | Column |
   |---|---|

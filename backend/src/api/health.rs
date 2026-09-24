@@ -21,7 +21,10 @@ pub struct HealthResponse {
     )
 )]
 pub async fn health_check(State(state): State<ApiState>) -> (StatusCode, Json<HealthResponse>) {
-    let db_ok = crate::db_execute!(&state.db.pool, "SELECT 1").is_ok();
+    let db_ok = sqlx::query_scalar!(r#"SELECT 1 AS "ok!""#)
+        .fetch_one(&state.db.pool)
+        .await
+        .is_ok();
 
     let status_code = if db_ok {
         StatusCode::OK
