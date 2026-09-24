@@ -200,9 +200,10 @@ Two frontend changes, no backend work. Do this first; it is nearly free.
 
 `grep -ri "global_search\|commandpalette"` — zero hits. Fourteen modules, no
 `Cmd+K`, no `!search`. A transaction from four months ago is reachable only by
-paging to it. SQLite FTS5 over todos, transactions, bookmarks, footprints and
-life notes is a single virtual table and one endpoint, and it is the feature that
-stops the module count from becoming a navigation cost.
+paging to it. PostgreSQL full-text search (`tsvector`/`tsquery` with a GIN
+index) over todos, transactions, bookmarks, footprints and life notes is a
+single column and one endpoint, and it is the feature that stops the module
+count from becoming a navigation cost.
 
 ---
 
@@ -264,7 +265,7 @@ shared-data story — `FEATURE_PROPOSALS.md` §1 — before adding to it.
 ## 9. On the branch this was written from
 
 `visualizing-life` adds a 24-slot `time_allocation` per day plus deep-work and
-average-sleep aggregates (`schema_life.rs`, `life/models.rs`,
+average-sleep aggregates (`backend/migrations/`, `life/models.rs`,
 `LifeTimeGrid.tsx`). Two consequences worth deciding on deliberately:
 
 **It is the first quantitative time series in the life module.** Mood is
@@ -292,6 +293,6 @@ independently — this is much cheaper to settle now than after either has users
 | 5 | Budgets + recurring income (§4) | M | Turns the ledger from record into forecast |
 | 6 | Export (§6) | S | Closes an active falsehood in the UI |
 | 7 | `m.location` → footprints (§3) | S | Map is built and waiting for input |
-| 8 | FTS5 search (§5) | M | Caps the navigation cost of 14 modules |
+| 8 | PostgreSQL full-text search (§5) | M | Caps the navigation cost of 14 modules |
 
 §7 (registration) is XS and independent — take it whenever it is convenient.

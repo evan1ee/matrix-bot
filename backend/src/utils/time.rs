@@ -6,11 +6,11 @@ use std::time::Duration;
 /// Now, truncated to the precision a database can actually store.
 ///
 /// PostgreSQL's `TIMESTAMPTZ` holds microseconds; `DateTime<Utc>` holds
-/// nanoseconds. A value written and read back therefore differs in the last
-/// three digits on PostgreSQL and not on SQLite, which is invisible in
-/// production — nothing compares stored instants for exact equality — but makes
-/// a test that round-trips `Utc::now()` pass on one database and fail on the
-/// other.
+/// nanoseconds. A value written and read back therefore loses its last three
+/// digits of sub-second precision, which is invisible in production —
+/// nothing compares stored instants for exact equality — but makes a test
+/// that asserts a round-tripped value equals the original `Utc::now()` fail,
+/// since the nanosecond field it never actually stored comes back zeroed.
 ///
 /// Tests that assert on a round-tripped timestamp use this so they are
 /// asserting on scheduling, not on a storage precision they do not care about.

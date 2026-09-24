@@ -77,10 +77,21 @@ impl AiRepository {
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
-        // The cutoff is computed here rather than in SQL, against the same
-        // `YYYY-MM-DD HH:MM:SS` shape `updated_at` (a TEXT column) is stored
-        // in, so a lexicographic comparison means the same thing as a
-        // chronological one.
+        // The cutoff is computed here rather than in SQL, formatted as the
+        // `YYYY-MM-DD HH:MM:SS` prefix of what `updated_at` (a TEXT column
+        // defaulting to `NOW()::text`) actually stores on PostgreSQL --
+        // `YYYY-MM-DD HH:MM:SS.ffffff+TZ` in the session's TimeZone -- so a
+        // lexicographic `>=` comparison against this shorter prefix still
+        // means the same thing as a chronological one. This assumes the
+        // session TimeZone is UTC, matching `chrono::Utc::now()` above; it is
+        // never set explicitly here.
+        //
+        // TODO(postgres-foundation): move this column to `TIMESTAMPTZ` and a
+        // compile-checked `query!` comparison instead of a string-prefix
+        // comparison against a session-TimeZone-dependent text rendering,
+        // once the `ai` feature moves to `query!` (see AGENTS.md's Database &
+        // SQLx conventions for the `query!` migration this repo is mid-way
+        // through).
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
