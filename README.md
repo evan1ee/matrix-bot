@@ -90,12 +90,9 @@ The backend supports multiple client surfaces with strict ownership isolation:
 **Matrix account is the primary identity.** Every todo, reminder,
 transaction, bill, habit, bookmark, and holding belongs to an account. Whether messaging the bot in Matrix, browsing on the web, or using the native iOS app, you are one owner with one unified dataset.
 
-- **Matrix-Driven Passkey Enrollment (`!passkey add` or `!web`)** — send `!passkey add` (or `!web`) to the bot in a direct message. The bot generates a single-use 15-minute enrollment link that opens the web UI and registers a WebAuthn passkey directly to your existing Matrix account without creating orphan accounts.
-- **Multiple Passkeys** — attach multiple passkeys (e.g. MacBook Touch ID, Windows Hello, iPhone Face ID, YubiKey) to a single account. Additional passkeys can be added anytime from chat via `!passkey add` or via the **+ Add a passkey** button in the Web UI Security Panel.
-- **Chat Management & Revocation (`!passkeys` & `!unlink`)**:
-  - `!passkeys` (or `!passkey list`) — lists all registered passkeys with index numbers, labels, and creation dates.
-  - `!unlink passkey <n>` — deletes the specified passkey directly from chat. Because your Matrix identity is the primary identity, removing the last passkey is safely permitted without locking you out of your account.
-  - `!unlink sessions` — revokes all active web sessions across all devices directly from chat.
+- **Matrix-Driven Passkey Enrollment (`!passkey add` or `!web`)**: send `!passkey add` (or `!web`) to the bot in a direct message. For an account with **no passkey yet**, the bot generates a single-use 10-minute enrollment link that opens the web UI and registers a WebAuthn passkey directly to your existing Matrix account without creating orphan accounts. Once the account has a passkey, the bot refuses: another passkey is added from a signed-in device, and a lost one is replaced through `!recover`.
+- **Multiple Passkeys** — attach multiple passkeys (e.g. MacBook Touch ID, Windows Hello, iPhone Face ID, YubiKey) to a single account. Additional passkeys are added from the **+ Add a passkey** button in the Web UI Security Panel.
+- **Listing passkeys in chat (`!passkeys`)**: `!passkeys` (or `!passkey list`) lists all registered passkeys with index numbers, labels, and creation dates. Removing a passkey, revoking sessions, and unlinking a Matrix identity need a recent passkey, so `!passkey rm` and `!unlink` point at the web app.
 - **Web Sign-in** — one button. Credentials are discoverable, so the browser offers
   the passkey and the credential itself identifies the account. There is no
   username or password field.
@@ -200,7 +197,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
 | **Account** | `!link <code>`<br>`!recover` | Link Matrix account to web/native identity, initiate delayed recovery |
 
-`!export`, `!unlink`, `!passkey`, `!sessions` and `!recoverycodes` are
+`!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
 deliberately refused on Matrix and point at the web app or native app — see **step-up** security assertions.
 
 ---
