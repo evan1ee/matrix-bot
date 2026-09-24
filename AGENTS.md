@@ -102,13 +102,13 @@ Design the boundaries carefully, keep the domain deterministic, use Rust's type 
 
 ## Conventions and Rules
 
-**`BotModule` plugin system** — features are independent modules implementing `BotModule` (`backend/src/modules/mod.rs`), registered in `backend/src/bot/mod.rs`. Never add command handling to `main.rs` or `bot/handler.rs`.
+**`BotModule` plugin system** — features are independent modules implementing `BotModule` (`backend/src/modules/mod.rs`), registered in `backend/src/interface/channels/matrix/mod.rs`. Never add command handling to `main.rs` or `interface/channels/matrix/handler.rs`.
 
-**Embedded Axum REST API** — endpoints live in `backend/src/api/`, aggregated via `api_routes()` in `api/routes.rs`. Use `ApiError` (`backend/src/error.rs`) for every response (`{ "error": "...", "code": 400 }`). Every mutation must `broadcaster.send(SystemEvent::…)`, and **every `SystemEvent` variant must return a meaningful `owner_id()`** — the broadcast channel is process-wide and per-owner SSE delivery depends on it; a variant with no owner leaks across users or is never delivered. Cap API payload strings at 500 chars.
+**Embedded Axum REST API** — endpoints live in `backend/src/interface/http/`, aggregated via `api_routes()` in `interface/http/routes.rs`. Use `ApiError` (`backend/src/error.rs`) for every response (`{ "error": "...", "code": 400 }`). Every mutation must `broadcaster.send(SystemEvent::…)`, and **every `SystemEvent` variant must return a meaningful `owner_id()`** — the broadcast channel is process-wide and per-owner SSE delivery depends on it; a variant with no owner leaks across users or is never delivered. Cap API payload strings at 500 chars.
 
 **File organization** — no file in `backend/src/` or `inference/src/` exceeds 500 lines of production code (target < 300; `#[cfg(test)]` modules don't count). Split along a real seam, never by line count alone. Feature module shape: `mod.rs`, `models.rs`, `repository.rs`, `handler.rs`, optional `scheduler.rs`.
 
-**`services/` boundary** — `services/` never imports from `modules/`. `modules/` is what the app does; `services/` is how it reaches external capabilities. A wire type and a domain type that share fields stay separate, with a `From` impl in the module.
+**`infrastructure/` boundary** — `infrastructure/` never imports from `modules/`, `interface/` or `application/`. `modules/` is what the app does; `infrastructure/` is how it reaches external capabilities. A wire type and a domain type that share fields stay separate, with a `From` impl in the module.
 
 **`contracts/`** — every HTTP wire contract between the two crates lives here as a JSON fixture both sides assert against (or the server side alone, for a server-only format) — a renamed field fails a test, not production.
 
@@ -132,10 +132,10 @@ Design the boundaries carefully, keep the domain deterministic, use Rust's type 
   **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
 - Schema changes are forward-only SQL files in `backend/migrations/NNNN_description.sql`, applied at boot by `sqlx::migrate!`. Never edit a committed migration. A data- or type-rewriting migration starts with a guard that names offending rows, and is rehearsed on a production copy (`migrates_a_real_database`) before release.
-- Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or bot modules to API modules.
+- Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or Matrix channel modules to HTTP interface modules.
 - **Any new owner-keyed table must be added to `OWNED_TABLES`** (`accounts/merge.rs`) — a merge rewrites every table that constant lists; one missing from it isn't a compile error, it's a silent data leak on the next account merge.
 
-**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `bot/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
+**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `interface/channels/matrix/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
 
 **AI tools & web search** — define tools with the standard OpenAI `type: "function"` schema (`modules/ai/search.rs`); never a provider-specific tool variant. Each domain tool file exports `pub fn tool_definitions() -> Vec<ToolDefinition>`; `definitions.rs` just aggregates them, and tool executors call domain SQLx repositories directly rather than through pass-through layers. Gate web search by intent (`should_enable_web_search()`) — skip it for routine productivity commands. Search backend: Tavily (`TAVILY_API_KEY`) first, falling back to keyless DuckDuckGo scraping if no key is set or on API errors. Execute concurrent tool calls with `futures_util::future::join_all`, not a sequential loop. Long research requests need a generous router timeout (`TimeoutLayer` >= 180s); dedupe immediate retries by checking the conversation's tail message before inserting.
 
@@ -153,12 +153,12 @@ When creating or enhancing a feature module:
 2. **Database migration**: a new `backend/migrations/NNNN_<feature>.sql`; if the table is owner-keyed, add it to `OWNED_TABLES` in `accounts/merge.rs` or a merge silently drops it.
 3. **Repository**: SQLx query binding CRUD methods in `repository.rs`.
 4. **Command handler**: parse Matrix commands, enforce length limits (max 500 chars), format HTML output.
-5. **REST API**: handlers in `backend/src/api/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/api/routes.rs::api_routes()`. If a route is sensitive, add `VerifiedUser` to the handler **and** add it to the `SENSITIVE` list in `backend/src/api/mod.rs::step_up_tests` — that test only checks routes already listed, so it won't catch a new one on its own.
+5. **REST API**: handlers in `backend/src/interface/http/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/interface/http/routes.rs::api_routes()`. If a route is sensitive, add `VerifiedUser` to the handler **and** add it to the `SENSITIVE` list in `backend/src/interface/http/mod.rs::step_up_tests` — that test only checks routes already listed, so it won't catch a new one on its own.
 6. **SystemEvents**: variants in `backend/src/events.rs` with `owner_id()`, broadcast on every state change.
-7. **BotModule registration**: implement `BotModule` in `mod.rs`, register in `backend/src/bot/mod.rs`.
-8. **OpenAPI & types**: update `ApiDoc` in `backend/src/api/openapi.rs`, then run the OpenAPI regeneration commands above.
+7. **BotModule registration**: implement `BotModule` in `mod.rs`, register in `backend/src/interface/channels/matrix/mod.rs`.
+8. **OpenAPI & types**: update `ApiDoc` in `backend/src/interface/http/openapi.rs`, then run the OpenAPI regeneration commands above.
 9. **Frontend**: `frontend/src/modules/<feature_name>/` exporting `<feature>Module: FrontendModule`; register in `frontend/src/App.tsx`; nav item in `Sidebar.tsx`; label in `AppShell.tsx`.
-10. **Tests**: backend unit tests in `repository.rs`/`handler.rs`/`api/<feature_name>.rs` using `crate::db::pool::test_pool()` + `crate::db::migrate::run_migrations_unlocked`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<feature_name>.spec.ts`.
+10. **Tests**: backend unit tests in `repository.rs`/`handler.rs`/`interface/http/<feature_name>.rs` using `crate::db::pool::test_pool()` + `crate::db::migrate::run_migrations_unlocked`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<feature_name>.spec.ts`.
 
 ## Architecture
 
@@ -170,15 +170,15 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Matrix session and crypto store** — never keep the crypto store across a fresh login, and never pin a device ID on one, or peers see broken encryption or a silent key rotation. [Details](docs/ARCHITECTURE.md#matrix-session-and-crypto-store).
 - **Verification** — `ensure_self_verified` must run on every boot; never treat `Recovery::recover()`'s `Ok` as "verified". [Details](docs/ARCHITECTURE.md#verification-self-and-peer).
 - **Accounts and ownership** — `owner_id` on every table is an `accounts.id`, resolved from a Matrix link or a web session, never derived any other way. A merge rewrites every table in `OWNED_TABLES`, and sessions never follow a merge — a session belongs to the credential that opened it. [Details](docs/ARCHITECTURE.md#accounts-one-owner-several-ways-in).
-- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; a sensitive route needs `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list (`api/mod.rs`) — the test checks only routes already listed, so both are required. An MCP token never satisfies step-up. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
+- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; a sensitive route needs `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list (`interface/http/mod.rs`) — the test checks only routes already listed, so both are required. An MCP token never satisfies step-up. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
 - **Linking and recovery** — `!link` must be handled before the sender is resolved (never move it into a `BotModule`), or the claim provisions an empty account first. `!recover` is time-fenced; cancelling it deliberately takes `AuthUser`, not `VerifiedUser`. `WEB_ONLY` refuses `!export`/`!sessions`/`!recoverycodes`/`!unlink`; `!passkey add` enrolls only an account's first passkey. [Details](docs/ARCHITECTURE.md#linking-recovery-and-the-matrix-ceiling).
 - **Per-user settings** — timezone/currency, read by every other module; a missing row means defaults, never an error. [Details](docs/ARCHITECTURE.md#per-user-settings-timezone-default-currency).
-- **Voice replies** — `!say` synthesises through `services/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
-- **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `services/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
+- **Voice replies** — `!say` synthesises through `infrastructure/inference/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
+- **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `backend/src/infrastructure/inference/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
 - **Persistence and migrations** — `db/migrate.rs::run_migrations` runs `sqlx::migrate!` over versioned SQL files in `backend/migrations/`; `0001_baseline.sql` is an idempotent adoption of the live database's shape, and every migration after it is forward-only. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
 - **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
-- **Target layer-first layout (approved, not yet built)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror. The move off today's `modules/`/`api/`/`bot/`/`services/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
+- **Target layer-first layout (in progress)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror. The former `api/`, `bot/` and `services/` directories are now `interface/http/`, `interface/channels/matrix/` and `infrastructure/inference/`; `domain/` and `application/` roots arrive next. The move off today's `modules/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 
 ## Testing and Verification
@@ -206,7 +206,7 @@ Never commit code that fails compilation, formatting, or tests.
 
 ## Security Rules
 
-- Sensitive API routes require `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list in `api/mod.rs` — the test only checks routes already listed there, so adding `VerifiedUser` alone isn't enough to be caught by CI (see Architecture: Auth). An MCP token never satisfies step-up.
+- Sensitive API routes require `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list in `interface/http/mod.rs` — the test only checks routes already listed there, so adding `VerifiedUser` alone isn't enough to be caught by CI (see Architecture: Auth). An MCP token never satisfies step-up.
 - Never put a value into SQL text — always bind it, even in dynamically assembled queries (see Conventions: Database & SQLx).
 - Escape all user input embedded in HTML with `html_escape()`.
 - Every `SystemEvent` variant must return a meaningful `owner_id()`, or it leaks across users or is never delivered.
@@ -221,7 +221,7 @@ Never commit code that fails compilation, formatting, or tests.
 ## Gotchas
 
 - Cutting over an existing production deployment to this branch (PostgreSQL-only, versioned migrations, matrix-sdk 0.18) follows `docs/runbooks/postgres-foundation-cutover.md` — production rehearsal, pre-boot steps, first-boot watch list, and rollback.
-- `DATABASE_URL` has no default and must be `postgres://`; `api/mod.rs` probes `web/dist` then `backend/web/dist`. The latter assumes `cargo run` from the repo root.
+- `DATABASE_URL` has no default and must be `postgres://`; `interface/http/mod.rs` probes `web/dist` then `backend/web/dist`. The latter assumes `cargo run` from the repo root.
 - Bare `cargo run` resolves to the bot only via `default-members = ["backend"]` + `default-run = "matrix-bot"` in `backend/Cargo.toml` — keep both if you add a workspace member or a third binary.
 - `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.

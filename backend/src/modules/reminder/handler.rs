@@ -19,7 +19,7 @@ pub async fn handle_reminder_command(
     owner_id: &str,
     sender_name: &str,
     clean_body: &str,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
@@ -413,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_reminder_with_quoted_message() {
         let pool = setup_test_db().await;
-        let quoted = crate::bot::quote::QuotedMessage {
+        let quoted = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("alice".to_string()),
             body: "Deployment scheduled at midnight".to_string(),
             event_id: None,

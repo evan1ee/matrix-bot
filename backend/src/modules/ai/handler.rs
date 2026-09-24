@@ -15,7 +15,7 @@ use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
-use crate::services::llm::{ChatCompletionMessage, ChatCompletionRequest};
+use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
 
 pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
@@ -43,7 +43,7 @@ pub async fn handle_ai_command(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
         pool,
@@ -78,8 +78,8 @@ pub async fn handle_ai_command_with_stage(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
@@ -181,7 +181,7 @@ pub async fn run_ai_turn_with_stage(
     room_id: &str,
     conversation_id_override: Option<&str>,
     prompt: &str,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> Result<AiTurnResult, AiError> {
     let prompt_trimmed = prompt.trim();
     if prompt_trimmed.is_empty() {
@@ -276,7 +276,7 @@ pub async fn run_ai_turn_with_stage(
         });
     }
 
-    let client = crate::services::llm::shared_client(ai.proxy.as_deref());
+    let client = crate::infrastructure::inference::llm::shared_client(ai.proxy.as_deref());
     let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
         .into_iter()
         .filter_map(|t| serde_json::to_value(t).ok())
@@ -383,7 +383,7 @@ pub async fn run_ai_turn_with_stage(
                         let eid = stage_reporter
                             .and_then(|r| r.event_id())
                             .map(|e| e.as_str());
-                        crate::bot::reaction_targets::record_ai_tool_target(
+                        crate::interface::channels::matrix::reaction_targets::record_ai_tool_target(
                             pool,
                             eid,
                             room_id,
@@ -1176,7 +1176,7 @@ mod tests {
             .await
             .unwrap();
 
-        let quote = crate::bot::quote::QuotedMessage {
+        let quote = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("@bob:mbm.one".to_string()),
             body: "The earth is flat and gravity is an illusion.".to_string(),
             event_id: None,

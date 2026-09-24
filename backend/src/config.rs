@@ -207,7 +207,7 @@ pub struct Config {
     /// for ElevenLabs.
     pub tts_voice: String,
     /// How requests are shaped for the provider at `tts_base_url`.
-    pub tts_dialect: crate::services::tts::TtsDialect,
+    pub tts_dialect: crate::infrastructure::inference::tts::TtsDialect,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -341,9 +341,10 @@ impl Config {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string());
-        let tts_dialect =
-            crate::services::tts::TtsDialect::parse(&env::var("TTS_DIALECT").unwrap_or_default())
-                .map_err(|e| anyhow::anyhow!(e))?;
+        let tts_dialect = crate::infrastructure::inference::tts::TtsDialect::parse(
+            &env::var("TTS_DIALECT").unwrap_or_default(),
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
 
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -386,8 +387,8 @@ impl Config {
     }
 
     /// The text-to-speech client for this deployment.
-    pub fn tts_client(&self) -> crate::services::tts::TtsClient {
-        crate::services::tts::TtsClient::new(
+    pub fn tts_client(&self) -> crate::infrastructure::inference::tts::TtsClient {
+        crate::infrastructure::inference::tts::TtsClient::new(
             self.tts_base_url.clone(),
             self.tts_api_key.clone(),
             self.tts_model.clone(),
@@ -474,7 +475,7 @@ mod tests {
             tts_api_key: None,
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
-            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
+            tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };
@@ -520,7 +521,7 @@ mod tests {
             tts_api_key: None,
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
-            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
+            tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };

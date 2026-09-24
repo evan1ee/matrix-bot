@@ -2,7 +2,7 @@
 //! saved AI settings. Business logic, so it lives here and hands the transport
 //! only the connection half (`endpoint`).
 
-use crate::services::llm::LlmEndpoint;
+use crate::infrastructure::inference::llm::LlmEndpoint;
 
 use super::models::AiUserConfig;
 
@@ -193,7 +193,7 @@ mod tests {
             }
         };
 
-        let client = crate::services::llm::LlmClient::new(ai_env.proxy.as_deref());
+        let client = crate::infrastructure::inference::llm::LlmClient::new(ai_env.proxy.as_deref());
         let verify = client
             .verify_api_key(
                 &config.api_base_url,
@@ -203,10 +203,10 @@ mod tests {
             .await;
         assert!(verify.is_ok(), "Live verify failed: {:?}", verify.err());
 
-        let req = crate::services::llm::ChatCompletionRequest {
+        let req = crate::infrastructure::inference::llm::ChatCompletionRequest {
             model: config.model_name.clone(),
             messages: vec![
-                crate::services::llm::ChatCompletionMessage {
+                crate::infrastructure::inference::llm::ChatCompletionMessage {
                     role: "system".to_string(),
                     content: Some(
                         "You are a concise AI assistant. Reply in one short sentence.".to_string(),
@@ -215,7 +215,7 @@ mod tests {
                     tool_call_id: None,
                     name: None,
                 },
-                crate::services::llm::ChatCompletionMessage {
+                crate::infrastructure::inference::llm::ChatCompletionMessage {
                     role: "user".to_string(),
                     content: Some("State your model name and say hello.".to_string()),
                     tool_calls: None,
@@ -261,15 +261,17 @@ mod tests {
             panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
 
-        let request = crate::services::llm::ChatCompletionRequest {
+        let request = crate::infrastructure::inference::llm::ChatCompletionRequest {
             model: config.model_name.clone(),
-            messages: vec![crate::services::llm::ChatCompletionMessage {
-                role: "user".to_string(),
-                content: Some("Count from one to five in words.".to_string()),
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-            }],
+            messages: vec![
+                crate::infrastructure::inference::llm::ChatCompletionMessage {
+                    role: "user".to_string(),
+                    content: Some("Count from one to five in words.".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                },
+            ],
             temperature: Some(0.0),
             max_tokens: Some(60),
             tools: None,
@@ -278,7 +280,7 @@ mod tests {
         };
         let deltas = std::sync::Arc::new(std::sync::Mutex::new(0usize));
 
-        let result = crate::services::llm::LlmClient::new(ai_env.proxy.as_deref())
+        let result = crate::infrastructure::inference::llm::LlmClient::new(ai_env.proxy.as_deref())
             .chat_completion_stream(config.endpoint(), &request, |_| {
                 let deltas = deltas.clone();
                 async move {

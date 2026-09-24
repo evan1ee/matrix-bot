@@ -16,9 +16,11 @@ use tracing::{error, warn};
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::tts::{
+    SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
+};
 use crate::modules::settings::SettingsRepository;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
-use crate::services::tts::{SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX};
 use crate::utils::html::html_escape;
 
 pub mod text;
@@ -194,7 +196,7 @@ impl BotModule for TtsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::tts::TtsDialect;
+    use crate::infrastructure::inference::tts::TtsDialect;
     use std::sync::Mutex;
 
     /// matrix-sdk turns each fraction back into a bucket with
@@ -312,7 +314,7 @@ mod tests {
         );
         let base = format!(
             "{}/v1",
-            crate::services::test_support::spawn_server(app).await
+            crate::infrastructure::inference::test_support::spawn_server(app).await
         );
         let tts = TtsClient::new(Some(base), None, "kokoro".to_string(), TtsDialect::OpenAi);
         let module = module_with(tts, "7");

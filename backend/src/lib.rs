@@ -5,12 +5,11 @@
 //! being produced as a side effect of the test suite.
 
 pub mod accounts;
-pub mod api;
-pub mod bot;
 pub mod config;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod infrastructure;
+pub mod interface;
 pub mod modules;
-pub mod services;
 pub mod utils;

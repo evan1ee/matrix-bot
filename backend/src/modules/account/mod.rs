@@ -22,9 +22,9 @@ use tokio::sync::RwLock;
 
 use crate::accounts::recovery::RECOVERY_DELAY_HOURS;
 use crate::accounts::{AccountRepository, MaturedRecovery, RecoveryRepository, SecurityEventKind};
-use crate::bot::notify::notify_account;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
+use crate::interface::channels::matrix::notify::notify_account;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
 

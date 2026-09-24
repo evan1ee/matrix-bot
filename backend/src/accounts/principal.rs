@@ -10,8 +10,8 @@
 
 use crate::accounts::session::COOKIE_NAME;
 use crate::accounts::{AccountRepository, SessionRepository};
-use crate::api::auth::types::AuthUser;
 use crate::db::DbPool;
+use crate::interface::http::auth::types::AuthUser;
 
 /// A credential presented by a request.
 pub enum Credential<'a> {

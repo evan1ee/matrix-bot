@@ -3,12 +3,12 @@ use chrono::Utc;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::ai::retrospective::generate_weekly_retrospective;
 use crate::modules::footprints::repository::FootprintRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 
 fn normalize_footprint_category(input: &str) -> &'static str {
     let lower = input.trim().to_lowercase();

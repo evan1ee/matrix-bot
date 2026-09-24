@@ -67,7 +67,7 @@ The system unifies two distinct interaction models — fast, deterministic chat 
    - **REST API & SSE**: An embedded Axum web server provides REST endpoints (`/api/v1/*`) and real-time SSE event streaming (`/api/v1/events`) for the React Web UI and native iOS client (Element X).
 
 2. **Deterministic Commands vs. Natural Language**:
-   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/bot/dispatcher.rs`](backend/src/bot/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
+   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/interface/channels/matrix/dispatcher.rs`](backend/src/interface/channels/matrix/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
    - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool schemas are colocated directly within their domain tool files.
 
 3. **Unified Domain Layer**:
@@ -478,23 +478,25 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │   ├── merge.rs          #   absorbing one account into another
     │   ├── recovery.rs       #   recovery codes and delayed Matrix recovery
     │   └── security_events.rs#   per-account audit log
-    ├── api/                  # axum REST layer
-    │   ├── auth/             #   passkey ceremonies, 1-step Matrix login, cookie/bearer extractor
-    │   ├── account.rs        #   passkeys, links, sessions, recovery, audit
-    │   └── …                 #   todos, reminders, finance, portfolio, bills, bookmarks, habits, life, ai, sse
-    ├── bot/                  # Matrix client, dispatcher, verification
-    │   ├── linking.rs        #   !link, handled before the sender is resolved
-    │   └── notify.rs         #   security DMs to linked identities
+    ├── interface/            # everything that talks to the outside world
+    │   ├── http/             #   axum REST layer
+    │   │   ├── auth/         #     passkey ceremonies, 1-step Matrix login, cookie/bearer extractor
+    │   │   ├── account.rs    #     passkeys, links, sessions, recovery, audit
+    │   │   └── …             #     todos, reminders, finance, portfolio, bills, bookmarks, habits, life, ai, sse
+    │   └── channels/matrix/  #   Matrix client, dispatcher, verification
+    │       ├── linking.rs    #     !link, handled before the sender is resolved
+    │       └── notify.rs     #     security DMs to linked identities
     ├── db/                   # pool + the single migration path
     ├── modules/              # BotModule plugins: core, todo, reminder, finance, portfolio,
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
-    ├── services/             # external capabilities, never importing from modules/
-    │   ├── llm/              #   LlmClient: OpenAI-compatible chat-completions transport
-    │   ├── ocr/              #   client to the inference crate's POST /ocr
-    │   ├── stt/              #   OpenAI-compatible client to POST /v1/audio/transcriptions
-    │   └── tts/              #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
+    ├── infrastructure/       # adapters to external systems
+    │   └── inference/        #   never importing from modules/, interface/ or application/
+    │       ├── llm/          #     LlmClient: OpenAI-compatible chat-completions transport
+    │       ├── ocr/          #     client to the inference crate's POST /ocr
+    │       ├── stt/          #     OpenAI-compatible client to POST /v1/audio/transcriptions
+    │       └── tts/          #     OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image
@@ -512,9 +514,10 @@ before changing auth, ownership or migrations.
 
 ## 🚀 Roadmap
 
-- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is the switch, and the whole
-  suite passes on both databases; see
-  [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
+- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is required and must be
+  `postgres://`; PostgreSQL 18 is the only application database (matrix-sdk
+  keeps its own SQLite crypto store under `data/`). See
+  [`docs/ARCHITECTURE.md#postgresql-only`](docs/ARCHITECTURE.md#postgresql-only).
 - **Conditional-UI sign-in** — passkey autofill on page load, rather than a
   button.
 - **Offline Sync for Native iOS** — local SwiftData caching in Element X iOS for offline task and log creation.

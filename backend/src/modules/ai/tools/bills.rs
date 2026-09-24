@@ -3,10 +3,10 @@ use chrono::Utc;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::recurring_bills::models::CreateBillPayload;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

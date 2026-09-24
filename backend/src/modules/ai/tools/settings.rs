@@ -2,8 +2,8 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

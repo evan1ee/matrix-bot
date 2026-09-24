@@ -17,7 +17,7 @@ pub async fn handle_todo_command(
     owner_id: &str,
     sender_name: &str,
     clean_body: &str,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     let clean_lower = clean_body.to_lowercase();
 
@@ -319,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_add_with_quoted_message() {
         let pool = setup_test_db().await;
-        let quoted = crate::bot::quote::QuotedMessage {
+        let quoted = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("bob".to_string()),
             body: "Remember to review PR 42".to_string(),
             event_id: None,

@@ -2,11 +2,11 @@ use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::reminder::service::{self, NewReminder};
 use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 use serde_json::json;
 
 pub async fn execute_tool(

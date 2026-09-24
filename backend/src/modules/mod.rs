@@ -54,7 +54,7 @@ pub struct ParsedCommand {
     /// Whether the bot was explicitly mentioned (@bot or pill).
     pub is_mentioned: bool,
     /// Optional quoted message context if the message is a reply or quote.
-    pub quoted: Option<crate::bot::quote::QuotedMessage>,
+    pub quoted: Option<crate::interface::channels::matrix::quote::QuotedMessage>,
 }
 
 impl ParsedCommand {
@@ -116,9 +116,9 @@ pub struct CommandContext {
     /// Whether the bot was explicitly mentioned in the room.
     pub is_mentioned: bool,
     /// Optional quoted message context if the message is a reply or quote.
-    pub quoted: Option<crate::bot::quote::QuotedMessage>,
+    pub quoted: Option<crate::interface::channels::matrix::quote::QuotedMessage>,
     /// Optional in-place stage reporter for tracking multi-phase progress in Matrix.
-    pub stage_reporter: Option<crate::bot::stage::StageReporter>,
+    pub stage_reporter: Option<crate::interface::channels::matrix::stage::StageReporter>,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -308,14 +308,14 @@ mod tests {
         // Built at runtime rather than written as one literal: the literal
         // itself would appear in this very source file and this test would
         // then fail on itself the moment it started passing.
-        let needle = ["crate", "api"].join("::");
+        let needle = ["crate", "interface", "http"].join("::");
         let modules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/modules");
         let mut offenders = Vec::new();
         walk(&modules, &needle, &mut offenders);
 
         assert!(
             offenders.is_empty(),
-            "modules/ must not depend on api/; found: {offenders:#?}"
+            "modules/ must not depend on interface::http; found: {offenders:#?}"
         );
     }
 
@@ -393,11 +393,11 @@ mod tests {
         // (AiModule) — see `test_tts_must_be_registered_before_a_direct_message_catch_all`.
         registry.register(TtsModule::new(
             Arc::new(tokio::sync::RwLock::new(None)),
-            crate::services::tts::TtsClient::new(
+            crate::infrastructure::inference::tts::TtsClient::new(
                 None,
                 None,
                 "kokoro".to_string(),
-                crate::services::tts::TtsDialect::OpenAi,
+                crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             ),
             "0".to_string(),
         ));
@@ -481,11 +481,11 @@ mod tests {
         let tts_module = || {
             TtsModule::new(
                 Arc::new(tokio::sync::RwLock::new(None)),
-                crate::services::tts::TtsClient::new(
+                crate::infrastructure::inference::tts::TtsClient::new(
                     None,
                     None,
                     "kokoro".to_string(),
-                    crate::services::tts::TtsDialect::OpenAi,
+                    crate::infrastructure::inference::tts::TtsDialect::OpenAi,
                 ),
                 "0".to_string(),
             )

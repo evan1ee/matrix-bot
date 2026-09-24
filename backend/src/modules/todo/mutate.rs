@@ -26,7 +26,7 @@ pub async fn handle_add(
     owner_id: &str,
     sender_name: &str,
     args_body: &str,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     let mut raw_text = args_body[3..].trim();
     let quoted_text_holder;

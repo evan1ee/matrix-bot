@@ -1,0 +1,167 @@
+use anyhow::Result;
+use matrix_sdk::config::SyncSettings;
+use matrix_sdk::Client;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::config::Config;
+use crate::db::Database;
+use crate::events::EventBroadcaster;
+use crate::interface::channels::matrix::client::BotClient;
+use crate::interface::channels::matrix::handler::register_handlers;
+use crate::interface::channels::matrix::verification::{
+    register_verification_handlers, VerificationPolicy,
+};
+use crate::modules::core::CoreModule;
+use crate::modules::finance::FinanceModule;
+use crate::modules::footprints::FootprintsModule;
+use crate::modules::habits::HabitsModule;
+use crate::modules::life::LifeModule;
+use crate::modules::portfolio::PortfolioModule;
+use crate::modules::recurring_bills::RecurringBillsModule;
+use crate::modules::reminder::ReminderModule;
+use crate::modules::settings::SettingsModule;
+use crate::modules::todo::TodoModule;
+use crate::modules::webhook::WebhookModule;
+use crate::modules::{ModuleContext, ModuleRegistry};
+
+pub mod attachments;
+pub mod client;
+pub mod command_flow;
+pub mod dispatcher;
+pub mod handler;
+pub mod handles;
+pub mod invite;
+pub mod linking;
+pub mod media;
+pub mod notify;
+pub mod quote;
+pub mod reaction;
+pub mod reaction_targets;
+pub mod reply;
+pub mod self_verify;
+pub mod stage;
+pub mod verification;
+
+pub struct MatrixBot {
+    client: Client,
+    db: Database,
+    registry: Arc<ModuleRegistry>,
+    broadcaster: Option<EventBroadcaster>,
+    /// Shared with the API, so a merge confirmed in the web UI is the same one
+    /// `!link` recorded.
+    handles: crate::interface::channels::matrix::handles::BotHandles,
+    config: Config,
+}
+
+impl MatrixBot {
+    pub async fn new_full(
+        config: &Config,
+        db: Database,
+        broadcaster: Option<EventBroadcaster>,
+        handles: crate::interface::channels::matrix::handles::BotHandles,
+    ) -> Result<Self> {
+        let client = BotClient::build_and_login_with_token_handles(
+            config,
+            Some(handles.access_token.clone()),
+            Some(handles.client.clone()),
+        )
+        .await?;
+
+        *handles.client.write().await = Some(client.clone());
+
+        // Answer verification requests so the bot's session can be signed into
+        // another user's trust; without this its sessions stay Unverified.
+        let own_user = client
+            .user_id()
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| config.username.clone());
+        register_verification_handlers(
+            &client,
+            VerificationPolicy::new(own_user, config.verification_allowlist.clone()),
+        );
+
+        let registry_ref = Arc::new(RwLock::new(None));
+        let mut registry = ModuleRegistry::new();
+
+        registry.register(CoreModule::new(registry_ref.clone()));
+        registry.register(TodoModule::new());
+        registry.register(ReminderModule::new());
+        registry.register(FinanceModule::new());
+        registry.register(PortfolioModule::new());
+        registry.register(FootprintsModule::new());
+        registry.register(HabitsModule::new());
+        registry.register(LifeModule::new());
+        registry.register(crate::modules::journal::JournalModule::new());
+        registry.register(crate::modules::bookmarks::BookmarksModule::new());
+        registry.register(RecurringBillsModule::new());
+        registry.register(SettingsModule::new());
+        registry.register(crate::modules::briefing::BriefingModule::new());
+        registry.register(WebhookModule::new());
+        registry.register(crate::modules::mcp::McpModule::new());
+        // Must precede AiModule: `AiModule::handle_command` claims any
+        // non-empty text sent as (or mentioning it in) a direct message, not
+        // just `!ai` — see `modules/ai/handler.rs::handle_ai_command_with_stage`.
+        // Registered after it, `!say` in a DM would be swallowed and answered
+        // by the AI instead of TTS. Covered by
+        // `modules::tests::test_tts_must_be_registered_before_a_direct_message_catch_all`.
+        registry.register(crate::modules::tts::TtsModule::new(
+            handles.client.clone(),
+            config.tts_client(),
+            config.tts_voice.clone(),
+        ));
+        registry.register(crate::modules::ai::AiModule::new(
+            handles.client.clone(),
+            config.ai.clone(),
+        ));
+        registry.register(crate::modules::account::AccountModule::new(
+            handles.client.clone(),
+            config.web_url.clone(),
+        ));
+
+        let registry_arc = Arc::new(registry);
+        *registry_ref.write().await = Some(registry_arc.clone());
+
+        Ok(Self {
+            client,
+            db,
+            registry: registry_arc,
+            broadcaster,
+            handles,
+            config: config.clone(),
+        })
+    }
+
+    pub async fn run(self) -> Result<()> {
+        let module_ctx = ModuleContext {
+            client: self.client.clone(),
+            db: self.db.clone(),
+            broadcaster: self.broadcaster.clone(),
+        };
+
+        // Register Matrix event handlers
+        register_handlers(
+            &self.client,
+            &self.config,
+            self.registry.clone(),
+            self.db.clone(),
+            self.broadcaster.clone(),
+            Some(self.handles.pending_merges.clone()),
+        );
+
+        // Start background workers for all modules (e.g., reminder scheduler).
+        // The guard stops them when this function returns, by any path: they
+        // hold this generation's client, and the caller reconnects in a loop, so
+        // leaving them detached accumulated one scheduler per reconnect and
+        // delivered every reminder once per copy.
+        let _workers = self
+            .registry
+            .spawn_all_background_workers(&module_ctx)
+            .await;
+
+        tracing::info!("Matrix Bot is active and listening for events...");
+        self.client.sync(SyncSettings::default()).await?;
+
+        Ok(())
+    }
+}

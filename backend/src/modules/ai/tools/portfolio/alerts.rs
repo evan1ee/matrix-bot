@@ -2,12 +2,12 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::finance::money::{exponent_for, parse_amount};
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::models::normalise_symbol;
 use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,

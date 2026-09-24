@@ -74,7 +74,7 @@ async fn deliver_to_matrix(
                 } else {
                     ("reminder", reminder.id)
                 };
-                let _ = crate::bot::reaction_targets::record_target(
+                let _ = crate::interface::channels::matrix::reaction_targets::record_target(
                     &ctx.db.pool,
                     resp.response.event_id.as_str(),
                     reminder.room_id.as_str(),
@@ -111,7 +111,7 @@ async fn deliver_to_matrix(
                 } else {
                     ("reminder", reminder.id)
                 };
-                let _ = crate::bot::reaction_targets::record_target(
+                let _ = crate::interface::channels::matrix::reaction_targets::record_target(
                     &ctx.db.pool,
                     resp.response.event_id.as_str(),
                     reminder.room_id.as_str(),

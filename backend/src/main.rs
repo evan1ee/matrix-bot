@@ -8,11 +8,11 @@ use tokio::sync::broadcast;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use matrix_bot::api;
-use matrix_bot::bot::MatrixBot;
 use matrix_bot::config::Config;
 use matrix_bot::db::Database;
 use matrix_bot::events::EventBroadcaster;
+use matrix_bot::interface::channels::matrix::MatrixBot;
+use matrix_bot::interface::http;
 
 /// Reconnect backoff bounds for the Matrix sync loop.
 const RECONNECT_MIN: Duration = Duration::from_secs(5);
@@ -29,7 +29,7 @@ async fn run_bot_loop(
     config: Config,
     db: Database,
     broadcaster: EventBroadcaster,
-    handles: matrix_bot::bot::handles::BotHandles,
+    handles: matrix_bot::interface::channels::matrix::handles::BotHandles,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut backoff = RECONNECT_MIN;
@@ -164,12 +164,12 @@ async fn main() -> Result<()> {
     }
     let db = Database::connect(&config.database_url, config.db_max_connections).await?;
     let broadcaster = EventBroadcaster::default();
-    let handles = matrix_bot::bot::handles::BotHandles::default();
+    let handles = matrix_bot::interface::channels::matrix::handles::BotHandles::default();
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     // 1. Start background Axum REST API & Web Server with graceful shutdown
-    api::start_api_server(
+    http::start_api_server(
         &config,
         db.clone(),
         broadcaster.clone(),

@@ -3,11 +3,11 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
 use crate::modules::todo::service::{self, NewTodo, TodoPatch};
-use crate::services::llm::ToolDefinition;
 use serde_json::json;
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {

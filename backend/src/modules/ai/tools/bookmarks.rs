@@ -2,10 +2,10 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
 use crate::modules::bookmarks::models::BookmarkQuery;
 use crate::modules::bookmarks::repository::BookmarksRepository;
-use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
     pool: &DbPool,
