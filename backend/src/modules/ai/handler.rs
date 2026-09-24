@@ -825,7 +825,7 @@ mod tests {
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
+            panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -898,7 +898,7 @@ mod tests {
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
+            panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -977,7 +977,7 @@ mod tests {
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
+            panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;
@@ -1033,7 +1033,7 @@ mod tests {
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config.api_key.is_none() {
-            panic!("live test run without an AI API key: set AI_API_KEY (or XAI_API_KEY / OPENAI_API_KEY) in the repo-root .env");
+            panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
 
         let (db, owner) = setup_test().await;

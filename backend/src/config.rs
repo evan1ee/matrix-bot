@@ -60,17 +60,15 @@ pub fn database_url_from_env() -> String {
 
 /// AI provider settings that come from the environment.
 ///
-/// The endpoint, key and model each resolve through a chain of aliases kept for
-/// compatibility with whichever provider's variable names an operator already
-/// has set. Resolved once at boot so every caller sees the same answer, rather
-/// than each re-walking the chain at the point of use.
+/// The endpoint, key and model each have exactly one name. Resolved once at
+/// boot so every caller sees the same answer.
 #[derive(Debug, Clone, Default)]
 pub struct AiEnvConfig {
-    /// First of AI_ENDPOINT, AI_API_BASE, AI_BASE_URL, OPENAI_API_BASE, OPENAI_BASE_URL.
+    /// `AI_ENDPOINT`: the OpenAI-compatible base URL, including `/v1`.
     pub base_url: Option<String>,
-    /// First of AI_API_KEY, XAI_API_KEY, OPENAI_API_KEY, ignoring blanks.
+    /// `AI_API_KEY`, ignoring a blank value.
     pub api_key: Option<String>,
-    /// First of AI_MODEL, XAI_MODEL, OPENAI_MODEL.
+    /// `AI_MODEL`.
     pub model: Option<String>,
     /// First of AI_PROXY, HTTPS_PROXY, https_proxy, ALL_PROXY, all_proxy,
     /// HTTP_PROXY, http_proxy.
@@ -84,23 +82,11 @@ pub struct AiEnvConfig {
 
 impl AiEnvConfig {
     pub fn from_env() -> Self {
-        let base_url = env::var("AI_ENDPOINT")
-            .or_else(|_| env::var("AI_API_BASE"))
-            .or_else(|_| env::var("AI_BASE_URL"))
-            .or_else(|_| env::var("OPENAI_API_BASE"))
-            .or_else(|_| env::var("OPENAI_BASE_URL"))
-            .ok();
+        let base_url = env::var("AI_ENDPOINT").ok();
 
-        let api_key = env::var("AI_API_KEY")
-            .or_else(|_| env::var("XAI_API_KEY"))
-            .or_else(|_| env::var("OPENAI_API_KEY"))
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+        let api_key = env::var("AI_API_KEY").ok().filter(|s| !s.trim().is_empty());
 
-        let model = env::var("AI_MODEL")
-            .or_else(|_| env::var("XAI_MODEL"))
-            .or_else(|_| env::var("OPENAI_MODEL"))
-            .ok();
+        let model = env::var("AI_MODEL").ok();
 
         let proxy = env::var("AI_PROXY")
             .or_else(|_| env::var("HTTPS_PROXY"))
