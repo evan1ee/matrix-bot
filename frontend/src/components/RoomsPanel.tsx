@@ -61,6 +61,10 @@ export const RoomsPanel: React.FC = () => {
         timezone: settings.timezone,
         currency: settings.currency,
         dev_room_id: roomId === settings.dev_room_id ? null : roomId,
+        max_history_turns: settings.max_history_turns,
+        briefing_enabled: settings.briefing_enabled,
+        briefing_time: settings.briefing_time,
+        tts_voice: settings.tts_voice ?? null,
       });
     } catch {
       // Ignored: notification handled by settings
