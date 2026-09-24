@@ -2558,6 +2558,7 @@ dependencies = [
  "futures-util",
  "image",
  "ogg",
+ "opus",
  "opus-decoder",
  "ort",
  "ort-sys",

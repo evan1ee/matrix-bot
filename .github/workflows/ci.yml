@@ -269,14 +269,14 @@ jobs:
       # Declared for the same reason as in the backend jobs: never assume the
       # runner image. `ort-sys` build-depends on `ureq` -> `native-tls`, which
       # on Linux is `openssl-sys` and needs the OpenSSL headers plus
-      # pkg-config to find them. Unlike the backend there is no cmake here --
-      # nothing in this crate's graph builds with it, so it is not installed.
+      # pkg-config to find them. cmake builds the vendored libopus inside
+      # opusic-sys, which the text-to-speech route encodes Ogg Opus with.
       - name: Install Linux build dependencies
         run: |
           set -eu
           if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
           $sudo apt-get update
-          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
 
       - uses: Swatinem/rust-cache@v2
         with:

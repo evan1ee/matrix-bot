@@ -1,0 +1,6 @@
+{
+  "model": "kokoro",
+  "input": "早安，今天有三件待办事项。",
+  "voice": "0",
+  "response_format": "opus"
+}

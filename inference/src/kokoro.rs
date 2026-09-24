@@ -1,8 +1,20 @@
-//! Kokoro text-to-speech: the model on disk, and (Task 3) the engine.
+//! Kokoro text-to-speech: the model on disk, and the engine.
+//!
+//! Config construction mirrors `backend/examples/tts_spike.rs`, which proved
+//! this exact Kokoro model directory against real audio output (103 speakers,
+//! 24000 Hz, ~1.5x realtime on a debug build). Nothing here is a new design —
+//! it is that spike's `build_config` narrowed to the one family this module
+//! supports.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use sherpa_onnx::{
+    GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
+    OfflineTtsModelConfig,
+};
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, warn};
 
 /// The sherpa-onnx release archive of the multi-language Kokoro model:
 /// 103 voices, English and Mandarin, with per-language lexicons and the
@@ -22,12 +34,16 @@ const STAGING_DIR_NAME: &str = ".kokoro-staging";
 /// degrades pronunciation rather than failing.
 pub const KOKORO_REQUIRED_FILES: [&str; 3] = ["model.onnx", "voices.bin", "tokens.txt"];
 
-/// Task 3 adds `ModelMissing`, `Engine` and `Encode` when the engine that
-/// constructs them arrives; adding them now would be dead code.
 #[derive(Debug, Error)]
 pub enum TtsError {
     #[error("Failed to install the Kokoro TTS model: {0}")]
     ModelDownload(String),
+    #[error("Kokoro TTS model is not installed in {0:?}")]
+    ModelMissing(PathBuf),
+    #[error("TTS engine error: {0}")]
+    Engine(String),
+    #[error("Ogg Opus encoding failed: {0}")]
+    Encode(String),
 }
 
 /// Whether every required model file is on disk. The route gates on this and
@@ -36,6 +52,177 @@ pub fn model_present(dir: &Path) -> bool {
     KOKORO_REQUIRED_FILES
         .iter()
         .all(|name| dir.join(name).is_file())
+}
+
+/// No streaming callback; only the finished audio is wanted.
+type NoCallback = fn(&[f32], f32) -> bool;
+
+/// Text-normalisation FSTs for the Kokoro multi-lang model, in the order
+/// sherpa-onnx documents. They turn "12.5%" and "2026年9月20日" into something
+/// a Mandarin voice can actually say; without them a number is read digit by
+/// digit, or in English, and nothing errors — the audio is just wrong.
+const RULE_FSTS: &[&str] = &["date-zh.fst", "number-zh.fst", "phone-zh.fst"];
+
+/// The loaded engine, built once and kept for the life of the process.
+///
+/// `sherpa.rs::run_transcription_sync` rebuilds its SenseVoice recogniser on
+/// every call, which is fine there because that model loads in milliseconds.
+/// This model is 311 MB and takes seconds to load, so it is built once.
+/// `OfflineTts` is `unsafe impl Send + Sync` in the sherpa-onnx crate (it
+/// wraps a C++ engine that owns no thread-local state), so one instance
+/// shared across the async runtime's worker threads is sound. Do not "fix"
+/// this back to rebuilding on every call — that was tried in
+/// `inference/src/sherpa.rs` for a much smaller model and is not the right
+/// trade-off here.
+static ENGINE: OnceLock<Option<OfflineTts>> = OnceLock::new();
+
+/// The path, but only if that file is actually present.
+///
+/// Every one of these fields is optional in sherpa-onnx, and handing it a
+/// path to something missing fails less helpfully than leaving it unset.
+fn opt(dir: &Path, name: &str) -> Option<String> {
+    let path = dir.join(name);
+    path.exists().then(|| path.to_string_lossy().into_owned())
+}
+
+fn build_config(dir: &Path) -> OfflineTtsConfig {
+    // One lexicon per language, comma-joined — sherpa-onnx picks per
+    // utterance. That is the whole of "per-language routing" for this engine:
+    // a path, not an abstraction.
+    let lexicons = ["lexicon-us-en.txt", "lexicon-zh.txt"]
+        .iter()
+        .filter_map(|name| opt(dir, name))
+        .collect::<Vec<String>>()
+        .join(",");
+
+    let rule_fsts = RULE_FSTS
+        .iter()
+        .filter_map(|name| opt(dir, name))
+        .collect::<Vec<String>>()
+        .join(",");
+
+    OfflineTtsConfig {
+        model: OfflineTtsModelConfig {
+            kokoro: OfflineTtsKokoroModelConfig {
+                model: opt(dir, "model.onnx"),
+                voices: opt(dir, "voices.bin"),
+                tokens: opt(dir, "tokens.txt"),
+                // espeak-ng data: the grapheme-to-phoneme step, already solved.
+                data_dir: opt(dir, "espeak-ng-data"),
+                lexicon: (!lexicons.is_empty()).then_some(lexicons),
+                dict_dir: opt(dir, "dict"),
+                ..Default::default()
+            },
+            num_threads: 2,
+            ..Default::default()
+        },
+        rule_fsts: (!rule_fsts.is_empty()).then_some(rule_fsts),
+        ..Default::default()
+    }
+}
+
+/// Returns the process-wide engine, loading it on the first call.
+///
+/// A missing model directory is cached as `None` rather than retried on every
+/// `!say` — that mirrors `model_present`'s own check, which callers are
+/// expected to run first so this path is only reached when the files were
+/// seen to exist.
+fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
+    let cell = ENGINE.get_or_init(|| {
+        if !model_present(model_dir) {
+            return None;
+        }
+        OfflineTts::create(&build_config(model_dir))
+    });
+
+    cell.as_ref()
+        .ok_or_else(|| TtsError::ModelMissing(model_dir.to_path_buf()))
+}
+
+/// Clamps a requested speaker id into the range a loaded model actually
+/// supports, returning the id to use for generation.
+///
+/// A stored `tts_speaker_id` preference can outlive the model that was loaded
+/// when it was chosen — an operator can swap in a Kokoro model with fewer
+/// voices without revalidating everyone's saved preference. Rather than fail
+/// the whole `!say`, this degrades to the nearest valid voice: negative ids
+/// (should not occur past API/handler validation, but never trust a stored
+/// value) clamp to 0, and ids at or past `num_speakers` clamp to the last
+/// valid index. A model reporting zero speakers (unexpected, but the C API
+/// returns a plain `i32`) clamps to 0 rather than underflowing.
+fn clamp_speaker_id(requested: i64, num_speakers: i32) -> i32 {
+    if num_speakers <= 0 {
+        return 0;
+    }
+    let max_valid = num_speakers - 1;
+    if requested < 0 {
+        0
+    } else if requested > i64::from(max_valid) {
+        max_valid
+    } else {
+        requested as i32
+    }
+}
+
+fn synthesize_sync(model_dir: &Path, speaker_id: i64, text: &str) -> Result<Speech, TtsError> {
+    let tts = engine(model_dir)?;
+
+    let num_speakers = tts.num_speakers();
+    let sid = clamp_speaker_id(speaker_id, num_speakers);
+    if i64::from(sid) != speaker_id {
+        warn!(
+            "TTS speaker id {} is out of range for this model ({} speakers); using {} instead",
+            speaker_id, num_speakers, sid
+        );
+    }
+
+    let generation = GenerationConfig {
+        sid,
+        ..Default::default()
+    };
+
+    let audio = tts
+        .generate_with_config(text, &generation, None::<NoCallback>)
+        .ok_or_else(|| TtsError::Engine("sherpa-onnx TTS generation failed".to_string()))?;
+
+    Ok(Speech {
+        samples: audio.samples().to_vec(),
+        sample_rate: audio.sample_rate(),
+    })
+}
+
+/// Synthesised audio: raw samples plus the sample rate they were generated at.
+#[derive(Debug, Clone)]
+pub struct Speech {
+    pub samples: Vec<f32>,
+    pub sample_rate: i32,
+}
+
+impl Speech {
+    /// The clip's length, derived from sample count and rate rather than
+    /// stored separately, so the two can never disagree.
+    pub fn duration(&self) -> std::time::Duration {
+        if self.sample_rate <= 0 {
+            return std::time::Duration::ZERO;
+        }
+        std::time::Duration::from_secs_f64(self.samples.len() as f64 / self.sample_rate as f64)
+    }
+}
+
+/// Synthesises `text` with the Kokoro model in `model_dir` at `speaker_id`,
+/// clamped to the voices the loaded model has.
+///
+/// Runs on a blocking worker thread: inference is synchronous and CPU-bound
+/// for seconds at a time, and on a runtime thread it would stall every other
+/// request this server is handling.
+pub async fn synthesize(
+    model_dir: PathBuf,
+    text: String,
+    speaker_id: i64,
+) -> Result<Speech, TtsError> {
+    tokio::task::spawn_blocking(move || synthesize_sync(&model_dir, speaker_id, &text))
+        .await
+        .map_err(|e| TtsError::Engine(format!("Worker thread panicked: {}", e)))?
 }
 
 /// Installs the Kokoro model into `model_dir` unless it is already there.
@@ -342,5 +529,100 @@ mod tests {
         assert!(!root.join(ARCHIVE_FILE_NAME).exists());
         assert!(!root.join(STAGING_DIR_NAME).exists());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn test_opt_returns_none_for_a_missing_file() {
+        let dir = std::env::temp_dir();
+        assert_eq!(opt(&dir, "definitely-not-a-real-file.onnx"), None);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_leaves_in_range_ids_untouched() {
+        assert_eq!(clamp_speaker_id(0, 103), 0);
+        assert_eq!(clamp_speaker_id(50, 103), 50);
+        assert_eq!(clamp_speaker_id(102, 103), 102);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_clamps_negative_to_zero() {
+        assert_eq!(clamp_speaker_id(-1, 103), 0);
+        assert_eq!(clamp_speaker_id(-999, 103), 0);
+    }
+
+    #[test]
+    fn test_clamp_speaker_id_clamps_too_large_to_the_last_valid_index() {
+        assert_eq!(clamp_speaker_id(103, 103), 102);
+        assert_eq!(clamp_speaker_id(9999, 103), 102);
+    }
+
+    /// A model reporting zero (or, defensively, a negative) speaker count
+    /// must not underflow `num_speakers - 1`.
+    #[test]
+    fn test_clamp_speaker_id_handles_a_model_with_no_reported_speakers() {
+        assert_eq!(clamp_speaker_id(5, 0), 0);
+        assert_eq!(clamp_speaker_id(0, 0), 0);
+        assert_eq!(clamp_speaker_id(5, -1), 0);
+    }
+
+    #[test]
+    fn test_duration_matches_sample_count_and_rate() {
+        let speech = Speech {
+            samples: vec![0.0; 24000],
+            sample_rate: 24000,
+        };
+        assert_eq!(speech.duration(), std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_duration_is_zero_for_an_invalid_sample_rate() {
+        let speech = Speech {
+            samples: vec![0.0; 100],
+            sample_rate: 0,
+        };
+        assert_eq!(speech.duration(), std::time::Duration::ZERO);
+    }
+
+    /// Requires a real Kokoro model on disk.
+    ///
+    /// On a Windows development machine it also needs the right
+    /// `onnxruntime.dll` beside the test binary. sherpa-onnx's build script
+    /// copies it to `target/debug/` and `target/debug/examples/`, but not to
+    /// `target/debug/deps/`, where test binaries actually run. Windows then
+    /// falls back to whatever `C:\Windows\System32\onnxruntime.dll` some other
+    /// installer left behind, and a version mismatch there does not fail
+    /// cleanly: the process dies with an access violation partway through model
+    /// loading. If that happens:
+    ///
+    /// ```text
+    /// cp target/debug/onnxruntime.dll target/debug/deps/
+    /// ```
+    ///
+    /// This is why `inference/src/sherpa.rs`'s SenseVoice test is `#[ignore]`d too.
+    ///
+    /// Deployment is unaffected: `Dockerfile.inference` copies
+    /// `libsherpa-onnx-c-api.so` and `libonnxruntime.so` into `/usr/local/lib`
+    /// explicitly, so there is no system copy to be shadowed by.
+    #[tokio::test]
+    #[ignore = "needs a real Kokoro model under data/tts_models/, and on Windows the sherpa onnxruntime.dll copied into target/debug/deps/"]
+    async fn test_synthesize_produces_audio_for_english_and_chinese() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/tts_models/kokoro-multi-lang-v1_1");
+        if !model_present(&dir) {
+            eprintln!("Skipping: no Kokoro model present at {:?}", dir);
+            return;
+        }
+
+        let english = synthesize(dir.clone(), "Good morning, this is a test.".to_string(), 0)
+            .await
+            .expect("english synthesis should succeed with a real model present");
+        assert!(!english.samples.is_empty());
+        assert_eq!(english.sample_rate, 24000);
+
+        let chinese = synthesize(dir.clone(), "早安，这是一个测试。".to_string(), 0)
+            .await
+            .expect("chinese synthesis should succeed with a real model present");
+        assert!(!chinese.samples.is_empty());
+        assert_eq!(chinese.sample_rate, 24000);
     }
 }
