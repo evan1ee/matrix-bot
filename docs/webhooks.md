@@ -179,7 +179,7 @@ send_matrix_alert(
 
 ## 📜 Message History & Delivery Logs
 
-Every message dispatched to a webhook is saved to the SQLite database.
+Every message dispatched to a webhook is saved to the database.
 
 You can browse past messages directly in the Web UI:
 1. Navigate to **Webhooks** under *Integrations*.
@@ -198,7 +198,7 @@ GET /api/v1/account/webhooks/:id/logs?limit=50&offset=0
 1. **SHA-256 Token Storage**:
    - Raw tokens (`whk_<hex>`) are generated using CSPRNG and displayed only once. Only the SHA-256 hash is persisted in the database.
 2. **Durable Outbox Queue**:
-   - Inbound requests return `202 Accepted` immediately upon writing to the transactional SQLite outbox queue.
+   - Inbound requests return `202 Accepted` immediately upon writing to the transactional outbox queue.
    - Background workers dispatch alerts with instant $< 50\text{ms}$ wakeup and retry with exponential backoff on homeserver rate limits or transient outages.
 3. **Rate Limiting**:
    - Protects against abuse with a sliding-window rate limit (max 60 requests per minute per webhook token).

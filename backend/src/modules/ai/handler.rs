@@ -217,7 +217,7 @@ pub async fn run_ai_turn_with_stage(
             .map_err(|e| AiError::Db(e.to_string()))?
     };
 
-    // Record user message in SQLite if not an exact immediate retry of the latest message
+    // Record user message if not an exact immediate retry of the latest message
     let is_immediate_duplicate =
         match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
             Ok(msgs) => msgs
@@ -393,7 +393,7 @@ pub async fn run_ai_turn_with_stage(
                         )
                         .await;
 
-                        // Persist tool result message in SQLite
+                        // Persist tool result message
                         let _ = AiRepository::add_message(
                             pool,
                             &conversation.id,
@@ -925,7 +925,7 @@ mod tests {
             .tool_calls_executed
             .contains(&"add_todo".to_string()));
 
-        // Verify task in SQLite DB
+        // Verify task was persisted
         let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(
             &db.pool, &owner, None, 10, 0,
         )
@@ -956,7 +956,7 @@ mod tests {
             .tool_calls_executed
             .contains(&"record_finance_entry".to_string()));
 
-        // Verify transaction in SQLite DB
+        // Verify transaction was persisted
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
         let summary = crate::modules::finance::repository::FinanceRepository::summary(

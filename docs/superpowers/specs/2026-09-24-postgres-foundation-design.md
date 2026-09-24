@@ -45,9 +45,9 @@ beyond regenerated API types.
 backend/
 ├── migrations/
 │   ├── 0001_baseline.sql          # today's 36 tables, idempotent (IF NOT EXISTS)
-│   ├── 0002_jobs.sql
-│   ├── 0003_outbox.sql            # outbox_events + outbox_deliveries; drops webhook_outbox
-│   └── 0004_account_uuid.sql      # owner_id TEXT 'acct_<uuid>' → UUID + FKs
+│   ├── 0002_account_uuid.sql      # owner_id TEXT 'acct_<uuid>' → UUID + FKs
+│   ├── 0003_jobs.sql
+│   └── 0004_outbox.sql            # outbox_events + outbox_deliveries; drops webhook_outbox
 ├── .sqlx/                         # committed offline query cache
 └── src/
     ├── main.rs                    # parse CLI (serve | mcp-stdio), call app::run
@@ -128,8 +128,11 @@ move to the router.
 
 - `DATABASE_URL` is required and must start with `postgres://` or `postgresql://`;
   anything else refuses to boot with a message naming the variable.
-- `PgPoolOptions` with `DATABASE_MAX_CONNECTIONS`, `acquire_timeout`, and
-  `statement_timeout` set per connection via `after_connect`.
+- `PgPoolOptions` with `DATABASE_MAX_CONNECTIONS` and `acquire_timeout`.
+  `statement_timeout` via `after_connect` is **deferred, not implemented** —
+  it needs a value chosen against the longest legitimate query, including
+  migrations, which is not yet known; revisit once the job queue (§6 step 8)
+  gives a clearer picture of long-running statements.
 - `sqlx` features: `runtime-tokio`, `tls-rustls`, `postgres`, `chrono`, `uuid`,
   `json`, `migrate`, `macros`. The `sqlite` feature is gone.
 
@@ -144,7 +147,7 @@ move to the router.
   and gets recorded in `_sqlx_migrations`. Precondition, stated in the release notes:
   the live deployment runs current master once before upgrading, so its schema equals
   the baseline.
-- **`0004_account_uuid.sql`** in one transaction:
+- **`0002_account_uuid.sql`** in one transaction:
   1. Guard: `DO $$ … RAISE EXCEPTION` listing any `owner_id`/`accounts.id` value not
      matching `^acct_[0-9a-f-]{36}$` (the discarded/follows sentinels in
      `ACCOUNT_ID_*` are checked explicitly).
@@ -152,7 +155,7 @@ move to the router.
      on `accounts.id` and every owner-keyed table.
   3. Add `REFERENCES accounts(id) ON DELETE CASCADE` on every `owner_id`.
 - **Audit-log hash chain.** `compute_entry_hash` folds the owner id string into each
-  digest. After 0004 the application renders `AccountId` as the canonical
+  digest. After 0002 the application renders `AccountId` as the canonical
   `acct_<uuid>` string when hashing, so every existing chain still verifies. A test
   pins this with a hash computed before the migration.
 - **Wire format.** `AccountId(Uuid)` serialises as `acct_<uuid>` wherever an account
@@ -163,7 +166,7 @@ move to the router.
   counts per table are unchanged and every audit chain verifies. Required before
   release.
 - Other column-type cleanups (`TEXT` timestamps → `TIMESTAMPTZ`, etc.) are **not** in
-  0004. Each lands in its own migration when its feature is moved (§6 step 6),
+  0002. Each lands in its own migration when its feature is moved (§6 step 6),
   against the field that reads it — per AGENTS.md's one-at-a-time rule.
 
 ### 4.3 Tests
@@ -173,7 +176,7 @@ move to the router.
   PostgreSQL schema with migrations applied, rather than `#[sqlx::test]`'s own
   database-per-test attribute macro.
   `DATABASE_URL`/`TEST_DATABASE_URL` must point at a server; locally
-  `docker compose --profile postgres up -d`.
+  `docker compose up -d`.
 - Tests that need no database stay plain `#[test]` — domain tests in particular.
 - CI: the `backend` and `backend-postgres` jobs merge into one containerised job
   with a `postgres:18` service (the supported version), running
@@ -282,14 +285,14 @@ Each step ends with master green (fmt, tests, OpenAPI drift) and deployable.
    recurring bills, portfolio, bookmarks, habits, journal/life, footprints, rooms,
    AI + tools, accounts/auth/recovery, MCP, webhooks. Last change deletes
    `executor.rs`, `dialect*.rs` and the macros.
-7. **Account UUID** — 0004, `owner_id` TEXT → UUID + FKs, `AccountId` type,
+7. **Account UUID** — 0002, `owner_id` TEXT → UUID + FKs, `AccountId` type,
    rehearsal test. Placed after the per-feature `query!` rewrite (step 6) rather
    than earlier: once every query is compiler-checked, the type change is
    compiler-guided — a `cargo check` failure enumerates every call site the
    column touches, instead of relying on the portability discipline that
    compile-time checking now replaces.
-8. **Job queue** — 0002, queue/worker/reaper/scheduler, then each loop moved.
-9. **Outbox** — 0003, dispatcher, SSE via LISTEN, webhook deliveries; broadcaster
+8. **Job queue** — 0003, queue/worker/reaper/scheduler, then each loop moved.
+9. **Outbox** — 0004, dispatcher, SSE via LISTEN, webhook deliveries; broadcaster
    and `webhook_outbox` removed.
 10. **Docs** — AGENTS.md (drop the portability tables and macro rules; add layer
     rules, `cargo sqlx prepare`, migration rules) and `docs/ARCHITECTURE.md`.
@@ -298,10 +301,10 @@ Each step ends with master green (fmt, tests, OpenAPI drift) and deployable.
 
 | Risk | Mitigation |
 |---|---|
-| 0004 fails on production data | Guard clause names bad rows; rehearsal on a `pg_dump` copy is a release gate |
+| 0002 fails on production data | Guard clause names bad rows; rehearsal on a `pg_dump` copy is a release gate |
 | Audit chains break after the UUID change | Hash input keeps `acct_<uuid>`; pinned by a test with a pre-migration digest |
 | `.sqlx` cache drifts | `cargo sqlx prepare --check` in CI |
-| 760 tests now need PostgreSQL locally | `docker compose --profile postgres`; `#[sqlx::test]` handles per-test databases |
+| 760 tests now need PostgreSQL locally | `docker compose up -d`; `test_pool()` + `run_migrations_unlocked` handle per-test schemas |
 | Long feature-migration tail leaves two styles side by side | Macros stay working until step 6's final change deletes them; each feature change is self-contained |
 | Jobs double-run on a second replica | SKIP LOCKED + dedupe keys + advisory-lock scheduler |
 

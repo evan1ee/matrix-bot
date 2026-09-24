@@ -1009,8 +1009,8 @@ mod tests {
     }
 
     /// Proves the transactional-DDL assumption `absorb_ledger` relies on: a
-    /// rolled-back merge must leave the trigger intact, because SQLite undoes
-    /// `DROP TRIGGER` along with everything else in the transaction.
+    /// rolled-back merge must leave the trigger intact, because PostgreSQL
+    /// undoes `DROP TRIGGER` along with everything else in the transaction.
     #[tokio::test]
     async fn test_a_rolled_back_merge_restores_the_trigger() {
         use crate::modules::portfolio::audit::record_audit_entry;

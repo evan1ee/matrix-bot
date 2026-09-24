@@ -8,7 +8,7 @@ use crate::modules::mcp::models::McpToken;
 pub struct McpTokenRepository;
 
 impl McpTokenRepository {
-    /// Mints a new MCP personal access token and stores its hash in SQLite.
+    /// Mints a new MCP personal access token and stores its hash in the database.
     /// Returns the plaintext token (only returned at creation time) and the model row.
     pub async fn create(
         pool: &DbPool,

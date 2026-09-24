@@ -259,7 +259,7 @@ mod tests {
     /// A row saved before this column existed must read as `None` ("no
     /// preference") rather than failing — the column is nullable and
     /// `run_migrations`'s best-effort `ALTER TABLE` adds it with no default,
-    /// so SQLite backfills existing rows with NULL.
+    /// so PostgreSQL backfills existing rows with NULL.
     #[tokio::test]
     async fn test_a_row_that_predates_the_column_reads_as_unset() {
         let pool = pool().await;

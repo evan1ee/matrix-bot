@@ -395,7 +395,7 @@ mod tests {
         assert!(res.contains("8770"));
         assert!(res.contains("CNY"));
 
-        // Verify transaction is recorded in SQLite
+        // Verify transaction was persisted
         let txs = FinanceRepository::list(&db.pool, &owner, None, 10, 0)
             .await
             .unwrap();

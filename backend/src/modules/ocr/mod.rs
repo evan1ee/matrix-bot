@@ -15,7 +15,7 @@ pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 ///    gets back detection and recognition results.
 /// 2. If text is extracted, synthesizes a structured semantic prompt with the text and user caption.
 /// 3. Executes an AI turn with all domain tools enabled (add_expense, add_todo, create_reminder).
-/// 4. Returns an HTML reply summarizing the actions taken and persisting to SQLite.
+/// 4. Returns an HTML reply summarizing the actions taken and persisted to the database.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_image_event(
     db: &Database,

@@ -93,8 +93,8 @@ Anything that changes how the account is reached needs a passkey assertion from
 the last five minutes. To test the expiry without waiting:
 
 ```bash
-sqlite3 data/bot_data.db \
-  "UPDATE sessions SET last_verified_at = datetime('now','-10 minutes');"
+psql "$DATABASE_URL" -c \
+  "UPDATE sessions SET last_verified_at = NOW() - INTERVAL '10 minutes';"
 ```
 
 Now click **Sign out other devices** or **Generate new codes**. The server
@@ -108,8 +108,8 @@ experience, not an error.
 waiting a day:
 
 ```bash
-sqlite3 data/bot_data.db \
-  "UPDATE recovery_requests SET valid_after = datetime('now','-1 minute');"
+psql "$DATABASE_URL" -c \
+  "UPDATE recovery_requests SET valid_after = NOW() - INTERVAL '1 minute';"
 ```
 
 Also worth testing the other direction: after `!recover`, open Settings →
@@ -141,7 +141,8 @@ These actions still refuse and point at the web app, because they require web-on
 ## Resetting
 
 ```bash
-rm -f data/bot_data.db          # fresh database, fresh accounts
+psql "$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+cargo run   # re-applies migrations on boot; fresh database, fresh accounts
 ```
 
 Delete the virtual authenticator in the WebAuthn panel to drop the passkeys

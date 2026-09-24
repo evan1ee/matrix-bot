@@ -54,9 +54,10 @@ jobs:
           --health-retries 10
 
     env:
-      # Every test opens its own schema on this server instead of an in-memory
-      # SQLite database. The host is the service's label, per the container
-      # note above — never `127.0.0.1`.
+      # Every test opens its own schema on this server -- there is no
+      # in-memory fallback; PostgreSQL is the only application database. The
+      # host is the service's label, per the container note above — never
+      # `127.0.0.1`.
       TEST_DATABASE_URL: postgres://postgres:bot@postgres:5432/postgres
       # The #[ignore]d live tests read this one.
       PG_TEST_URL: postgres://postgres:bot@postgres:5432/postgres
@@ -111,8 +112,8 @@ jobs:
         run: cargo test -p matrix-bot --all-targets
 
       # These are #[ignore]d because they need a server, which is exactly what
-      # this job has. They cover the boot path, the schema, the audit-log
-      # triggers and the merge savepoints.
+      # this job has. They cover the boot path, connecting to a live server,
+      # and the audit-log triggers being genuinely append-only.
       - name: Run the live PostgreSQL tests
         run: cargo test --package matrix-bot live_postgres -- --ignored --test-threads=1
 

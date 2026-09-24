@@ -77,11 +77,10 @@ impl AiRepository {
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
-        // The cutoff is computed here rather than in SQL. `strftime` is
-        // SQLite-only, and `updated_at` is a TEXT column in the
-        // `YYYY-MM-DD HH:MM:SS` shape `CAST(CURRENT_TIMESTAMP AS TEXT)`
-        // produces, so a lexicographic comparison against the same shape means
-        // the same thing on both databases.
+        // The cutoff is computed here rather than in SQL, against the same
+        // `YYYY-MM-DD HH:MM:SS` shape `updated_at` (a TEXT column) is stored
+        // in, so a lexicographic comparison means the same thing as a
+        // chronological one.
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();

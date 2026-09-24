@@ -175,9 +175,9 @@ pub async fn record_audit_entry(
 /// Returns how many rows moved. Zero means `from` had no ledger, in which case
 /// nothing is dropped, appended or rebuilt.
 ///
-/// The caller must already be inside a transaction. If it rolls back, SQLite
-/// undoes the `DROP TRIGGER` with everything else, so the trigger cannot be
-/// left off.
+/// The caller must already be inside a transaction. If it rolls back,
+/// PostgreSQL undoes the `DROP TRIGGER` with everything else, so the trigger
+/// cannot be left off.
 pub async fn absorb_ledger(
     conn: &mut crate::db::DbTx<'_>,
     from: &str,

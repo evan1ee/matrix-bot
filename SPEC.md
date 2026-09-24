@@ -1278,9 +1278,9 @@ backend/
 ├── .sqlx/                             # Committed offline query cache (cargo sqlx prepare)
 ├── migrations/                        # Forward-only PostgreSQL migrations
 │   ├── 0001_baseline.sql              # Current schema, idempotent: adopts the live DB in place
-│   ├── 0002_jobs.sql
-│   ├── 0003_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
-│   └── 0004_account_uuid.sql          # owner_id TEXT -> UUID + foreign keys
+│   ├── 0002_account_uuid.sql          # owner_id TEXT -> UUID + foreign keys
+│   ├── 0003_jobs.sql
+│   └── 0004_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
 ├── tests/
 │   └── architecture.rs                # Fails if domain/ imports sqlx/axum/matrix-sdk, or interface/ runs SQL
 └── src/

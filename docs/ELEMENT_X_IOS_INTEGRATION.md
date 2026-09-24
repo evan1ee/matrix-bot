@@ -50,7 +50,7 @@ When your tab appears in Element X, it performs a transparent 1-step handshake:
    }
    ```
 3. The backend calls the homeserver's `/_matrix/client/v3/account/whoami` to verify that the token belongs to `@user:domain`.
-4. The backend resolves or provisions the account in SQLite via `AccountRepository::resolve_or_provision`.
+4. The backend resolves or provisions the account in PostgreSQL via `AccountRepository::resolve_or_provision`.
 5. The backend returns a local `session_token`:
    ```json
    {

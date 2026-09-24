@@ -12,10 +12,17 @@ cargo fmt --all -- --check               # CI blocks on this; `cargo fmt --all` 
 
 # Local PostgreSQL for all tests. `DATABASE_URL` is required and must be
 # `postgres://`; there is no SQLite fallback for the application database.
-docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
+# --shm-size=1g: test_pool() creates a fresh schema per test (see db/pool.rs)
+# and never drops it, so a long-running local server's default 64MB of shared
+# memory has filled up before now.
+docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot --shm-size=1g postgres:18
 export TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres
 export PG_TEST_URL=$TEST_DATABASE_URL
 cargo test -p matrix-bot --all-targets   # backend suite (CI's own invocation)
+
+# test_pool() leaves its per-test schemas (named t<pid>_<n>) behind; drop them
+# periodically on a long-running local server:
+psql "$TEST_DATABASE_URL" -Atc "SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace WHERE nspname ~ '^t[0-9]+_[0-9]+$'" | psql "$TEST_DATABASE_URL"
 cargo test -p matrix-bot-inference --all-targets   # inference crate; not covered by bare `cargo test`
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot verified?
 cargo test test_parse_message_exclamation_command   # single test by name
@@ -24,7 +31,10 @@ cargo run                                # starts bot + API server
 
 # After changing a sqlx::query!/query_as!/query_scalar! call or a migration,
 # regenerate the offline cache against a migrated database and commit .sqlx/;
-# CI fails on drift (`cargo sqlx prepare --workspace --check`).
+# CI fails on drift (`cargo sqlx prepare --workspace --check`). Prerequisite:
+# create a scratch database and run the migrations against it first.
+createdb -h localhost -U postgres sqlx_prepare
+sqlx migrate run --source backend/migrations --database-url postgres://postgres:bot@localhost:5432/sqlx_prepare
 DATABASE_URL=postgres://postgres:bot@localhost:5432/sqlx_prepare cargo sqlx prepare --workspace -- -p matrix-bot --all-targets
 
 # Rehearse a migration against a restored COPY of production and assert
@@ -62,7 +72,7 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
 - `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting local ONNX models (OCR, STT, Kokoro TTS).
 - `contracts/` — JSON fixtures each crate asserts its wire formats against.
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
-- `data/` — runtime SQLite DB + Matrix crypto store (gitignored).
+- `data/` — Matrix crypto store (gitignored); the application database lives in PostgreSQL, not here.
 - `docs/` — `ARCHITECTURE.md` (design rationale); `testing-auth-locally.md` covers running passkeys against `localhost` (virtual authenticator, the `!link` DM flow, SQL to skip the step-up and recovery delays); roadmap, reviews.
 
 ## Engineering Principles
@@ -106,7 +116,7 @@ Design the boundaries carefully, keep the domain deterministic, use Rust's type 
 
 **Database & SQLx**:
 - Treat the database as an infrastructure boundary: convert rows into domain types at the repository edge rather than letting a SQLx row type escape it, keep SQL close to the repository implementation that issues it, prefer compile-time checked queries where practical, and make indexes, constraints, foreign keys, uniqueness, and transaction semantics explicit — a constraint that matters must not depend solely on application code. Never hand-edit the schema outside a migration; review a migration's ordering and rollback implications before applying it; keep a data-rewriting migration separate from plain DDL; never silently change the meaning of historical data.
-- New and converted code uses compile-checked `sqlx::query!` / `query_as!` / `query_scalar!`. Builds read the committed `.sqlx/` cache (`SQLX_OFFLINE=true` via `.cargo/config.toml`). After changing a query or a migration, regenerate with `cargo sqlx prepare --workspace -- -p matrix-bot --all-targets` against a migrated database and commit `.sqlx/`; CI fails on drift. The `db_*!`/`tx_*!` macros remain only in code not yet converted — do not add new uses.
+- New and converted code uses compile-checked `sqlx::query!` / `query_as!` / `query_scalar!`. Builds read the committed `.sqlx/` cache (`SQLX_OFFLINE=true` via `.cargo/config.toml`). After changing a query or a migration, regenerate with `cargo sqlx prepare --workspace -- -p matrix-bot --all-targets` against a migrated database and commit `.sqlx/`; CI fails on drift — create a scratch database and run `sqlx migrate run --source backend/migrations` against it first, or `prepare` has nothing to check queries against. The `db_*!`/`tx_*!` macros remain only in code not yet converted — do not add new uses. Those interim macros wrap the runtime-built SQL in `sqlx::AssertSqlSafe`, which is sound only because every value is bound and every dynamic fragment is a compile-time constant or an allow-listed identifier (e.g. `OWNED_TABLES`), never user input; new code uses `query!`.
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
 - **Match the column type to the Rust type it is read as**, and check both directions when changing either:
 
@@ -117,7 +127,7 @@ Design the boundaries carefully, keep the domain deterministic, use Rust's type 
   | `f64` | `DOUBLE PRECISION` (`REAL` is `float4`) |
   | `bool` | `BOOLEAN` |
   | `DateTime<Utc>` | `TIMESTAMPTZ` (bare `TIMESTAMP` carries no zone) |
-  | `String` holding a timestamp | `TEXT` with the `{{NOW_TEXT}}` default |
+  | `String` holding a timestamp | `TEXT` with a `DEFAULT (NOW()::text)` |
 
   **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
@@ -148,7 +158,7 @@ When creating or enhancing a feature module:
 7. **BotModule registration**: implement `BotModule` in `mod.rs`, register in `backend/src/bot/mod.rs`.
 8. **OpenAPI & types**: update `ApiDoc` in `backend/src/api/openapi.rs`, then run the OpenAPI regeneration commands above.
 9. **Frontend**: `frontend/src/modules/<feature_name>/` exporting `<feature>Module: FrontendModule`; register in `frontend/src/App.tsx`; nav item in `Sidebar.tsx`; label in `AppShell.tsx`.
-10. **Tests**: backend unit tests in `repository.rs`/`handler.rs`/`api/<feature_name>.rs` using `sqlite::memory:`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<feature_name>.spec.ts`.
+10. **Tests**: backend unit tests in `repository.rs`/`handler.rs`/`api/<feature_name>.rs` using `crate::db::pool::test_pool()` + `crate::db::migrate::run_migrations_unlocked`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<feature_name>.spec.ts`.
 
 ## Architecture
 
@@ -186,7 +196,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs: `backend` (format, tests, `live
 
 Never commit code that fails compilation, formatting, or tests.
 
-**Quality gates for changed code** — `cargo fmt --all -- --check` and the test commands above (which also compile every target, so there's no separate CI `cargo check` step) are required and CI-enforced. `cargo clippy -p matrix-bot --all-targets -- -D warnings` (and `-p matrix-bot-inference`) is a required gate for any Rust you touch but is **not yet enforced in CI** — a backlog of 102 warnings (101 `matrix-bot`, 1 `matrix-bot-inference`) predates this rule and is tracked as follow-up; don't add new ones in files you change, and don't silence one with `#[allow]` without documenting why it exists, why it's safe, its scope, and when it can be removed. For a release-sensitive change, also run `cargo build -p matrix-bot --release`.
+**Quality gates for changed code** — `cargo fmt --all -- --check` and the test commands above (which also compile every target, so there's no separate CI `cargo check` step) are required, and CI-enforced except for `npm --prefix frontend run test:e2e`, which is required before shipping a UI change but not yet run in CI. `cargo clippy -p matrix-bot --all-targets -- -D warnings` (and `-p matrix-bot-inference`) is a required gate for any Rust you touch but is **not yet enforced in CI** — a backlog of 102 warnings (101 `matrix-bot`, 1 `matrix-bot-inference`) predates this rule and is tracked as follow-up; don't add new ones in files you change, and don't silence one with `#[allow]` without documenting why it exists, why it's safe, its scope, and when it can be removed. For a release-sensitive change, also run `cargo build -p matrix-bot --release`.
 
 **Checklist by change type** — beyond the standard fmt/check/test/clippy pass:
 - *Schema change*: add `backend/migrations/NNNN_description.sql`, run the backend suite, and if it rewrites or retypes existing data, rehearse it against a restored production copy with `migrates_a_real_database` (see Commands) before shipping.

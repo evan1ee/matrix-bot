@@ -107,7 +107,7 @@ pub struct ApiState {
     pub webauthn: std::sync::Arc<webauthn_rs::Webauthn>,
     /// WebAuthn ceremonies waiting for the browser to come back.
     ///
-    /// In memory, not in SQLite: a ceremony lives for seconds and is worthless
+    /// In memory, not in the database: a ceremony lives for seconds and is worthless
     /// afterwards, so durability would buy nothing and cost a table to sweep.
     /// This mirrors how `matrix_identity_cache` above is held.
     pub webauthn_ceremonies: std::sync::Arc<tokio::sync::RwLock<HashMap<String, PendingCeremony>>>,

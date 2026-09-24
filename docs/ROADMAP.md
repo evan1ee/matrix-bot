@@ -47,7 +47,7 @@ Recorded so the next reader does not re-propose them.
 | Portfolio price feed | `modules/portfolio/price_feed.rs` |
 | Portfolio alerts / history / audit chain | `alerts.rs`, `history.rs`, `audit.rs` |
 | **Bill payment posts to the ledger** | `recurring_bills/repository.rs:205` |
-| Matrix reactions → complete / snooze / delete | `bot/reaction.rs`, `db/schema_reactions.rs` |
+| Matrix reactions → complete / snooze / delete | `bot/reaction.rs`, `backend/migrations/0001_baseline.sql` (`bot_message_targets`) |
 | Voice replies (`!say`, offline Kokoro TTS) | `modules/tts/`, `opus.rs` writes the Ogg voice bubble |
 
 The last one closed the previous finding #2; the price feed closed #9.

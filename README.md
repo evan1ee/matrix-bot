@@ -25,7 +25,7 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
 - 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus). By default this is synthesized by the bundled inference server's Kokoro (English + Mandarin, 103 voices, Chinese text normalization), or by OpenAI or ElevenLabs with one env change. Every user picks their own voice.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
-- 🗄️ **PostgreSQL** — `DATABASE_URL` is required and must be a `postgres://` URL; the schema is created there on boot, no separate migration step. CI runs the full suite against a real PostgreSQL 18 on every pull request. matrix-sdk keeps its own SQLite crypto store under `data/`, unaffected by this setting. See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
+- 🗄️ **PostgreSQL** — `DATABASE_URL` is required and must be a `postgres://` URL; versioned migrations in [`backend/migrations/`](backend/migrations) apply automatically at boot via `sqlx::migrate!`. CI runs the full suite against a real PostgreSQL 18 on every pull request. matrix-sdk keeps its own SQLite crypto store under `data/`, unaffected by this setting. See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
 
 ---
@@ -74,7 +74,7 @@ The system unifies two distinct interaction models — fast, deterministic chat 
    - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
 
 4. **Persistence & Real-Time Sync**:
-   - All state modifications persist through runtime SQLx query binding to **PostgreSQL**, the only application database (`DATABASE_URL`, required, `postgres://`), through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
+   - All state modifications persist through compile-checked and runtime-bound SQLx queries to **PostgreSQL**, the only application database (`DATABASE_URL`, required, `postgres://`), through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schema changes are forward-only SQL files in [`backend/migrations/`](backend/migrations), applied at boot by `sqlx::migrate!`.
    - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
 
 ---
