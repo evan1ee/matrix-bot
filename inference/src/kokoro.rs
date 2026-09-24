@@ -67,13 +67,25 @@ const RULE_FSTS: &[&str] = &["date-zh.fst", "number-zh.fst", "phone-zh.fst"];
 /// `sherpa.rs::run_transcription_sync` rebuilds its SenseVoice recogniser on
 /// every call, which is fine there because that model loads in milliseconds.
 /// This model is 311 MB and takes seconds to load, so it is built once.
-/// `OfflineTts` is `unsafe impl Send + Sync` in the sherpa-onnx crate (it
-/// wraps a C++ engine that owns no thread-local state), so one instance
-/// shared across the async runtime's worker threads is sound. Do not "fix"
-/// this back to rebuilding on every call — that was tried in
-/// `inference/src/sherpa.rs` for a much smaller model and is not the right
-/// trade-off here.
+/// `OfflineTts` is `unsafe impl Send + Sync` in the sherpa-onnx crate, so one
+/// instance shared across the async runtime's worker threads compiles — but
+/// that alone does not make concurrent *use* sound. Sharing it is sound
+/// because every call into it is serialised by `SYNTH_LOCK`: espeak-ng, which
+/// Kokoro uses for grapheme-to-phoneme, keeps process-global state and is not
+/// documented as thread-safe, and sherpa's own SAFETY note for `OfflineTts`
+/// only promises "single-object usage", not concurrent calls on one object.
+/// The lock also bounds CPU usage — each synthesis already asks for
+/// `num_threads: 2`, so letting requests overlap would let their thread
+/// counts stack uncontrolled. Do not "fix" this back to rebuilding on every
+/// call — that was tried in `inference/src/sherpa.rs` for a much smaller
+/// model and is not the right trade-off here.
 static ENGINE: OnceLock<Option<OfflineTts>> = OnceLock::new();
+
+/// Serialises every call into the shared `ENGINE`. See `ENGINE`'s doc
+/// comment for why concurrent calls are unsound rather than merely slow.
+/// The guarded data is `()`, so a poisoned lock (a prior synthesis panicked
+/// while holding it) carries no broken invariant and is safe to recover from.
+static SYNTH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The path, but only if that file is actually present.
 ///
@@ -122,20 +134,37 @@ fn build_config(dir: &Path) -> OfflineTtsConfig {
 
 /// Returns the process-wide engine, loading it on the first call.
 ///
-/// A missing model directory is cached as `None` rather than retried on every
-/// request — that mirrors `model_present`'s own check, which callers are
-/// expected to run first so this path is only reached when the files were
-/// seen to exist.
+/// `model_present` is checked on every call, before the `OnceLock` is
+/// touched, so a directory that is missing or incomplete always reports
+/// `ModelMissing` — never the stale result of an earlier attempt. Once the
+/// files are present, the load result (success or failure) is cached
+/// forever: a `create` that fails on present-but-corrupt files is an engine
+/// error, not "not installed", so it is reported as `TtsError::Engine` and
+/// logged once, at the moment the load fails, rather than retried on every
+/// request.
 fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
+    if !model_present(model_dir) {
+        return Err(TtsError::ModelMissing(model_dir.to_path_buf()));
+    }
+
     let cell = ENGINE.get_or_init(|| {
-        if !model_present(model_dir) {
-            return None;
+        let loaded = OfflineTts::create(&build_config(model_dir));
+        if loaded.is_none() {
+            warn!(
+                "Kokoro model files are present in {:?} but failed to load; \
+                 TTS will report an engine error until the process is restarted \
+                 with valid model files",
+                model_dir
+            );
         }
-        OfflineTts::create(&build_config(model_dir))
+        loaded
     });
 
-    cell.as_ref()
-        .ok_or_else(|| TtsError::ModelMissing(model_dir.to_path_buf()))
+    cell.as_ref().ok_or_else(|| {
+        TtsError::Engine(
+            "the Kokoro model is present but failed to load; see the server log".to_string(),
+        )
+    })
 }
 
 /// Clamps a requested speaker id into the range a loaded model actually
@@ -180,9 +209,11 @@ fn synthesize_sync(model_dir: &Path, speaker_id: i64, text: &str) -> Result<Spee
         ..Default::default()
     };
 
-    let audio = tts
-        .generate_with_config(text, &generation, None::<NoCallback>)
-        .ok_or_else(|| TtsError::Engine("sherpa-onnx TTS generation failed".to_string()))?;
+    let audio = {
+        let _guard = SYNTH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        tts.generate_with_config(text, &generation, None::<NoCallback>)
+    }
+    .ok_or_else(|| TtsError::Engine("sherpa-onnx TTS generation failed".to_string()))?;
 
     Ok(Speech {
         samples: audio.samples().to_vec(),
@@ -528,6 +559,26 @@ mod tests {
         assert!(!root.join(ARCHIVE_FILE_NAME).exists());
         assert!(!root.join(STAGING_DIR_NAME).exists());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Present-but-corrupt model files must report an engine error, not
+    /// `ModelMissing` — the files ARE there, the load just failed. This is
+    /// separate from the process-crashing case documented on
+    /// `test_synthesize_produces_audio_for_english_and_chinese`: if
+    /// `OfflineTts::create` instead segfaults on garbage input, sherpa never
+    /// gets a chance to return `None` and this test cannot run at all.
+    #[tokio::test]
+    async fn test_present_but_corrupt_model_files_report_an_engine_error_not_missing() {
+        let dir = scratch("corrupt");
+        for name in KOKORO_REQUIRED_FILES {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        assert!(model_present(&dir));
+
+        let result = synthesize(dir.clone(), "hi".to_string(), 0).await;
+
+        assert!(matches!(result, Err(TtsError::Engine(_))), "{:?}", result);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
