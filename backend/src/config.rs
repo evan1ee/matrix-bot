@@ -166,10 +166,13 @@ pub struct Config {
     /// Defaults to the WebAuthn origin, which is by definition where the SPA
     /// is served from — so it is right without being configured twice.
     pub web_url: String,
-    /// Whether local PaddleOCR image text recognition is enabled.
+    /// Whether OCR image text recognition is enabled.
     pub ocr_enabled: bool,
-    /// Path to directory containing the PaddleOCR ONNX models.
-    pub ocr_model_dir: std::path::PathBuf,
+    /// Base URL of the inference server's OCR endpoint.
+    ///
+    /// Absent means OCR is unavailable in this deployment: the feature
+    /// degrades with a message, and nothing else is affected.
+    pub ocr_base_url: Option<String>,
     /// Whether local sherpa-onnx SenseVoice speech transcription is enabled.
     pub voice_enabled: bool,
     /// Path to directory containing the SenseVoice ONNX model and tokens.
@@ -269,9 +272,10 @@ impl Config {
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(true);
 
-        let ocr_model_dir = env::var("OCR_MODEL_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("data/ocr_models"));
+        let ocr_base_url = env::var("OCR_BASE_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
 
         let voice_enabled = env::var("VOICE_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -320,7 +324,7 @@ impl Config {
             cookie_secure,
             web_url,
             ocr_enabled,
-            ocr_model_dir,
+            ocr_base_url,
             voice_enabled,
             voice_model_dir,
             voice_language,
@@ -412,7 +416,7 @@ mod tests {
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
             ocr_enabled: true,
-            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            ocr_base_url: None,
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
@@ -454,7 +458,7 @@ mod tests {
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
             ocr_enabled: true,
-            ocr_model_dir: std::path::PathBuf::from("data/ocr_models"),
+            ocr_base_url: None,
             voice_enabled: true,
             voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
@@ -554,7 +558,7 @@ mod tests {
 
     /// Configuration is read in one place. Everything else is handed values.
     ///
-    /// The bot half used to re-read `OCR_MODEL_DIR`, `VOICE_*` and the
+    /// The bot half used to re-read `OCR_BASE_URL`, `VOICE_*` and the
     /// verification allowlist at the point of use, so it could disagree with
     /// the copy the API server was given and `validate` could not check what it
     /// did not own. The files below still read the environment directly and are

@@ -97,8 +97,11 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # Scoped to the bot crate. `--workspace` would drag the inference crate's
+      # native ML dependencies back into this job, which is the cost this
+      # split exists to remove.
       - name: Run backend tests & check targets
-        run: cargo test --workspace --all-targets
+        run: cargo test -p matrix-bot --all-targets
 
       - name: Verify OpenAPI spec is up-to-date
         run: |
@@ -241,14 +244,49 @@ jobs:
           cargo clean -p sherpa-onnx-sys -p sherpa-onnx || true
           rm -rf target/sherpa-onnx-prebuilt
 
+      # Scoped to the bot crate. `--workspace` would drag the inference crate's
+      # native ML dependencies back into this job, which is the cost this
+      # split exists to remove.
       - name: Run the suite against PostgreSQL
-        run: cargo test --workspace
+        run: cargo test -p matrix-bot
 
       # These are #[ignore]d because they need a server, which is exactly what
       # this job has. They cover the boot path, the schema, the audit-log
       # triggers and the merge savepoints.
       - name: Run the live PostgreSQL tests
         run: cargo test --package matrix-bot live_postgres -- --ignored --test-threads=1
+
+  inference:
+    name: Inference CI (check, test, format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      # Declared for the same reason as in the backend jobs: never assume the
+      # runner image. `ort-sys` build-depends on `ureq` -> `native-tls`, which
+      # on Linux is `openssl-sys` and needs the OpenSSL headers plus
+      # pkg-config to find them. Unlike the backend there is no cmake here --
+      # nothing in this crate's graph builds with it, so it is not installed.
+      - name: Install Linux build dependencies
+        run: |
+          set -eu
+          if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+          $sudo apt-get update
+          $sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-inference"
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Run inference tests
+        run: cargo test -p matrix-bot-inference --all-targets
 
   frontend:
     name: Frontend CI (build & typecheck)

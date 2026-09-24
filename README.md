@@ -357,6 +357,10 @@ sudo systemctl status matrix-bot
 ### Option 2: Docker Compose (Recommended for Containers)
 
 Docker Compose manages persistent data volumes and restarts automatically.
+`docker compose up` now starts **two** containers: `matrix-bot` and
+`inference` (the local ONNX model server behind `POST /ocr`). The inference
+service is not published to the host — the bot reaches it over the compose
+network only.
 
 ```bash
 # 1. Clone repo & setup .env
@@ -373,7 +377,7 @@ docker compose logs -f
 docker compose down
 ```
 
-Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts.
+Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts. The inference server's downloaded OCR models persist in `matrix-bot-inference-data`.
 
 ---
 
@@ -399,7 +403,10 @@ there is no separate migration step.
 
 ### Option 3: Docker Run
 
-Run directly as a single container without compose:
+Run directly as a single container without compose. There is no inference
+server here, so `OCR_BASE_URL` stays unset: the bot still boots and every
+other feature works, and an image message just gets a reply saying OCR is
+unavailable.
 
 ```bash
 # 1. Create a persistent named volume for SQLite and Matrix crypto store
@@ -467,7 +474,7 @@ npm --prefix frontend run generate-api  # -> frontend/src/types/api.ts
 
 ## 🏗️ Layout
 
-Cargo workspace with one member, plus a separate npm frontend and iOS integration guides.
+Cargo workspace with two members, plus a separate npm frontend and iOS integration guides.
 
 ```
 backend/                      # crate `matrix-bot`: bot + embedded API, one binary
@@ -495,7 +502,11 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
+    ├── services/             # HTTP clients to sibling services
+    │   └── ocr/               #   client to the inference crate's POST /ocr
     └── utils/
+inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
+│                              # models (OCR now; STT/TTS later), a separate binary and image
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)
 docs/                         # documentation, roadmap, architecture reviews, guides

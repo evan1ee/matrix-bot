@@ -12,4 +12,5 @@ pub mod db;
 pub mod error;
 pub mod events;
 pub mod modules;
+pub mod services;
 pub mod utils;

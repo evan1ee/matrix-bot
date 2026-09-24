@@ -2523,7 +2523,6 @@ dependencies = [
  "chrono-tz",
  "dotenvy",
  "futures-util",
- "image",
  "matrix-sdk",
  "mime_guess",
  "ogg",
@@ -2532,7 +2531,6 @@ dependencies = [
  "opus-decoder",
  "ort",
  "ort-sys",
- "paddle-ocr-rs",
  "reqwest",
  "rust-embed",
  "serde",
@@ -2552,6 +2550,26 @@ dependencies = [
  "utoipa",
  "uuid",
  "webauthn-rs",
+]
+
+[[package]]
+name = "matrix-bot-inference"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "image",
+ "ort",
+ "ort-sys",
+ "paddle-ocr-rs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
