@@ -124,8 +124,14 @@ impl TtsClient {
         let api_key = api_key
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty());
+        // reqwest 0.11 strips only Authorization/Cookie/Proxy-Authorization/
+        // WWW-Authenticate on a cross-host redirect, so a custom header like
+        // `xi-api-key` would still be forwarded to whatever host a 3xx points
+        // at, and a 307/308 would re-post the user's text there too. Neither
+        // provider needs redirects, so following them is a pure liability.
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default();
         Self {
@@ -180,7 +186,13 @@ impl TtsClient {
                     model_id: &self.model,
                 });
                 if let Some(key) = &self.api_key {
-                    request = request.header("xi-api-key", key);
+                    let mut value = reqwest::header::HeaderValue::from_str(key).map_err(|_| {
+                        TtsServiceError::Unreachable(
+                            "TTS_API_KEY is not a valid header value".to_string(),
+                        )
+                    })?;
+                    value.set_sensitive(true);
+                    request = request.header("xi-api-key", value);
                 }
                 Ok(request)
             }
@@ -658,5 +670,67 @@ mod tests {
         );
         client.synthesize("hi", "a/../b").await.unwrap();
         assert_eq!(seen.lock().unwrap().path, "/v1/text-to-speech/a%2F..%2Fb");
+    }
+
+    #[derive(Debug, Default)]
+    struct RedirectTarget {
+        was_hit: bool,
+        xi_api_key: Option<String>,
+    }
+
+    /// A 307 that would re-post the request, and carry the key, to a second
+    /// host if the client followed it. `TtsClient` must not follow it.
+    #[tokio::test]
+    async fn test_a_redirect_is_not_followed_and_never_carries_the_key() {
+        let b_seen = Arc::new(Mutex::new(RedirectTarget::default()));
+        let b_app = Router::new().fallback({
+            let b_seen = b_seen.clone();
+            move |headers: AxumHeaders| {
+                let b_seen = b_seen.clone();
+                async move {
+                    *b_seen.lock().unwrap() = RedirectTarget {
+                        was_hit: true,
+                        xi_api_key: headers
+                            .get("xi-api-key")
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_owned),
+                    };
+                    StatusCode::OK
+                }
+            }
+        });
+        let b_base = spawn_server(b_app).await;
+        let location = format!("{}/v1/text-to-speech/v", b_base);
+
+        let a_app = Router::new().route(
+            "/v1/text-to-speech/v",
+            post(move || {
+                let location = location.clone();
+                async move {
+                    axum::response::Response::builder()
+                        .status(StatusCode::TEMPORARY_REDIRECT)
+                        .header("Location", location)
+                        .body(axum::body::Body::empty())
+                        .unwrap()
+                }
+            }),
+        );
+        let a_base = format!("{}/v1", spawn_server(a_app).await);
+
+        let client = TtsClient::new(
+            Some(a_base),
+            Some("k-secret".to_string()),
+            "m".to_string(),
+            TtsDialect::ElevenLabs,
+        );
+
+        match client.synthesize("hi", "v").await {
+            Err(TtsServiceError::Upstream { status, .. }) => assert_eq!(status, 307),
+            other => panic!("expected a 307 upstream error, got {:?}", other),
+        }
+
+        let seen = b_seen.lock().unwrap();
+        assert!(!seen.was_hit, "the redirect target must never be contacted");
+        assert_eq!(seen.xi_api_key, None);
     }
 }
