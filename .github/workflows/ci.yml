@@ -175,10 +175,13 @@ jobs:
         with:
           prefix-key: "v2-inference"
 
-      # sherpa-onnx arrives in this crate with speech-to-text. Same handling as
-      # the backend jobs: rust-cache prunes the prebuilt .so files, so the
-      # build script is forced to re-run, and the archive it fetches is cached
-      # so the download is a cache-miss-only path with retries.
+      # sherpa-onnx-sys's build script needs this prebuilt shared-library
+      # archive on disk to link against. rust-cache above restores Cargo's own
+      # build outputs, not this archive, so it is fetched and cached here
+      # separately, keyed by version, on a cache-miss-only path with retries.
+      # The explicit clean step below then strips any prebuilt sherpa-onnx
+      # artifacts rust-cache did restore, so the build script always re-links
+      # against the freshly cached archive instead of a stale Cargo-cached one.
       - name: Resolve the sherpa-onnx version
         id: sherpa
         run: |

@@ -281,6 +281,11 @@ Touch points: `config.rs`, `api/settings.rs` and four of its tests,
 Per `CLAUDE.md`, no compatibility layer is added — the integer path is removed,
 not kept alongside.
 
+*Revised during Plan 3 execution: `TTS_ENABLED` is removed as well; an absent
+`TTS_BASE_URL` is the off switch, as for OCR and STT. There is no data
+migration from `tts_speaker_id`; the column is dropped (see CLAUDE.md's
+no-compatibility rule).*
+
 ## Dependencies removed from `backend/Cargo.toml`
 
 `image` · `ort` · `ort-sys` · `paddle-ocr-rs` · `sherpa-onnx` · `opus` ·
@@ -317,6 +322,11 @@ Each phase ends with a green `cargo test` and a shippable tree.
    with the OpenAI dialect; the `tts_voice` migration and its frontend changes;
    `tts_spike.rs` example follows. Drop `opus`, `ort`, `ort-sys`. Acceptance
    includes OpenAI as the provider and confirming a voice bubble still renders.
+
+   *Revised during Plan 3 execution: `text.rs` stays in `modules/tts`, because
+   it prepares a Matrix message and helps every provider; `tts_spike.rs` is
+   deleted, as its own header asked, not moved; Kokoro is provisioned from the
+   sherpa-onnx release archive at startup, like the other models.*
 3a. **ElevenLabs dialect.** `TTS_DIALECT` and the ElevenLabs request shaping,
    as a separate increment on top of a working OpenAI path.
 4. **`services/llm`.** Extract `modules/ai/client.rs`. Pure move, no behaviour
@@ -368,6 +378,13 @@ keeps that coexistence intact — relocated, not resolved.
 If it bites, the escape hatch is splitting `inference` into two containers,
 which is cheap **because** the HTTP boundary exists. That is an argument for
 the boundary, not a claim that this change fixes the collision.
+
+*Checked on 2026-09-24 in a Linux build of the inference image: `OrtGetApiBase`
+is in the binary's `.symtab` but not its `.dynsym`, and
+`libsherpa-onnx-c-api.so` binds `OrtGetApiBase@VERS_1.28.2`, which its own
+`libonnxruntime.so` provides. The two runtimes do not interpose. Re-check
+after an `ort` or sherpa-onnx upgrade, or if the binary is ever linked with
+`-rdynamic`.*
 
 ## Documentation to update
 

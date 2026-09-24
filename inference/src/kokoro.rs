@@ -1,10 +1,9 @@
 //! Kokoro text-to-speech: the model on disk, and the engine.
 //!
-//! Config construction mirrors `backend/examples/tts_spike.rs`, which proved
-//! this exact Kokoro model directory against real audio output (103 speakers,
-//! 24000 Hz, ~1.5x realtime on a debug build). Nothing here is a new design —
-//! it is that spike's `build_config` narrowed to the one family this module
-//! supports.
+//! `build_config` was proved against real audio output before this module
+//! existed (103 speakers, 24000 Hz, ~1.5x realtime on a debug build), and is
+//! kept narrowed to the one Kokoro family `routes/speech.rs` needs. Nothing
+//! here is a new design.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -124,7 +123,7 @@ fn build_config(dir: &Path) -> OfflineTtsConfig {
 /// Returns the process-wide engine, loading it on the first call.
 ///
 /// A missing model directory is cached as `None` rather than retried on every
-/// `!say` — that mirrors `model_present`'s own check, which callers are
+/// request — that mirrors `model_present`'s own check, which callers are
 /// expected to run first so this path is only reached when the files were
 /// seen to exist.
 fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
@@ -142,11 +141,11 @@ fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
 /// Clamps a requested speaker id into the range a loaded model actually
 /// supports, returning the id to use for generation.
 ///
-/// A stored `tts_speaker_id` preference can outlive the model that was loaded
-/// when it was chosen — an operator can swap in a Kokoro model with fewer
-/// voices without revalidating everyone's saved preference. Rather than fail
-/// the whole `!say`, this degrades to the nearest valid voice: negative ids
-/// (should not occur past API/handler validation, but never trust a stored
+/// A request's voice can outlive the model that was loaded when it was
+/// chosen — an operator can swap in a Kokoro model with fewer voices without
+/// revalidating every caller's saved preference. Rather than fail the whole
+/// request, this degrades to the nearest valid voice: negative ids (should
+/// not occur past `validate`'s own check, but never trust a caller-supplied
 /// value) clamp to 0, and ids at or past `num_speakers` clamp to the last
 /// valid index. A model reporting zero speakers (unexpected, but the C API
 /// returns a plain `i32`) clamps to 0 rather than underflowing.
