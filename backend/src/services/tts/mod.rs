@@ -1,7 +1,8 @@
 //! Client for text-to-speech providers.
 //!
 //! Speaks OpenAI's `POST {base}/audio/speech` and asks for Ogg Opus, the
-//! format that makes a Matrix client draw a voice bubble. The bundled
+//! format that makes a Matrix client draw a voice bubble. `TtsDialect::ElevenLabs`
+//! shapes the same request the way ElevenLabs wants it. The bundled
 //! inference server adds two headers (`x-duration-ms`, `x-waveform`) that a
 //! voice message needs and raw audio does not carry. A provider that omits
 //! them is still fine: the duration is read from the Ogg stream itself, and
@@ -52,6 +53,40 @@ struct OpenAiSpeechRequest<'a> {
     response_format: &'static str,
 }
 
+/// How a provider wants a speech request shaped. Most providers speak
+/// OpenAI's shape and need only a base URL. ElevenLabs differs on four axes
+/// at once (auth header, URL, where the voice goes, body field names), which
+/// a base URL cannot reconcile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TtsDialect {
+    #[default]
+    OpenAi,
+    ElevenLabs,
+}
+
+impl TtsDialect {
+    /// Parses `TTS_DIALECT`. Blank means the default.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "openai" => Ok(Self::OpenAi),
+            "elevenlabs" => Ok(Self::ElevenLabs),
+            other => Err(format!(
+                "Unknown TTS_DIALECT '{}'; expected openai or elevenlabs",
+                other
+            )),
+        }
+    }
+}
+
+/// ElevenLabs returns this as Ogg Opus, so the granule fallback applies.
+const ELEVENLABS_OUTPUT_FORMAT: &str = "opus_48000_64";
+
+#[derive(Serialize)]
+struct ElevenLabsSpeechRequest<'a> {
+    text: &'a str,
+    model_id: &'a str,
+}
+
 /// An absent `base_url` is a normal state: text-to-speech is not configured
 /// in this deployment, and every call reports `NotConfigured` so the caller
 /// can degrade that one feature.
@@ -60,6 +95,7 @@ pub struct TtsClient {
     base_url: Option<String>,
     api_key: Option<String>,
     model: String,
+    dialect: TtsDialect,
     http: reqwest::Client,
 }
 
@@ -70,12 +106,18 @@ impl fmt::Debug for TtsClient {
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("model", &self.model)
+            .field("dialect", &self.dialect)
             .finish()
     }
 }
 
 impl TtsClient {
-    pub fn new(base_url: Option<String>, api_key: Option<String>, model: String) -> Self {
+    pub fn new(
+        base_url: Option<String>,
+        api_key: Option<String>,
+        model: String,
+        dialect: TtsDialect,
+    ) -> Self {
         let base_url = base_url
             .map(|u| u.trim().trim_end_matches('/').to_string())
             .filter(|u| !u.is_empty());
@@ -90,7 +132,58 @@ impl TtsClient {
             base_url,
             api_key,
             model,
+            dialect,
             http,
+        }
+    }
+
+    /// Shapes the outgoing request per `self.dialect`.
+    fn build_request(
+        &self,
+        base: &str,
+        text: &str,
+        voice: &str,
+    ) -> Result<reqwest::RequestBuilder, TtsServiceError> {
+        match self.dialect {
+            TtsDialect::OpenAi => {
+                let mut request =
+                    self.http
+                        .post(format!("{}/audio/speech", base))
+                        .json(&OpenAiSpeechRequest {
+                            model: &self.model,
+                            input: text,
+                            voice,
+                            response_format: "opus",
+                        });
+                if let Some(key) = &self.api_key {
+                    request = request.bearer_auth(key);
+                }
+                Ok(request)
+            }
+            TtsDialect::ElevenLabs => {
+                let invalid = |detail: String| {
+                    TtsServiceError::Unreachable(format!(
+                        "Invalid TTS_BASE_URL {}: {}",
+                        base, detail
+                    ))
+                };
+                let mut url = reqwest::Url::parse(base).map_err(|e| invalid(e.to_string()))?;
+                url.path_segments_mut()
+                    .map_err(|_| invalid("it cannot carry a path".to_string()))?
+                    .push("text-to-speech")
+                    .push(voice);
+                url.query_pairs_mut()
+                    .append_pair("output_format", ELEVENLABS_OUTPUT_FORMAT);
+
+                let mut request = self.http.post(url).json(&ElevenLabsSpeechRequest {
+                    text,
+                    model_id: &self.model,
+                });
+                if let Some(key) = &self.api_key {
+                    request = request.header("xi-api-key", key);
+                }
+                Ok(request)
+            }
         }
     }
 
@@ -105,18 +198,7 @@ impl TtsClient {
             .as_ref()
             .ok_or(TtsServiceError::NotConfigured)?;
 
-        let mut request =
-            self.http
-                .post(format!("{}/audio/speech", base))
-                .json(&OpenAiSpeechRequest {
-                    model: &self.model,
-                    input: text,
-                    voice,
-                    response_format: "opus",
-                });
-        if let Some(key) = &self.api_key {
-            request = request.bearer_auth(key);
-        }
+        let request = self.build_request(base, text, voice)?;
 
         let response = request.send().await.map_err(|e| {
             warn!("Text-to-speech request failed: {}", e);
@@ -327,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_an_unconfigured_client_reports_not_configured() {
-        let client = TtsClient::new(None, None, "kokoro".to_string());
+        let client = TtsClient::new(None, None, "kokoro".to_string(), TtsDialect::OpenAi);
         assert!(matches!(
             client.synthesize("hi", "0").await,
             Err(TtsServiceError::NotConfigured)
@@ -338,7 +420,7 @@ mod tests {
     async fn test_sends_the_contract_body_and_reads_the_contract_headers() {
         let captured = Arc::new(Mutex::new(Captured::default()));
         let base = fake_openai(captured.clone(), b"OggS-audio".to_vec(), contract_headers()).await;
-        let client = TtsClient::new(Some(base), None, "kokoro".to_string());
+        let client = TtsClient::new(Some(base), None, "kokoro".to_string(), TtsDialect::OpenAi);
         let contract: serde_json::Value = serde_json::from_str(REQUEST_CONTRACT).unwrap();
 
         let speech = client
@@ -366,7 +448,12 @@ mod tests {
         let captured = Arc::new(Mutex::new(Captured::default()));
         let ogg = fake_ogg_opus(312, 2 * 48_000 + 312);
         let base = fake_openai(captured, ogg, Vec::new()).await;
-        let client = TtsClient::new(Some(base), Some("sk-test".to_string()), "tts-1".to_string());
+        let client = TtsClient::new(
+            Some(base),
+            Some("sk-test".to_string()),
+            "tts-1".to_string(),
+            TtsDialect::OpenAi,
+        );
 
         let speech = client.synthesize("hi", "alloy").await.unwrap();
 
@@ -378,7 +465,12 @@ mod tests {
     async fn test_sends_a_bearer_token_when_configured() {
         let captured = Arc::new(Mutex::new(Captured::default()));
         let base = fake_openai(captured.clone(), Vec::new(), Vec::new()).await;
-        let client = TtsClient::new(Some(base), Some("sk-test".to_string()), "tts-1".to_string());
+        let client = TtsClient::new(
+            Some(base),
+            Some("sk-test".to_string()),
+            "tts-1".to_string(),
+            TtsDialect::OpenAi,
+        );
 
         client.synthesize("hi", "alloy").await.unwrap();
 
@@ -421,7 +513,7 @@ mod tests {
             post(|| async { (StatusCode::SERVICE_UNAVAILABLE, "model is not installed") }),
         );
         let base = format!("{}/v1", spawn_server(app).await);
-        let client = TtsClient::new(Some(base), None, "kokoro".to_string());
+        let client = TtsClient::new(Some(base), None, "kokoro".to_string(), TtsDialect::OpenAi);
 
         match client.synthesize("hi", "0").await {
             Err(TtsServiceError::Upstream { status, message }) => {
@@ -438,6 +530,7 @@ mod tests {
             Some("http://127.0.0.1:1/v1".to_string()),
             None,
             "kokoro".to_string(),
+            TtsDialect::OpenAi,
         );
         assert!(matches!(
             client.synthesize("hi", "0").await,
@@ -451,9 +544,119 @@ mod tests {
             Some("https://api.openai.com/v1".to_string()),
             Some("sk-very-secret".to_string()),
             "tts-1".to_string(),
+            TtsDialect::OpenAi,
         );
         let debug = format!("{:?}", client);
         assert!(!debug.contains("sk-very-secret"), "leaked: {}", debug);
         assert!(debug.contains("redacted"));
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct Seen {
+        path: String,
+        query: Option<String>,
+        authorization: Option<String>,
+        xi_api_key: Option<String>,
+        body: serde_json::Value,
+    }
+
+    /// Accepts any POST path and records what arrived.
+    async fn recording_server(seen: Arc<Mutex<Seen>>) -> String {
+        let app = Router::new().fallback(
+            move |uri: axum::http::Uri,
+                  headers: AxumHeaders,
+                  Json(body): Json<serde_json::Value>| {
+                let seen = seen.clone();
+                async move {
+                    let header = |name: &str| {
+                        headers
+                            .get(name)
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_owned)
+                    };
+                    *seen.lock().unwrap() = Seen {
+                        path: uri.path().to_string(),
+                        query: uri.query().map(str::to_owned),
+                        authorization: header("authorization"),
+                        xi_api_key: header("xi-api-key"),
+                        body,
+                    };
+                    fake_ogg_opus(312, 48_000 + 312)
+                }
+            },
+        );
+        format!("{}/v1", spawn_server(app).await)
+    }
+
+    #[test]
+    fn test_dialect_parse() {
+        assert_eq!(TtsDialect::parse(""), Ok(TtsDialect::OpenAi));
+        assert_eq!(TtsDialect::parse("openai"), Ok(TtsDialect::OpenAi));
+        assert_eq!(
+            TtsDialect::parse(" ElevenLabs "),
+            Ok(TtsDialect::ElevenLabs)
+        );
+        assert!(TtsDialect::parse("azure").is_err());
+    }
+
+    /// The spec's dialect test: one input, two shapes on the wire.
+    #[tokio::test]
+    async fn test_openai_and_elevenlabs_shape_the_same_input_differently() {
+        let openai_seen = Arc::new(Mutex::new(Seen::default()));
+        let openai = TtsClient::new(
+            Some(recording_server(openai_seen.clone()).await),
+            Some("k-1".to_string()),
+            "tts-1".to_string(),
+            TtsDialect::OpenAi,
+        );
+        openai.synthesize("hello", "voice123").await.unwrap();
+
+        let eleven_seen = Arc::new(Mutex::new(Seen::default()));
+        let eleven = TtsClient::new(
+            Some(recording_server(eleven_seen.clone()).await),
+            Some("k-1".to_string()),
+            "eleven_multilingual_v2".to_string(),
+            TtsDialect::ElevenLabs,
+        );
+        let speech = eleven.synthesize("hello", "voice123").await.unwrap();
+
+        let o = openai_seen.lock().unwrap().clone();
+        assert_eq!(o.path, "/v1/audio/speech");
+        assert_eq!(o.authorization.as_deref(), Some("Bearer k-1"));
+        assert_eq!(o.xi_api_key, None);
+        assert_eq!(
+            o.body,
+            serde_json::json!({ "model": "tts-1", "input": "hello", "voice": "voice123", "response_format": "opus" })
+        );
+
+        let e = eleven_seen.lock().unwrap().clone();
+        assert_eq!(e.path, "/v1/text-to-speech/voice123");
+        assert_eq!(e.query.as_deref(), Some("output_format=opus_48000_64"));
+        assert_eq!(e.xi_api_key.as_deref(), Some("k-1"));
+        assert_eq!(e.authorization, None);
+        assert_eq!(
+            e.body,
+            serde_json::json!({ "text": "hello", "model_id": "eleven_multilingual_v2" })
+        );
+        assert_eq!(
+            speech.duration,
+            Some(Duration::from_secs(1)),
+            "Ogg fallback applies"
+        );
+    }
+
+    /// The voice is a path segment under ElevenLabs, so it must not be able
+    /// to add segments of its own.
+    #[tokio::test]
+    async fn test_an_elevenlabs_voice_is_one_encoded_path_segment() {
+        let seen = Arc::new(Mutex::new(Seen::default()));
+        let client = TtsClient::new(
+            Some(recording_server(seen.clone()).await),
+            None,
+            "m".to_string(),
+            TtsDialect::ElevenLabs,
+        );
+        client.synthesize("hi", "a/../b").await.unwrap();
+        assert_eq!(seen.lock().unwrap().path, "/v1/text-to-speech/a%2F..%2Fb");
     }
 }
