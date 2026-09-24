@@ -289,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_empty_holdings() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
             .await
@@ -300,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_holding_without_cash() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let reply = handle_portfolio_command(
             &pool,

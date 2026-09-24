@@ -481,12 +481,11 @@ pub async fn handle_delete(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::{EventBroadcaster, SystemEvent};
 
     async fn setup_test_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

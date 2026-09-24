@@ -183,8 +183,7 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema_auth::create_tables(&pool).await.unwrap();
-        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         crate::db_execute!(
             &pool,

@@ -378,11 +378,10 @@ impl MergeRepository {
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE, STATUS_UNCLAIMED};
-    use crate::db::schema::run_migrations;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
@@ -1194,7 +1193,7 @@ mod tests {
     #[tokio::test]
     async fn test_every_merged_table_has_the_row_key_this_names() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         for table in crate::accounts::OWNED_TABLES
             .iter()
@@ -1213,7 +1212,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_collision_does_not_block_the_rows_that_can_move() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // `finance_categories` is unique on (owner_id, name). Both owners have
         // "food"; only the source has "travel".

@@ -370,14 +370,13 @@ pub async fn delete_day(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema_life::run_life_schema;
     use crate::db::Database;
     use crate::db::DbPool;
     use crate::events::EventBroadcaster;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
-        run_life_schema(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();

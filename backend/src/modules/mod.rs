@@ -378,7 +378,7 @@ mod tests {
         use crate::modules::tts::TtsModule;
 
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
 
         let registry_ref = Arc::new(tokio::sync::RwLock::new(None));
@@ -568,7 +568,7 @@ mod tests {
 
     async fn memory_db() -> Database {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         Database { pool }
     }
 

@@ -309,7 +309,6 @@ pub async fn pay_bill(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::db::DbPool;
     use crate::events::EventBroadcaster;
     use crate::modules::reminder::models::ReminderSource;
@@ -354,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn test_bill_lead_time_schedules_rearms_and_tears_down() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -448,7 +447,7 @@ mod tests {
     #[tokio::test]
     async fn test_lead_time_is_validated_at_the_boundary() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -490,7 +489,7 @@ mod tests {
     #[tokio::test]
     async fn test_recurring_bills_api_flow() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

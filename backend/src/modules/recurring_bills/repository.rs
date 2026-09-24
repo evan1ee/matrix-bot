@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_recurring_bill_crud() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let payload = CreateBillPayload {
             name: "Netflix Subscription".to_string(),

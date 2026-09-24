@@ -623,9 +623,10 @@ mod tests {
             "search.rs",
             // Read only inside #[ignore]d live tests.
             "self_verify.rs",
-            "backfill.rs",
             // PG_TEST_URL, in the #[ignore]d live PostgreSQL connection test.
             "pool.rs",
+            // MIGRATE_TEST_DATABASE_URL, in the #[ignore]d production rehearsal test.
+            "catalog.rs",
         ];
 
         fn walk(dir: &std::path::Path, offenders: &mut Vec<String>) {

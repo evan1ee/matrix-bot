@@ -80,13 +80,12 @@ pub async fn sync_rooms(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -103,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn test_cached_rooms_crud_and_list() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // Create account
         crate::accounts::AccountRepository::create_with_id(

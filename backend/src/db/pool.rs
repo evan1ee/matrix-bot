@@ -3,7 +3,6 @@ use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
 use crate::db::executor::DbPool;
-use crate::db::schema;
 
 #[derive(Clone, Debug)]
 pub struct Database {
@@ -100,9 +99,9 @@ impl Database {
 
         let pool = connect_pool(database_url, max_connections).await?;
 
-        schema::run_migrations(&pool)
+        crate::db::migrate::run_migrations(&pool)
             .await
-            .context("Failed to execute database migrations")?;
+            .context("Failed to apply database migrations")?;
 
         Ok(Self { pool })
     }
@@ -169,5 +168,49 @@ mod tests {
         // same mismatch that made the schema use BIGINT everywhere.
         let one: i64 = crate::db_scalar_one!(&pool, i64, "SELECT 1::bigint").unwrap();
         assert_eq!(one, 1, "the pool must actually answer a query");
+    }
+
+    /// The whole boot path on PostgreSQL: `Database::connect`, which now runs
+    /// the migrator, then an ordinary write and read.
+    ///
+    /// This is the claim "the bot runs on PostgreSQL" reduced to a test. Every
+    /// other live test exercises one layer; this one starts from a connection
+    /// string, as the process does.
+    #[tokio::test]
+    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
+    async fn test_the_bot_boots_against_a_live_postgres() {
+        // A dedicated schema so this neither sees nor leaves shared state.
+        let scoped = {
+            let base = pg_test_url();
+            let admin = connect_pool(&base, 1).await.unwrap();
+            crate::db_execute!(&admin, "DROP SCHEMA IF EXISTS boot_check CASCADE").unwrap();
+            crate::db_execute!(&admin, "CREATE SCHEMA boot_check").unwrap();
+            let sep = if base.contains('?') { "&" } else { "?" };
+            format!("{base}{sep}options=-c%20search_path%3Dboot_check")
+        };
+
+        let db = Database::connect(&scoped, 2)
+            .await
+            .expect("Database::connect must run every migration on PostgreSQL");
+
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
+            "acct_boot",
+            "Evan",
+            "unclaimed"
+        )
+        .expect("an ordinary write must work after boot");
+
+        let status: String = crate::db_scalar_one!(
+            &db.pool,
+            String,
+            "SELECT status FROM accounts WHERE id = ?",
+            "acct_boot"
+        )
+        .expect("an ordinary read must work after boot");
+        assert_eq!(status, "unclaimed");
+
+        crate::db::pool::drop_pg_schema("boot_check").await;
     }
 }

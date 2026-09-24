@@ -62,7 +62,6 @@ pub async fn sse_handler(
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, SessionRepository};
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     #[tokio::test]
@@ -99,7 +98,7 @@ mod tests {
     #[tokio::test]
     async fn test_the_stream_requires_a_session() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = test_state(pool.clone());
 
         let account = AccountRepository::create(&pool, "evan", "active")

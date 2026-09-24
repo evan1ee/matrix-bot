@@ -124,9 +124,9 @@ pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
 /// Tables carrying `account_id` that a merge deliberately leaves alone.
 ///
 /// `web_users` is the dead password table. Nothing authenticates against it —
-/// only `db::backfill` reads it, once, to decide whether a legacy owner had a
-/// credential. Deleting from it would destroy the only record that a legacy
-/// local account ever existed, and gain nothing.
+/// the now-deleted one-shot backfill read it, once, to decide whether a legacy
+/// owner had a credential. Deleting from it would destroy the only record that
+/// a legacy local account ever existed, and gain nothing.
 pub const ACCOUNT_ID_UNTOUCHED: &[&str] = &["web_users"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -188,7 +188,6 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::db::DbPool;
     use std::collections::BTreeSet;
 
@@ -259,7 +258,7 @@ mod tests {
 
     async fn migrated_pool() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

@@ -535,7 +535,7 @@ mod tests {
     #[tokio::test]
     async fn test_finance_alias_and_rm() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // Add expense via !expense add
         let add_res = handle_finance_command(
@@ -570,7 +570,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let broadcaster = crate::events::EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
@@ -602,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn test_expense_add_refuses_an_unknown_category() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let reply = handle_finance_command(
             &pool,

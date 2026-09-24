@@ -367,7 +367,6 @@ pub async fn summary(
 mod tests {
     use super::*;
     use crate::api::portfolio_cash::{deposit_cash, list_cash, withdraw_cash};
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use crate::modules::portfolio::cash_repo;
     use crate::modules::portfolio::models::QUANTITY_EXPONENT;
@@ -375,7 +374,7 @@ mod tests {
 
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

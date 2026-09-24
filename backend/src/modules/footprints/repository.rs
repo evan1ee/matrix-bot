@@ -252,7 +252,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_update_atomic_returning() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
 
         let created = FootprintRepository::create(

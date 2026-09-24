@@ -349,11 +349,10 @@ pub enum RecoveryRejection {
 mod tests {
     use super::*;
     use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
-    use crate::db::schema::run_migrations;
 
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         Database { pool: pool }
     }
 

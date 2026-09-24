@@ -241,7 +241,7 @@ mod tests {
     async fn test_compute_net_worth_aggregation() {
         let pool = crate::db::pool::test_pool().await;
 
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // Insert a transaction (ledger cash: $50.00 USD)
         crate::db_execute!(&pool, r#"

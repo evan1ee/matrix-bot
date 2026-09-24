@@ -94,41 +94,78 @@ impl SchemaSnapshot {
 mod tests {
     use super::*;
 
-    /// The baseline migration must build exactly what the legacy
-    /// `schema*.rs` runner builds, or the live database — built by the legacy
-    /// runner — would not match what a fresh deployment gets.
+    /// Rehearses the migrations against a restored copy of production.
+    ///
+    /// ```text
+    /// pg_dump -Fc "$PROD_URL" > prod.dump
+    /// createdb -h localhost -U postgres rehearsal
+    /// pg_restore -h localhost -U postgres -d rehearsal --no-owner prod.dump
+    /// MIGRATE_TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/rehearsal \
+    /// PG_TEST_URL=postgres://postgres:bot@localhost:5432/postgres \
+    ///   cargo test -p matrix-bot migrates_a_real_database -- --ignored --nocapture
+    /// ```
+    ///
+    /// Never point it at production itself: it applies the migrations.
     #[tokio::test]
-    #[ignore = "needs a live PostgreSQL server; set PG_TEST_URL"]
-    async fn test_live_postgres_baseline_matches_legacy_schema() {
-        let legacy = crate::db::pool::connect_pg_schema("baseline_legacy").await;
-        crate::db::schema::create_schema(&legacy).await.unwrap();
+    #[ignore = "needs MIGRATE_TEST_DATABASE_URL pointing at a *copy* of production"]
+    async fn test_migrates_a_real_database() {
+        let url = std::env::var("MIGRATE_TEST_DATABASE_URL")
+            .expect("set MIGRATE_TEST_DATABASE_URL to a restored copy of production");
+        let copy = crate::db::pool::connect_pool(&url, 2).await.unwrap();
 
-        let fresh = crate::db::pool::connect_pg_schema("baseline_fresh").await;
-        let mut migrator = sqlx::migrate!("./migrations");
-        migrator.set_locking(false);
-        migrator.run(&fresh).await.unwrap();
+        let tables: Vec<String> = crate::db_scalar_all!(
+            &copy,
+            String,
+            "SELECT table_name FROM information_schema.tables \
+             WHERE table_schema = 'public' AND table_type = 'BASE TABLE' \
+               AND table_name <> '_sqlx_migrations'"
+        )
+        .unwrap();
+        let mut before = std::collections::BTreeMap::new();
+        for t in &tables {
+            let n: i64 =
+                crate::db_scalar_one!(&copy, _, &format!("SELECT COUNT(*) FROM {t}")).unwrap();
+            before.insert(t.clone(), n);
+        }
 
-        let a = snapshot(&legacy, "baseline_legacy").await;
-        let b = snapshot(&fresh, "baseline_fresh").await;
-        assert!(
-            a.columns.len() > 100,
-            "snapshot looks empty: {}",
-            a.columns.len()
-        );
-        assert_eq!(a, b, "baseline differs from legacy schema:\n{}", a.diff(&b));
+        crate::db::run_migrations(&copy)
+            .await
+            .expect("migrations apply to production copy");
 
-        // Applying the baseline over an already-built legacy schema (the live
-        // database's situation) must succeed and change nothing.
-        migrator.run(&legacy).await.unwrap();
-        let a2 = snapshot(&legacy, "baseline_legacy").await;
+        for (t, n) in &before {
+            let after: i64 =
+                crate::db_scalar_one!(&copy, _, &format!("SELECT COUNT(*) FROM {t}")).unwrap();
+            assert_eq!(*n, after, "row count changed in {t}");
+        }
+
+        // Production must now have exactly the structure a fresh deployment gets.
+        let fresh = crate::db::pool::connect_pg_schema("rehearsal_fresh").await;
+        crate::db::migrate::run_migrations_unlocked(&fresh).await;
+        let prod = snapshot(&copy, "public").await;
+        let want = snapshot(&fresh, "rehearsal_fresh").await;
         assert_eq!(
-            a,
-            a2,
-            "baseline is not a no-op on a legacy database:\n{}",
-            a.diff(&a2)
+            prod,
+            want,
+            "production schema drifted from the migrations:\n{}",
+            want.diff(&prod)
         );
+        crate::db::pool::drop_pg_schema("rehearsal_fresh").await;
 
-        crate::db::pool::drop_pg_schema("baseline_legacy").await;
-        crate::db::pool::drop_pg_schema("baseline_fresh").await;
+        // Every audit chain still verifies.
+        let owners: Vec<String> = crate::db_scalar_all!(
+            &copy,
+            String,
+            "SELECT DISTINCT owner_id FROM portfolio_audit_log"
+        )
+        .unwrap();
+        for owner in owners {
+            let result = crate::modules::portfolio::audit::verify_audit_chain(&copy, &owner)
+                .await
+                .unwrap();
+            assert!(
+                result.is_valid,
+                "audit chain broken for {owner}: {result:?}"
+            );
+        }
     }
 }

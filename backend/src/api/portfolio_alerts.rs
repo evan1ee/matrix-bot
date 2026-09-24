@@ -132,12 +132,11 @@ pub async fn delete_alert(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AuthUser) {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
             crate::db::Database { pool: pool },

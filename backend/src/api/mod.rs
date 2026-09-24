@@ -152,7 +152,6 @@ pub async fn start_api_server(
 mod step_up_tests {
     use super::*;
     use crate::accounts::{AccountRepository, SessionRepository, STATUS_ACTIVE};
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -192,7 +191,7 @@ mod step_up_tests {
 
     async fn app_with_session(verified_minutes_ago: i64) -> (Router, String) {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
             .await

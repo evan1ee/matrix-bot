@@ -213,11 +213,10 @@ async fn handle_log(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema_life::run_life_schema;
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_life_schema(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

@@ -173,14 +173,13 @@ pub async fn redeem_recovery(
 mod tests {
     use super::*;
     use crate::accounts::AccountRepository;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool.clone() },
             EventBroadcaster::default(),
@@ -239,7 +238,7 @@ mod tests {
     #[tokio::test]
     async fn test_recovery_rate_limit_cannot_be_bypassed_with_spoofed_headers() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

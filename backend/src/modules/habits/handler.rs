@@ -276,9 +276,7 @@ mod tests {
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema_habits::create_tables(&pool)
-            .await
-            .unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

@@ -28,14 +28,13 @@ mod tests {
     use crate::api::account::{audit::*, links::*, passkeys::*, recovery::*, sessions::*};
     use crate::api::auth::extractor::VerifiedUser;
     use crate::api::auth::types::{ApiState, AuthUser};
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
     use axum::extract::{Path, State};
     use axum::Json;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

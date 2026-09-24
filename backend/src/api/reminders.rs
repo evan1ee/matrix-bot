@@ -288,13 +288,12 @@ pub async fn clear_reminder_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -345,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_reminder_is_owner_scoped_and_validated() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -423,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn test_reminder_history_api() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

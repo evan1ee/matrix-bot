@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn test_media_proxy_rejects_malformed_input_before_any_request() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),

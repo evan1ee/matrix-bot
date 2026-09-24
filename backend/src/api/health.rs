@@ -51,13 +51,12 @@ pub async fn health_check(State(state): State<ApiState>) -> (StatusCode, Json<He
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_health_check() {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

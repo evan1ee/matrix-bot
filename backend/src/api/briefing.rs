@@ -64,12 +64,11 @@ pub async fn trigger_briefing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

@@ -38,14 +38,13 @@ pub async fn get_day_activity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::db::Database;
     use crate::db::DbPool;
     use crate::events::EventBroadcaster;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();

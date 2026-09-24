@@ -448,12 +448,11 @@ pub async fn get_webhook_logs(
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
-    use crate::db::schema::run_migrations;
     use crate::events::EventBroadcaster;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::new(32),

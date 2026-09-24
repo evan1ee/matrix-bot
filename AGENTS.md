@@ -22,10 +22,15 @@ cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
 cargo run                                # starts bot + API server
 
-# Migrate a COPY of a real database and assert nothing was stranded — run
-# before shipping any migration that touches ownership.
-cp data/bot_data.db /tmp/copy.db
-MIGRATE_TEST_DB=/tmp/copy.db cargo test migrates_a_real_database -- --ignored
+# Rehearse a migration against a restored COPY of production and assert
+# nothing was stranded — run before shipping any migration, never against
+# production itself.
+pg_dump -Fc "$PROD_URL" > prod.dump
+createdb -h localhost -U postgres rehearsal
+pg_restore -h localhost -U postgres -d rehearsal --no-owner prod.dump
+MIGRATE_TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/rehearsal \
+PG_TEST_URL=postgres://postgres:bot@localhost:5432/postgres \
+  cargo test -p matrix-bot migrates_a_real_database -- --ignored --nocapture
 
 # After any #[utoipa::path] or ToSchema change, regenerate both, and commit
 # backend/openapi.json if it changed — CI's drift check fails on any diff.
@@ -113,7 +118,7 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
 
   **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
-- Migrate via `CREATE TABLE IF NOT EXISTS` + best-effort `ALTER TABLE` in `db/schema_*.rs`, orchestrated by `db/schema.rs`. No `sqlx migrate` directory.
+- Schema changes are forward-only SQL files in `backend/migrations/NNNN_description.sql`, applied at boot by `sqlx::migrate!`. Never edit a committed migration. A data- or type-rewriting migration starts with a guard that names offending rows, and is rehearsed on a production copy (`migrates_a_real_database`) before release.
 - Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or bot modules to API modules.
 - **Any new owner-keyed table must be added to `OWNED_TABLES`** (`accounts/merge.rs`) — a merge rewrites every table that constant lists; one missing from it isn't a compile error, it's a silent data leak on the next account merge.
 
@@ -132,7 +137,7 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
 When creating or enhancing a feature module:
 
 1. **Backend directory**: `backend/src/modules/<feature_name>/` with `mod.rs`, `models.rs`, `repository.rs`, `handler.rs`.
-2. **Database migration**: table schema in `backend/src/db/schema.rs` (or a modular `schema_<feature>.rs`); if the table is owner-keyed, add it to `OWNED_TABLES` in `accounts/merge.rs` or a merge silently drops it.
+2. **Database migration**: a new `backend/migrations/NNNN_<feature>.sql`; if the table is owner-keyed, add it to `OWNED_TABLES` in `accounts/merge.rs` or a merge silently drops it.
 3. **Repository**: SQLx query binding CRUD methods in `repository.rs`.
 4. **Command handler**: parse Matrix commands, enforce length limits (max 500 chars), format HTML output.
 5. **REST API**: handlers in `backend/src/api/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/api/routes.rs::api_routes()`. If a route is sensitive, add `VerifiedUser` to the handler **and** add it to the `SENSITIVE` list in `backend/src/api/mod.rs::step_up_tests` — that test only checks routes already listed, so it won't catch a new one on its own.
@@ -158,7 +163,7 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Voice replies** — `!say` synthesises through `services/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
 - **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `services/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
-- **Persistence and migrations** — `db/schema.rs::run_migrations` is the only mechanism: idempotent `CREATE TABLE IF NOT EXISTS` plus best-effort `ALTER TABLE`, no `sqlx migrate` directory. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
+- **Persistence and migrations** — `db/migrate.rs::run_migrations` runs `sqlx::migrate!` over versioned SQL files in `backend/migrations/`; `0001_baseline.sql` is an idempotent adoption of the live database's shape, and every migration after it is forward-only. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
 - **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 

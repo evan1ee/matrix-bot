@@ -240,7 +240,7 @@ mod tests {
 
     async fn setup_db() -> (DbPool, String) {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
                 .await
