@@ -1,10 +1,12 @@
 //! The Matrix half of account management.
 //!
-//! Two commands, and a wall.
+//! Two commands, a first passkey, and a wall.
 //!
 //! `!link` and `!recover` live here because they can only be done from Matrix —
 //! each proves control of a Matrix identity, which is exactly what the web UI
-//! cannot do for you.
+//! cannot do for you. `!passkey add` enrolls a passkey only for an account that
+//! has none, where the Matrix identity is already the only way in; listing
+//! passkeys is read-only.
 //!
 //! Everything else is refused. The Matrix path has no way to prompt for a
 //! passkey, so it has no route to elevated privilege at all — that is what makes
@@ -34,6 +36,10 @@ const WEB_ONLY: &[(&str, &str)] = &[
     ("export", "Exporting financial data"),
     ("sessions", "Managing signed-in devices"),
     ("recoverycodes", "Generating recovery codes"),
+    (
+        "unlink",
+        "Unlinking passkeys, Matrix accounts and signed-in devices",
+    ),
 ];
 
 pub struct AccountModule {
@@ -71,20 +77,14 @@ impl BotModule for AccountModule {
             CommandHelp {
                 name: "passkey".to_string(),
                 usage: "!passkey [add|list]".to_string(),
-                description: "Link a passkey (Face ID, Touch ID, Windows Hello) to your Matrix \
-                              account, or list your active passkeys."
+                description: "Add a first passkey (Face ID, Touch ID, Windows Hello) to an \
+                              account that has none, or list your active passkeys."
                     .to_string(),
             },
             CommandHelp {
                 name: "passkeys".to_string(),
                 usage: "!passkeys".to_string(),
                 description: "List all passkeys linked to your Matrix account.".to_string(),
-            },
-            CommandHelp {
-                name: "unlink".to_string(),
-                usage: "!unlink [passkey <num>|sessions]".to_string(),
-                description: "Revoke a linked passkey or sign out all web browser sessions."
-                    .to_string(),
             },
             CommandHelp {
                 name: "recover".to_string(),
@@ -117,7 +117,6 @@ impl BotModule for AccountModule {
 
         match command.as_str() {
             "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, db).await),
-            "unlink" => Some(self.handle_unlink(ctx, db).await),
             "recover" => Some(self.handle_recover(ctx, db).await),
             _ => None,
         }
@@ -233,7 +232,7 @@ impl AccountModule {
                         "<b>Link a Passkey to your Matrix Account</b> (<code>{}</code>)<br/><br/>\
                          Open this link on your device (iPhone, Mac, Android, Windows) to register Face ID, Touch ID, or Windows Hello:<br/>\
                          <a href=\"{}\">{}</a><br/><br/>\
-                         <i>Expires in 10 minutes and can be used once. Repeat on multiple devices to attach multiple passkeys.</i>",
+                         <i>Expires in 10 minutes and can be used once. Add more passkeys later from the web app.</i>",
                         escape(&ctx.sender_mxid),
                         escape(&enroll_url),
                         escape(&enroll_url),
@@ -249,8 +248,7 @@ impl AccountModule {
                 }
             }
         } else if subcmd == "rm" || subcmd == "delete" || subcmd == "remove" {
-            let target = trimmed.split_whitespace().nth(1).unwrap_or("");
-            self.handle_unlink_passkey(ctx, db, target).await
+            self.handle_remove_passkey(ctx)
         } else {
             match crate::accounts::CredentialRepository::list_for_account(&db.pool, &ctx.owner_id)
                 .await
@@ -280,7 +278,10 @@ impl AccountModule {
                                 escape(&created_str)
                             ));
                         }
-                        lines.push("<br/>• To remove a passkey: <code>!unlink passkey &lt;number&gt;</code><br/>• To link another device: <code>!passkey add</code>".to_string());
+                        lines.push(format!(
+                            "<br/>Add or remove passkeys from a signed-in device at <code>{}</code>.",
+                            escape(&self.web_url)
+                        ));
                         lines.join("")
                     }
                 }
@@ -292,80 +293,7 @@ impl AccountModule {
         }
     }
 
-    async fn handle_unlink(&self, ctx: &CommandContext, db: &Database) -> String {
-        let trimmed = ctx.raw_args.trim();
-        let mut parts = trimmed.split_whitespace();
-        let target_type = parts.next().unwrap_or("").to_lowercase();
-
-        match target_type.as_str() {
-            "passkey" | "pk" => {
-                let target = parts.next().unwrap_or("");
-                self.handle_unlink_passkey(ctx, db, target).await
-            }
-            "sessions" | "session" => {
-                if !ctx.is_direct {
-                    return "Send <code>!unlink sessions</code> in a direct message.".to_string();
-                }
-                match crate::accounts::SessionRepository::revoke_all_for_account(&db.pool, &ctx.owner_id, None).await {
-                    Ok(count) => {
-                        crate::accounts::SecurityEventRepository::record(
-                            &db.pool,
-                            &ctx.owner_id,
-                            crate::accounts::SecurityEventKind::SessionsRevoked,
-                            Some(&format!("revoked {} session(s) via Matrix command", count)),
-                        )
-                        .await;
-                        format!("✅ Revoked {} active web browser session(s) for your account.", count)
-                    }
-                    Err(err) => {
-                        tracing::error!("Could not revoke sessions for {}: {:?}", ctx.owner_id, err);
-                        "Could not revoke web sessions. Try again shortly.".to_string()
-                    }
-                }
-            }
-            "matrix" => {
-                let target_mxid = parts.next().unwrap_or("");
-                if target_mxid.is_empty() {
-                    return "Usage: <code>!unlink matrix &lt;@user:server.org&gt;</code>".to_string();
-                }
-                if target_mxid == ctx.sender_mxid {
-                    return "Cannot unlink your currently active Matrix identity. To unlink a secondary Matrix account, specify its MXID.".to_string();
-                }
-                match crate::accounts::LinkRepository::unlink(&db.pool, &ctx.owner_id, target_mxid).await {
-                    Ok(true) => {
-                        crate::accounts::SecurityEventRepository::record(
-                            &db.pool,
-                            &ctx.owner_id,
-                            crate::accounts::SecurityEventKind::MatrixUnlinked,
-                            Some(target_mxid),
-                        )
-                        .await;
-                        format!("✅ Unlinked Matrix identity <code>{}</code>.", escape(target_mxid))
-                    }
-                    Ok(false) => format!("Matrix account <code>{}</code> is not linked to your account.", escape(target_mxid)),
-                    Err(err) => {
-                        tracing::error!("Could not unlink Matrix {}: {:?}", target_mxid, err);
-                        "Could not unlink Matrix account. Try again shortly.".to_string()
-                    }
-                }
-            }
-            _ => {
-                "<b>Account Unlink Commands:</b><br/>\
-                 • <code>!unlink passkey &lt;number&gt;</code> — Remove a linked passkey (see <code>!passkeys</code>)<br/>\
-                 • <code>!unlink sessions</code> — Sign out all active web browser sessions<br/>\
-                 • <code>!passkeys</code> — List all your linked passkeys<br/>\
-                 • <code>!passkey add</code> — Link a new passkey to this Matrix account"
-                    .to_string()
-            }
-        }
-    }
-
-    async fn handle_unlink_passkey(
-        &self,
-        ctx: &CommandContext,
-        _db: &Database,
-        _target: &str,
-    ) -> String {
+    fn handle_remove_passkey(&self, ctx: &CommandContext) -> String {
         if !ctx.is_direct {
             return "Send passkey management commands in a direct message.".to_string();
         }
@@ -678,8 +606,58 @@ mod tests {
         assert_eq!(issued, 0, "no token may be minted for a passkey account");
     }
 
+    /// Revoking devices and dropping a linked identity both need `VerifiedUser`
+    /// on the web. From Matrix they would let the Matrix account alone sign the
+    /// owner out while `!recover` counts down, or cut the other identities that
+    /// the request is announced to.
     #[tokio::test]
-    async fn test_passkeys_list_and_unlink_flow() {
+    async fn test_unlink_changes_nothing_from_matrix() {
+        let db = db().await;
+        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        crate::db_execute!(
+            &db.pool,
+            "INSERT INTO matrix_links (mxid, account_id) \
+             VALUES ('@evan:mbm.one', ?), ('@evan:other.org', ?)",
+            &account,
+            &account
+        )
+        .unwrap();
+        let session =
+            crate::accounts::SessionRepository::create(&db.pool, &account, None, None, None)
+                .await
+                .unwrap();
+
+        for args in ["sessions", "matrix @evan:other.org"] {
+            let mut dm = ctx("unlink", &account, true);
+            dm.raw_args = args.into();
+            let reply = module().handle_command(&dm, &db, None).await.unwrap();
+            assert!(
+                reply.contains("web app"),
+                "`!unlink {args}` must point to the web app: {reply}"
+            );
+        }
+
+        assert!(
+            crate::accounts::SessionRepository::resolve(&db.pool, &session)
+                .await
+                .unwrap()
+                .is_some(),
+            "the web session must survive"
+        );
+        let links: i64 = crate::db_scalar_one!(
+            &db.pool,
+            _,
+            "SELECT COUNT(*) FROM matrix_links WHERE account_id = ?",
+            &account
+        )
+        .unwrap();
+        assert_eq!(links, 2, "the second identity must stay linked");
+    }
+
+    #[tokio::test]
+    async fn test_passkeys_list_and_remove_flow() {
         let db = db().await;
         let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
             .await
@@ -705,11 +683,11 @@ mod tests {
         assert!(reply.contains("MacBook"));
         assert!(reply.contains("iPhone"));
 
-        // Unlink passkey via Matrix DM is safely rejected, directing user to web settings
-        let mut unlink_ctx = ctx("unlink", &account, true);
-        unlink_ctx.raw_args = "passkey 1".into();
+        // Removing a passkey via Matrix DM is safely rejected, directing user to web settings
+        let mut remove_ctx = ctx("passkey", &account, true);
+        remove_ctx.raw_args = "rm 1".into();
         let reply = module()
-            .handle_command(&unlink_ctx, &db, None)
+            .handle_command(&remove_ctx, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("Passkey Removal Requires Verification"));
@@ -721,14 +699,5 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(creds_after.len(), 2);
-
-        // Unlink sessions
-        let mut sessions_ctx = ctx("unlink", &account, true);
-        sessions_ctx.raw_args = "sessions".into();
-        let reply = module()
-            .handle_command(&sessions_ctx, &db, None)
-            .await
-            .unwrap();
-        assert!(reply.contains("Revoked 0 active web browser session(s)"));
     }
 }
