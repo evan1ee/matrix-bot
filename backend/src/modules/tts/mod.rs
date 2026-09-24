@@ -105,11 +105,10 @@ impl TtsModule {
             Ok(()) => format!("🔊 <b>已朗读:</b> “{}”", html_escape(&text)),
             Err(err) => {
                 error!("Failed to send TTS voice message: {}", err);
-                format!(
-                    "⚠️ <b>语音发送失败</b><br/>\
-                     • <b>原因:</b> {}",
-                    html_escape(&err)
-                )
+                "⚠️ <b>语音发送失败</b><br/>\
+                 • <b>原因:</b> 语音已生成，但发送到房间时出错<br/>\
+                 • <b>建议:</b> 请稍后重试。"
+                    .to_string()
             }
         }
     }
@@ -305,6 +304,11 @@ mod tests {
             .unwrap();
 
         assert!(reply.contains("语音发送失败"), "{}", reply);
+        assert!(
+            !reply.contains("Matrix client is not connected"),
+            "leaked internal error detail: {}",
+            reply
+        );
         assert_eq!(voice_seen.lock().unwrap().as_deref(), Some("7"));
     }
 
