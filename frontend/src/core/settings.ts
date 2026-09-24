@@ -15,10 +15,10 @@ export interface UserSettings {
   briefing_enabled?: boolean;
   /** Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00). */
   briefing_time?: string;
-  /** Kokoro TTS speaker index `!say` uses to speak a reply. `null`/absent
-   *  means no preference — the server falls back to its own house default.
-   *  `0` is a real, selectable voice, not a stand-in for "unset". */
-  tts_speaker_id?: number | null;
+  /** The voice `!say` speaks in, as the configured TTS provider names it.
+   *  `null`/absent means no preference: the server uses its own default.
+   *  `"0"` is a real Kokoro voice, not a stand-in for "unset". */
+  tts_voice?: string | null;
 }
 
 /** Matches the server's own fallback, so an unauthenticated or still-loading UI
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   max_history_turns: 10,
   briefing_enabled: true,
   briefing_time: '07:00',
-  tts_speaker_id: null,
+  tts_voice: null,
 };
 
 export const SETTINGS_QUERY_KEY = ['settings'] as const;

@@ -28,10 +28,8 @@ pub const MAX_SPEAK_CHARS: usize = 500;
 
 /// The voice `!say` speaks in: the sender's own choice, or the operator's
 /// `TTS_VOICE` for someone who never chose.
-fn resolve_voice(house_default: &str, saved: Option<i64>) -> String {
-    saved
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| house_default.to_string())
+fn resolve_voice(house_default: &str, saved: Option<&str>) -> String {
+    saved.unwrap_or(house_default).to_string()
 }
 
 /// What the sender is told when synthesis fails. Fixed text: the upstream
@@ -91,7 +89,7 @@ impl TtsModule {
         }
 
         let settings = SettingsRepository::get_or_default(&db.pool, &ctx.owner_id).await;
-        let voice = resolve_voice(&self.default_voice, settings.tts_speaker_id);
+        let voice = resolve_voice(&self.default_voice, settings.tts_voice.as_deref());
 
         let speech = match self.tts.synthesize(&text, &voice).await {
             Ok(speech) => speech,
@@ -357,13 +355,13 @@ mod tests {
     #[test]
     fn test_resolve_voice_prefers_the_saved_choice() {
         assert_eq!(resolve_voice("5", None), "5");
-        assert_eq!(resolve_voice("5", Some(77)), "77");
+        assert_eq!(resolve_voice("5", Some("77")), "77");
     }
 
     /// Speaker 0 is a real voice: an explicit 0 must win over a non-zero
     /// house default.
     #[test]
     fn test_resolve_voice_honours_an_explicit_zero() {
-        assert_eq!(resolve_voice("44", Some(0)), "0");
+        assert_eq!(resolve_voice("44", Some("0")), "0");
     }
 }

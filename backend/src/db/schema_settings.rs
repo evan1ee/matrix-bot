@@ -43,21 +43,18 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
         "ALTER TABLE user_settings ADD COLUMN last_briefing_date TEXT;"
     );
 
-    // Nullable, unlike the other columns here: NULL means "no preference, use
-    // TTS_SPEAKER_ID", and 0 is a real, selectable speaker index rather than a
-    // stand-in for "unset" (see `modules::settings::models::UserSettings`).
-    //
-    // SQLite cannot alter a column's constraints in place, and this ALTER is
-    // best-effort like its neighbours, so a dev database that already ran an
-    // earlier build of this branch (which added this column as
-    // `NOT NULL DEFAULT 0`) keeps that shape. On such a database every row's
-    // `tts_speaker_id` reads back as `Some(0)` rather than `None` — the
-    // operator default silently stops applying for that row until the user
-    // re-picks a voice. Acceptable on an unreleased branch; drop the affected
-    // table (or the whole dev database) if this bites.
+    // Nullable: NULL means "no preference, use TTS_VOICE". A TEXT column
+    // because a voice is whatever the configured provider calls one ("0" for
+    // Kokoro, "alloy" for OpenAI, an id for ElevenLabs).
+    let _ = crate::db_ddl!(pool, "ALTER TABLE user_settings ADD COLUMN tts_voice TEXT;");
+
+    // The integer column this replaced. Dropped rather than migrated: the
+    // project does not carry compatibility paths, and a saved Kokoro index
+    // would be meaningless to any other provider. Best-effort like every
+    // ALTER here: a fresh database never had it.
     let _ = crate::db_ddl!(
         pool,
-        "ALTER TABLE user_settings ADD COLUMN tts_speaker_id BIGINT;"
+        "ALTER TABLE user_settings DROP COLUMN tts_speaker_id;"
     );
 
     Ok(())

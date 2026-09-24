@@ -10395,10 +10395,9 @@
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`."
           },
-          "tts_speaker_id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Kokoro TTS speaker index (0-1023), or `null`/absent to clear back to no\npreference — the same convention `dev_room_id` uses, and for the same\nreason: `0` is a real, selectable voice, so it cannot also mean \"unset\".",
+          "tts_voice": {
+            "type": "string",
+            "description": "The voice `!say` speaks in, as the configured TTS provider names it,\nor `null`/absent to clear back to the server default, the same\nconvention `dev_room_id` uses.",
             "nullable": true
           }
         }
@@ -10598,10 +10597,9 @@
             "type": "string",
             "description": "IANA zone name, e.g. `Asia/Shanghai`. Validated on write."
           },
-          "tts_speaker_id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Kokoro TTS speaker index `!say` uses to speak a reply. `None` means no\npreference — `modules::tts` then falls back to the operator's\n`TTS_SPEAKER_ID` — exactly the same \"no row until you change\nsomething\" convention `dev_room_id` uses; `Some(0)` is a real,\nselectable voice, not a stand-in for \"unset\". The Kokoro model this\nproject ships bundles 103 speakers (English and Mandarin, mixed);\nvalidated against `MAX_TTS_SPEAKER_ID` on write, and clamped again in\n`modules::tts::engine` against however many the currently loaded model\nactually reports.",
+          "tts_voice": {
+            "type": "string",
+            "description": "The voice `!say` speaks in, in whatever the configured provider calls\nit. `None` means no preference, and `modules::tts` falls back to the\noperator's `TTS_VOICE`: the same \"no row until you change something\"\nconvention `dev_room_id` uses. `Some(\"0\")` is a real Kokoro voice, not\na stand-in for \"unset\". Shape-checked by `parse_tts_voice` on write.",
             "nullable": true
           }
         }

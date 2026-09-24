@@ -31,12 +31,9 @@ interface JoinedRoom {
  *  the popover scroll for a very long time to no benefit. */
 const VISIBLE_ZONE_LIMIT = 60;
 
-/** The sanity ceiling the API enforces (`MAX_TTS_SPEAKER_ID`), used only to
- *  keep the number input from accepting something absurd. The installed
- *  Kokoro model's actual voice count (103) is what the hint text below the
- *  field states, since that — not this ceiling — is what a real id must
- *  stay under. */
-const MAX_TTS_SPEAKER_ID = 1023;
+/** Mirrors the server's `parse_tts_voice`, so a malformed voice is caught
+ *  before a round trip. */
+const TTS_VOICE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const saved = useSettings();
@@ -49,7 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [maxHistoryTurns, setMaxHistoryTurns] = useState(saved.max_history_turns ?? 10);
   const [briefingEnabled, setBriefingEnabled] = useState(saved.briefing_enabled ?? true);
   const [briefingTime, setBriefingTime] = useState(saved.briefing_time ?? '07:00');
-  const [ttsSpeakerId, setTtsSpeakerId] = useState<number | null>(saved.tts_speaker_id ?? null);
+  const [ttsVoice, setTtsVoice] = useState(saved.tts_voice ?? '');
   const [filter, setFilter] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [testBriefingMsg, setTestBriefingMsg] = useState<string | null>(null);
@@ -71,7 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setMaxHistoryTurns(saved.max_history_turns ?? 10);
       setBriefingEnabled(saved.briefing_enabled ?? true);
       setBriefingTime(saved.briefing_time ?? '07:00');
-      setTtsSpeakerId(saved.tts_speaker_id ?? null);
+      setTtsVoice(saved.tts_voice ?? '');
       setFilter('');
       setErrorMsg(null);
       setTestBriefingMsg(null);
@@ -84,7 +81,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     saved.max_history_turns,
     saved.briefing_enabled,
     saved.briefing_time,
-    saved.tts_speaker_id,
+    saved.tts_voice,
   ]);
 
   useEffect(() => {
@@ -131,10 +128,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     maxHistoryTurns !== (saved.max_history_turns ?? 10) ||
     briefingEnabled !== (saved.briefing_enabled ?? true) ||
     briefingTime !== (saved.briefing_time ?? '07:00') ||
-    ttsSpeakerId !== (saved.tts_speaker_id ?? null);
+    (ttsVoice.trim() || null) !== (saved.tts_voice ?? null);
 
   const handleSave = async () => {
     setErrorMsg(null);
+    const voice = ttsVoice.trim();
+    if (voice && !TTS_VOICE_PATTERN.test(voice)) {
+      setErrorMsg('A voice is 1–64 letters, digits, "_" or "-".');
+      return;
+    }
     try {
       await mutateAsync({
         timezone,
@@ -143,7 +145,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         max_history_turns: maxHistoryTurns,
         briefing_enabled: briefingEnabled,
         briefing_time: briefingTime,
-        tts_speaker_id: ttsSpeakerId,
+        tts_voice: voice || null,
       });
       onClose();
     } catch (err: unknown) {
@@ -363,33 +365,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         {/* TTS voice */}
         <div className="space-y-2">
           <label
-            htmlFor="tts-speaker-id"
+            htmlFor="tts-voice"
             className="flex items-center gap-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400"
           >
             <Volume2 className="w-3.5 h-3.5" />
             Voice
           </label>
           <input
-            id="tts-speaker-id"
-            type="number"
-            min={0}
-            max={MAX_TTS_SPEAKER_ID}
-            step={1}
-            value={ttsSpeakerId ?? ''}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === '') {
-                setTtsSpeakerId(null);
-                return;
-              }
-              const parsed = parseInt(raw, 10);
-              setTtsSpeakerId(Number.isNaN(parsed) ? null : parsed);
-            }}
+            id="tts-voice"
+            type="text"
+            placeholder="server default"
+            value={ttsVoice}
+            onChange={(e) => setTtsVoice(e.target.value)}
             className="w-full px-3 py-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-neutral-500 font-mono"
           />
           <p className="text-[11px] font-mono text-neutral-500">
-            Speaker index used when <code>!say</code> speaks a reply. The installed Kokoro model
-            ships 103 voices, ids 0–102. Leave empty to use the server default.
+            The voice <code>!say</code> speaks in, as your TTS provider names it: a Kokoro speaker
+            id (0–102) on the bundled server, a name such as <code>alloy</code> on OpenAI, or a
+            voice id on ElevenLabs. Leave empty to use the server default.
           </p>
         </div>
 
