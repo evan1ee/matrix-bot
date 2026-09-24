@@ -25,13 +25,11 @@ const WAVEFORM_BUCKETS: usize = 100;
 /// The largest value a waveform bucket may hold, per the Matrix spec.
 const WAVEFORM_MAX: f32 = 1024.0;
 
-/// OpenAI's speech request. `model` (and any field OpenAI defines that is
-/// not named here, such as `speed`) is accepted and ignored: this server has
-/// one model.
+/// OpenAI's speech request. `model` and any other field OpenAI defines that
+/// is not named here, such as `speed`, is accepted and ignored: this server
+/// has one model.
 #[derive(Debug, Deserialize)]
 pub struct SpeechRequest {
-    #[serde(default)]
-    pub model: Option<String>,
     pub input: String,
     pub voice: String,
     #[serde(default)]
@@ -130,17 +128,6 @@ pub async fn speak(
     State(state): State<AppState>,
     Json(request): Json<SpeechRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    // `model` is accepted for OpenAI compatibility and otherwise ignored:
-    // this server has exactly one TTS model. A caller naming a different one
-    // gets served anyway, but it is worth a log line rather than a silently
-    // unread field.
-    if let Some(model) = request.model.as_deref().filter(|m| *m != "kokoro") {
-        warn!(
-            "speech request named model '{}'; this server only serves kokoro",
-            model
-        );
-    }
-
     let (input, speaker_id) = validate(&request).map_err(|m| (StatusCode::BAD_REQUEST, m))?;
 
     if !crate::kokoro::model_present(&state.config.tts_model_dir) {
@@ -212,7 +199,6 @@ mod tests {
     #[test]
     fn test_the_shared_request_contract_deserialises() {
         let request: SpeechRequest = serde_json::from_str(REQUEST_CONTRACT).unwrap();
-        assert_eq!(request.model.as_deref(), Some("kokoro"));
         assert_eq!(request.voice, "0");
         assert_eq!(request.response_format.as_deref(), Some("opus"));
         assert_eq!(validate(&request).unwrap().1, 0);
