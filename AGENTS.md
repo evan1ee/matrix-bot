@@ -60,15 +60,30 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
 - `data/` — runtime SQLite DB + Matrix crypto store (gitignored).
 - `docs/` — `ARCHITECTURE.md` (design rationale); `testing-auth-locally.md` covers running passkeys against `localhost` (virtual authenticator, the `!link` DM flow, SQL to skip the step-up and recovery delays); roadmap, reviews.
 
-## Working Principles
+## Engineering Principles
 
-- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-- Keep components modular and concerns clearly separated.
-- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+Design the boundaries carefully, keep the domain deterministic, use Rust's type system to enforce invariants, make concurrency and failure explicit, and keep implementation complexity proportional to the actual problem.
+
+- **Architecture and domain first** — plan crate/module responsibilities, dependency direction, data ownership, and persistence/external-service boundaries before writing code; the architecture should be complete even where the implementation stays restrained. Keep business rules in the domain/application layer, never in Axum handlers, Matrix event handlers, SQL, or UI code. Don't add an abstraction for a single use case — wait for a second genuine one to justify it.
+- **Rust-first design** — write idiomatic Rust, not patterns translated from another language. Make invalid states unrepresentable: enums over stringly-typed state, newtypes for identifiers, `Result`/`Option` for fallibility, immutable data by default, exhaustive `match`. Avoid unneeded `Arc<Mutex<_>>`, excess `clone()`, `unwrap()`/`expect()` on runtime paths, global mutable state, and `Box<dyn Trait>` where a concrete type or generic is clearer. A trait earns its place at a real architectural boundary, not for mocking alone.
+- **Crate and module boundaries** — see the target layer-first layout under Architecture below for where this is headed. Regardless of layout: domain code never depends on Axum, Matrix SDK, SQLx, or an HTTP client; API and database models never leak into the domain; external responses are validated and converted at the boundary; module/crate dependencies stay acyclic; public module APIs stay small.
+- **Data boundaries** — keep transport models, validated input, application commands, domain models, and persistence models distinct; never pass a database row or an HTTP DTO through the whole application unchanged. Every boundary crossing validates, normalizes, authorizes, converts, and maps errors.
+- **Domain and business logic** — keep domain logic deterministic and independent of transport/persistence; never put business logic in Axum handlers, Matrix handlers, SQL, serialization impls, or background-task closures. Don't mark a domain operation `async` unless it actually does I/O.
+- **Error handling** — structure errors by boundary (validation, not-found, unauthorized, forbidden, conflict, database, external-service). Never silently swallow an error, retry unboundedly, or collapse everything into a generic "internal error"; map infrastructure errors to application errors at the boundary and never leak implementation details to a client. `thiserror` for library/application error types, `anyhow` for application-level propagation.
+- **Async and concurrency** — before spawning a task, decide its ownership, cancellation, lifetime, backpressure, ordering, and cleanup. Prefer message passing over shared mutable state; never hold a lock across `.await`; never block a Tokio worker thread directly — use `spawn_blocking`. Bound every queue/channel/worker/concurrent-request count, give every background task a shutdown strategy, every external call a timeout, and every retry a bound that respects idempotency.
+- **Idempotency and transactions** — before writing a mutation that can be retried, duplicated, or run concurrently (Matrix events, webhooks, background jobs, reminders, AI tool calls, database writes, external requests), decide what happens on double-execution, partial success, a mid-operation crash, and concurrent writers. Size a transaction to the smallest atomic business operation, not to however many statements happen to run together.
+- **Security by default** (beyond Security Rules below) — design for multi-tenant isolation even at small scale; every externally supplied value is untrusted. Apply least privilege. Never let a client-supplied id imply ownership — every query enforces the caller's own scope. Guard against resource exhaustion and apply rate limiting on new endpoints. Treat SSRF as a general risk for any outbound request built from user input, not only the AI transport's. Logs must never leak a secret alongside the payloads they already exclude.
+- **External services and adapters** — isolate Matrix, LLM providers, MCP, STT/TTS/OCR, web search, and any future external system behind an adapter. Assume they are slow, unavailable, or wrong: explicit timeouts, response validation, rate-limit and cancellation handling, bounded retries. Don't leak a provider's own types into the domain, and don't make an external service mandatory for functionality that doesn't need it.
+- **AI/agent boundaries** — the LLM is an untrusted orchestration component, not a source of truth; its output reaches application state only through a validated, independently authorized tool call into a deterministic application service, never a direct mutation. Agent retries and tool loops need explicit limits, timeouts, and cancellation; keep agent orchestration out of domain services, and prefer a deterministic tool over letting an agent manipulate infrastructure directly.
+- **Observability** — every important operation should be diagnosable via structured logging/tracing carrying a request/task id, user id (when safe), operation name, duration, outcome, and retry count — never a token, password, API key, session secret, or full sensitive payload.
+- **Testing strategy** — match the test level to what's being verified (unit → domain/application → repository/database → API/integration → end-to-end), and prioritize business invariants, authorization, data isolation, transactions, idempotency, and concurrency-sensitive paths over chasing a coverage number. For a bug fix: reproduce it, add a regression test, confirm it fails before the fix, then fix it.
+- **Dependencies** — before adding a crate, check the workspace's existing dependencies first, verify the candidate's current API and maintenance status, and add the smallest one necessary. Don't hand-roll what the standard library or an existing workspace dependency already does.
+- **Focused files and functions** — see File organization below for the line-count rule; functions should have one responsibility, never parsing input, authorizing, executing business logic, running SQL, formatting a response, and calling an external service all at once.
+- **Comments and ADRs** — comments explain *why*, not what the code already says: invariants, concurrency assumptions, external-service limitations, workarounds, known defects, security considerations. A TODO names an issue and a removal condition — bad: `// TODO: fix this later`; good: `// TODO(#123): Replace polling with Matrix sync notifications once upstream supports it.` Record real architectural decisions as ADRs.
+- **Deletion over compatibility** — delete obsolete implementations, dead code, unused dependencies, and obsolete config/database paths rather than keeping deprecated shims, dual-write logic, or dead fallback paths. Public contracts are the one place compatibility is a deliberate, evaluated decision rather than a default.
+- **Change discipline** — understand the existing architecture and affected boundaries before changing them, make the smallest correct change, remove what it obsoletes, add or update tests, run the relevant quality gates, and review the final diff for anything unintended. Don't mix unrelated refactoring into a feature or bugfix change.
+- Grow the system in layers: start from the smallest version that works end to end, and add each new capability on top of a product that already works — never trade a working product for unfinished complexity.
+- Make architectural decisions for the long term; do not accept a stopgap that only works for now and is meant to be replaced later.
 
 ## Conventions and Rules
 
@@ -82,7 +97,10 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
 
 **`contracts/`** — every HTTP wire contract between the two crates lives here as a JSON fixture both sides assert against (or the server side alone, for a server-only format) — a renamed field fails a test, not production.
 
+**Public contracts** — REST endpoints, OpenAPI, Matrix commands/events, MCP interfaces, the database schema, auth behavior, and externally consumed config are explicit contracts. Before changing one: identify its consumers, decide whether the change is breaking, update the schema/source of truth, regenerate derived artifacts (OpenAPI, `contracts/` fixtures, frontend API types), update tests, and update documentation. Never add a compatibility shim for a purely internal refactor — for a public contract, compatibility is an intentional decision, not a side effect.
+
 **Database & SQLx**:
+- Treat the database as an infrastructure boundary: convert rows into domain types at the repository edge rather than letting a SQLx row type escape it, prefer compile-time checked queries where practical, and make indexes, constraints, foreign keys, uniqueness, and transaction semantics explicit — a constraint that matters must not depend solely on application code. Never hand-edit the schema outside a migration; review a migration's ordering and rollback implications before applying it; keep a data-rewriting migration separate from plain DDL; never silently change the meaning of historical data.
 - **Never call `sqlx::query*` directly.** Use the macros in `backend/src/db/executor.rs`, which holds `DbPool` — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. These are `?`-style macros (PostgreSQL only; being replaced by compile-checked `query!`).
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
 - Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; the `backend` job in CI is blocking.
@@ -96,7 +114,7 @@ ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up 
   | `UPDATE OR IGNORE` | `accounts::merge::move_rows` | PostgreSQL has no equivalent |
   | `x IS NOT ?` | `x IS DISTINCT FROM ?` | `IS NOT` expects `NULL`/`TRUE` on PostgreSQL |
   | `COLLATE NOCASE` | `LOWER(...)` | SQLite-only collation |
-  | `PRAGMA`, `sqlite_master` | `information_schema`, or gate with `pool::skip_on_postgres` | SQLite-only |
+  | `PRAGMA`, `sqlite_master` | `information_schema` | SQLite-only |
   | `SUM(bigint_col)` | `CAST(SUM(...) AS BIGINT)` | PostgreSQL returns `NUMERIC` |
   | `SELECT 1` read as `i64` | `SELECT CAST(1 AS BIGINT)` | an integer literal is `INT4` |
   | `date(x)` compared or unioned with text | `CAST(date(x) AS TEXT)` | PostgreSQL returns a `date` |
@@ -165,6 +183,7 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
 - **Persistence and migrations** — `db/migrate.rs::run_migrations` runs `sqlx::migrate!` over versioned SQL files in `backend/migrations/`; `0001_baseline.sql` is an idempotent adoption of the live database's shape, and every migration after it is forward-only. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
 - **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
+- **Target layer-first layout (approved, not yet built)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror. The move off today's `modules/`/`api/`/`bot/`/`services/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 
 ## Testing and Verification
@@ -181,6 +200,14 @@ npm --prefix frontend run test:e2e                 # not CI-gated yet; still req
 CI (`.github/workflows/ci.yml`) runs three jobs: `backend` (format, tests, `live_postgres --ignored` tests against a real PostgreSQL 18, OpenAPI drift — all blocking), `inference` (format + tests), `frontend` (build only). See "Commands" above to run the Postgres suite locally.
 
 Never commit code that fails compilation, formatting, or tests.
+
+**Quality gates for changed code** — `cargo fmt --all -- --check`, `cargo check -p matrix-bot --all-targets`, and the test commands above are required and CI-enforced. `cargo clippy -p matrix-bot --all-targets -- -D warnings` (and `-p matrix-bot-inference`) is a required gate for any Rust you touch but is **not yet enforced in CI** — a backlog of 102 warnings (101 `matrix-bot`, 1 `matrix-bot-inference`) predates this rule and is tracked as follow-up; don't add new ones in files you change, and don't silence one with `#[allow]` without documenting why it exists, why it's safe, its scope, and when it can be removed.
+
+**Checklist by change type** — beyond the standard fmt/check/test/clippy pass:
+- *Schema change*: add `backend/migrations/NNNN_description.sql`, run the backend suite, and if it rewrites or retypes existing data, rehearse it against a restored production copy with `migrates_a_real_database` (see Commands) before shipping.
+- *API/OpenAPI change*: update the handler/model, regenerate `backend/openapi.json` and the frontend client (`npm --prefix frontend run generate-api`), update `contracts/` fixtures and tests, and re-check auth/step-up behavior on the route.
+- *AI/agent change*: validate tool arguments, verify authorization independently of the model, and test malformed model output, tool failure, timeouts, cancellation, retry limits, and duplicate tool calls.
+- *Before submitting*: `git diff --check`, review `git status`/`git diff` for unrelated changes, generated artifacts, debug code, or secrets.
 
 ## Security Rules
 
@@ -203,6 +230,21 @@ Never commit code that fails compilation, formatting, or tests.
 - `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.
 - Windows: loading the real Kokoro TTS model in a test needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
+- Running the bot binary (`cargo run` / `matrix-bot.exe`) from a git worktree checkout loads the **main checkout's** `.env` — `main.rs` uses `dotenvy::dotenv()`, which searches parent directories and finds the first `.env` it hits, real Matrix credentials included. Override every Matrix-related variable explicitly, or run from a directory with no `.env` in any parent, before ever running the binary from a worktree.
+
+## Definition of Done
+
+A change is not complete merely because it compiles. Before considering it complete:
+
+- [ ] Architecture and dependency direction remain correct; domain logic stays transport/infrastructure-independent.
+- [ ] Input validation, authorization, and data isolation are enforced.
+- [ ] Errors are handled explicitly; concurrency and cancellation behavior are understood.
+- [ ] Database transactions and invariants are correct.
+- [ ] Public contracts remain intentional and documented.
+- [ ] Tests cover the important behavior; no obsolete implementation remains.
+- [ ] Logs carry sufficient diagnostic context without sensitive data.
+- [ ] `cargo fmt`, `cargo check`, and `cargo test` pass; `cargo clippy` passes on the code you touched.
+- [ ] Documentation, ADRs, and technical-debt references are updated where necessary.
 
 ## Commits and PRs
 

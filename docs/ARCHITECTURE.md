@@ -154,6 +154,12 @@ Because a migration runs against a real, populated database exactly once, a data
 
 PostgreSQL is the only application database: `DATABASE_URL` is required and must be `postgres://` or `postgresql://`, and the process refuses to boot otherwise. The one exception is matrix-sdk's own crypto store, which stays SQLite under `data/` regardless of `DATABASE_URL` — that store is matrix-sdk's, not this application's, and is out of scope for this cut. See `docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` for the decision and its rationale, and `docs/POSTGRES_MIGRATION.md` for the history of what differed under the old dual-dialect design.
 
+## Target layer-first layout
+
+`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` §3 is the approved target structure, not the code on disk today: `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`. `interface/` takes over the role a generic `api/` + `adapters/` split would play elsewhere — it is where Axum handlers, the chat command router, channel adapters (Matrix today, Discord/Telegram later), and the MCP surface live, all translating an inbound request into an application command and an application result back into a response. `llm/` and `jobs/` sit beside `interface/` rather than under it, because a tool-calling loop or a background job handler calls into `application` the same way an HTTP handler does. `domain` depends on nothing but `std`, `chrono`, `uuid`, `serde`, and `thiserror`; `application` depends on `domain` and on the repository/adapter implementations `infrastructure` provides; nothing depends back up the chain.
+
+Today's `modules/`, `api/`, `bot/`, `services/` split is still the real layout, and its rules (Conventions and Rules, above) are still what CI and this document enforce. The move to the target layout happens feature by feature as each module is rewritten, not as one big-bang cut — a feature that hasn't moved keeps living under `BotModule` until it does.
+
 ## Frontend module mirror
 
 The SPA mirrors the backend plugin shape: `core/registry.ts` holds `FrontendModule`s registered in `App.tsx` (`core`, `todo`, `reminder`). Each module supplies a `MainView`, optional `navTab`/`getStatItems`, and a `handleSseEvent(event, queryClient)` used to invalidate React Query caches from the live stream (`core/useSystemEvents.ts`). Adding a backend module means adding a matching `frontend/src/modules/<name>/index.tsx` and registering it in `App.tsx`.
