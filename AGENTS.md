@@ -2,13 +2,19 @@
 
 ## Overview
 
-`matrix-bot` is a Matrix chat bot with an embedded web UI: a Rust Cargo workspace holds the bot itself (`backend/`) plus a local-inference server for OCR, speech-to-text and text-to-speech (`inference/`), and a React SPA (`frontend/`) builds into the bot's static assets. Data lives in SQLite by default, with PostgreSQL as a supported second target picked at boot from `DATABASE_URL`. This file states every hard rule and convention; `docs/ARCHITECTURE.md` is the long-form companion explaining the *why* behind the parts of the design that aren't obvious from the code alone.
+`matrix-bot` is a Matrix chat bot with an embedded web UI: a Rust Cargo workspace holds the bot itself (`backend/`) plus a local-inference server for OCR, speech-to-text and text-to-speech (`inference/`), and a React SPA (`frontend/`) builds into the bot's static assets. Data lives in PostgreSQL 18+ (the only application database); matrix-sdk keeps its own SQLite crypto store under `data/`. This file states every hard rule and convention; `docs/ARCHITECTURE.md` is the long-form companion explaining the *why* behind the parts of the design that aren't obvious from the code alone.
 
 ## Commands
 
 ```bash
 cargo check                              # must be warning-free
 cargo fmt --all -- --check               # CI blocks on this; `cargo fmt --all` to fix
+
+# Local PostgreSQL for all tests. `DATABASE_URL` is required and must be
+# `postgres://`; there is no SQLite fallback for the application database.
+docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
+export TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres
+export PG_TEST_URL=$TEST_DATABASE_URL
 cargo test -p matrix-bot --all-targets   # backend suite (CI's own invocation)
 cargo test -p matrix-bot-inference --all-targets   # inference crate; not covered by bare `cargo test`
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot verified?
@@ -20,12 +26,6 @@ cargo run                                # starts bot + API server
 # before shipping any migration that touches ownership.
 cp data/bot_data.db /tmp/copy.db
 MIGRATE_TEST_DB=/tmp/copy.db cargo test migrates_a_real_database -- --ignored
-
-# Run the suite against PostgreSQL instead of in-memory SQLite. CI's
-# backend-postgres job does this against a service container; locally, start
-# a matching one first:
-docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
-TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres cargo test -p matrix-bot
 
 # After any #[utoipa::path] or ToSchema change, regenerate both, and commit
 # backend/openapi.json if it changed — CI's drift check fails on any diff.
@@ -43,7 +43,7 @@ npm --prefix frontend run test:e2e   # Playwright; `npx --prefix ... playwright`
 # http://localhost:8080; only override it if your .env sets a different value
 # (e.g. the Vite :5173 origin). Add REGISTRATION_OPEN=true to open sign-up —
 # compose always passes the variable, and an empty value means closed.
-DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose --profile postgres up -d
+ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up -d
 ```
 
 ## Repository Layout
@@ -78,9 +78,9 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 **`contracts/`** — every HTTP wire contract between the two crates lives here as a JSON fixture both sides assert against (or the server side alone, for a server-only format) — a renamed field fails a test, not production.
 
 **Database & SQLx**:
-- **Never call `sqlx::query*` directly.** Use the dual-dialect macros in `backend/src/db/executor.rs`, which holds `DbPool` (an enum over both drivers) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. Write SQL once in SQLite's `?` style; `dialect::render_placeholders` rewrites it to `$1..$n` for Postgres. Compile-time `query!` macros stay banned — they need a DB URL at build time, which would defeat both the dual-dialect layer and an offline build.
+- **Never call `sqlx::query*` directly.** Use the macros in `backend/src/db/executor.rs`, which holds `DbPool` — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. These are `?`-style macros (PostgreSQL only; being replaced by compile-checked `query!`).
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
-- Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; `backend-postgres` in CI is blocking.
+- Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; the `backend` job in CI is blocking.
 
   | Do not write | Write instead | Why |
   |---|---|---|
@@ -115,7 +115,6 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
 - Migrate via `CREATE TABLE IF NOT EXISTS` + best-effort `ALTER TABLE` in `db/schema_*.rs`, orchestrated by `db/schema.rs`. No `sqlx migrate` directory.
 - Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or bot modules to API modules.
-- SQLite pools: `WAL`, `busy_timeout=5000`, `DATABASE_MAX_CONNECTIONS`. Postgres pools take only the connection limit.
 - **Any new owner-keyed table must be added to `OWNED_TABLES`** (`accounts/merge.rs`) — a merge rewrites every table that constant lists; one missing from it isn't a compile error, it's a silent data leak on the next account merge.
 
 **Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `bot/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
@@ -160,7 +159,7 @@ One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 - **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `services/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
 - **Persistence and migrations** — `db/schema.rs::run_migrations` is the only mechanism: idempotent `CREATE TABLE IF NOT EXISTS` plus best-effort `ALTER TABLE`, no `sqlx migrate` directory. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
-- **Two databases** — `DATABASE_URL` picks SQLite (default) or PostgreSQL at boot; `sqlx::Any` can't do this job (no chrono in 0.7), which is why the macro layer exists. [Details](docs/ARCHITECTURE.md#two-databases-one-set-of-queries).
+- **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 
 ## Testing and Verification
@@ -174,7 +173,7 @@ npm --prefix frontend run build                    # CI: frontend job
 npm --prefix frontend run test:e2e                 # not CI-gated yet; still required before shipping a UI change
 ```
 
-CI (`.github/workflows/ci.yml`) runs four jobs: `backend` (format, tests, OpenAPI drift), `backend-postgres` (the same suite plus `live_postgres --ignored` tests against a real PostgreSQL — blocking), `inference` (format + tests), `frontend` (build only). See "Commands" above to run the Postgres suite locally.
+CI (`.github/workflows/ci.yml`) runs three jobs: `backend` (format, tests, `live_postgres --ignored` tests against a real PostgreSQL 18, OpenAPI drift — all blocking), `inference` (format + tests), `frontend` (build only). See "Commands" above to run the Postgres suite locally.
 
 Never commit code that fails compilation, formatting, or tests.
 
@@ -194,7 +193,7 @@ Never commit code that fails compilation, formatting, or tests.
 
 ## Gotchas
 
-- `DATABASE_URL` defaults to `sqlite://data/bot_data.db?mode=rwc`; `api/mod.rs` probes `web/dist` then `backend/web/dist`. Both assume `cargo run` from the repo root.
+- `DATABASE_URL` has no default and must be `postgres://`; `api/mod.rs` probes `web/dist` then `backend/web/dist`. The latter assumes `cargo run` from the repo root.
 - Bare `cargo run` resolves to the bot only via `default-members = ["backend"]` + `default-run = "matrix-bot"` in `backend/Cargo.toml` — keep both if you add a workspace member or a third binary.
 - `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.
