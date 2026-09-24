@@ -182,7 +182,7 @@ four-step verification gate that is entirely dependent on a human remembering it
 
 The step-up test (`api/mod.rs::step_up_tests`) is explicitly designed as the
 thing that catches a sensitive endpoint shipped without `VerifiedUser` — "CI
-catches it," says AGENTS.md. CI does not currently run it.
+catches it," says CLAUDE.md. CI does not currently run it.
 
 **Fix:** a `on: [push, pull_request]` workflow running the AGENTS.md four steps
 plus `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`.
@@ -290,7 +290,7 @@ minimum, emit a `Resync` event on lag so the client can invalidate everything.
 
 **P2-7 · Portfolio buy/sell writes two tables without a transaction.**
 `PortfolioRepository::buy` debits cash and writes the holding as separate
-statements. The reasoning in AGENTS.md (no repository uses `pool.begin()`, so
+statements. The reasoning in CLAUDE.md (no repository uses `pool.begin()`, so
 this follows precedent) is honest, but this is the one place in the codebase
 where the two writes are a *financial* pair: a crash between them loses the cash
 or the shares. Precedent is a weaker argument than money. Wrap these two in a
