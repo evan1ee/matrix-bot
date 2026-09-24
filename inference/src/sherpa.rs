@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::audio::TARGET_SAMPLE_RATE;
 
@@ -84,102 +82,10 @@ pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError
     Ok(())
 }
 
-/// How long to wait for the next chunk of a model download before giving up.
-/// This bounds idle time, not total transfer time: a slow-but-steady 239 MB
-/// download on a modest link is not a stall, but a connection with no bytes
-/// arriving for this long is.
-const DOWNLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
-
 async fn download_model(url: &str, dest: &Path) -> Result<(), VoiceError> {
-    download_model_with_idle(url, dest, DOWNLOAD_IDLE_TIMEOUT).await
-}
-
-/// Streams `url` into `dest` via a `.tmp` file that is renamed into place
-/// only on success, so a route watching `dest` never sees a partial model.
-/// There is deliberately no total-transfer timeout — only `idle`, applied to
-/// each chunk — because the model is 239 MB and a total timeout fails
-/// deterministically on any link slower than it assumes.
-async fn download_model_with_idle(
-    url: &str,
-    dest: &Path,
-    idle: Duration,
-) -> Result<(), VoiceError> {
-    let tmp_dest = dest.with_extension("tmp");
-
-    match stream_to_file(url, &tmp_dest, idle).await {
-        Ok(()) => tokio::fs::rename(&tmp_dest, dest)
-            .await
-            .map_err(|e| VoiceError::ModelDownload(format!("Failed to persist model file: {}", e))),
-        Err(err) => {
-            remove_partial_download(&tmp_dest).await;
-            Err(err)
-        }
-    }
-}
-
-/// Deletes a partial `.tmp` download after a failed attempt. Already-gone is
-/// not an error: the failure may have happened before the file was created.
-async fn remove_partial_download(tmp_dest: &Path) {
-    if let Err(err) = tokio::fs::remove_file(tmp_dest).await {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            warn!("Failed to remove partial download {:?}: {}", tmp_dest, err);
-        }
-    }
-}
-
-/// Requests `url` and writes its body to `tmp_dest` chunk by chunk, failing
-/// if no chunk arrives within `idle`.
-async fn stream_to_file(url: &str, tmp_dest: &Path, idle: Duration) -> Result<(), VoiceError> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| VoiceError::ModelDownload(e.to_string()))?;
-
-    let mut response = client
-        .get(url)
-        .send()
+    crate::download::download_to(url, dest)
         .await
-        .map_err(|e| VoiceError::ModelDownload(format!("Failed to request {}: {}", url, e)))?;
-
-    if !response.status().is_success() {
-        return Err(VoiceError::ModelDownload(format!(
-            "Download failed with HTTP status {}: {}",
-            response.status(),
-            url
-        )));
-    }
-
-    let mut file = tokio::fs::File::create(tmp_dest).await.map_err(|e| {
-        VoiceError::ModelDownload(format!("Failed to create tmp model file: {}", e))
-    })?;
-
-    loop {
-        let chunk = tokio::time::timeout(idle, response.chunk())
-            .await
-            .map_err(|_| {
-                VoiceError::ModelDownload(format!(
-                    "Download stalled: no data received for {:?} from {}",
-                    idle, url
-                ))
-            })?
-            .map_err(|e| {
-                VoiceError::ModelDownload(format!("Failed to read stream from {}: {}", url, e))
-            })?;
-
-        let Some(bytes) = chunk else {
-            break;
-        };
-
-        file.write_all(&bytes).await.map_err(|e| {
-            VoiceError::ModelDownload(format!("Failed to write tmp model file: {}", e))
-        })?;
-    }
-
-    file.flush()
-        .await
-        .map_err(|e| VoiceError::ModelDownload(format!("Failed to flush tmp model file: {}", e)))?;
-
-    Ok(())
+        .map_err(|e| VoiceError::ModelDownload(e.0))
 }
 
 /// Runs speech recognition synchronously on 16kHz mono f32 samples using sherpa-onnx OfflineRecognizer.
@@ -284,109 +190,6 @@ pub async fn run_transcription(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Starts a throwaway server on loopback and returns its base URL. The
-    /// inference crate has no shared test-server helper (unlike
-    /// `backend/src/services/test_support.rs`), so this is inlined here.
-    async fn spawn_server(app: axum::Router) -> String {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .expect("ephemeral port should bind");
-        let addr = listener
-            .local_addr()
-            .expect("listener should have an address");
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        format!("http://{}", addr)
-    }
-
-    fn scratch_dest(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "sherpa-download-{}-{}.bin",
-            tag,
-            std::process::id()
-        ))
-    }
-
-    #[tokio::test]
-    async fn test_download_model_with_idle_streams_a_full_body_to_disk() {
-        let body: Vec<u8> = vec![7u8; 1024 * 1024];
-        let expected = body.clone();
-        let app = axum::Router::new().route(
-            "/model.bin",
-            axum::routing::get(move || {
-                let body = body.clone();
-                async move { body }
-            }),
-        );
-        let base = spawn_server(app).await;
-        let dest = scratch_dest("ok");
-        let tmp_dest = dest.with_extension("tmp");
-        std::fs::remove_file(&dest).ok();
-        std::fs::remove_file(&tmp_dest).ok();
-
-        download_model_with_idle(
-            &format!("{}/model.bin", base),
-            &dest,
-            Duration::from_secs(5),
-        )
-        .await
-        .expect("download of a well-behaved body should succeed");
-
-        let written = std::fs::read(&dest).expect("destination file should exist");
-        assert_eq!(written, expected);
-        assert!(
-            !tmp_dest.exists(),
-            "tmp file should not remain after a successful download"
-        );
-
-        std::fs::remove_file(&dest).ok();
-    }
-
-    #[tokio::test]
-    async fn test_download_model_with_idle_fails_and_cleans_up_on_a_stalled_stream() {
-        use futures_util::{stream, StreamExt};
-        use std::convert::Infallible;
-
-        let app = axum::Router::new().route(
-            "/model.bin",
-            axum::routing::get(|| async {
-                let first = stream::iter(vec![Ok::<Vec<u8>, Infallible>(vec![1, 2, 3])]);
-                let stalled = stream::once(async {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    Ok::<Vec<u8>, Infallible>(vec![4, 5, 6])
-                });
-                axum::body::Body::from_stream(first.chain(stalled))
-            }),
-        );
-        let base = spawn_server(app).await;
-        let dest = scratch_dest("stall");
-        let tmp_dest = dest.with_extension("tmp");
-        std::fs::remove_file(&dest).ok();
-        std::fs::remove_file(&tmp_dest).ok();
-
-        let result = download_model_with_idle(
-            &format!("{}/model.bin", base),
-            &dest,
-            Duration::from_millis(200),
-        )
-        .await;
-
-        assert!(
-            matches!(result, Err(VoiceError::ModelDownload(_))),
-            "a stalled stream must fail as ModelDownload, got {:?}",
-            result
-        );
-        assert!(
-            !dest.exists(),
-            "destination must not exist after a stalled download"
-        );
-        assert!(
-            !tmp_dest.exists(),
-            "tmp file must not remain after a stalled download"
-        );
-    }
 
     #[test]
     fn test_clean_sensevoice_output_removes_tags() {

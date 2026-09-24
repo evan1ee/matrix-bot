@@ -23,7 +23,7 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - 📍 **Footprints** — travel & location check-in logs with country/city pins, ratings, visited places timeline, and journey statistics.
 - 🔔 **Webhooks** — inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility (`/bot:token/sendMessage`), and a durable retry delivery queue. See [`docs/webhooks.md`](docs/webhooks.md).
 - 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
-- 🔊 **Voice replies** — `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus with waveform), synthesized entirely offline by sherpa-onnx Kokoro (English + Mandarin, 103 voices, per-language lexicons and Chinese text normalization). Every user picks their own voice; no cloud TTS API and no second ML runtime.
+- 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus). By default this is synthesized by the bundled inference server's Kokoro (English + Mandarin, 103 voices, Chinese text normalization), or by OpenAI or ElevenLabs with one env change. Every user picks their own voice.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
 - 🗄️ **SQLite or PostgreSQL** — one `DATABASE_URL` picks the database; no application code is dialect-specific. SQLite is the default and needs no server, which is what keeps the standalone single binary a single binary. Point it at PostgreSQL for a shared or managed deployment and the schema is created there on boot. The **entire test suite passes on both**, and CI runs both on every pull request. See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
@@ -196,8 +196,8 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **Footprints** | `!footprint list`<br>`!footprint add <name> [\| date] [\| rating] [\| note]`<br>`!footprint delete <id>` | Visited places log, travel timeline, ratings (1-5 stars), and journey statistics |
 | **Webhooks** | `!webhook list`<br>`!webhook create <name> [room]`<br>`!webhook test <id>`<br>`!webhook revoke <id>` | Inbound webhook endpoints for external services, custom alert cards, and Telegram Bot API emulation |
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
-| **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message, synthesized offline by Kokoro; voice chosen per user |
-| **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <0-1023\|none>` | Configure per-user timezone, default currency, and the `!say` speaker voice, applied across all modules |
+| **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
+| **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
 | **Account** | `!link <code>`<br>`!recover` | Link Matrix account to web/native identity, initiate delayed recovery |
 
 `!export`, `!unlink`, `!passkey`, `!sessions` and `!recoverycodes` are
@@ -287,10 +287,13 @@ AI_MODEL=grok-4.6
 # AI_PROXY=http://127.0.0.1:7897        # Optional proxy for restricted networks
 TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo if unset)
 
-# Text-to-Speech / !say voice replies (Optional — off by default; the Kokoro model is 311 MB)
-TTS_ENABLED=false
-TTS_MODEL_DIR=data/tts_models/kokoro-multi-lang-v1_1
-TTS_SPEAKER_ID=0                       # House default voice; each user can override it in Settings
+# Text-to-Speech / !say voice replies (Optional — unset means !say is off;
+# under `docker compose up` this defaults to the bundled inference server's Kokoro)
+# TTS_BASE_URL=http://inference:8090/v1  # Local Kokoro (bundled), or a hosted OpenAI-compatible/ElevenLabs endpoint
+# TTS_API_KEY=                           # Bearer token, or xi-api-key under TTS_DIALECT=elevenlabs
+# TTS_MODEL=kokoro                       # Ignored by the bundled server; required for a hosted provider
+# TTS_VOICE=0                            # House default voice; each user can override it in Settings
+# TTS_DIALECT=openai                     # openai (default) or elevenlabs
 ```
 
 > [!WARNING]
@@ -511,10 +514,11 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
     ├── services/             # HTTP clients to sibling services
     │   ├── ocr/               #   client to the inference crate's POST /ocr
-    │   └── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
+    │   ├── stt/               #   OpenAI-compatible client to POST /v1/audio/transcriptions
+    │   └── tts/               #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
-│                              # models (OCR, STT now; TTS later), a separate binary and image
+│                              # models (OCR, STT and TTS), a separate binary and image
 contracts/                    # JSON fixtures each crate asserts for the wire formats it speaks
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime SQLite + Matrix crypto store (gitignored)

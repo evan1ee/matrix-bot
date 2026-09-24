@@ -120,6 +120,7 @@ mod tests {
                 port: 0,
                 ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
                 voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
+                tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
             }),
         }
     }

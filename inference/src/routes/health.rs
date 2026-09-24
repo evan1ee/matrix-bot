@@ -13,12 +13,12 @@ pub struct HealthResponse {
     pub ocr: bool,
 }
 
-/// Reports which models are installed. `tts` alone is hardcoded false until
-/// that capability lands; see the TTS plan.
+/// Reports which models are installed. Each flag is that capability's own
+/// presence check (`stt`/`ocr`: `models_present`; `tts`: `model_present`).
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         stt: crate::sherpa::models_present(&state.config.voice_model_dir),
-        tts: false,
+        tts: crate::kokoro::model_present(&state.config.tts_model_dir),
         ocr: crate::paddle::models_present(&state.config.ocr_model_dir),
     })
 }
@@ -35,6 +35,7 @@ mod tests {
             port: 0,
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
             voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
+            tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
         };
         let state = AppState {
             config: Arc::new(config),
@@ -62,6 +63,7 @@ mod tests {
             port: 0,
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
             voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
+            tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
         };
         let state = AppState {
             config: Arc::new(config),

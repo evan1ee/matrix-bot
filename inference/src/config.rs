@@ -6,6 +6,7 @@ pub struct InferenceConfig {
     pub port: u16,
     pub ocr_model_dir: PathBuf,
     pub voice_model_dir: PathBuf,
+    pub tts_model_dir: PathBuf,
 }
 
 impl Default for InferenceConfig {
@@ -14,6 +15,7 @@ impl Default for InferenceConfig {
             port: 8090,
             ocr_model_dir: PathBuf::from("data/ocr_models"),
             voice_model_dir: PathBuf::from("data/voice_models"),
+            tts_model_dir: PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
         }
     }
 }
@@ -35,10 +37,15 @@ impl InferenceConfig {
             .map(PathBuf::from)
             .unwrap_or(defaults.voice_model_dir);
 
+        let tts_model_dir = std::env::var("TTS_MODEL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or(defaults.tts_model_dir);
+
         Self {
             port,
             ocr_model_dir,
             voice_model_dir,
+            tts_model_dir,
         }
     }
 }

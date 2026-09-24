@@ -18,10 +18,9 @@ pub const MIN_MAX_HISTORY_TURNS: i64 = 1;
 pub const MAX_MAX_HISTORY_TURNS: i64 = 100;
 pub const DEFAULT_BRIEFING_ENABLED: bool = true;
 pub const DEFAULT_BRIEFING_TIME: &str = "07:00";
-/// A sanity ceiling, not a model fact: how many voices actually exist depends
-/// on which Kokoro model directory is installed. This just keeps a stray
-/// input from being stored as something absurd.
-pub const MAX_TTS_SPEAKER_ID: i64 = 1023;
+/// The longest voice name or id stored. ElevenLabs ids are 20 characters and
+/// OpenAI's names are shorter; this only refuses the absurd.
+pub const MAX_TTS_VOICE_LEN: usize = 64;
 
 fn default_max_history_turns() -> i64 {
     DEFAULT_MAX_HISTORY_TURNS
@@ -60,17 +59,13 @@ pub struct UserSettings {
     /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     #[serde(default = "default_briefing_time")]
     pub briefing_time: String,
-    /// Kokoro TTS speaker index `!say` uses to speak a reply. `None` means no
-    /// preference — `modules::tts` then falls back to the operator's
-    /// `TTS_SPEAKER_ID` — exactly the same "no row until you change
-    /// something" convention `dev_room_id` uses; `Some(0)` is a real,
-    /// selectable voice, not a stand-in for "unset". The Kokoro model this
-    /// project ships bundles 103 speakers (English and Mandarin, mixed);
-    /// validated against `MAX_TTS_SPEAKER_ID` on write, and clamped again in
-    /// `modules::tts::engine` against however many the currently loaded model
-    /// actually reports.
+    /// The voice `!say` speaks in, in whatever the configured provider calls
+    /// it. `None` means no preference, and `modules::tts` falls back to the
+    /// operator's `TTS_VOICE`: the same "no row until you change something"
+    /// convention `dev_room_id` uses. `Some("0")` is a real Kokoro voice, not
+    /// a stand-in for "unset". Shape-checked by `parse_tts_voice` on write.
     #[serde(default)]
-    pub tts_speaker_id: Option<i64>,
+    pub tts_voice: Option<String>,
 }
 
 impl Default for UserSettings {
@@ -82,7 +77,7 @@ impl Default for UserSettings {
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
             briefing_enabled: DEFAULT_BRIEFING_ENABLED,
             briefing_time: DEFAULT_BRIEFING_TIME.to_string(),
-            tts_speaker_id: None,
+            tts_voice: None,
         }
     }
 }
@@ -129,6 +124,27 @@ pub fn parse_briefing_time(raw: &str) -> Result<(u32, u32), String> {
     Ok((hour, minute))
 }
 
+/// Checks that `raw` could be a voice. What voices exist depends on the
+/// configured provider, which the bot does not know. A Kokoro speaker id, an
+/// OpenAI name and an ElevenLabs id all fit this shape, and a voice the
+/// provider does not have fails at `!say` time with the provider's own error.
+pub fn parse_tts_voice(raw: &str) -> Result<String, String> {
+    let voice = raw.trim();
+    let valid = !voice.is_empty()
+        && voice.len() <= MAX_TTS_VOICE_LEN
+        && voice
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if valid {
+        Ok(voice.to_string())
+    } else {
+        Err(format!(
+            "A voice is 1-{} letters, digits, '_' or '-' (e.g. 0, alloy, 21m00Tcm4TlvDq8ikWAM)",
+            MAX_TTS_VOICE_LEN
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,7 +158,7 @@ mod tests {
         assert_eq!(settings.max_history_turns, DEFAULT_MAX_HISTORY_TURNS);
         assert!(settings.briefing_enabled);
         assert_eq!(settings.briefing_time, "07:00");
-        assert_eq!(settings.tts_speaker_id, None);
+        assert_eq!(settings.tts_voice, None);
         assert_eq!(settings.tz(), Tz::UTC);
     }
 
@@ -185,8 +201,39 @@ mod tests {
             max_history_turns: DEFAULT_MAX_HISTORY_TURNS,
             briefing_enabled: true,
             briefing_time: "07:00".to_string(),
-            tts_speaker_id: None,
+            tts_voice: None,
         };
         assert_eq!(settings.tz(), Tz::UTC);
+    }
+
+    #[test]
+    fn test_parse_tts_voice_accepts_every_provider_shape() {
+        assert_eq!(parse_tts_voice("0"), Ok("0".to_string()));
+        assert_eq!(parse_tts_voice(" alloy "), Ok("alloy".to_string()));
+        assert_eq!(
+            parse_tts_voice("21m00Tcm4TlvDq8ikWAM"),
+            Ok("21m00Tcm4TlvDq8ikWAM".to_string())
+        );
+        assert_eq!(
+            parse_tts_voice("zf_xiaobei-2"),
+            Ok("zf_xiaobei-2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_tts_voice_rejects_anything_that_is_not_a_voice_name() {
+        let too_long = "a".repeat(MAX_TTS_VOICE_LEN + 1);
+        for bad in [
+            "",
+            "   ",
+            "a b",
+            "../x",
+            "a/b",
+            "é",
+            "a?b",
+            too_long.as_str(),
+        ] {
+            assert!(parse_tts_voice(bad).is_err(), "accepted {:?}", bad);
+        }
     }
 }

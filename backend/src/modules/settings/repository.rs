@@ -10,7 +10,7 @@ impl SettingsRepository {
     /// when a user changes one, so every user starts without a row and must
     /// still get a usable answer.
     pub async fn get(pool: &DbPool, owner_id: &str) -> Result<UserSettings, sqlx::Error> {
-        let found = crate::db_fetch_optional!(pool, UserSettings, "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id FROM user_settings WHERE owner_id = ?", owner_id)?;
+        let found = crate::db_fetch_optional!(pool, UserSettings, "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_voice FROM user_settings WHERE owner_id = ?", owner_id)?;
 
         Ok(found.unwrap_or_default())
     }
@@ -41,7 +41,7 @@ impl SettingsRepository {
         owner_id: &str,
         settings: &UserSettings,
     ) -> Result<UserSettings, sqlx::Error> {
-        crate::db_execute!(pool, "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_speaker_id, updated_at) \
+        crate::db_execute!(pool, "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_voice, updated_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
              ON CONFLICT(owner_id) DO UPDATE SET \
                 timezone = excluded.timezone, \
@@ -50,8 +50,8 @@ impl SettingsRepository {
                 max_history_turns = excluded.max_history_turns, \
                 briefing_enabled = excluded.briefing_enabled, \
                 briefing_time = excluded.briefing_time, \
-                tts_speaker_id = excluded.tts_speaker_id, \
-                updated_at = CURRENT_TIMESTAMP", owner_id, &settings.timezone, &settings.currency, &settings.dev_room_id, settings.max_history_turns, settings.briefing_enabled, &settings.briefing_time, settings.tts_speaker_id)?;
+                tts_voice = excluded.tts_voice, \
+                updated_at = CURRENT_TIMESTAMP", owner_id, &settings.timezone, &settings.currency, &settings.dev_room_id, settings.max_history_turns, settings.briefing_enabled, &settings.briefing_time, &settings.tts_voice)?;
 
         Self::get(pool, owner_id).await
     }
@@ -123,7 +123,7 @@ mod tests {
                 max_history_turns: 15,
                 briefing_enabled: true,
                 briefing_time: "07:30".to_string(),
-                tts_speaker_id: Some(42),
+                tts_voice: Some("alloy".to_string()),
             },
         )
         .await
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(created.max_history_turns, 15);
         assert!(created.briefing_enabled);
         assert_eq!(created.briefing_time, "07:30");
-        assert_eq!(created.tts_speaker_id, Some(42));
+        assert_eq!(created.tts_voice.as_deref(), Some("alloy"));
 
         let updated = SettingsRepository::upsert(
             &pool,
@@ -146,7 +146,7 @@ mod tests {
                 max_history_turns: 20,
                 briefing_enabled: false,
                 briefing_time: "08:00".to_string(),
-                tts_speaker_id: Some(7),
+                tts_voice: Some("21m00Tcm4TlvDq8ikWAM".to_string()),
             },
         )
         .await
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(updated.max_history_turns, 20);
         assert!(!updated.briefing_enabled);
         assert_eq!(updated.briefing_time, "08:00");
-        assert_eq!(updated.tts_speaker_id, Some(7));
+        assert_eq!(updated.tts_voice.as_deref(), Some("21m00Tcm4TlvDq8ikWAM"));
 
         // The upsert must update the existing row, never accumulate rows.
         let count: i64 =
@@ -201,7 +201,7 @@ mod tests {
                 max_history_turns: 10,
                 briefing_enabled: true,
                 briefing_time: "07:00".to_string(),
-                tts_speaker_id: None,
+                tts_voice: None,
             },
         )
         .await
@@ -217,25 +217,25 @@ mod tests {
     /// Save a voice preference, then read it back through a fresh `get` — the
     /// same round trip `!settings voice` and the web UI both rely on.
     #[tokio::test]
-    async fn test_tts_speaker_id_round_trips() {
+    async fn test_tts_voice_round_trips() {
         let pool = pool().await;
         let owner = "@evan:mbm.one";
 
         let settings = UserSettings {
-            tts_speaker_id: Some(55),
+            tts_voice: Some("55".to_string()),
             ..UserSettings::default()
         };
         let saved = SettingsRepository::upsert(&pool, owner, &settings)
             .await
             .unwrap();
-        assert_eq!(saved.tts_speaker_id, Some(55));
+        assert_eq!(saved.tts_voice.as_deref(), Some("55"));
 
         let read_back = SettingsRepository::get(&pool, owner).await.unwrap();
-        assert_eq!(read_back.tts_speaker_id, Some(55));
+        assert_eq!(read_back.tts_voice.as_deref(), Some("55"));
     }
 
     /// Speaker 0 is a real, selectable voice, not a stand-in for "unset" — it
-    /// must round-trip as `Some(0)`, never collapse to `None` on the way
+    /// must round-trip as `Some("0")`, never collapse to `None` on the way
     /// through the database. This is the case the earlier `i64`-with-a-
     /// sentinel design got wrong: saving 0 must not read back as "no
     /// preference".
@@ -245,16 +245,16 @@ mod tests {
         let owner = "@evan:mbm.one";
 
         let settings = UserSettings {
-            tts_speaker_id: Some(0),
+            tts_voice: Some("0".to_string()),
             ..UserSettings::default()
         };
         let saved = SettingsRepository::upsert(&pool, owner, &settings)
             .await
             .unwrap();
-        assert_eq!(saved.tts_speaker_id, Some(0));
+        assert_eq!(saved.tts_voice.as_deref(), Some("0"));
 
         let read_back = SettingsRepository::get(&pool, owner).await.unwrap();
-        assert_eq!(read_back.tts_speaker_id, Some(0));
+        assert_eq!(read_back.tts_voice.as_deref(), Some("0"));
     }
 
     /// A row saved before this column existed must read as `None` ("no
@@ -266,8 +266,8 @@ mod tests {
         let pool = pool().await;
         let owner = "@evan:mbm.one";
 
-        // Written without ever mentioning tts_speaker_id, exactly like a row
-        // an older binary would have created.
+        // Written without ever mentioning tts_voice, exactly like a row an
+        // older binary would have created.
         crate::db_execute!(
             &pool,
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES (?, 'UTC', 'USD')",
@@ -276,6 +276,6 @@ mod tests {
         .unwrap();
 
         let settings = SettingsRepository::get(&pool, owner).await.unwrap();
-        assert_eq!(settings.tts_speaker_id, None);
+        assert_eq!(settings.tts_voice, None);
     }
 }

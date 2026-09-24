@@ -1,14 +1,14 @@
 //! Ogg Opus encoding for synthesised speech.
 //!
-//! Kept separate from `engine.rs` (which only knows about sherpa-onnx) and
-//! from `mod.rs` (which only knows about Matrix) — this file's one job is
+//! Kept separate from `kokoro.rs` (which only knows about sherpa-onnx) and
+//! from `routes/speech.rs` (which only knows HTTP) — this file's one job is
 //! turning `f32` PCM samples into an Ogg-contained Opus bitstream, per
-//! RFC 7845. Replaces `wav.rs`: Matrix clients expect Ogg Opus for a voice
-//! bubble, and it is roughly forty times smaller on the wire than WAV.
+//! RFC 7845. Matrix clients expect Ogg Opus for a voice bubble, and it is
+//! roughly forty times smaller on the wire than WAV.
 //!
-//! Uses the `opus` crate for encoding and `ogg::PacketWriter` (already a
-//! dependency, used today for decoding speech-to-text input) for the
-//! container — no new dependencies.
+//! Uses the `opus` crate (libopus, built from source by `opusic-sys`, which
+//! is why this crate's build needs `cmake`) for encoding and
+//! `ogg::PacketWriter` for the container.
 
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};

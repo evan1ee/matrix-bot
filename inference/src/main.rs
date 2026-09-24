@@ -3,10 +3,15 @@ use tracing::info;
 
 mod audio;
 mod config;
+mod download;
+mod kokoro;
+mod opus;
 mod paddle;
 mod provision;
 mod routes;
 mod sherpa;
+#[cfg(test)]
+mod test_support;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

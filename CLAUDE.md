@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Cargo workspace at the root with two members, plus a separate npm frontend:
 
 - `backend/` — Rust crate `matrix-bot`: Matrix bot + embedded Axum REST API in one binary.
-- `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting the local ONNX models (OCR and speech-to-text now; TTS later).
+- `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting the local ONNX models (OCR, speech-to-text and Kokoro text-to-speech).
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `data/` — runtime SQLite DB + Matrix SDK crypto store (gitignored).
 
@@ -106,18 +106,20 @@ bot, and `cargo test -p matrix-bot` is the everyday suite —
 `cargo test --workspace` additionally builds the crate carrying the native ML
 dependencies, which is why CI scopes the backend jobs explicitly.
 
-OCR reaches the inference server over HTTP via `services/ocr`, and speech to
-text via `services/stt`, which speaks OpenAI's `POST /v1/audio/transcriptions`
-— so `STT_BASE_URL` can point at the bundled server, OpenAI, Groq or anything
-else with that shape, and `STT_API_KEY` is sent as a bearer token. The client
-asks for `response_format=json`, the one format every compatible
-transcription model accepts (OpenAI's `gpt-4o-*-transcribe` models reject
-`verbose_json`); a voice note's duration prefers the provider's own figure
-when one comes back, falling back to the Matrix event's own
-`AudioInfo.duration` otherwise — a `json` response carries none, so that
-fallback is the usual case. An unset base URL, or an unreachable server,
-degrades that one feature: the bot still boots, and `docker run` with a
-volume still yields a working bot without it.
+OCR reaches the inference server over HTTP via `services/ocr`, speech to
+text via `services/stt`, and text to speech via `services/tts`. STT speaks
+OpenAI's `POST /v1/audio/transcriptions` — so `STT_BASE_URL` can point at the
+bundled server, OpenAI, Groq or anything else with that shape, and
+`STT_API_KEY` is sent as a bearer token. The client asks for
+`response_format=json`, the one format every compatible transcription model
+accepts (OpenAI's `gpt-4o-*-transcribe` models reject `verbose_json`); a voice
+note's duration prefers the provider's own figure when one comes back, falling
+back to the Matrix event's own `AudioInfo.duration` otherwise — a `json`
+response carries none, so that fallback is the usual case. Text to speech
+reaches `POST /v1/audio/speech` via `services/tts`, which speaks the OpenAI
+shape and, under `TTS_DIALECT=elevenlabs`, the ElevenLabs one. An unset base
+URL, or an unreachable server, degrades that one feature: the bot still boots,
+and `docker run` with a volume still yields a working bot without it.
 
 The inference server provisions models in the background (`provision.rs`),
 spawned beside the listener rather than awaited in front of it, so `/health`
@@ -281,64 +283,60 @@ Validation lives at the API boundary (`api/settings.rs`), not at render time: an
 
 On the frontend, `core/settings.ts` is the single source — `useSettings()` reads one shared React Query entry, so a change reformats the whole app from one cache write. Anything rendering an instant must pass the zone explicitly (`formatDateTimeInZone` and friends); a bare `toLocaleString` silently uses the browser's zone, which is exactly what the setting exists to override. The same applies in reverse for *input*: `zonedInputToUtcIso`/`utcIsoToZonedInput` convert the `DateTimePicker`'s naive `YYYY-MM-DDTHH:mm` against the chosen zone, applying the offset twice so a daylight-saving boundary cannot land the result an hour out. `DateTimePicker` itself stays zone-agnostic and takes a `now` prop purely so "today" and the "Now" button mean the right day.
 
-### Voice replies (`!say`, offline text-to-speech)
+### Voice replies (`!say`)
 
-`modules/tts/` speaks a reply into the room as a native Matrix voice message.
-One engine, one code path, no trait. `modules/voice` and `modules/ocr` used to
-share that shape (SenseVoice only, PaddleOCR only); both are now HTTP clients
-instead — `modules/voice` calls `services::stt`, which works with any
-OpenAI-compatible provider, and `modules/ocr` calls the inference crate's
-`POST /ocr` — so the comparison no longer holds for either. In the backend,
-sherpa-onnx now serves text-to-speech only — speech-to-text runs in the
-inference crate's own sherpa-onnx dependency instead. The same prebuilt C API
-bundles Kokoro TTS with espeak-ng grapheme-to-phoneme and per-language
-lexicons already built in, so text to speech needed no second ML runtime and
-no hand-written phonemiser. The raw ONNX model would have forced one: it
-takes phoneme ids, not text.
-
-`engine.rs` loads the model **once** into a `static OnceLock`, deliberately
-unlike `inference/src/sherpa.rs`, which rebuilds its SenseVoice recogniser on every call.
-That is right there — a small model loading in milliseconds — and wrong here:
-Kokoro is 311 MB and takes seconds. Synthesis itself runs in `spawn_blocking`:
-it is CPU-bound for seconds at a time, and on the runtime thread it would
-stall the Matrix sync loop. The
-text-normalisation FSTs (`date-zh.fst`, `number-zh.fst`, `phone-zh.fst`) are
-easy to leave out and nothing fails without them — a number is simply read
-digit by digit, or in English.
+`modules/tts` speaks a reply into the room as a native Matrix voice message.
+It prepares the text (`text.rs` strips HTML and emoji — the phonemiser has no
+reading for `🔊` or `✅`, and leaving them in produces unpredictable silent
+gaps mid-sentence), resolves which voice speaks, and uploads the result.
+Synthesis itself happens elsewhere: `services/tts` reaches
+`POST /v1/audio/speech`, served by the bundled inference server's Kokoro
+(`inference/src/kokoro.rs`) or by any OpenAI-compatible or ElevenLabs
+provider, chosen by `TTS_BASE_URL` / `TTS_DIALECT`. An unset base URL makes
+`!say` answer that speech is unavailable, and nothing else changes — the same
+degrade-one-feature shape `services/ocr` and `services/stt` use.
 
 The reply is **Ogg Opus, not WAV**, and that is what makes a client draw a
-voice bubble instead of a file card. `opus.rs` frames the 24 kHz samples at
-20 ms and writes Ogg pages whose granule positions are in 48 kHz units per
-RFC 7845, with the encoder's own `get_lookahead()` as the pre-skip; `mod.rs`
-attaches `AttachmentInfo::Voice` with a duration and a 100-bucket waveform.
-Get the granule arithmetic wrong and the bubble still renders, with a wrong
-duration, so the check has to be external — `ffprobe` over the `.ogg` files
-`cargo run -p matrix-bot --example tts_spike` writes beside its `.wav`s.
+voice bubble instead of a file card. The bundled server adds
+`X-Duration-Ms` and `X-Waveform` response headers, which a Matrix voice
+message needs and raw audio does not carry. A provider that omits them —
+every third-party one — still produces a bubble:
+`services::tts::ogg_opus_duration` reads the duration straight from the Ogg
+container, the last page's granule position minus the `OpusHead` pre-skip,
+and the bubble simply has no amplitude bars. The granule arithmetic of the
+encoder itself (`inference/src/opus.rs`) has no equivalent local check; it is
+verified externally with `ffprobe` over the route's own output.
 
-**Which voice speaks is per user, and `TTS_SPEAKER_ID` is only the house
-default** for someone who has never chosen. `user_settings.tts_speaker_id` is
-`Option<i64>` and `resolve_speaker_id` is `saved.unwrap_or(env_fallback)`. It
-is an `Option` rather than a plain integer because **speaker 0 is a real
-voice**: a bare `i64` makes "never customised" and "chose the first voice" the
-same value, so with a non-zero house default nobody can select voice 0 at all.
-This follows `dev_room_id: Option<String>` in the same struct. `!settings voice
-<id|none>` and the web Settings modal both write it, `none` clears it back to
-the house default, and `engine::clamp_speaker_id` still degrades a stored id
-that outlived its model to the nearest valid voice rather than failing `!say`.
+The per-user voice is `user_settings.tts_voice: Option<String>`, and
+`TTS_VOICE` is the house default for someone who has never chosen. It is an
+`Option` rather than a plain string for the same reason it was an
+`Option<i64>` before this crate split: `"0"` is a real Kokoro voice, so a bare
+default would make "never customised" and "chose voice 0" indistinguishable.
+`!settings voice <voice|none>` validates only the *shape* of a saved value
+(`parse_tts_voice`) — a Kokoro id, an OpenAI name and an ElevenLabs id all fit
+the same shape, and the bot has no way to know which voices a configured
+provider actually has. The bundled server is the one place that does know: it
+clamps an out-of-range Kokoro id to the nearest valid voice
+(`kokoro::clamp_speaker_id`) rather than failing the request, and answers 400
+to a voice that is not an integer at all.
 
-TTS is **off by default** (`TTS_ENABLED=false`): a 311 MB model should not load
-just because someone pulled the branch. A disabled module and a missing model
-both answer with a message saying which, never a panic — `engine::model_present`
-is checked before synthesis is attempted, and a failed load is cached as `None`
-so a missing directory is not re-probed on every `!say`.
+The Kokoro engine loads once into a `static OnceLock`, deliberately unlike
+`inference/src/sherpa.rs`, which rebuilds its SenseVoice recogniser on every
+call — that is fine for a small model loading in milliseconds and wrong for
+Kokoro, which is 311 MB and takes seconds. It is provisioned at inference
+server startup the same way the other models are: downloaded from the
+sherpa-onnx `tts-models` release archive, unpacked into a staging directory,
+and renamed into place so a route never sees a partial model. Its
+text-normalisation FSTs ship inside that same archive.
 
-Two build facts follow from the encoder and the runtime. The Dockerfile's build
-stage needs `cmake`, because `opusic-sys` compiles a vendored libopus from
-source; it links statically, so the runtime stage needs no libopus package.
-And on a Windows development machine the model test needs sherpa's own
-`onnxruntime.dll` copied into `target/debug/deps/` — `engine.rs`'s test comment
-explains why, and why a version mismatch there dies with an access violation
-rather than a clean error.
+Two build facts follow from the encoder and the runtime now living in a
+separate crate. `matrix-bot-inference` needs `cmake`, because `opusic-sys`
+compiles a vendored libopus from source for `inference/src/opus.rs`; the bot
+needs neither `cmake` nor any sherpa shared library at all. On a Windows
+development machine, a test that loads the real Kokoro model needs sherpa's
+own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own
+comment in `inference/src/kokoro.rs` for why a version mismatch there dies
+with an access violation rather than a clean error.
 
 ### Portfolio (investment holdings)
 

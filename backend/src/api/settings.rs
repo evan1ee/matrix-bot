@@ -6,7 +6,7 @@ use crate::api::auth::{ApiState, AuthUser};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::modules::finance::money::normalise_currency;
-use crate::modules::settings::models::MAX_TTS_SPEAKER_ID;
+use crate::modules::settings::models::parse_tts_voice;
 use crate::modules::settings::{parse_timezone, SettingsRepository, UserSettings};
 
 /// Both preferences are always sent together — settings are saved as a whole
@@ -29,11 +29,11 @@ pub struct UpdateSettingsRequest {
     /// Optional scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     #[serde(default)]
     pub briefing_time: Option<String>,
-    /// Kokoro TTS speaker index (0-1023), or `null`/absent to clear back to no
-    /// preference — the same convention `dev_room_id` uses, and for the same
-    /// reason: `0` is a real, selectable voice, so it cannot also mean "unset".
+    /// The voice `!say` speaks in, as the configured TTS provider names it,
+    /// or `null`/absent to clear back to the server default, the same
+    /// convention `dev_room_id` uses.
     #[serde(default)]
-    pub tts_speaker_id: Option<i64>,
+    pub tts_voice: Option<String>,
 }
 
 #[utoipa::path(
@@ -116,14 +116,8 @@ pub async fn update_settings(
     // preference, the same as `dev_room_id` above. A present value is still
     // validated: it is written straight into the row, never merged against
     // `current`.
-    let tts_speaker_id = match payload.tts_speaker_id {
-        Some(id) if (0..=MAX_TTS_SPEAKER_ID).contains(&id) => Some(id),
-        Some(_) => {
-            return Err(ApiError::bad_request(format!(
-                "tts_speaker_id must be between 0 and {}",
-                MAX_TTS_SPEAKER_ID
-            )));
-        }
+    let tts_voice = match payload.tts_voice.as_deref() {
+        Some(raw) => Some(parse_tts_voice(raw).map_err(ApiError::bad_request)?),
         None => None,
     };
 
@@ -137,7 +131,7 @@ pub async fn update_settings(
             max_history_turns,
             briefing_enabled,
             briefing_time,
-            tts_speaker_id,
+            tts_voice,
         },
     )
     .await
@@ -178,7 +172,7 @@ mod tests {
             max_history_turns: None,
             briefing_enabled: None,
             briefing_time: None,
-            tts_speaker_id: None,
+            tts_voice: None,
         }
     }
 
@@ -194,7 +188,7 @@ mod tests {
         assert_eq!(settings.timezone, "UTC");
         assert_eq!(settings.currency, "USD");
         assert_eq!(settings.max_history_turns, 10);
-        assert_eq!(settings.tts_speaker_id, None);
+        assert_eq!(settings.tts_voice, None);
     }
 
     #[tokio::test]
@@ -341,48 +335,50 @@ mod tests {
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 
-    /// A valid speaker id must be stored and read back unchanged; boundary
-    /// values 0 and `MAX_TTS_SPEAKER_ID` are both in range and must not be
-    /// rejected as if they were the "outside the ceiling" case. Speaker 0 in
-    /// particular must come back as `Some(0)`, never `None` — it is a real
-    /// voice, not the "unset" state.
+    /// A valid voice must be stored and read back unchanged, across the
+    /// shapes different providers use: a bare index, a short name, and the
+    /// longest id this project accepts. `"0"` in particular must come back
+    /// as `Some("0")`, never `None` — it is a real voice, not the "unset"
+    /// state.
     #[tokio::test]
-    async fn test_update_stores_a_valid_tts_speaker_id() {
+    async fn test_update_stores_a_valid_tts_voice() {
         let state = state().await;
         let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let mut zero_req = body("UTC", "USD");
-        zero_req.tts_speaker_id = Some(0);
+        zero_req.tts_voice = Some("0".to_string());
         let saved_zero = update_settings(State(state.clone()), user.clone(), Json(zero_req))
             .await
             .unwrap();
-        assert_eq!(saved_zero.tts_speaker_id, Some(0));
+        assert_eq!(saved_zero.tts_voice.as_deref(), Some("0"));
 
         let mut req = body("UTC", "USD");
-        req.tts_speaker_id = Some(42);
+        req.tts_voice = Some("alloy".to_string());
         let saved = update_settings(State(state.clone()), user.clone(), Json(req))
             .await
             .unwrap();
-        assert_eq!(saved.tts_speaker_id, Some(42));
+        assert_eq!(saved.tts_voice.as_deref(), Some("alloy"));
 
+        let long_voice = "a".repeat(64);
         let mut boundary_req = body("UTC", "USD");
-        boundary_req.tts_speaker_id = Some(MAX_TTS_SPEAKER_ID);
+        boundary_req.tts_voice = Some(long_voice.clone());
         let saved2 = update_settings(State(state), user, Json(boundary_req))
             .await
             .unwrap();
-        assert_eq!(saved2.tts_speaker_id, Some(MAX_TTS_SPEAKER_ID));
+        assert_eq!(saved2.tts_voice.as_deref(), Some(long_voice.as_str()));
     }
 
-    /// A negative id or one past the ceiling must be refused at the boundary,
-    /// the same way an unknown timezone is — accepting it would store a value
-    /// nothing downstream expects.
+    /// A malformed voice must be refused at the boundary, the same way an
+    /// unknown timezone is — accepting it would store a value nothing
+    /// downstream expects.
     #[tokio::test]
-    async fn test_rejects_a_tts_speaker_id_outside_the_valid_range() {
+    async fn test_rejects_a_malformed_tts_voice() {
         let state = state().await;
 
-        for bad in [-1, MAX_TTS_SPEAKER_ID + 1] {
+        let too_long = "a".repeat(65);
+        for bad in ["a b", "../x", too_long.as_str()] {
             let mut req = body("UTC", "USD");
-            req.tts_speaker_id = Some(bad);
+            req.tts_voice = Some(bad.to_string());
             let err = update_settings(
                 State(state.clone()),
                 AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
@@ -402,12 +398,12 @@ mod tests {
     /// back `null`/absent — mirroring `dev_room_id`, not the "leave the
     /// current value alone" behaviour `max_history_turns` uses.
     #[tokio::test]
-    async fn test_omitting_tts_speaker_id_clears_a_previously_saved_one() {
+    async fn test_omitting_tts_voice_clears_a_previously_saved_one() {
         let state = state().await;
         let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let mut req = body("UTC", "USD");
-        req.tts_speaker_id = Some(9);
+        req.tts_voice = Some("alloy".to_string());
         let _ = update_settings(State(state.clone()), user.clone(), Json(req))
             .await
             .unwrap();
@@ -415,6 +411,6 @@ mod tests {
         let cleared = update_settings(State(state), user, Json(body("UTC", "USD")))
             .await
             .unwrap();
-        assert_eq!(cleared.tts_speaker_id, None);
+        assert_eq!(cleared.tts_voice, None);
     }
 }

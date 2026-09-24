@@ -62,16 +62,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # cmake builds the vendored libopus inside opusic-sys, which the !say
-      # voice replies encode Ogg Opus with. The hosted images happen to ship
-      # cmake already, but this job declares its build dependencies rather
-      # than inheriting them, and the arm64 image is the one most likely to
-      # change underneath us.
+      # reqwest's native-tls needs the OpenSSL headers and pkg-config to find
+      # them. This job declares its build dependencies rather than inheriting
+      # them from the runner image.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev cmake
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
 
       - name: Build release binary
         run: cargo build --release --bin matrix-bot --target ${{ matrix.target }}
@@ -82,8 +80,6 @@ jobs:
           mkdir -p release_pkg
           cp "target/${{ matrix.target }}/release/matrix-bot" release_pkg/
           chmod +x release_pkg/matrix-bot
-          cp -P "target/${{ matrix.target }}/release"/*.so* release_pkg/ 2>/dev/null || true
-          cp -P "target/${{ matrix.target }}/release"/*.dylib* release_pkg/ 2>/dev/null || true
           cp .env.example release_pkg/
           cp README.md release_pkg/
           if [ -f LICENSE ]; then cp LICENSE release_pkg/; fi
@@ -96,7 +92,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release_pkg
           Copy-Item "target/${{ matrix.target }}/release/matrix-bot.exe" -Destination release_pkg/
-          Copy-Item "target/${{ matrix.target }}/release/*.dll" -Destination release_pkg/ -ErrorAction SilentlyContinue
           Copy-Item .env.example -Destination release_pkg/
           Copy-Item README.md -Destination release_pkg/
           if (Test-Path LICENSE) { Copy-Item LICENSE -Destination release_pkg/ }

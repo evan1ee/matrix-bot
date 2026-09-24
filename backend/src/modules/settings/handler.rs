@@ -4,7 +4,7 @@ use tracing::error;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::finance::money::normalise_currency;
 use crate::modules::settings::models::{
-    parse_timezone, UserSettings, MAX_MAX_HISTORY_TURNS, MAX_TTS_SPEAKER_ID, MIN_MAX_HISTORY_TURNS,
+    parse_timezone, parse_tts_voice, UserSettings, MAX_MAX_HISTORY_TURNS, MIN_MAX_HISTORY_TURNS,
 };
 use crate::modules::settings::repository::SettingsRepository;
 use crate::utils::{format_datetime, html_escape};
@@ -76,9 +76,8 @@ fn usage() -> String {
          <code>!settings currency &lt;CODE&gt;</code>, \
          <code>!settings dev_room &lt;room_id|none&gt;</code>, \
          <code>!settings history &lt;1-100&gt;</code>, \
-         <code>!settings voice &lt;0-{}|none&gt;</code><br/>\
+         <code>!settings voice &lt;voice|none&gt;</code><br/>\
          <i>Zones: {}</i>",
-        MAX_TTS_SPEAKER_ID,
         SUGGESTED_ZONES.join(", ")
     )
 }
@@ -154,37 +153,37 @@ async fn set_voice(
 ) -> String {
     if value.is_empty() {
         return format!(
-            "⚠️ Which voice? A speaker index (or <code>none</code> to clear).<br/>{}",
+            "⚠️ Which voice? A voice name or id (or <code>none</code> to clear).<br/>{}",
             usage()
         );
     }
 
     // "none"/"clear" resets to no preference, the same clearing keywords
-    // `set_dev_room` accepts — a speaker index alone has no way to say
+    // `set_dev_room` accepts — a voice name alone has no way to say
     // "forget my choice" the way an empty value would elsewhere, since an
     // empty value here is instead "you gave no argument at all" (above).
-    let speaker_id: Option<i64> = if value.eq_ignore_ascii_case("none")
+    let voice: Option<String> = if value.eq_ignore_ascii_case("none")
         || value.eq_ignore_ascii_case("clear")
     {
         None
     } else {
-        match value.parse() {
-            Ok(n) if (0..=MAX_TTS_SPEAKER_ID).contains(&n) => Some(n),
-            _ => {
+        match parse_tts_voice(value) {
+            Ok(voice) => Some(voice),
+            Err(reason) => {
                 return format!(
-                    "⚠️ Voice must be an integer between 0 and {} (or <code>none</code> to clear).<br/>Example: <code>!settings voice 0</code>",
-                    MAX_TTS_SPEAKER_ID
+                    "⚠️ {} (or <code>none</code> to clear).<br/>Example: <code>!settings voice alloy</code>",
+                    html_escape(&reason)
                 );
             }
         }
     };
 
     let mut updated = SettingsRepository::get_or_default(pool, owner_id).await;
-    updated.tts_speaker_id = speaker_id;
+    updated.tts_voice = voice;
 
     match save(pool, owner_id, updated, broadcaster).await {
-        Ok(saved) => match saved.tts_speaker_id {
-            Some(id) => format!("✅ Voice set to speaker <b>{}</b>.", id),
+        Ok(saved) => match saved.tts_voice {
+            Some(voice) => format!("✅ Voice set to <b>{}</b>.", html_escape(&voice)),
             None => "✅ Voice cleared — using the server default.".to_string(),
         },
         Err(()) => "❌ Database error saving your voice.".to_string(),
@@ -521,24 +520,26 @@ mod tests {
     async fn test_sets_voice_and_the_speaker_alias_works() {
         let pool = pool().await;
 
-        let reply = run(&pool, "!settings voice 42").await;
-        assert!(reply.contains("42"), "{reply}");
+        let reply = run(&pool, "!settings voice alloy").await;
+        assert!(reply.contains("alloy"), "{reply}");
         assert_eq!(
             SettingsRepository::get(&pool, "@alice:a")
                 .await
                 .unwrap()
-                .tts_speaker_id,
-            Some(42)
+                .tts_voice
+                .as_deref(),
+            Some("alloy")
         );
 
-        let reply2 = run(&pool, "!settings speaker 7").await;
-        assert!(reply2.contains("7"), "{reply2}");
+        let reply2 = run(&pool, "!settings speaker 21m00Tcm4TlvDq8ikWAM").await;
+        assert!(reply2.contains("21m00Tcm4TlvDq8ikWAM"), "{reply2}");
         assert_eq!(
             SettingsRepository::get(&pool, "@alice:a")
                 .await
                 .unwrap()
-                .tts_speaker_id,
-            Some(7)
+                .tts_voice
+                .as_deref(),
+            Some("21m00Tcm4TlvDq8ikWAM")
         );
     }
 
@@ -552,39 +553,40 @@ mod tests {
         assert!(reply.contains('0'), "{reply}");
 
         let settings = SettingsRepository::get(&pool, "@alice:a").await.unwrap();
-        assert_eq!(settings.tts_speaker_id, Some(0));
+        assert_eq!(settings.tts_voice.as_deref(), Some("0"));
     }
 
     #[tokio::test]
     async fn test_clearing_the_voice_resets_to_no_preference() {
         let pool = pool().await;
-        run(&pool, "!settings voice 42").await;
+        run(&pool, "!settings voice alloy").await;
 
         let reply = run(&pool, "!settings voice none").await;
         assert!(reply.contains("cleared"), "{reply}");
 
         let settings = SettingsRepository::get(&pool, "@alice:a").await.unwrap();
-        assert_eq!(settings.tts_speaker_id, None);
+        assert_eq!(settings.tts_voice, None);
     }
 
     #[tokio::test]
-    async fn test_rejects_out_of_range_voice_without_changing_anything() {
+    async fn test_rejects_a_malformed_voice_without_changing_anything() {
         let pool = pool().await;
-        run(&pool, "!settings voice 5").await;
+        run(&pool, "!settings voice alloy").await;
 
+        let too_long = "a".repeat(65);
         for bad in [
-            "!settings voice -1",
-            "!settings voice 1024",
-            "!settings voice abc",
+            "!settings voice a/b".to_string(),
+            "!settings voice ../x".to_string(),
+            format!("!settings voice {}", too_long),
         ] {
-            let reply = run(&pool, bad).await;
-            assert!(reply.contains("between 0"), "{bad} -> {reply}");
+            let reply = run(&pool, &bad).await;
+            assert!(reply.contains("⚠️"), "{bad} -> {reply}");
         }
 
         let settings = SettingsRepository::get(&pool, "@alice:a").await.unwrap();
         assert_eq!(
-            settings.tts_speaker_id,
-            Some(5),
+            settings.tts_voice.as_deref(),
+            Some("alloy"),
             "a rejected value must not clobber the saved voice"
         );
     }
@@ -595,20 +597,20 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
-        handle_settings_command(&pool, "@alice:a", "!settings voice 3", Some(&broadcaster))
-            .await
-            .unwrap();
-        let event = rx.try_recv().expect("a valid voice change must broadcast");
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
-
         handle_settings_command(
             &pool,
             "@alice:a",
-            "!settings voice 9999",
+            "!settings voice alloy",
             Some(&broadcaster),
         )
         .await
         .unwrap();
+        let event = rx.try_recv().expect("a valid voice change must broadcast");
+        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+
+        handle_settings_command(&pool, "@alice:a", "!settings voice a/b", Some(&broadcaster))
+            .await
+            .unwrap();
         assert!(
             rx.try_recv().is_err(),
             "a rejected voice must not broadcast"

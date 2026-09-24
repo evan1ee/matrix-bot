@@ -9,6 +9,7 @@ use crate::config::InferenceConfig;
 
 pub mod health;
 pub mod ocr;
+pub mod speech;
 pub mod transcriptions;
 
 /// Images and audio clips are the payloads here; 32 MB comfortably exceeds a
@@ -25,6 +26,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health::health))
         .route("/ocr", post(ocr::scan))
         .route("/v1/audio/transcriptions", post(transcriptions::transcribe))
+        .route("/v1/audio/speech", post(speech::speak))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }

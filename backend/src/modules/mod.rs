@@ -391,7 +391,13 @@ mod tests {
         // (AiModule) — see `test_tts_must_be_registered_before_a_direct_message_catch_all`.
         registry.register(TtsModule::new(
             Arc::new(tokio::sync::RwLock::new(None)),
-            crate::modules::tts::TtsConfig::default(),
+            crate::services::tts::TtsClient::new(
+                None,
+                None,
+                "kokoro".to_string(),
+                crate::services::tts::TtsDialect::OpenAi,
+            ),
+            "0".to_string(),
         ));
 
         for body in [
@@ -444,7 +450,7 @@ mod tests {
     /// the two registrations in `bot/mod.rs`.
     #[tokio::test]
     async fn test_tts_must_be_registered_before_a_direct_message_catch_all() {
-        use crate::modules::tts::{TtsConfig, TtsModule};
+        use crate::modules::tts::TtsModule;
 
         struct DirectMessageCatchAll;
 
@@ -473,7 +479,13 @@ mod tests {
         let tts_module = || {
             TtsModule::new(
                 Arc::new(tokio::sync::RwLock::new(None)),
-                TtsConfig::default(),
+                crate::services::tts::TtsClient::new(
+                    None,
+                    None,
+                    "kokoro".to_string(),
+                    crate::services::tts::TtsDialect::OpenAi,
+                ),
+                "0".to_string(),
             )
         };
 

@@ -3,8 +3,11 @@
 # ---- Stage 1: build ---------------------------------------------------------
 FROM rust:1-bookworm AS build
 
+# cmake builds the vendored libopus inside opusic-sys (the Ogg Opus encoder
+# for text-to-speech). It links statically, so the runtime stage needs no
+# libopus package.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev cmake \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -57,7 +60,8 @@ USER app
 
 ENV INFERENCE_PORT=8090 \
     OCR_MODEL_DIR=/app/data/ocr_models \
-    VOICE_MODEL_DIR=/app/data/voice_models
+    VOICE_MODEL_DIR=/app/data/voice_models \
+    TTS_MODEL_DIR=/app/data/tts_models/kokoro-multi-lang-v1_1
 
 EXPOSE 8090
 VOLUME ["/app/data"]

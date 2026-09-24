@@ -62,9 +62,9 @@ impl BotModule for SettingsModule {
             },
             CommandHelp {
                 name: "settings voice".to_string(),
-                usage: "!settings voice <0-1023>".to_string(),
-                description: "Set the Kokoro TTS speaker index !say uses \
-                              (e.g. !settings voice 0)"
+                usage: "!settings voice <voice|none>".to_string(),
+                description: "Set the voice !say speaks in: a name or id your TTS provider \
+                              knows (e.g. !settings voice 0)"
                     .to_string(),
             },
         ]

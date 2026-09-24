@@ -15,13 +15,12 @@ RUN npm run build
 
 # ---- Stage 2: build the bot -------------------------------------------------
 # reqwest pulls in native-tls (openssl-sys is in Cargo.lock), so the build needs
-# the OpenSSL headers even though sqlx itself is on rustls. cmake is for
-# opusic-sys, which compiles a vendored libopus from source at build time —
-# the result is statically linked, so the runtime stage needs no libopus package.
+# the OpenSSL headers even though sqlx itself is on rustls. No cmake: the bot
+# links no native ML or codec library; those live in the inference image.
 FROM rust:1-bookworm AS build
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pkg-config libssl-dev cmake \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -68,9 +67,6 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=build /src/target/release/matrix-bot /usr/local/bin/matrix-bot
-COPY --from=build /src/target/release/libsherpa-onnx-c-api.so /usr/local/lib/
-COPY --from=build /src/target/release/libonnxruntime.so       /usr/local/lib/
-RUN ldconfig
 COPY --from=web   /src/backend/web/dist          /app/web/dist
 COPY docker-entrypoint.sh                        /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
