@@ -201,7 +201,9 @@ pub fn ogg_opus_duration(bytes: &[u8]) -> Option<Duration> {
     }
 
     let samples = last_granule?.checked_sub(pre_skip?)?;
-    Some(Duration::from_millis(samples * 1000 / OPUS_GRANULE_RATE))
+    Some(Duration::from_millis(
+        samples.checked_mul(1000)? / OPUS_GRANULE_RATE,
+    ))
 }
 
 #[cfg(test)]
@@ -394,6 +396,11 @@ mod tests {
         );
         assert_eq!(ogg_opus_duration(b"ID3 an mp3, not ogg"), None);
         assert_eq!(ogg_opus_duration(&[]), None);
+    }
+
+    #[test]
+    fn test_ogg_opus_duration_does_not_panic_on_an_overflowing_granule() {
+        assert_eq!(ogg_opus_duration(&fake_ogg_opus(312, u64::MAX - 1)), None);
     }
 
     #[test]
