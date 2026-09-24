@@ -127,18 +127,26 @@ OCR has no standard and uses our own route.
 
 | Route | Request | Response |
 |---|---|---|
-| `POST {STT_BASE_URL}/audio/transcriptions` | multipart: `file`, `model`, `language`, `response_format=verbose_json` | `{ text, language, duration }` |
+| `POST {STT_BASE_URL}/audio/transcriptions` | multipart: `file`, `model`, `language`, `response_format=json` | `{ text }` |
 | `POST {TTS_BASE_URL}/audio/speech` | JSON `{ model, input, voice, response_format: "opus" }` | raw Ogg Opus bytes |
 | `POST {OCR_BASE_URL}/ocr` | raw image bytes | `{ text, blocks: [{ text, confidence, box }] }` |
 | `GET /health` | — | `{ stt: bool, tts: bool, ocr: bool }` per-model presence |
 
 All three carry `Authorization: Bearer` when an API key is configured.
 
-### STT maps onto the existing type unchanged
+### STT asks for `json`, and the duration comes from Matrix
 
-`verbose_json` returns `{text, language, duration}`. The existing
-`VoiceTranscriptionResult { text, language: Option<String>, duration_secs }`
-matches field for field. No adapter is needed.
+The client requests `response_format=json`, the one format every
+OpenAI-compatible transcription model accepts: OpenAI's `gpt-4o-transcribe`
+and `gpt-4o-mini-transcribe` reject `verbose_json`, so asking for it would make
+OpenAI's recommended models fail on every voice note. `json` carries text only.
+The voice note's duration, which the AI prompt mentions, comes from the Matrix
+event's own `AudioInfo.duration`, set by the sender's client. A provider that
+includes `language` or `duration` anyway is honoured. The bundled server still
+serves `verbose_json` for any other client.
+
+*Revised during Plan 2 execution; this section originally specified
+`verbose_json`.*
 
 ### TTS returns bytes, and the metadata gap
 

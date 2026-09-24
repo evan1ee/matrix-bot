@@ -1,10 +1,10 @@
 use std::fmt;
-use std::path::PathBuf;
 
+/// Voice transcription settings the bot owns. Where the model runs, and which
+/// provider serves it, is `services::stt`'s concern.
 #[derive(Debug, Clone)]
 pub struct VoiceConfig {
     pub enabled: bool,
-    pub model_dir: PathBuf,
     pub language: String,
 }
 
@@ -12,8 +12,21 @@ impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            model_dir: PathBuf::from("data/voice_models"),
             language: "auto".to_string(),
+        }
+    }
+}
+
+impl VoiceConfig {
+    /// The language to ask the transcription service for, or `None` to let it
+    /// detect. `auto` is SenseVoice's own word for detection, and
+    /// OpenAI-compatible providers reject it, so it is never sent.
+    pub fn language_hint(&self) -> Option<&str> {
+        let language = self.language.trim();
+        if language.is_empty() || language.eq_ignore_ascii_case("auto") {
+            None
+        } else {
+            Some(language)
         }
     }
 }
@@ -31,35 +44,60 @@ impl VoiceTranscriptionResult {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum VoiceError {
-    #[error("Audio decoding failed: {0}")]
-    AudioDecode(String),
-
-    #[error("Missing SenseVoice ONNX model: {0}")]
-    MissingModel(String),
-
-    #[error("Failed to download voice model: {0}")]
-    ModelDownload(String),
-
-    #[error("Voice transcription inference error: {0}")]
-    Inference(String),
-
-    #[error("I/O error: {0}")]
-    Io(String),
-
-    #[error("Voice transcription feature is disabled")]
-    Disabled,
-}
-
-impl From<std::io::Error> for VoiceError {
-    fn from(err: std::io::Error) -> Self {
-        VoiceError::Io(err.to_string())
+impl From<crate::services::stt::SttTranscription> for VoiceTranscriptionResult {
+    fn from(t: crate::services::stt::SttTranscription) -> Self {
+        Self {
+            text: t.text,
+            language: t.language,
+            duration_secs: t.duration.unwrap_or(0.0),
+        }
     }
 }
 
 impl fmt::Display for VoiceTranscriptionResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_language_hint_never_sends_auto_or_blank() {
+        let hint = |language: &str| {
+            VoiceConfig {
+                enabled: true,
+                language: language.to_string(),
+            }
+            .language_hint()
+            .map(str::to_owned)
+        };
+        assert_eq!(hint("auto"), None);
+        assert_eq!(hint("AUTO"), None);
+        assert_eq!(hint("  "), None);
+        assert_eq!(hint(""), None);
+        assert_eq!(hint("zh"), Some("zh".to_string()));
+        assert_eq!(hint(" en "), Some("en".to_string()));
+    }
+
+    #[test]
+    fn test_voice_config_defaults_to_enabled_with_auto_detection() {
+        let config = VoiceConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.language, "auto");
+    }
+
+    #[test]
+    fn test_a_transcription_without_a_duration_maps_to_zero() {
+        let result: VoiceTranscriptionResult = crate::services::stt::SttTranscription {
+            text: "hi".to_string(),
+            language: None,
+            duration: None,
+        }
+        .into();
+        assert_eq!(result.text, "hi");
+        assert_eq!(result.duration_secs, 0.0);
     }
 }

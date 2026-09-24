@@ -13,11 +13,11 @@ pub struct HealthResponse {
     pub ocr: bool,
 }
 
-/// Reports which models are installed. `stt` and `tts` are hardcoded false
-/// until those capabilities land; see the STT and TTS plans.
+/// Reports which models are installed. `tts` alone is hardcoded false until
+/// that capability lands; see the TTS plan.
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
-        stt: false,
+        stt: crate::sherpa::models_present(&state.config.voice_model_dir),
         tts: false,
         ocr: crate::paddle::models_present(&state.config.ocr_model_dir),
     })
@@ -34,6 +34,7 @@ mod tests {
         let config = InferenceConfig {
             port: 0,
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+            voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
         };
         let state = AppState {
             config: Arc::new(config),
@@ -60,6 +61,7 @@ mod tests {
         let config = InferenceConfig {
             port: 0,
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+            voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
         };
         let state = AppState {
             config: Arc::new(config),

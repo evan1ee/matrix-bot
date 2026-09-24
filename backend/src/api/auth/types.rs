@@ -132,6 +132,7 @@ pub struct ApiState {
     pub ocr_config: crate::modules::ocr::OcrConfig,
     pub ocr: crate::services::ocr::OcrClient,
     pub voice_config: crate::modules::voice::VoiceConfig,
+    pub stt: crate::services::stt::SttClient,
     /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
     pub ai: crate::config::AiEnvConfig,
 }
@@ -198,6 +199,7 @@ impl ApiState {
             ocr_config: crate::modules::ocr::OcrConfig::default(),
             ocr: crate::services::ocr::OcrClient::new(None),
             voice_config: crate::modules::voice::VoiceConfig::default(),
+            stt: crate::services::stt::SttClient::new(None, None, "sensevoice-small".to_string()),
             ai: crate::config::AiEnvConfig::default(),
         }
     }
@@ -256,9 +258,13 @@ impl ApiState {
             ocr: crate::services::ocr::OcrClient::new(config.ocr_base_url.clone()),
             voice_config: crate::modules::voice::VoiceConfig {
                 enabled: config.voice_enabled,
-                model_dir: config.voice_model_dir.clone(),
                 language: config.voice_language.clone(),
             },
+            stt: crate::services::stt::SttClient::new(
+                config.stt_base_url.clone(),
+                config.stt_api_key.clone(),
+                config.stt_model.clone(),
+            ),
             ai: config.ai.clone(),
         })
     }
@@ -431,8 +437,10 @@ mod tests {
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,
-            voice_model_dir: std::path::PathBuf::from("data/voice_models"),
             voice_language: "auto".to_string(),
+            stt_base_url: None,
+            stt_api_key: None,
+            stt_model: "sensevoice-small".to_string(),
             tts_enabled: false,
             tts_model_dir: std::path::PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
             tts_speaker_id: 0,

@@ -28,15 +28,15 @@ const RULE_FSTS: &[&str] = &["date-zh.fst", "number-zh.fst", "phone-zh.fst"];
 
 /// The loaded engine, built once and kept for the life of the process.
 ///
-/// `modules/voice/sherpa.rs::run_transcription_sync` rebuilds its recogniser
-/// on every call, which is fine there because that model loads in
+/// `inference/src/sherpa.rs::run_transcription_sync` rebuilds its SenseVoice
+/// recogniser on every call, which is fine there because that model loads in
 /// milliseconds. This Kokoro model is 311 MB and loading it takes seconds, so
 /// rebuilding it per `!say` would make every reply pay that cost. `OfflineTts`
 /// is `unsafe impl Send + Sync` in the sherpa-onnx crate (it wraps a C++
 /// engine that owns no thread-local state), so one instance shared across the
 /// async runtime's worker threads is sound. Do not "fix" this back to
-/// rebuilding on every call — that was tried in `modules/voice` for a much
-/// smaller model and is not the right trade-off here.
+/// rebuilding on every call — that was tried in `inference/src/sherpa.rs` for
+/// a much smaller model and is not the right trade-off here.
 static ENGINE: OnceLock<Option<OfflineTts>> = OnceLock::new();
 
 /// The path, but only if that file is actually present.
@@ -173,8 +173,9 @@ fn synthesize_sync(model_dir: &Path, speaker_id: i64, text: &str) -> Result<Spee
 ///
 /// Runs on a blocking worker thread. Inference is synchronous and CPU-bound
 /// for seconds at a time; on the runtime thread it would stall the Matrix
-/// sync loop, exactly as `modules/voice/sherpa.rs::run_transcription` already
-/// avoids for speech-to-text.
+/// sync loop — the same reason `inference/src/sherpa.rs` runs SenseVoice in
+/// `spawn_blocking`, even though that server has no sync loop of its own to
+/// stall.
 pub async fn synthesize(
     config: &TtsConfig,
     text: &str,
@@ -252,7 +253,7 @@ mod tests {
     /// cp target/debug/onnxruntime.dll target/debug/deps/
     /// ```
     ///
-    /// This is why `modules/voice` has no test that loads its model either.
+    /// This is why `inference/src/sherpa.rs`'s SenseVoice test is `#[ignore]`d too.
     ///
     /// Deployment is unaffected: the Dockerfile copies
     /// `libsherpa-onnx-c-api.so` and `libonnxruntime.so` into `/usr/local/lib`

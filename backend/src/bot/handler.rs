@@ -39,9 +39,13 @@ pub fn register_handlers(
     let ocr_client = crate::services::ocr::OcrClient::new(config.ocr_base_url.clone());
     let voice_config = crate::modules::voice::VoiceConfig {
         enabled: config.voice_enabled,
-        model_dir: config.voice_model_dir.clone(),
         language: config.voice_language.clone(),
     };
+    let stt_client = crate::services::stt::SttClient::new(
+        config.stt_base_url.clone(),
+        config.stt_api_key.clone(),
+        config.stt_model.clone(),
+    );
     let ai_config = config.ai.clone();
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room| {
         let own_id = bot_user_id.clone();
@@ -51,6 +55,7 @@ pub fn register_handlers(
         let pending_merges = pending_merges.clone();
         let ocr_client = ocr_client.clone();
         let voice_config = voice_config.clone();
+        let stt_client = stt_client.clone();
         let ai_config = ai_config.clone();
 
         async move {
@@ -79,6 +84,7 @@ pub fn register_handlers(
                         broadcaster.as_ref(),
                         &ocr_client,
                         &voice_config,
+                        &stt_client,
                     )
                     .await;
                 }

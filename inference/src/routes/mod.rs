@@ -9,6 +9,7 @@ use crate::config::InferenceConfig;
 
 pub mod health;
 pub mod ocr;
+pub mod transcriptions;
 
 /// Images and audio clips are the payloads here; 32 MB comfortably exceeds a
 /// Matrix attachment while still refusing an unbounded upload.
@@ -23,6 +24,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health::health))
         .route("/ocr", post(ocr::scan))
+        .route("/v1/audio/transcriptions", post(transcriptions::transcribe))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }

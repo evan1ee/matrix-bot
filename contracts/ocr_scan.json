@@ -1,0 +1,7 @@
+{
+  "text": "SHAKE SHACK\nTotal $16.50",
+  "blocks": [
+    { "text": "SHAKE SHACK", "score": 0.5 },
+    { "text": "Total $16.50", "score": 0.75 }
+  ]
+}
