@@ -14,14 +14,14 @@ pub struct JoinedRoomInfo {
 pub struct RoomRepository;
 
 impl RoomRepository {
-    /// Reads cached rooms for an account from SQLite.
+    /// Reads cached rooms for an account.
     pub async fn get_cached_rooms(
         pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<JoinedRoomInfo>, sqlx::Error> {
         // Selected as a typed tuple rather than read column-by-column off a raw
-        // row: `SqliteRow` and `PgRow` are different types, so `row.get` cannot
-        // be written once, while a tuple `FromRow` serves both.
+        // row, so the shape is checked once by `FromRow` rather than at each
+        // `row.get` call.
         let rows: Vec<(String, String, bool, Option<String>)> = crate::db_fetch_all!(
             pool,
             (String, String, bool, Option<String>),

@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
             )
             .init();
 
-        let database_url = matrix_bot::config::database_url_from_env();
+        let database_url = matrix_bot::config::database_url_from_env()?;
         let db = Database::connect(&database_url, 5).await?;
 
         let mut owner_id = String::new();

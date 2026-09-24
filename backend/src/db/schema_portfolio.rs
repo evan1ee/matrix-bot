@@ -78,10 +78,9 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
          ON portfolio_audit_log(owner_id, created_at DESC);"
     )?;
 
-    // Written per dialect rather than translated: PostgreSQL has no
-    // CREATE TRIGGER IF NOT EXISTS and needs a plpgsql function behind each
-    // guard, so it emits three statements where SQLite emits one.
-    for statement in ddl::audit_log_immutability(pool.dialect()) {
+    // PostgreSQL has no CREATE TRIGGER IF NOT EXISTS and needs a plpgsql
+    // function behind each guard, hence three statements per guard.
+    for statement in ddl::audit_log_immutability() {
         crate::db_ddl!(pool, &statement)?;
     }
 

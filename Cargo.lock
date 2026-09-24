@@ -2523,6 +2523,7 @@ dependencies = [
  "chrono-tz",
  "dotenvy",
  "futures-util",
+ "libsqlite3-sys",
  "matrix-sdk",
  "mime_guess",
  "ogg",

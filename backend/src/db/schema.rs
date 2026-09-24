@@ -55,19 +55,18 @@ pub async fn create_schema(pool: &DbPool) -> Result<(), sqlx::Error> {
 mod tests {
     use super::*;
 
-    /// Reads `sqlite_master`, so it is SQLite-only on purpose. The PostgreSQL
-    /// equivalent queries `information_schema` and arrives with the live
-    /// migration test in stage 7.
     async fn table_names(pool: &DbPool) -> Vec<String> {
-        crate::db_scalar_all!(pool, String, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        crate::db_scalar_all!(
+            pool,
+            String,
+            "SELECT table_name FROM information_schema.tables \
+             WHERE table_schema = current_schema() ORDER BY table_name"
+        )
         .unwrap()
     }
 
     #[tokio::test]
     async fn test_creates_every_table() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master to list tables") {
-            return;
-        }
         let pool = crate::db::pool::test_pool().await;
         run_migrations(&pool).await.unwrap();
 
@@ -96,9 +95,6 @@ mod tests {
     /// It must be safe to apply repeatedly to an already-migrated database.
     #[tokio::test]
     async fn test_migrations_are_idempotent() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master to list tables") {
-            return;
-        }
         let pool = crate::db::pool::test_pool().await;
 
         run_migrations(&pool).await.unwrap();

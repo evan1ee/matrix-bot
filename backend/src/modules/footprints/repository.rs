@@ -251,8 +251,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_update_atomic_returning() {
-        let db = Database::connect("sqlite::memory:", 5).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let db = Database { pool };
 
         let created = FootprintRepository::create(
             &db.pool,

@@ -41,8 +41,9 @@ mod tests {
     use crate::modules::finance::repository::FinanceRepository;
 
     async fn setup_db() -> (Database, String) {
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let db = Database { pool };
         let account_id =
             crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
                 .await

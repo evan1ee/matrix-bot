@@ -192,12 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_initialize() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -216,12 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_tools_list() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -241,12 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_resources_and_prompts() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
         let service = McpService::new(&pool, None, "test_owner");
 
         let req_res = JsonRpcRequest {

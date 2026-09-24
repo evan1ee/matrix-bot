@@ -23,7 +23,7 @@ pub async fn create_tables(pool: &DbPool) -> Result<(), sqlx::Error> {
         "CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger ON reminders(status, trigger_at);"
     )?;
 
-    // Migration helper for existing sqlite DBs missing retry_count column
+    // Migration helper for existing databases missing the retry_count column
     let _ = crate::db_ddl!(
         pool,
         "ALTER TABLE reminders ADD COLUMN retry_count BIGINT NOT NULL DEFAULT 0;"

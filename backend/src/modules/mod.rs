@@ -377,7 +377,9 @@ mod tests {
         use crate::modules::todo::TodoModule;
         use crate::modules::tts::TtsModule;
 
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        let db = Database { pool };
 
         let registry_ref = Arc::new(tokio::sync::RwLock::new(None));
         let mut registry = ModuleRegistry::new();
@@ -565,7 +567,9 @@ mod tests {
     }
 
     async fn memory_db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::schema::run_migrations(&pool).await.unwrap();
+        Database { pool }
     }
 
     /// Dispatch returns the *first* module that claims the command. Registration

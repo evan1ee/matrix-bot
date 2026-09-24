@@ -217,12 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_handler_ping() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
         let service = McpService::new(&pool, None, "test_owner");
 
         let req = JsonRpcRequest {
@@ -239,12 +234,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tokens_api_flow() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
         crate::db::schema_auth::create_tables(&pool).await.unwrap();
         crate::db::schema_mcp::create_tables(&pool).await.unwrap();
 

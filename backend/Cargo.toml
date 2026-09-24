@@ -33,7 +33,13 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "migrate"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "migrate"] }
+# Dropping sqlx's `sqlite` feature above removed the only crate that asked
+# `libsqlite3-sys` (a transitive dependency of matrix-sdk-sqlite, our
+# still-required crypto store) to vendor and link its own SQLite. Without this,
+# Windows has no system `sqlite3.lib` to link against. This is a build
+# dependency only — the application's own database layer never uses it.
+libsqlite3-sys = { version = "0.27", features = ["bundled"] }
 axum = { version = "0.7", features = ["macros", "multipart"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "timeout", "limit"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart"] }

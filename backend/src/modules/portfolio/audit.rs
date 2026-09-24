@@ -3,7 +3,7 @@
 //!
 //! Each entry stores both its own deterministic SHA-256 digest (`entry_hash`) and the
 //! hash of the preceding entry (`prev_hash`), forming a tamper-evident blockchain-style
-//! ledger. SQLite triggers additionally enforce immutability at the database engine level.
+//! ledger. PostgreSQL triggers additionally enforce immutability at the database engine level.
 
 use crate::db::DbPool;
 use anyhow::Result;
@@ -195,13 +195,8 @@ pub async fn absorb_ledger(
     }
 
     // `crate::db::ddl` is the single source for these statements so the schema
-    // and this drop/restore pair cannot drift apart. The dialect comes from the
-    // transaction itself, so the guard is dropped and restored in whichever
-    // form the live database understands.
-    crate::tx_execute!(
-        &mut *conn,
-        &crate::db::ddl::drop_audit_update_trigger(conn.dialect())
-    )?;
+    // and this drop/restore pair cannot drift apart.
+    crate::tx_execute!(&mut *conn, &crate::db::ddl::drop_audit_update_trigger())?;
 
     crate::tx_execute!(
         &mut *conn,
@@ -266,7 +261,7 @@ pub async fn absorb_ledger(
         prev = entry_hash;
     }
 
-    for statement in crate::db::ddl::audit_update_trigger(conn.dialect()) {
+    for statement in crate::db::ddl::audit_update_trigger() {
         crate::tx_execute!(&mut *conn, &statement)?;
     }
 
@@ -487,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sqlite_triggers_prevent_update_and_delete() {
+    async fn test_triggers_prevent_update_and_delete() {
         let pool = pool().await;
         let owner = "acct_charlie";
 

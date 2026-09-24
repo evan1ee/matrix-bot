@@ -58,8 +58,8 @@ pub const STATUS_UNCLAIMED: &str = "unclaimed";
 /// Phase 3 account merge — and a table missing from it is a silent data leak
 /// rather than a compile error. It drifted three tables behind the schema
 /// before `test_owned_tables_and_exceptions_match_the_schema` existed; that
-/// test now derives the truth from `PRAGMA table_info` and fails on any new
-/// `owner_id` table that nobody classified.
+/// test now derives the truth from `information_schema.columns` and fails on
+/// any new `owner_id` table that nobody classified.
 pub const OWNED_TABLES: &[&str] = &[
     "todos",
     "reminders",
@@ -190,7 +190,6 @@ mod tests {
     use super::*;
     use crate::db::schema::run_migrations;
     use crate::db::DbPool;
-    use sqlx::Row;
     use std::collections::BTreeSet;
 
     #[test]
@@ -238,28 +237,16 @@ mod tests {
 
     /// Every table in the schema that has `column`.
     async fn tables_with_column(pool: &DbPool, column: &str) -> BTreeSet<String> {
-        let tables: Vec<String> = crate::db_scalar_all!(
+        crate::db_scalar_all!(
             pool,
-            _,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            String,
+            "SELECT table_name FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND column_name = ?",
+            column
         )
-        .unwrap();
-
-        let mut found = BTreeSet::new();
-        for table in tables {
-            // `PRAGMA table_info` is SQLite-only introspection; this guard test
-            // runs on SQLite by construction.
-            let has_column = sqlx::query(&format!("PRAGMA table_info({table})"))
-                .fetch_all(pool.sqlite_or_err().unwrap())
-                .await
-                .unwrap()
-                .iter()
-                .any(|row| row.get::<String, _>("name") == column);
-            if has_column {
-                found.insert(table);
-            }
-        }
-        found
+        .unwrap()
+        .into_iter()
+        .collect()
     }
 
     fn declared(lists: &[&[&str]]) -> BTreeSet<String> {
@@ -284,9 +271,6 @@ mod tests {
     /// classified as following a merge or explicitly not, or this fails.
     #[tokio::test]
     async fn test_owned_tables_and_exceptions_match_the_schema() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
-            return;
-        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "owner_id").await;
         let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
@@ -315,9 +299,6 @@ mod tests {
     /// a row pointing at an account id that the merge is about to delete.
     #[tokio::test]
     async fn test_account_id_tables_are_all_classified() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
-            return;
-        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "account_id").await;
         let classified = declared(&[

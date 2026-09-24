@@ -423,7 +423,7 @@ mod tests {
             password: "secretpassword".to_string(),
             recovery_key: None,
             verification_allowlist: Vec::new(),
-            database_url: "sqlite::memory:".to_string(),
+            database_url: "postgres://test@localhost/test".to_string(),
             api_host: "0.0.0.0".to_string(),
             api_port: 8080,
             registration_secret: None,

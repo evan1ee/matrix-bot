@@ -1,7 +1,6 @@
 pub mod backfill;
 pub mod ddl;
 pub mod dialect;
-pub mod dialect_probe;
 pub mod executor;
 pub mod pool;
 pub mod rooms;
@@ -23,7 +22,6 @@ pub mod schema_settings;
 pub mod schema_todos;
 pub mod schema_webhooks;
 
-pub use dialect::Dialect;
 pub use executor::{DbPool, DbTx};
 pub use pool::Database;
 pub use rooms::{

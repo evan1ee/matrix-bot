@@ -236,16 +236,10 @@ impl NetWorthService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
     #[tokio::test]
     async fn test_compute_net_worth_aggregation() {
-        let pool = crate::db::DbPool::Sqlite(
-            SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
+        let pool = crate::db::pool::test_pool().await;
 
         crate::db::schema::run_migrations(&pool).await.unwrap();
 

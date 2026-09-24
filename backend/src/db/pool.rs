@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::str::FromStr;
 use tracing::info;
 
-use crate::db::dialect::Dialect;
 use crate::db::executor::DbPool;
 use crate::db::schema;
 
@@ -13,59 +10,16 @@ pub struct Database {
     pub pool: DbPool,
 }
 
-/// Opens a pool for whichever database `database_url` names.
-///
-/// Split out from `Database::connect` so the connection logic can be tested
-/// without also running migrations — the SQLite branch creates directories and
-/// sets pragmas, and those are worth asserting on their own.
+/// Opens the PostgreSQL pool. Split from `Database::connect` so tests can get a
+/// pool without running migrations.
 pub async fn connect_pool(database_url: &str, max_connections: u32) -> Result<DbPool> {
-    match Dialect::from_url(database_url) {
-        Dialect::Sqlite => {
-            // `DATABASE_URL` defaults to `data/bot_data.db`, and that directory
-            // is absent on a fresh checkout and in a fresh container.
-            if !database_url.contains("mode=memory") {
-                let raw_path = database_url
-                    .trim_start_matches("sqlite://")
-                    .split('?')
-                    .next()
-                    .unwrap_or("data/bot_data.db");
-                let path = std::path::Path::new(raw_path);
-                if let Some(parent) = path.parent() {
-                    if !parent.as_os_str().is_empty() && !parent.exists() {
-                        info!("Creating database directory: {:?}", parent);
-                        tokio::fs::create_dir_all(parent)
-                            .await
-                            .context("Failed to create database directory")?;
-                    }
-                }
-            }
-
-            let options = SqliteConnectOptions::from_str(database_url)?
-                .create_if_missing(true)
-                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-                .busy_timeout(std::time::Duration::from_secs(5));
-
-            let pool = SqlitePoolOptions::new()
-                .max_connections(max_connections)
-                .connect_with(options)
-                .await
-                .context("Failed to connect to SQLite database")?;
-
-            Ok(DbPool::Sqlite(pool))
-        }
-        Dialect::Postgres => {
-            // No directory to create and no journal mode to set: the server
-            // owns its storage. `max_connections` means the same thing on both
-            // and stays the caller's decision.
-            let pool = PgPoolOptions::new()
-                .max_connections(max_connections)
-                .connect(database_url)
-                .await
-                .context("Failed to connect to PostgreSQL database")?;
-
-            Ok(DbPool::Postgres(pool))
-        }
-    }
+    crate::config::validate_database_url(database_url)?;
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect(database_url)
+        .await
+        .context("Failed to connect to PostgreSQL")
 }
 
 /// The PostgreSQL URL the `#[ignore]`d live tests connect to.
@@ -80,30 +34,22 @@ pub fn pg_test_url() -> String {
 
 /// The pool every in-crate test runs against.
 ///
-/// SQLite in memory by default, which keeps `cargo test` instant and
-/// dependency-free. Set `TEST_DATABASE_URL` to a PostgreSQL server and the
-/// whole suite runs there instead — that is what the second CI job does, and it
-/// is the only way a query that happens to be SQLite-flavoured gets caught
-/// before production.
-///
 /// Each call gets its own PostgreSQL schema, because the suite runs in parallel
 /// and `search_path` is per connection, not per statement. The schema name
 /// carries the process id so concurrent `cargo test` runs cannot collide.
 /// Schemas are left behind: the server is a throwaway CI container, and a test
 /// that failed is more useful with its rows still in place.
 ///
-/// The pool is returned **unmigrated**; callers run whichever schema they need,
-/// exactly as they did when this was an inline `SqlitePool::connect`.
+/// The pool is returned **unmigrated**; callers run whichever schema they need.
 #[cfg(test)]
 pub async fn test_pool() -> crate::db::DbPool {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
-    let Ok(base) = std::env::var("TEST_DATABASE_URL") else {
-        return crate::db::DbPool::Sqlite(
-            sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap(),
-        );
-    };
+    let base = std::env::var("TEST_DATABASE_URL").expect(
+        "TEST_DATABASE_URL must point at a PostgreSQL server, e.g. \
+         postgres://postgres:bot@localhost:5432/postgres (see AGENTS.md)",
+    );
 
     let schema = format!(
         "t{}_{}",
@@ -120,26 +66,6 @@ pub async fn test_pool() -> crate::db::DbPool {
     let separator = if base.contains('?') { "&" } else { "?" };
     let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
     connect_pool(&scoped, 2).await.expect("scoped test pool")
-}
-
-/// Whether the current run is on SQLite, for the handful of tests that are
-/// about SQLite itself rather than about this project's behaviour.
-///
-/// Three kinds qualify, and no others should: `db::backfill`'s fixtures build a
-/// *legacy SQLite database* by hand to prove the one-shot conversion still
-/// works on one; the `accounts` and `db::schema` guards read `sqlite_master` to
-/// derive the table list from the live schema; and `db::ddl`'s probes assert
-/// SQLite's own acceptance of a portable spelling.
-///
-/// Skipping is deliberate rather than a silent pass: each caller prints why, so
-/// a PostgreSQL run says what it did not cover instead of quietly covering less.
-#[cfg(test)]
-pub fn skip_on_postgres(what: &str) -> bool {
-    if std::env::var("TEST_DATABASE_URL").is_ok() {
-        println!("skipped on PostgreSQL: {what}");
-        return true;
-    }
-    false
 }
 
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.
@@ -170,7 +96,7 @@ pub async fn drop_pg_schema(schema: &str) {
 
 impl Database {
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self> {
-        info!("Connecting to database at {}", database_url);
+        info!("Connecting to PostgreSQL");
 
         let pool = connect_pool(database_url, max_connections).await?;
 
@@ -187,46 +113,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_in_memory_connect_runs_migrations() {
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-
-        let count: i64 = crate::db_scalar_one!(&db.pool, _, "SELECT COUNT(*) FROM todos").unwrap();
-        assert_eq!(count, 0, "migrations must have created the table");
-    }
-
-    /// `DATABASE_URL` points at `data/bot_data.db` by default, and that
-    /// directory does not exist on a fresh checkout or in a fresh container.
-    #[tokio::test]
-    async fn test_creates_the_database_directory_if_missing() {
-        let dir = std::env::temp_dir().join(format!("matrix-bot-pool-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let nested = dir.join("nested");
-        let url = format!("sqlite://{}/bot.db?mode=rwc", nested.display());
-
-        let db = Database::connect(&url, 1).await.unwrap();
-        assert!(nested.exists(), "the parent directory must be created");
-
-        // Usable, not merely present.
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO web_users (username, password_hash) VALUES ('a', 'h')"
-        )
-        .unwrap();
-
-        drop(db);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn test_a_sqlite_url_yields_a_sqlite_pool() {
-        let pool = connect_pool("sqlite::memory:", 1).await.unwrap();
-        assert_eq!(pool.dialect(), Dialect::Sqlite);
+    async fn test_connect_pool_refuses_sqlite() {
+        let err = connect_pool("sqlite::memory:", 1).await.unwrap_err();
+        assert!(err.to_string().contains("DATABASE_URL"));
     }
 
     /// The refusal that used to live here is gone: every repository, the
-    /// schema and the transactions now speak both dialects, so a Postgres URL
-    /// is a supported configuration rather than a half-working one. What
-    /// remains is that an unreachable server fails as a connection error.
+    /// schema and the transactions now speak PostgreSQL only, so a Postgres URL
+    /// is the only supported configuration. What remains is that an
+    /// unreachable server fails as a connection error.
     #[tokio::test]
     async fn test_a_postgres_url_is_no_longer_refused_before_connecting() {
         let err = Database::connect("postgres://127.0.0.1:1/nonexistent", 1)
@@ -241,7 +136,7 @@ mod tests {
 
     /// The connection layer itself is finished, so this is about the *driver*,
     /// not the rollout: a Postgres URL pointing nowhere must fail as a
-    /// connection error rather than being mistaken for SQLite.
+    /// connection error.
     #[tokio::test]
     async fn test_a_postgres_url_is_routed_to_the_postgres_driver() {
         let err = connect_pool("postgres://127.0.0.1:1/nonexistent", 1)
@@ -269,7 +164,6 @@ mod tests {
     async fn test_connect_pool_connects_to_a_live_postgres() {
         let url = pg_test_url();
         let pool = connect_pool(&url, 2).await.expect("should connect");
-        assert_eq!(pool.dialect(), Dialect::Postgres);
 
         // `SELECT 1` is int4 on PostgreSQL and will not decode into i64 — the
         // same mismatch that made the schema use BIGINT everywhere.

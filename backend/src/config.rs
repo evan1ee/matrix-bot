@@ -49,13 +49,29 @@ pub fn resolve_registration_policy(
     (secret, open)
 }
 
-/// The database URL, with the default every entry point shares.
+/// The application database is PostgreSQL only; refuse anything else at boot
+/// rather than failing on the first query.
+pub fn validate_database_url(url: &str) -> anyhow::Result<()> {
+    if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "DATABASE_URL must be a PostgreSQL URL (postgres://user:pass@host:5432/db); got {:?}",
+            url.split('@').next_back().unwrap_or(url)
+        )
+    }
+}
+
+/// The database URL, required and validated.
 ///
 /// MCP mode does not build a full `Config` — it needs no Matrix credentials —
-/// but it must not carry its own copy of this default either, or the two
+/// but it must not carry its own copy of this validation either, or the two
 /// silently diverge.
-pub fn database_url_from_env() -> String {
-    env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string())
+pub fn database_url_from_env() -> Result<String> {
+    let database_url = env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL is required (a postgres:// URL)"))?;
+    validate_database_url(&database_url)?;
+    Ok(database_url)
 }
 
 /// AI provider settings that come from the environment.
@@ -224,7 +240,7 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let database_url = database_url_from_env();
+        let database_url = database_url_from_env()?;
 
         let api_host = env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
@@ -429,7 +445,7 @@ mod tests {
             password: "secretpassword".to_string(),
             recovery_key: None,
             verification_allowlist: Vec::new(),
-            database_url: "sqlite::memory:".to_string(),
+            database_url: "postgres://test@localhost/test".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
@@ -475,7 +491,7 @@ mod tests {
             password: "secretpassword".to_string(),
             recovery_key: None,
             verification_allowlist: Vec::new(),
-            database_url: "sqlite::memory:".to_string(),
+            database_url: "postgres://test@localhost/test".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
@@ -650,5 +666,18 @@ mod tests {
             offenders.is_empty(),
             "only config.rs may read the environment; found: {offenders:#?}"
         );
+    }
+
+    #[test]
+    fn test_database_url_must_be_postgres() {
+        assert!(validate_database_url("postgres://bot:bot@localhost/matrix_bot").is_ok());
+        assert!(validate_database_url("postgresql://bot@db/matrix_bot").is_ok());
+
+        let err = validate_database_url("sqlite://data/bot_data.db?mode=rwc").unwrap_err();
+        assert!(
+            err.to_string().contains("DATABASE_URL"),
+            "error must name the variable: {err}"
+        );
+        assert!(validate_database_url("").is_err());
     }
 }
