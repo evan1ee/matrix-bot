@@ -1,1661 +1,1069 @@
 # Matrix Bot — Complete Architecture Design & Implementation Specification
 
-## 1. Architecture Goal
-
-The Matrix Bot should evolve into a **Personal AI / Life Workspace** built around:
-
-* Rust
-* Matrix
-* Axum
-* React 19
-* PostgreSQL
-* LLM
-* MCP
-* Optional Agent Runtime
-* Persistent background jobs
-* External STT / TTS / OCR services
-* Object storage
-
-The core architectural principle is:
-
-> **Matrix is the primary interaction interface, Web is the management/visualization interface, LLM is the AI Interface Layer, Agent is the future orchestration layer, Domain Services contain the actual business logic, and PostgreSQL is the central persistent state and durable job system.**
-
-The application should be designed so that Matrix, Web, MCP, LLM, and Agent all reuse the same application/domain capabilities rather than implementing separate business logic.
+> **Version:** 2.0.0-draft  
+> **Status:** Target Architectural Specification  
+> **Target Database:** PostgreSQL 16+ Exclusively (SQLite Deprecated & Removed)  
+> **Target Platforms:** Matrix (E2EE), Web (React 19 SPA), MCP (Model Context Protocol), External AI Agents  
 
 ---
 
-# 2. High-Level Architecture
+## 1. Executive Summary & Architectural Vision
+
+The `matrix-bot` platform is evolving from a single-user hybrid chat-bot into a robust, multi-tenant **Personal AI & Life Workspace**. The system unifies daily productivity, personal finance, investment tracking, knowledge management, location logging, and AI assistance into a cohesive, self-hosted platform.
+
+### Core Architectural Principle
+
+> **Matrix is the conversational interaction interface; Web is the visual management and analytics interface; MCP is the external AI developer interface; LLMs act as the Natural Language understanding layer; Agents orchestrate multi-step autonomous workflows; Domain Services encapsulate all business invariants; and PostgreSQL is the sole, authoritative source of truth for persistent state, durable jobs, and transactional outbox events.**
 
 ```text
-                                      ┌─────────────────────┐
-                                      │   Claude / Cursor   │
-                                      │   External LLM      │
-                                      └──────────┬──────────┘
-                                                 │
-                                            MCP / HTTP
-                                                 │
-                                                 ▼
-┌──────────────────┐                  ┌──────────────────────┐
-│   Matrix Client  │                  │      Web Browser     │
-│ Element X / etc. │                  │ React Web Console    │
-└────────┬─────────┘                  └──────────┬───────────┘
-         │                                       │
-         │ Matrix                                │ REST / SSE
-         ▼                                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│                         MATRIX BOT                            │
-│                       Rust / Axum                            │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                    Interface Layer                     │  │
-│  │                                                        │  │
-│  │  Matrix Handler    Web API    MCP Server    LLM API    │  │
-│  └───────────┬────────────┬────────────┬─────────────────┘  │
-│              │            │            │                    │
-│              └────────────┴────────────┘                    │
-│                           │                                  │
-│                           ▼                                  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                Application / Orchestration             │  │
-│  │                                                        │  │
-│  │ Command Router   AI Router   Agent Runtime   Workflows │  │
-│  └──────────────────────────┬─────────────────────────────┘  │
-│                             │                                │
-│              ┌──────────────┴──────────────┐                 │
-│              │                             │                 │
-│              ▼                             ▼                 │
-│  ┌─────────────────────────┐    ┌────────────────────────┐  │
-│  │      Domain Layer       │    │     Job System         │  │
-│  │                         │    │                        │  │
-│  │ Todo                    │    │ Durable Jobs           │  │
-│  │ Finance                 │    │ Retry / Schedule       │  │
-│  │ Portfolio               │    │ Workers                │  │
-│  │ Bills                   │    │                        │  │
-│  │ Bookmarks               │    │ STT / TTS / OCR         │  │
-│  │ Habits                  │    │ News / Agent Jobs       │  │
-│  │ Journal                 │    │ Media Processing        │  │
-│  │ Footprints              │    │                        │  │
-│  └────────────┬────────────┘    └────────────┬────────────┘  │
-│               │                              │               │
-│               └──────────────┬───────────────┘               │
-│                              ▼                               │
-│                    ┌──────────────────┐                      │
-│                    │ Repository / DB   │                      │
-│                    │      Layer       │                      │
-│                    └────────┬─────────┘                      │
-└─────────────────────────────┼────────────────────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │   PostgreSQL     │
-                    │                  │
-                    │ Domain Data      │
-                    │ Jobs             │
-                    │ Agent State      │
-                    │ Outbox           │
-                    │ Audit            │
-                    └──────────────────┘
-
-         ┌────────────────────────────────────────────┐
-         │             External AI Services           │
-         │                                            │
-         │ STT │ TTS │ OCR │ LLM │ Search │ Embedding│
-         └────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                           INTERACTION SURFACES                         │
+│                                                                        │
+│   ┌──────────────────┐   ┌────────────────────┐   ┌─────────────────┐  │
+│   │  Matrix Clients  │   │   Web Browser UI   │   │  MCP Clients    │  │
+│   │  (Element X/E2EE)│   │  (React 19 / SSE)  │   │  (Cursor/Claude)│  │
+│   └────────┬─────────┘   └─────────┬──────────┘   └────────┬────────┘  │
+└────────────┼───────────────────────┼───────────────────────┼───────────┘
+             │                       │                       │
+             ▼                       ▼                       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        INTERFACE ADAPTER LAYER                         │
+│                                                                        │
+│     Matrix Handler         Axum REST & SSE           MCP Server        │
+└────────────┬───────────────────────┬───────────────────────┬───────────┘
+             │                       │                       │
+             └───────────────────────┼───────────────────────┘
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                     AI & ORCHESTRATION SUBSYSTEM                       │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │                     Unified Tool Registry                      │   │
+│   │    (OpenAI Function Schemas, Permission Gates, Dispatch)       │   │
+│   └──────────────┬──────────────────────────────────┬──────────────┘   │
+│                  │                                  │                  │
+│                  ▼                                  ▼                  │
+│       ┌──────────────────────┐           ┌──────────────────────┐      │
+│       │   LLM Tool Gateway   │           │    Agent Runtime     │      │
+│       │   (Single-turn ReAct)│           │ (Multi-step Planner) │      │
+│       └──────────┬───────────┘           └──────────┬───────────┘      │
+└──────────────────┼──────────────────────────────────┼──────────────────┘
+                   │                                  │
+                   └─────────────────┬────────────────┘
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                       APPLICATION SERVICE LAYER                        │
+│                                                                        │
+│      Use Case Handlers  •  Command / Query Bus  •  Tx Orchestration     │
+└────────────┬───────────────────────────────────────────────┬───────────┘
+             │                                               │
+             ▼                                               ▼
+┌─────────────────────────────┐               ┌──────────────────────────┐
+│        DOMAIN LAYER         │               │     DURABLE JOB SYSTEM   │
+│                             │               │                          │
+│  Todos & Reminders          │               │  STT & Voice Processing  │
+│  Finance & Expenses         │               │  TTS Audio Synthesis     │
+│  Portfolio & Trading        │               │  OCR Receipt Extraction  │
+│  Recurring Bills            │               │  Daily Briefings & News  │
+│  Bookmarks & Reading List   │               │  Scheduled Reminders     │
+│  Habits & Routines          │               │  Long-Running Agent Runs │
+│  Journal & Footprints       │               │  Transactional Outbox    │
+└────────────┬────────────────┘               └──────────────┬───────────┘
+             │                                               │
+             └───────────────────────┬───────────────────────┘
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                     DATA & INFRASTRUCTURE LAYER                        │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │                      PostgreSQL 16+ (Only)                     │   │
+│   │   Domain Tables  •  Jobs Queue (SKIP LOCKED)  •  Outbox Events │   │
+│   │   Agent State    •  Audit Logs  •  Sessions  •  Full-Text FTS  │   │
+│   └────────────────────────────────┬───────────────────────────────┘   │
+│                                    │                                   │
+│              ┌─────────────────────┴────────────────────┐              │
+│              ▼                                          ▼              │
+│   ┌──────────────────────┐                   ┌──────────────────────┐  │
+│   │    Object Storage    │                   │   External / Local   │  │
+│   │  (S3 / R2 / Local)   │                   │   Inference Engine   │  │
+│   │ Audio, Images, OCR   │                   │ (Kokoro, Sherpa STT) │  │
+│   └──────────────────────┘                   └──────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# 3. Database Decision: PostgreSQL Only
+## 2. Standardization on PostgreSQL: Complete Removal of SQLite
 
-The project should now standardize on **PostgreSQL as the only supported database backend**.
+### 2.1 The Architectural Decision
 
-Do not maintain separate SQLite and PostgreSQL implementations.
+**SQLite support is completely removed from the project.** PostgreSQL 16+ becomes the sole supported database backend across development, testing, and production.
 
-### Reasons
+### 2.2 Rationale and Technical Debt Elimination
 
-PostgreSQL provides:
+Maintaining a dual-dialect database abstraction layer created massive incidental complexity and hindered system capabilities:
 
-* Strong concurrency
-* Multi-user support
-* Reliable transactions
-* Row-level locking
-* `SELECT ... FOR UPDATE SKIP LOCKED`
-* Durable background job queues
-* Agent state persistence
-* Outbox pattern support
-* Future `pgvector` support
-* Better support for multiple workers
-* Easier future horizontal scaling
+1. **Elimination of the Dual-Dialect Macro Layer:**
+   The project previously maintained over 700 lines of complex macros in `backend/src/db/executor.rs` (`db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!`, `tx_*`) and the `DbPool` enum (`Sqlite(SqlitePool)` vs `Postgres(PgPool)`). Removing SQLite eliminates this layer entirely in favor of idiomatic, type-safe, direct `sqlx::PgPool` and `sqlx::query!` / `sqlx::query_as!` usage.
+2. **Elimination of Runtime Query Rewriting:**
+   `dialect::render_placeholders` dynamically parsed and rewritten every query from SQLite `?` syntax to PostgreSQL `$1..$n` at runtime. Eliminating this provides zero runtime translation overhead, unlocks native prepared statement caching, and allows direct SQL compilation.
+3. **Removal of Token-Substituted DDL Hackery:**
+   `db/ddl.rs` and macro tokens (`{{PK}}`, `{{NOW_TEXT}}`, `{{TIMESTAMPTZ}}`) are deleted. Database migrations become native, standard, transactional PostgreSQL DDL.
+4. **Unlocking Advanced PostgreSQL Capabilities:**
+   * **Durable Job Queues:** Native `SELECT ... FOR UPDATE SKIP LOCKED` enables a high-throughput, multi-worker persistent job queue without external dependencies like Redis or RabbitMQ.
+   * **Transactional Outbox:** Atomic writes of domain state changes and outbox notification records in a single database transaction.
+   * **Strict Typing:** Native `UUID`, `TIMESTAMPTZ` (microsecond precision), `BOOLEAN`, `JSONB`, `NUMERIC`, and `BIGINT` without dialect impedance mismatches or string fallbacks.
+   * **Advisory Locks (`pg_advisory_xact_lock`):** Cluster-safe single-flight operations, scheduler leader election, and atomic critical sections.
+   * **Full-Text & Vector Search:** Native `tsvector`/`tsquery` for search across bookmarks, notes, and journal entries, with seamless future adoption of `pgvector` for RAG.
+   * **Listen / Notify (`LISTEN` / `NOTIFY`):** Instant outbox event dispatch and SSE wakeups without polling latency.
 
-This also significantly reduces code complexity.
+### 2.3 SQLite Deprecation & Removal Inventory
 
-Avoid code such as:
+The refactor involves removing the following files and constructs:
 
-```rust
-if sqlite {
-    ...
-} else if postgres {
-    ...
-}
-```
-
-The application should assume PostgreSQL.
-
----
-
-# 4. Six Major Layers
-
-The architecture should be organized into six conceptual layers:
-
-```text
-1. Interface Layer
-2. Application Layer
-3. Agent Layer
-4. Domain Layer
-5. Infrastructure Layer
-6. Data Layer
-```
-
-Responsibilities must remain separated.
+| Component | Target Action | Consequence |
+|---|---|---|
+| `backend/src/db/executor.rs` | **Delete** dual-dialect macros and `DbPool` enum | Replace with direct `sqlx::PgPool` and repository methods |
+| `backend/src/db/dialect.rs` | **Delete** entirely | No runtime placeholder rewriting (`?` -> `$1..$n`) |
+| `backend/src/db/dialect_probe.rs` | **Delete** entirely | No dual `FromRow` probe required |
+| `backend/src/db/ddl.rs` | **Delete** entirely | Native PostgreSQL DDL replaces token substitution |
+| `backend/src/db/backfill.rs` | **Deprecate / Simplify** | Remove legacy SQLite table migration and SQLite fixtures |
+| `backend/src/db/pool.rs` | **Refactor** | Retain only `PgPoolOptions` configuration and health check |
+| In-memory SQLite tests | **Replace** | Tests run against a transient PostgreSQL database / testcontainers |
+| Unversioned `schema_*.rs` | **Transition** | Migrate to forward-only versioned migrations (`migrations/*.sql`) |
 
 ---
 
-# 5. Interface Layer
+## 3. System Architecture & Six-Layer Model
 
-The Interface Layer exposes the application to external users and systems.
-
-```text
-Interface
-├── Matrix
-├── Web API
-├── MCP
-└── LLM Interface
-```
-
-## Matrix Interface
-
-The Matrix layer handles:
-
-* Matrix events
-* Messages
-* Commands
-* Reactions
-* Media
-* Voice messages
-* Locations
-* Rooms
-* Users
-
-The Matrix layer must NOT directly access SQL or repositories.
-
-Use:
+The system is structured as a strict **Layered & Hexagonal Architecture** to enforce separation of concerns, testability, and multi-interface reuse.
 
 ```text
-Matrix Event
-    ↓
-Command / AI Router
-    ↓
-Application Service
-```
-
----
-
-# 6. Web API
-
-The React 19 frontend should communicate with the Rust backend through Axum REST APIs and SSE.
-
-```text
-React 19
-    ↓
-Axum REST API
-    ↓
-Application Layer
-    ↓
-Domain Services
-    ↓
-PostgreSQL
-```
-
-The Web API must reuse the same application/domain services as Matrix and MCP.
-
-For example:
-
-```text
-Matrix:
-"show my expenses"
-
-Web:
-GET /api/expenses
-
-MCP:
-finance.list_expenses()
-
-LLM:
-"what did I spend yesterday?"
-```
-
-All should eventually use:
-
-```text
-FinanceService
-```
-
-There must not be three independent implementations of Finance logic.
-
----
-
-# 7. MCP Server
-
-MCP should be treated as another Interface Layer.
-
-Architecture:
-
-```text
-Claude Desktop
-Cursor
-External LLM
-       │
-       ▼
-      MCP
-       │
-       ▼
-┌─────────────────────┐
-│   MCP Tool Adapter  │
-└──────────┬──────────┘
-           ▼
-    Application Layer
-           ▼
-      Domain Services
-           ▼
-       PostgreSQL
-```
-
-MCP tools must NOT directly access repositories.
-
-Use:
-
-```text
-MCP Tool
-    ↓
-Application Service
-    ↓
-Domain Service
-    ↓
-Repository
-    ↓
-PostgreSQL
-```
-
----
-
-# 8. LLM Interface Layer
-
-The LLM is an **Interface Layer**, not the business logic layer.
-
-Example:
-
-```text
-User:
-"Yesterday I spent $15 on lunch. Record it."
-
-       ↓
-
-LLM
-       ↓
-Tool Call
-       ↓
-finance.create_expense
-       ↓
-FinanceService
-       ↓
-PostgreSQL
-```
-
-Example tool call:
-
-```json
-{
-  "tool": "finance.create_expense",
-  "arguments": {
-    "amount": 15,
-    "category": "food",
-    "date": "2026-09-23"
-  }
-}
-```
-
-Important:
-
-> The LLM should never own business rules.
-
-Business rules must remain in Domain/Application services.
-
----
-
-# 9. Unified Tool Registry
-
-The existing domain tools should become a unified Tool Registry.
-
-Example:
-
-```text
-Tool Registry
-├── todo.create
-├── todo.list
-├── todo.complete
-├── finance.create
-├── finance.list
-├── portfolio.get
-├── reminder.create
-├── bookmark.search
-├── habit.create
-└── ...
-```
-
-The same Tool Registry should be usable by:
-
-```text
-Matrix AI
-Web AI
-MCP
-Agent
-```
-
-Architecture:
-
-```text
-                Tool Registry
-                     ▲
-       ┌─────────────┼──────────────┐
-       │             │              │
-     Matrix          MCP           Agent
-       │             │              │
-       └─────────────┴──────────────┘
-```
-
-This is a critical architectural component.
-
----
-
-# 10. Agent Layer
-
-Agent should be introduced as an orchestration layer, not as a replacement for the existing LLM/tool system.
-
-The architecture should support:
-
-```text
-LLM + Tool Calling
-       │
-       ├── Simple task → Direct Tool
-       │
-       └── Complex task → Agent Runtime
-```
-
-Example simple task:
-
-```text
-"Add a $15 lunch expense."
-```
-
-Use:
-
-```text
-LLM → Tool → Database
-```
-
-No Agent is required.
-
-Example complex task:
-
-```text
-"Collect today's important news,
-summarize it,
-generate audio,
-and send it to Matrix."
-```
-
-Use:
-
-```text
-Agent
- ↓
-Search
- ↓
-Collect
- ↓
-Summarize
- ↓
-Create TTS Job
- ↓
-Worker
- ↓
-Matrix
-```
-
----
-
-# 11. Agent Runtime
-
-The Agent Runtime should be independently designed.
-
-```text
-AgentRuntime
-├── AgentContext
-├── Task State
-├── Tool Registry
-├── Tool Executor
-├── Step Limit
-├── Timeout
-├── Retry
-├── Cancellation
-└── Job Integration
-```
-
-Typical loop:
-
-```text
-Agent
- │
- ├── Think
- │
- ├── Tool Call
- │
- ├── Observe
- │
- ├── Tool Call
- │
- ├── Observe
- │
- └── Final Response
-```
-
-The runtime must enforce limits:
-
-```text
-max_steps
-max_duration
-max_tool_calls
-max_tokens
-```
-
-Never allow an unbounded agent loop.
-
----
-
-# 12. Domain Layer
-
-The Domain Layer contains the actual business capabilities.
-
-Recommended modules:
-
-```text
-domain/
-├── todos/
-├── finance/
-├── portfolio/
-├── bills/
-├── bookmarks/
-├── habits/
-├── journal/
-├── footprints/
-├── reminders/
-└── users/
-```
-
-Each domain should contain concepts such as:
-
-```text
-Entity
-Value Objects
-Domain Services
-Repository Traits
-Business Rules
-```
-
-Example:
-
-```text
-TodoService
-    ↓
-TodoRepository
-    ↓
-PostgreSQL
-```
-
-The Domain Layer should not depend on Matrix, React, MCP, or a specific LLM provider.
-
----
-
-# 13. Background Job System
-
-The application should include a **persistent background job system**.
-
-Do NOT introduce Redis, RabbitMQ, or Kafka at this stage.
-
-Use PostgreSQL as the durable job queue.
-
-```text
-Application
-    ↓
-PostgreSQL jobs table
-    ↓
-Worker
-    ↓
-External Service / Domain Operation
-```
-
-Suitable job types include:
-
-```text
-stt
-tts
-ocr
-
-news_fetch
-news_summarize
-
-media_process
-
-reminder_execute
-
-agent_task
-```
-
-Future jobs may include:
-
-```text
-embedding
-backup
-export
-sync
-notification
-```
-
----
-
-# 14. Job Lifecycle
-
-Jobs should support:
-
-```text
-pending
-running
-completed
-failed
-cancelled
-```
-
-Typical lifecycle:
-
-```text
-              ┌────────────┐
-              │  pending   │
-              └─────┬──────┘
-                    │
-                    ▼
-              ┌────────────┐
-              │   running  │
-              └─────┬──────┘
-                    │
-          ┌─────────┴─────────┐
-          ▼                   ▼
-    ┌───────────┐       ┌──────────┐
-    │ completed │       │  failed  │
-    └───────────┘       └────┬─────┘
-                             │
-                          retry?
-                             │
+┌────────────────────────────────────────────────────────┐
+│ 1. INTERFACE LAYER                                     │
+│    Matrix Handlers  •  Axum REST & SSE  •  MCP Server  │
+└───────────────────────────┬────────────────────────────┘
+                            │ Calls use cases
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ 2. APPLICATION LAYER                                   │
+│    Commands  •  Queries  •  Workflows  •  Permissions  │
+└──────────────┬──────────────────────────┬──────────────┘
+               │                          │
+               ▼                          ▼
+┌──────────────────────────┐   ┌─────────────────────────┐
+│ 3. AI & AGENT LAYER      │   │ 4. DOMAIN LAYER         │
+│    Tool Registry         │   │    Entities & Invariants│
+│    LLM Gateway           │   │    Domain Services      │
+│    Agent Runtime (ReAct) │   │    Value Objects        │
+│    Context Assemblers    │   │    Domain Events        │
+└──────────────┬───────────┘   └──────────┬──────────────┘
+               │                          │
+               └─────────────┬────────────┘
+                             │ Persists & Schedules
                              ▼
-                         pending
+┌────────────────────────────────────────────────────────┐
+│ 5. JOB & EVENT SUBSYSTEM                               │
+│    Durable Jobs (SKIP LOCKED)  •  Transactional Outbox │
+└───────────────────────────┬────────────────────────────┘
+                            │ Implements via adapters
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ 6. DATA & INFRASTRUCTURE LAYER                         │
+│    PostgreSQL Repositories  •  S3 Storage  •  AI Clients│
+└────────────────────────────────────────────────────────┘
 ```
 
-Support:
+### 3.1 Layer Responsibilities & Invariants
 
-* Retry
-* Exponential backoff
-* Timeout
-* Cancellation
-* Priority
-* Scheduled execution
-* Maximum attempts
+1. **Interface Layer (`src/interface/`):**
+   * Translates incoming protocol requests (Matrix room messages, HTTP REST payloads, MCP JSON-RPC calls) into strongly typed Application Commands and Queries.
+   * Formats domain responses into protocol-specific outputs (Matrix HTML with fallbacks, Axum JSON responses, SSE event payloads, MCP tool results).
+   * **Rule:** Zero business logic; zero direct SQL execution.
+2. **Application Layer (`src/application/`):**
+   * Implements specific use cases (e.g., `CreateTodoCommand`, `RecordExpenseCommand`, `ExecuteTradeCommand`).
+   * Manages transaction boundaries (`sqlx::Transaction<'_, Postgres>`).
+   * Dispatches domain events to the Transactional Outbox.
+   * Enforces cross-domain orchestration (e.g., receipt image uploaded -> enqueue OCR job -> parse expense -> notify user).
+3. **AI & Agent Layer (`src/agent/` and `src/ai/`):**
+   * Maintains the **Unified Tool Registry**, exposing domain capabilities to LLMs and Agents as standard schemas.
+   * Manages the **Agent Runtime**, providing a deterministic, step-bounded ReAct execution loop with persistent state tracking in PostgreSQL.
+   * Assembles dynamic system prompts combining user preferences, room context, and permission filters.
+4. **Domain Layer (`src/domain/`):**
+   * Encapsulates enterprise business rules, entities, and value objects (e.g., `Money`, `Holding`, `RecurrenceSchedule`).
+   * Expresses operations as pure domain methods enforcing business invariants (e.g., "cannot buy securities without sufficient cash balance").
+   * **Rule:** Completely decoupled from web frameworks, Matrix SDK, and database libraries.
+5. **Job & Event Subsystem (`src/jobs/` and `src/events/`):**
+   * Houses the durable PostgreSQL job queue, worker pool orchestration, retry policies, and dead-letter handling.
+   * Implements the Transactional Outbox pattern with `LISTEN` / `NOTIFY` and poll fallback for guaranteed event delivery.
+6. **Data & Infrastructure Layer (`src/infrastructure/`):**
+   * Implements repository traits using native PostgreSQL SQLx queries.
+   * Manages external clients: S3/R2 storage, Matrix homeserver HTTP client, local/remote STT/TTS/OCR engines.
 
 ---
 
-# 15. PostgreSQL Job Queue
+## 4. PostgreSQL Database Architecture & Schema Specification
 
-Suggested schema:
+All relational, unstructured (JSONB), and queuing state resides in PostgreSQL 16+.
+
+### 4.1 Primary Database Standards
+
+* **Identifiers:** Standardized on `UUIDv7` or `UUIDv4` for global unique identifiers across all primary keys.
+* **Timestamps:** Standardized on `TIMESTAMPTZ` (UTC). Application code uses `chrono::DateTime<Utc>`.
+* **Money & Finance:** All currency amounts are represented as `BIGINT` representing minor units (e.g., cents, satoshis) alongside a 3-character ISO 4217 currency code (`VARCHAR(3)`), or high-precision `NUMERIC(18, 4)` where fractional units are required.
+* **Quantities:** Investment quantities use `BIGINT` with an 8-decimal fixed exponent or `NUMERIC(24, 8)`.
+* **Booleans:** Native PostgreSQL `BOOLEAN` (`TRUE` / `FALSE`).
+* **Unstructured Payloads:** Native PostgreSQL `JSONB` with `GIN` indexing where queried.
+
+### 4.2 Core Schemas
+
+#### 4.2.1 Multi-Tenant Accounts & Authentication
+
+```sql
+-- Core User Account (Owner of all data)
+CREATE TABLE accounts (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    display_name        TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'unclaimed', 'suspended')),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Matrix Identities linked to an Account (1-to-Many)
+CREATE TABLE matrix_links (
+    mxid                TEXT PRIMARY KEY,
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    linked_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_matrix_links_account ON matrix_links(account_id);
+
+-- WebAuthn / Passkey Credentials
+CREATE TABLE webauthn_credentials (
+    id                  BYTEA PRIMARY KEY,
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    public_key          BYTEA NOT NULL,
+    counter             BIGINT NOT NULL DEFAULT 0,
+    aaguid              UUID NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at        TIMESTAMPTZ
+);
+
+CREATE INDEX idx_webauthn_account ON webauthn_credentials(account_id);
+
+-- Web Sessions (Indexed by SHA-256 hash of the session token)
+CREATE TABLE web_sessions (
+    token_hash          BYTEA PRIMARY KEY,
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    last_asserted_at    TIMESTAMPTZ NOT NULL,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_sessions_account ON web_sessions(account_id);
+CREATE INDEX idx_sessions_expires ON web_sessions(expires_at);
+
+-- User Settings
+CREATE TABLE user_settings (
+    account_id          UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    timezone            TEXT NOT NULL DEFAULT 'UTC',
+    default_currency    VARCHAR(3) NOT NULL DEFAULT 'USD',
+    tts_voice           TEXT,
+    ai_model            TEXT,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+#### 4.2.2 Productivity: Todos & Reminders
+
+```sql
+CREATE TABLE todos (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    title               TEXT NOT NULL,
+    description         TEXT,
+    completed           BOOLEAN NOT NULL DEFAULT FALSE,
+    completed_at        TIMESTAMPTZ,
+    due_at              TIMESTAMPTZ,
+    priority            SMALLINT NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 3),
+    tags                TEXT[] NOT NULL DEFAULT '{}',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_todos_account_pending ON todos(account_id) WHERE completed = FALSE;
+CREATE INDEX idx_todos_due_at ON todos(due_at) WHERE completed = FALSE;
+
+CREATE TABLE reminders (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    room_id             TEXT,
+    message             TEXT NOT NULL,
+    remind_at           TIMESTAMPTZ NOT NULL,
+    recurrence_rule     TEXT, -- Optional iCalendar RRULE
+    dispatched          BOOLEAN NOT NULL DEFAULT FALSE,
+    dispatched_at       TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_reminders_pending ON reminders(remind_at) WHERE dispatched = FALSE;
+```
+
+#### 4.2.3 Personal Finance & Investment Portfolio
+
+```sql
+-- Finance Transactions
+CREATE TABLE transactions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    amount_minor        BIGINT NOT NULL,
+    currency            VARCHAR(3) NOT NULL,
+    category            TEXT NOT NULL,
+    description         TEXT NOT NULL,
+    occurred_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    receipt_storage_key TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_transactions_account_date ON transactions(account_id, occurred_at DESC);
+CREATE INDEX idx_transactions_category ON transactions(account_id, category);
+
+-- Portfolio Cash Balances (per currency)
+CREATE TABLE portfolio_cash_balances (
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    currency            VARCHAR(3) NOT NULL,
+    balance_minor       BIGINT NOT NULL DEFAULT 0,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_id, currency)
+);
+
+-- Portfolio Holdings (Investment Assets)
+CREATE TABLE portfolio_holdings (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    symbol              TEXT NOT NULL,
+    currency            VARCHAR(3) NOT NULL,
+    quantity_scaled     BIGINT NOT NULL, -- Scaled by 10^8 for fractional shares/crypto
+    avg_cost_minor      BIGINT NOT NULL, -- Weighted average cost per unit
+    current_price_minor BIGINT,          -- Last known price per unit
+    last_priced_at      TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_account_symbol UNIQUE (account_id, symbol)
+);
+
+-- Trade Audit Log
+CREATE TABLE portfolio_trades (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    symbol              TEXT NOT NULL,
+    side                TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+    quantity_scaled     BIGINT NOT NULL,
+    price_minor         BIGINT NOT NULL,
+    currency            VARCHAR(3) NOT NULL,
+    gross_proceeds_minor BIGINT NOT NULL,
+    realized_pl_minor   BIGINT,
+    executed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_trades_account ON portfolio_trades(account_id, executed_at DESC);
+```
+
+#### 4.2.4 Knowledge & Life Workspace
+
+```sql
+-- Bookmarks & Reading List
+CREATE TABLE bookmarks (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    url                 TEXT NOT NULL,
+    title               TEXT NOT NULL,
+    summary             TEXT,
+    content_text        TEXT,
+    tags                TEXT[] NOT NULL DEFAULT '{}',
+    is_archived         BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_bookmarks_account ON bookmarks(account_id);
+CREATE INDEX idx_bookmarks_fts ON bookmarks USING GIN(to_tsvector('english', title || ' ' || COALESCE(summary, '') || ' ' || COALESCE(content_text, '')));
+
+-- Habits Tracker
+CREATE TABLE habits (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    frequency_days      SMALLINT NOT NULL DEFAULT 1,
+    target_count        INTEGER NOT NULL DEFAULT 1,
+    archived            BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE habit_logs (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    habit_id            UUID NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+    logged_date         DATE NOT NULL,
+    count               INTEGER NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_habit_date UNIQUE (habit_id, logged_date)
+);
+
+-- Journal & Notes
+CREATE TABLE journal_entries (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    content             TEXT NOT NULL,
+    mood                SMALLINT CHECK (mood BETWEEN 1 AND 5),
+    tags                TEXT[] NOT NULL DEFAULT '{}',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_journal_account_date ON journal_entries(account_id, created_at DESC);
+CREATE INDEX idx_journal_fts ON journal_entries USING GIN(to_tsvector('english', content));
+
+-- Geolocation Footprints
+CREATE TABLE footprints (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    latitude            DOUBLE PRECISION NOT NULL,
+    longitude           DOUBLE PRECISION NOT NULL,
+    accuracy_meters     DOUBLE PRECISION,
+    location_name       TEXT,
+    recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_footprints_account_time ON footprints(account_id, recorded_at DESC);
+```
+
+---
+
+## 5. Durable PostgreSQL Job Queue Engine
+
+The system uses PostgreSQL's native row locking (`FOR UPDATE SKIP LOCKED`) to implement a robust, persistent, multi-worker background job queue. External queues (Redis/Celery/RabbitMQ) are strictly avoided.
+
+### 5.1 Job Schema
 
 ```sql
 CREATE TABLE jobs (
-    id              UUID PRIMARY KEY,
-    user_id         UUID,
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id      UUID REFERENCES accounts(id) ON DELETE CASCADE,
     job_type        TEXT NOT NULL,
     payload         JSONB NOT NULL,
-
-    status          TEXT NOT NULL,
-
-    priority        INTEGER NOT NULL DEFAULT 0,
-
+    status          TEXT NOT NULL DEFAULT 'pending' 
+                    CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    priority        SMALLINT NOT NULL DEFAULT 0,
     attempts        INTEGER NOT NULL DEFAULT 0,
     max_attempts    INTEGER NOT NULL DEFAULT 3,
-
-    available_at    TIMESTAMPTZ NOT NULL,
-
+    backoff_seconds INTEGER NOT NULL DEFAULT 10,
+    available_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     locked_at       TIMESTAMPTZ,
     locked_by       TEXT,
-
     started_at      TIMESTAMPTZ,
     completed_at    TIMESTAMPTZ,
-
     error           TEXT,
-
-    created_at      TIMESTAMPTZ NOT NULL,
-    updated_at      TIMESTAMPTZ NOT NULL
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Index for instant worker dequeue without scanning running or completed jobs
+CREATE INDEX idx_jobs_dequeue ON jobs (priority DESC, available_at ASC)
+WHERE status = 'pending';
+
+-- Index for monitoring, stuck worker detection, and cleanup
+CREATE INDEX idx_jobs_running ON jobs (locked_at)
+WHERE status = 'running';
 ```
 
-For multiple workers, use PostgreSQL row locking and `SKIP LOCKED` for job claiming.
+### 5.2 Atomic Job Dequeue & Worker Protocol
 
-Example conceptual flow:
+Workers poll or wake on `LISTEN` and acquire jobs using an atomic query:
+
+```sql
+WITH next_job AS (
+    SELECT id
+    FROM jobs
+    WHERE status = 'pending'
+      AND available_at <= NOW()
+    ORDER BY priority DESC, available_at ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE jobs
+SET status = 'running',
+    locked_at = NOW(),
+    locked_by = $1, -- worker identifier (hostname:pid:uuid)
+    started_at = NOW(),
+    attempts = attempts + 1,
+    updated_at = NOW()
+FROM next_job
+WHERE jobs.id = next_job.id
+RETURNING jobs.*;
+```
+
+### 5.3 Error Handling, Backoff, and Dead-Letter Protocol
+
+When a job execution fails:
+* If `attempts < max_attempts`:
+  * Calculate exponential backoff: `available_at = NOW() + (backoff_seconds * 2^(attempts - 1))`.
+  * Set `status = 'pending'`, `locked_at = NULL`, `locked_by = NULL`, `error = $error`.
+* If `attempts >= max_attempts`:
+  * Transition to dead-letter state: `status = 'failed'`, `completed_at = NOW()`, `error = $error`.
+  * Emit an alert event via the Transactional Outbox.
+
+### 5.4 Stuck Worker Reaper
+
+A background task runs periodically to reclaim jobs where `status = 'running'` and `locked_at < NOW() - INTERVAL '15 minutes'`:
+* Reset such jobs to `status = 'pending'`, increment `attempts`, or mark as `failed` if timeout exceeded.
+
+---
+
+## 6. Transactional Outbox Pattern & Notification Subsystem
+
+To guarantee that state changes reliably produce Matrix messages, Web SSE events, and audit logs without distributed transaction inconsistency, the system implements the **Transactional Outbox Pattern**.
+
+### 6.1 Outbox Schema
+
+```sql
+CREATE TABLE outbox_events (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id      UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    event_type      TEXT NOT NULL,
+    payload         JSONB NOT NULL,
+    idempotency_key TEXT UNIQUE,
+    published       BOOLEAN NOT NULL DEFAULT FALSE,
+    published_at    TIMESTAMPTZ,
+    error           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_outbox_pending ON outbox_events(created_at ASC)
+WHERE published = FALSE;
+```
+
+### 6.2 Outbox Processing Lifecycle
 
 ```text
-                 PostgreSQL
-                     │
-       ┌─────────────┼─────────────┐
-       ▼             ▼             ▼
-    Worker 1      Worker 2      Worker 3
-       │             │             │
-      TTS           OCR           STT
+┌────────────────────────────────────────────────────────┐
+│               Application Service Mutation             │
+│                                                        │
+│  BEGIN TRANSACTION;                                    │
+│    1. INSERT INTO transactions (...) VALUES (...);     │
+│    2. UPDATE portfolio_cash_balances SET ...;         │
+│    3. INSERT INTO outbox_events (                      │
+│         account_id, event_type, payload                │
+│       ) VALUES (...);                                  │
+│    4. PERFORM pg_notify('outbox_channel', id::text);   │
+│  COMMIT;                                               │
+└───────────────────────────┬────────────────────────────┘
+                            │ (Zero chance of missing event)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                 Outbox Dispatcher Daemon               │
+│                                                        │
+│  1. Woken by LISTEN outbox_channel (or 1s timer)       │
+│  2. SELECT ... FROM outbox_events                      │
+│     WHERE published = FALSE                            │
+│     FOR UPDATE SKIP LOCKED LIMIT 50;                   │
+│  3. Fan-out concurrently:                              │
+│     ├── Broadcast to Axum Web SSE channel              │
+│     ├── Route to Matrix DM / Room Client               │
+│     └── Trigger Webhook integrations                   │
+│  4. UPDATE outbox_events                               │
+│     SET published = TRUE, published_at = NOW()         │
+│     WHERE id IN (...);                                 │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# 16. Durable Jobs vs Ephemeral Events
+## 7. Unified Tool Registry & AI Architecture
 
-Not everything should become a database job.
+The system decouples tool execution from specific LLM providers and user interfaces. A single **Unified Tool Registry** serves Matrix conversational AI, the Web AI console, MCP servers, and autonomous Agent workflows.
 
-### Durable jobs
+### 7.1 Architectural Position of LLMs and Agents
 
-Persist in PostgreSQL:
-
-```text
-TTS
-STT
-OCR
-News fetching
-News summarization
-Scheduled reminders
-Agent tasks
-Media processing
-```
-
-### Ephemeral events
-
-Use Tokio channels:
+* **LLM is an Interface:** The model acts as a natural language parser, intent classifier, and parameter extractor. It does **not** make authoritative business decisions.
+* **Agent is an Orchestrator:** The Agent executes multi-step plans requiring iterative feedback. Single-turn commands bypass the Agent and execute tools directly.
 
 ```text
-typing indicators
-temporary progress
-streaming tokens
-temporary UI state
+User Input: "Add 15 dollars for lunch"
+  └─► LLM identifies tool: finance.create_expense(amount=15, category="food")
+        └─► Direct invocation: FinanceService::create_expense(...)
+              └─► DB write + Outbox event
+
+User Input: "Read my unread bookmarks, summarize them, and send me an audio brief"
+  └─► LLM identifies complex workflow
+        └─► Dispatches to Agent Runtime
+              ├─► Step 1: bookmarks.list_unread()
+              ├─► Step 2: llm.summarize_batch()
+              ├─► Step 3: jobs.enqueue_tts()
+              └─► Step 4: matrix.send_voice_message()
 ```
 
-Architecture:
+### 7.2 Tool Definition Specification
 
-```text
-                    Matrix Bot
-                       │
-             ┌─────────┴─────────┐
-             │                   │
-       Durable Work        Ephemeral Work
-             │                   │
-             ▼                   ▼
-       PostgreSQL          Tokio channel
-          Jobs
+Every tool is defined using a standard Rust contract adhering to the OpenAI Tool Specification:
+
+```rust
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolParameterSchema {
+    #[serde(rename = "type")]
+    pub schema_type: String,
+    pub description: String,
+    pub properties: serde_json::Map<String, serde_json::Value>,
+    pub required: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: ToolParameterSchema,
+    pub is_sensitive: bool,          // Requires passkey step-up or explicit confirmation
+    pub allowed_interfaces: Vec<InterfaceKind>, // Matrix, Web, MCP, Agent
+}
+
+#[async_trait::async_trait]
+pub trait ToolHandler: Send + Sync {
+    async fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, ToolExecutionError>;
+}
 ```
+
+### 7.3 Standardized Tool Modules
+
+| Namespace | Tool Name | Description | Sensitivity |
+|---|---|---|---|
+| `todo` | `todo.create` | Create a new task with due date and priority | Low |
+| `todo` | `todo.list` | List tasks with filters (pending, completed, tags) | Low |
+| `todo` | `todo.complete` | Mark a task as completed | Low |
+| `finance` | `finance.record_expense` | Log an expense with amount, currency, and category | Low |
+| `finance` | `finance.get_summary` | Aggregate spending by category for a time period | Low |
+| `portfolio` | `portfolio.get_holdings` | Retrieve current asset positions and values | Low |
+| `portfolio` | `portfolio.execute_trade` | Buy or sell securities/crypto | **High (Requires Confirmation)** |
+| `reminders` | `reminders.schedule` | Create a time-based or recurring reminder | Low |
+| `bookmarks` | `bookmarks.save` | Save and summarize a URL | Low |
+| `bookmarks` | `bookmarks.search` | Search saved bookmarks with semantic or full-text | Low |
+| `habits` | `habits.log` | Check in a habit completion | Low |
+| `journal` | `journal.write` | Record a journal entry or thought | Low |
+| `media` | `media.synthesize_speech` | Convert text into speech audio | Low |
+| `search` | `search.web` | Live web search via Tavily / DuckDuckGo | Low |
 
 ---
 
-# 17. Agent State
+## 8. Agent Runtime Specification
 
-Agent execution state should be persisted in PostgreSQL.
+The Agent Runtime provides an isolated, stateful, ReAct (Reasoning + Acting) execution environment for complex workflows.
 
-Example:
+### 8.1 Agent State Persistence Schema
 
 ```sql
 CREATE TABLE agent_runs (
-    id              UUID PRIMARY KEY,
-    user_id         UUID NOT NULL,
-    task            TEXT NOT NULL,
-    status          TEXT NOT NULL,
-    started_at      TIMESTAMPTZ,
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id      UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    initiator       TEXT NOT NULL CHECK (initiator IN ('matrix', 'web', 'mcp', 'cron')),
+    goal            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'planning'
+                    CHECK (status IN ('planning', 'executing', 'awaiting_approval', 'completed', 'failed', 'cancelled')),
+    max_steps       INTEGER NOT NULL DEFAULT 10,
+    current_step    INTEGER NOT NULL DEFAULT 0,
+    total_tokens    INTEGER NOT NULL DEFAULT 0,
+    error           TEXT,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at    TIMESTAMPTZ,
-    error           TEXT
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-```
 
-And:
+CREATE INDEX idx_agent_runs_account ON agent_runs(account_id, started_at DESC);
 
-```sql
 CREATE TABLE agent_steps (
-    id              UUID PRIMARY KEY,
-    agent_run_id    UUID NOT NULL,
-    step            INTEGER NOT NULL,
-    tool            TEXT,
-    input           JSONB,
-    output          JSONB,
-    status          TEXT NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id          UUID NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    step_number     INTEGER NOT NULL,
+    thought         TEXT,
+    tool_call       TEXT,
+    tool_input      JSONB,
+    tool_output     JSONB,
+    status          TEXT NOT NULL CHECK (status IN ('success', 'failed', 'blocked')),
+    tokens_used     INTEGER NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_run_step UNIQUE (run_id, step_number)
 );
+
+CREATE INDEX idx_agent_steps_run ON agent_steps(run_id, step_number ASC);
 ```
 
-This allows an Agent to recover after a process restart.
-
----
-
-# 18. External AI Services
-
-STT, TTS, and OCR should be logically independent services.
+### 8.2 Execution Loop & Safety Boundaries
 
 ```text
-                    Matrix Bot
-                        │
-              ┌─────────┴─────────┐
-              │                   │
-          Application          Job Worker
-                                  │
-                   ┌──────────────┼─────────────┐
-                   ▼              ▼             ▼
-                  STT            TTS           OCR
+┌────────────────────────────────────────────────────────┐
+│                   Agent Execution Loop                 │
+│                                                        │
+│  1. Check Boundaries:                                  │
+│     ├── step_count <= max_steps (default 10)           │
+│     ├── elapsed_time <= max_timeout (default 180s)     │
+│     └── total_tokens <= token_budget (default 32k)     │
+│  2. Assemble Context:                                  │
+│     ├── Goal + System Persona                          │
+│     ├── Past Agent Steps (Thoughts, Tools, Results)    │
+│     └── Allowed Tool Definitions                       │
+│  3. Model Inference (LLM Generates Thought + Tool)     │
+│  4. Evaluate Tool Call:                                │
+│     ├── If requires confirmation:                      │
+│     │     Set status = 'awaiting_approval';            │
+│     │     Send approval prompt to Matrix / Web;        │
+│     │     Halt loop until user responds;               │
+│     └── Else:                                          │
+│           Execute tool via ToolHandler;                │
+│  5. Persist Step into agent_steps (PostgreSQL);        │
+│  6. Check Goal Completion:                             │
+│     ├── If Final Answer: Set status = 'completed';     │
+│     └── Else: Increment step, loop back to 1.          │
+└────────────────────────────────────────────────────────┘
 ```
-
-They can initially run on the same physical server or Docker Compose stack.
-
-They should nevertheless have clear service interfaces.
 
 ---
 
-# 19. AI Provider Abstraction
+## 9. Interface Layer Specifications
 
-The Rust application should not be tightly coupled to specific AI models.
+### 9.1 Matrix Bot Interface
 
-Use provider abstractions such as:
+* **Library:** `matrix-sdk` with full End-to-End Encryption (E2EE) support via PostgreSQL/state store.
+* **Responsibilities:**
+  * Process timeline room events, direct messages (DMs), reactions, and encrypted media attachments.
+  * Command Router: Parses prefix commands (`!todo`, `!expense`, `!portfolio`, `!remind`, `!say`, `!link`, `!recover`).
+  * Conversational AI Router: Dispatches freeform messages to the AI Context Builder when the bot is mentioned or addressed in a DM.
+  * Reply Formatting: Renders structured HTML with `<mx-reply>` support and clean plain-text fallbacks via `html_escape()` and `strip_html()`.
+  * Audio Notes: Dispatches `!say` voice synthesis results as native Matrix voice messages (`audio/ogg; codecs=opus`) with waveform metadata.
+* **Security Guard:** Never execute privileged administrative actions (account export, passkey enrollment, unlinking) directly over Matrix. Matrix commands provide web links for sensitive step-up verification.
+
+### 9.2 Web REST & SSE API (Axum)
+
+* **Endpoints:**
+  * `/api/auth/*`: WebAuthn registration, passkey authentication, session status (`/api/auth/me`), step-up assertions.
+  * `/api/todos/*`: Full CRUD for tasks, completion toggles, tag filters.
+  * `/api/finance/*`: Expense logging, categories, aggregation summaries, receipt upload.
+  * `/api/portfolio/*`: Holdings view, trade execution, cash balance adjustments.
+  * `/api/bookmarks/*`: Bookmark ingestion, tagging, full-text search.
+  * `/api/habits/*`: Habit definitions, streak tracking, daily check-ins.
+  * `/api/journal/*`: Daily notes, mood ratings, search.
+  * `/api/footprints/*`: Geolocation ingestion, location history feeds.
+  * `/api/ai/*`: Direct conversational AI chat with SSE streaming tokens.
+  * `/api/jobs/*`: Background job inspection, queue metrics.
+  * `/api/events`: Server-Sent Events (SSE) stream for real-time live UI updates, filtered strictly by authenticated `account_id`.
+* **Standardized Error Envelope:**
+  ```json
+  {
+    "error": "Human readable error description",
+    "code": 400,
+    "details": null
+  }
+  ```
+
+### 9.3 MCP Server (Model Context Protocol)
+
+* **Transports:** Standard I/O (`stdio`) for local editor integrations (Cursor, Claude Desktop) and HTTP/SSE for remote agents.
+* **Authentication:** Authenticated via Personal Access Tokens (`mb_mcp_` prefix) tied to an `account_id`.
+* **Access Control:** Exposes domain capabilities from the Unified Tool Registry. Destructive or sensitive financial operations require explicit permission allowlisting in the user's settings.
+
+---
+
+## 10. External AI Services & Media Processing Pipeline
+
+To maintain lean backend execution, resource-intensive machine learning models are isolated from the main bot process.
+
+```text
+┌──────────────────┐               ┌─────────────────────────────────────┐
+│   Matrix Bot     │   HTTP REST   │   matrix-bot-inference Server       │
+│   (Rust / Axum)  ├──────────────►│   (Local Axum / ONNX Runtime)       │
+│                  │               │                                     │
+│  services/stt    │               │  POST /v1/audio/transcriptions (STT)│
+│  services/tts    │               │  POST /v1/audio/speech (Kokoro TTS) │
+│  services/ocr    │               │  POST /v1/vision/ocr (PaddleOCR)    │
+└──────────────────┘               └─────────────────────────────────────┘
+```
+
+### 10.1 Service Abstractions
+
+1. **Speech-to-Text (`SttProvider` trait):**
+   * Default: Bundled inference server running `sherpa-onnx` (SenseVoice / Whisper).
+   * Alternate: OpenAI Whisper API, Groq Cloud Whisper.
+2. **Text-to-Speech (`TtsProvider` trait):**
+   * Default: Bundled inference server running `Kokoro-82M` emitting native Ogg Opus.
+   * Alternate: ElevenLabs API, OpenAI TTS.
+3. **Optical Character Recognition (`OcrProvider` trait):**
+   * Default: Bundled inference server running ONNX OCR.
+   * Capability: Extracts raw text and bounding boxes from receipt and document images.
+4. **LLM Gateway (`LlmGateway` trait):**
+   * Supports any OpenAI-compatible completions API (OpenAI, Anthropic via bridge, Ollama, vLLM, DeepSeek).
+   * Supports streaming token responses via Server-Sent Events.
+
+### 10.2 Media Processing Example: Automated Receipt Ingestion
+
+```text
+User uploads receipt image to Matrix DM
+  │
+  ▼
+1. Matrix Handler receives m.image event
+  │
+  ▼
+2. Binary stream uploaded to Object Storage (S3 / R2 / Local)
+   Storage Key: accounts/{id}/receipts/{uuid}.jpg
+  │
+  ▼
+3. Enqueue Durable Job in PostgreSQL:
+   job_type: "media.process_receipt"
+   payload: { "storage_key": "...", "account_id": "..." }
+  │
+  ▼
+4. Job Worker claims task via SKIP LOCKED:
+   a. Calls OCR Service to extract text lines
+   b. Calls LLM with structured receipt prompt:
+      Extract: Merchant, Total Amount, Currency, Category, Date
+   c. Invokes FinanceService::create_expense(...)
+   d. Links transaction to receipt_storage_key
+  │
+  ▼
+5. Emits Outbox Event:
+   ReceiptProcessed { transaction_id, amount, merchant }
+  │
+  ▼
+6. Outbox Dispatcher sends Matrix reply & Web SSE notification:
+   "Receipt recorded: $42.50 at Trader Joe's (Groceries)"
+```
+
+---
+
+## 11. Object Storage Architecture
+
+Unstructured binary media (audio recordings, images, receipts, document attachments) are never stored as database blobs.
+
+### 11.1 Storage Trait Contract
 
 ```rust
-trait TtsProvider
-trait SttProvider
-trait OcrProvider
-trait LlmProvider
-trait SearchProvider
+#[async_trait::async_trait]
+pub trait StorageService: Send + Sync {
+    async fn put(&self, key: &str, data: bytes::Bytes, content_type: &str) -> Result<(), StorageError>;
+    async fn get(&self, key: &str) -> Result<bytes::Bytes, StorageError>;
+    async fn delete(&self, key: &str) -> Result<(), StorageError>;
+    async fn get_presigned_url(&self, key: &str, ttl: std::time::Duration) -> Result<String, StorageError>;
+}
 ```
 
-For example:
+### 11.2 Storage Providers
 
-```text
-TTS
- │
- ├── Kokoro
- ├── External TTS service
- └── Future provider
-```
-
-The application should depend on the interface rather than the implementation.
+* **Local Filesystem:** Default for single-node development (`data/storage/`).
+* **S3 / Cloudflare R2:** Production standard configured via `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`.
 
 ---
 
-# 20. Media Processing Pipeline
+## 12. Security, Authentication & Multi-Tenancy
 
-Example: receipt image → Finance record.
+### 12.1 WebAuthn / Passkeys
 
-```text
-Matrix Image
- ↓
-Media Handler
- ↓
-Object Storage
- ↓
-OCR Job
- ↓
-OCR Worker
- ↓
-OCR Service
- ↓
-Extract Structured Data
- ↓
-FinanceService
- ↓
-PostgreSQL
- ↓
-Matrix Confirmation
-```
+* Passkeys are the **exclusive** browser authentication mechanism. Passwords, magic links, and unencrypted bearer tokens in localStorage are banned.
+* **Discoverable Credentials:** Sign-in requires no username input. The WebAuthn credential ID maps directly to `accounts.id`.
+* **Session Storage:** Cookies are issued as `HttpOnly`, `SameSite=Strict`, `Secure`. Only the SHA-256 hash of the session token is persisted in `web_sessions`.
 
-Example result:
+### 12.2 Step-Up Verification (`VerifiedUser`)
 
-```text
-Receipt detected
+Sensitive actions (modifying passkeys, exporting financial history, generating MCP access tokens, high-value trades) require `VerifiedUser` extraction:
+* Validates that the active session has performed a passkey ceremony within the preceding 5 minutes (`STEP_UP_WINDOW_MINUTES = 5`).
+* If stale, the API returns `403 Forbidden` with a challenge header triggering the browser's biometric authenticator.
 
-Amount: $23.50
-Category: Food
-Merchant: Walmart
+### 12.3 Matrix Capability Ceiling
 
-Recorded successfully.
-```
+Matrix chat carries inherent risks (stolen phone, unlocked Element desktop, unauthorized room invites). Therefore:
+* Privileged administrative actions cannot be completed over Matrix.
+* `!link` begins in Matrix but requires passkey confirmation in the web browser.
+* `!recover` initiates a mandatory 24-hour cooling-off period during which all active linked sessions are alerted and can cancel the request.
+* `!passkey add` generates a single-use token valid only for enrolling an account's very first passkey.
 
 ---
 
-# 21. Object Storage
+## 13. Target Codebase Structure
 
-Large files should not be stored directly in PostgreSQL.
-
-Use object storage for:
+The backend will be refactored into a clear layered architecture:
 
 ```text
-audio
-images
-receipts
-attachments
-generated media
-```
-
-Possible providers:
-
-```text
-Cloudflare R2
-S3-compatible storage
-WebDAV
-Local filesystem
-```
-
-PostgreSQL stores metadata:
-
-```text
-object_key
-mime_type
-size
-hash
-owner
-created_at
-```
-
----
-
-# 22. Internal Event System
-
-Use a lightweight internal event bus for non-durable events.
-
-Possible implementation:
-
-```text
-Tokio broadcast / mpsc
-```
-
-Examples:
-
-```text
-TodoCreated
-ExpenseCreated
-ReminderTriggered
-JobCompleted
-AgentCompleted
-```
-
-For example:
-
-```text
-ExpenseCreated
-      │
-      ├── Audit
-      ├── Web SSE
-      └── Matrix notification
-```
-
----
-
-# 23. Outbox Pattern
-
-For reliable external side effects, implement an Outbox pattern.
-
-Example:
-
-```text
-Create Expense
-     │
-     ├── INSERT expense
-     │
-     └── INSERT outbox event
-```
-
-Both operations happen in the same PostgreSQL transaction.
-
-Then:
-
-```text
-Outbox Worker
-     ↓
-Matrix notification
-Web SSE
-External integration
-```
-
-This prevents situations where:
-
-```text
-Database write succeeds
-but notification is lost
-```
-
----
-
-# 24. API Structure
-
-Recommended Axum routes:
-
-```text
-/api
-├── /auth
-├── /users
-├── /todos
-├── /expenses
-├── /portfolio
-├── /bills
-├── /bookmarks
-├── /habits
-├── /journal
-├── /footprints
-├── /reminders
-├── /ai
-├── /jobs
-└── /events
-```
-
-SSE:
-
-```text
-GET /api/events
-```
-
-Use SSE for:
-
-```text
-Job progress
-AI responses
-Notifications
-Data changes
-```
-
----
-
-# 25. Authentication
-
-The Web UI should use WebAuthn / Passkeys.
-
-Recommended flow:
-
-```text
-WebAuthn / Passkey
-        ↓
-Session
-        ↓
-API
-```
-
-Provide recovery codes or another recovery mechanism so users cannot permanently lose access if they lose their passkey.
-
-If public registration is enabled, support an installation/admin registration secret or invitation-only registration.
-
----
-
-# 26. Multi-User Architecture
-
-Even if the initial deployment has only a few users, design the database for multi-user operation.
-
-Core records should contain:
-
-```text
-user_id
-```
-
-Examples:
-
-```text
-todos
- ├── id
- ├── user_id
- └── ...
-
-jobs
- ├── id
- ├── user_id
- └── ...
-
-agent_runs
- ├── id
- ├── user_id
- └── ...
-```
-
-Do not rely on a single-user assumption in the data model.
-
----
-
-# 27. Matrix Room Context
-
-Matrix requires a distinction between users and rooms.
-
-A single user can have:
-
-```text
-DM
-Family room
-Work room
-Private room
-```
-
-Therefore, do not treat `room_id` as a user identity.
-
-The AI context should understand:
-
-```text
-Matrix Room
-      ↓
-Conversation Context
-      ↓
-User
-      ↓
-Agent / LLM
-```
-
----
-
-# 28. AI Context Builder
-
-Create a dedicated context-building component:
-
-```text
-AI Context
-├── User Context
-├── Room Context
-├── Recent Messages
-├── Domain Context
-├── Memories
-├── Tool Definitions
-└── Permissions
-```
-
-Flow:
-
-```text
-User Message
-    ↓
-Context Builder
-    ↓
-LLM
-```
-
-The LLM should not directly query arbitrary database tables to construct context.
-
----
-
-# 29. Memory
-
-Do not introduce a separate vector database initially.
-
-Use PostgreSQL for:
-
-```text
-Conversation history
-User preferences
-Explicit memories
-Conversation summaries
-```
-
-Later, if semantic search becomes necessary, consider PostgreSQL + `pgvector`.
-
-This keeps the architecture simple.
-
----
-
-# 30. Security Boundary
-
-Recommended deployment boundary:
-
-```text
-                    Internet
-                       │
-                       ▼
-                     Caddy
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-     Matrix endpoint           Web/API endpoint
-          │                         │
-          └────────────┬────────────┘
-                       ▼
-                ┌─────────────┐
-                │ Matrix Bot  │
-                │ Rust/Axum   │
-                └──────┬──────┘
-                       │
-              ┌────────▼────────┐
-              │    Services     │
-              └────────┬────────┘
-                       │
-                ┌──────▼──────┐
-                │ PostgreSQL  │
-                └─────────────┘
-```
-
-Security requirements:
-
-* Authentication
-* Authorization
-* Tool permission checks
-* Rate limiting
-* Input validation
-* Audit logging
-* MCP authentication
-* MCP tool allowlists
-* User/room isolation
-* Job ownership checks
-
-Do not expose all domain tools to every MCP client by default.
-
----
-
-# 31. Recommended Rust Project Structure
-
-Target structure:
-
-```text
-matrix-bot/
+backend/
+├── Cargo.toml
+├── migrations/                        # Versioned PostgreSQL migrations (*.sql)
+│   ├── 0001_initial_schema.sql
+│   ├── 0002_jobs_and_outbox.sql
+│   └── 0003_agent_state.sql
 │
-├── backend/
-│   ├── Cargo.toml
-│   │
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── config.rs
-│   │   ├── error.rs
-│   │   ├── state.rs
-│   │   │
-│   │   ├── interface/
-│   │   │   ├── matrix/
-│   │   │   ├── api/
-│   │   │   ├── mcp/
-│   │   │   └── ai/
-│   │   │
-│   │   ├── application/
-│   │   │   ├── commands/
-│   │   │   ├── queries/
-│   │   │   ├── tools/
-│   │   │   └── workflows/
-│   │   │
-│   │   ├── agent/
-│   │   │   ├── runtime.rs
-│   │   │   ├── context.rs
-│   │   │   ├── executor.rs
-│   │   │   ├── state.rs
-│   │   │   └── policies.rs
-│   │   │
-│   │   ├── domain/
-│   │   │   ├── todos/
-│   │   │   ├── finance/
-│   │   │   ├── portfolio/
-│   │   │   ├── bills/
-│   │   │   ├── bookmarks/
-│   │   │   ├── habits/
-│   │   │   ├── journal/
-│   │   │   ├── footprints/
-│   │   │   └── reminders/
-│   │   │
-│   │   ├── jobs/
-│   │   │   ├── queue.rs
-│   │   │   ├── worker.rs
-│   │   │   ├── scheduler.rs
-│   │   │   └── handlers/
-│   │   │
-│   │   ├── infrastructure/
-│   │   │   ├── postgres/
-│   │   │   ├── matrix/
-│   │   │   ├── llm/
-│   │   │   ├── stt/
-│   │   │   ├── tts/
-│   │   │   ├── ocr/
-│   │   │   ├── search/
-│   │   │   └── storage/
-│   │   │
-│   │   └── events/
-│   │       ├── bus.rs
-│   │       ├── outbox.rs
-│   │       └── events.rs
-│   │
-│   ├── migrations/
-│   │
-│   └── openapi.json
-│
-├── frontend/
-│   └── React 19
-│
-├── ai-media/
-│   ├── stt/
-│   ├── tts/
-│   └── ocr/
-│
-├── docs/
-│   ├── architecture.md
-│   ├── agent.md
-│   ├── mcp.md
-│   ├── jobs.md
-│   └── api.md
-│
-└── docker/
-    └── compose.yml
-```
-
-Do not perform a large restructuring blindly. Treat this as the target architecture and migrate incrementally.
-
----
-
-# 32. Deployment Architecture
-
-Recommended initial deployment:
-
-```text
-                    Internet
-                       │
-                       ▼
-                     Caddy
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-     Matrix endpoint           Web/API endpoint
-          │                         │
-          └────────────┬────────────┘
-                       ▼
-                ┌─────────────┐
-                │ Matrix Bot  │
-                │ Rust/Axum   │
-                └──────┬──────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-      PostgreSQL    AI Media     Matrix
-                    Services     Homeserver
-          │
-          ▼
-      Backup / R2
-```
-
-Initially, all services can run on the same VPS using Docker Compose.
-
-They should still have clear logical boundaries so they can be split later.
-
----
-
-# 33. Main Data Flows
-
-## Simple Todo
-
-```text
-Matrix
- ↓
-Handler
- ↓
-LLM
- ↓
-Tool
- ↓
-TodoService
- ↓
-PostgreSQL
- ↓
-Response
- ↓
-Matrix
-```
-
-## TTS
-
-```text
-Matrix
- ↓
-LLM
- ↓
-TTS Job
- ↓
-PostgreSQL
- ↓
-Worker
- ↓
-TTS Service
- ↓
-Object Storage
- ↓
-Matrix
-```
-
-## OCR Finance
-
-```text
-Matrix Image
- ↓
-Media Handler
- ↓
-Object Storage
- ↓
-OCR Job
- ↓
-OCR Worker
- ↓
-OCR Service
- ↓
-Finance Service
- ↓
-PostgreSQL
- ↓
-Matrix
-```
-
-## Agent
-
-```text
-Matrix
- ↓
-LLM
- ↓
-Agent Runtime
- ↓
-Tool
- ↓
-Tool
- ↓
-Job
- ↓
-Worker
- ↓
-Tool
- ↓
-Agent
- ↓
-Final Answer
- ↓
-Matrix
-```
-
-## MCP
-
-```text
-Claude / Cursor
- ↓
-MCP
- ↓
-Tool Registry
- ↓
-Application Service
- ↓
-Domain
- ↓
-PostgreSQL
+└── src/
+    ├── main.rs                        # Process entrypoint & graceful shutdown
+    ├── config.rs                      # Typed environment configuration
+    ├── error.rs                       # Standardized Error types & ApiError
+    │
+    ├── interface/                     # 1. Interface Adapters
+    │   ├── mod.rs
+    │   ├── matrix/                    # Matrix SDK event handlers & formatting
+    │   │   ├── handler.rs
+    │   │   ├── router.rs
+    │   │   ├── quote.rs
+    │   │   └── format.rs
+    │   ├── api/                       # Axum REST & SSE HTTP routes
+    │   │   ├── routes.rs
+    │   │   ├── auth/
+    │   │   ├── todos.rs
+    │   │   ├── finance.rs
+    │   │   ├── portfolio.rs
+    │   │   └── sse.rs
+    │   └── mcp/                       # Model Context Protocol adapter
+    │       ├── stdio.rs
+    │       └── protocol.rs
+    │
+    ├── application/                   # 2. Application Layer (Use Cases)
+    │   ├── mod.rs
+    │   ├── todos/
+    │   ├── finance/
+    │   ├── portfolio/
+    │   └── common/
+    │
+    ├── agent/                         # 3. AI & Agent Subsystem
+    │   ├── mod.rs
+    │   ├── runtime.rs                 # ReAct execution loop
+    │   ├── context.rs                 # Context & prompt assembler
+    │   ├── state.rs                   # Agent persistence
+    │   └── tools/                     # Unified Tool Registry
+    │       ├── registry.rs
+    │       ├── definitions.rs
+    │       └── handlers/
+    │
+    ├── domain/                        # 4. Pure Domain Layer
+    │   ├── mod.rs
+    │   ├── todos/
+    │   ├── finance/                   # Money, Categories, Invariants
+    │   ├── portfolio/                 # Holdings, Weighted Cost, Trades
+    │   └── habits/
+    │
+    ├── jobs/                          # 5. Durable Background Job Queue
+    │   ├── mod.rs
+    │   ├── queue.rs                   # SKIP LOCKED enqueue/dequeue
+    │   ├── worker.rs                  # Worker pool loop
+    │   ├── reaper.rs                  # Stuck job recovery
+    │   └── handlers/                  # TTS, STT, OCR, Briefing handlers
+    │
+    ├── events/                        # 6. Transactional Outbox & Events
+    │   ├── mod.rs
+    │   ├── outbox.rs                  # Outbox poller & LISTEN/NOTIFY
+    │   ├── bus.rs                     # Process-wide broadcast channel
+    │   └── definitions.rs             # SystemEvent variants
+    │
+    └── infrastructure/                # 7. Infrastructure Adapters
+        ├── mod.rs
+        ├── postgres/                  # PgPool setup & repositories
+        │   ├── pool.rs
+        │   └── repositories/
+        ├── storage/                   # S3 / Local storage adapter
+        ├── inference/                 # STT, TTS, OCR HTTP clients
+        └── matrix/                    # Homeserver crypto & sync client
 ```
 
 ---
 
-# 34. Recommended Technology Stack
+## 14. Phased Refactoring & Implementation Roadmap
 
-| Layer           | Technology                           |
-| --------------- | ------------------------------------ |
-| Language        | Rust                                 |
-| HTTP            | Axum                                 |
-| Matrix          | Matrix Rust SDK                      |
-| Database        | PostgreSQL only                      |
-| Database Access | SQLx                                 |
-| Frontend        | React 19                             |
-| API             | REST + SSE                           |
-| Async Runtime   | Tokio                                |
-| AI              | LLM provider abstraction             |
-| Tool Calling    | Unified Tool Registry                |
-| MCP             | MCP Server                           |
-| Agent           | Lightweight custom Agent Runtime     |
-| Queue           | PostgreSQL Job Queue                 |
-| STT             | sherpa-onnx / Whisper-class provider |
-| TTS             | Kokoro / Candle / sherpa-onnx        |
-| OCR             | Provider abstraction                 |
-| Search          | Search provider abstraction          |
-| Storage         | S3/R2-compatible                     |
-| Authentication  | WebAuthn / Passkey                   |
-| Reverse Proxy   | Caddy                                |
-| Deployment      | Docker Compose                       |
-| Backup          | PostgreSQL + R2                      |
-
----
-
-# 35. Architectural Principles
-
-The implementation should follow these principles.
-
-### Principle 1 — Domain is the source of truth
-
-Business rules belong in Domain/Application services.
-
-Not in:
-
-* Matrix handlers
-* React
-* MCP
-* LLM prompts
-* Agent code
-
----
-
-### Principle 2 — Interfaces share the same capabilities
-
-Matrix, Web, MCP, LLM, and Agent should reuse the same services/tools.
+To avoid disruptions to existing functionality, the refactoring will execute in six controlled, incremental phases.
 
 ```text
-Matrix ─────┐
-Web ────────┤
-MCP ────────┤
-LLM ────────┼──→ Application → Domain → PostgreSQL
-Agent ──────┘
+Phase 1: SQLite Deprecation ──► Phase 2: Domain Layer Extraction ──► Phase 3: Durable Job Queue
+          │                                                                   │
+          ▼                                                                   ▼
+Phase 6: Multi-Interface Polish ◄── Phase 5: Storage & Media ◄─── Phase 4: Unified Tools & Agent
 ```
 
----
+### Phase 1: Complete SQLite Removal & PostgreSQL Native Engine
+* **Goal:** Eradicate all SQLite scaffolding and transition to pure PostgreSQL.
+* **Tasks:**
+  1. Delete `backend/src/db/executor.rs`, `dialect.rs`, `ddl.rs`, `dialect_probe.rs`.
+  2. Refactor `DbPool` into a thin wrapper around `sqlx::PgPool`.
+  3. Replace all dual-dialect macros (`db_fetch_all!`, etc.) across all existing modules with direct `sqlx::query_as!` / `sqlx::query!` calls.
+  4. Consolidate unversioned `schema_*.rs` files into clean, forward-only PostgreSQL migrations (`migrations/*.sql`).
+  5. Update CI workflows: eliminate SQLite matrix jobs; configure PostgreSQL 16 service containers for all test runs.
+* **Verification:** `cargo test -p matrix-bot` passes warning-free against PostgreSQL with zero references to `SqlitePool` or `sqlite3`.
 
-### Principle 3 — LLM is not the business logic
+### Phase 2: Domain Layer Extraction & Use-Case Services
+* **Goal:** Separate business rules from Matrix handlers and Axum controllers.
+* **Tasks:**
+  1. Create pure domain packages under `src/domain/` for Todos, Finance, Portfolio, and Habits.
+  2. Implement Application Services (e.g., `FinanceService`, `PortfolioService`) handling transactions and domain events.
+  3. Refactor Matrix handlers and Axum endpoints to delegate to the new Application Services.
+* **Verification:** Unit tests cover domain invariants in isolation without database or network mocks.
 
-LLM decides which tool to call.
+### Phase 3: PostgreSQL Durable Job Queue & Transactional Outbox
+* **Goal:** Replace ad-hoc background polling loops (`due_reminder.rs`, briefing timers) with durable database jobs.
+* **Tasks:**
+  1. Implement `jobs` and `outbox_events` tables with SQL migrations.
+  2. Build the `JobQueue` engine using `SELECT ... FOR UPDATE SKIP LOCKED`.
+  3. Implement the `OutboxDispatcher` daemon using PostgreSQL `LISTEN` / `NOTIFY`.
+  4. Migrate reminders, briefings, and TTS audio synthesis into durable jobs.
+* **Verification:** Killing and restarting the bot process mid-job resumes cleanly without lost tasks or orphaned state.
 
-The application decides whether that operation is valid.
+### Phase 4: Unified Tool Registry & Agent Runtime
+* **Goal:** Unify tool definitions across Matrix, Web, and MCP, and introduce the Agent execution engine.
+* **Tasks:**
+  1. Build `ToolRegistry` exposing all domain application use cases as OpenAI-compatible schemas.
+  2. Implement the stateful `AgentRuntime` with PostgreSQL tables `agent_runs` and `agent_steps`.
+  3. Expose the Tool Registry over the MCP protocol (`stdio` and HTTP/SSE).
+  4. Connect Matrix conversational AI router to the Unified Tool Registry.
+* **Verification:** Claude Desktop / Cursor can invoke domain tools over MCP; Matrix can orchestrate multi-step tasks.
 
----
+### Phase 5: Storage Abstraction & External AI Decoupling
+* **Goal:** Decouple binary media and AI inference services from the core bot.
+* **Tasks:**
+  1. Implement the `StorageService` trait (Local filesystem and S3/R2).
+  2. Refactor receipt OCR and voice notes to store assets in Object Storage.
+  3. Standardize HTTP contracts between `backend/` and `inference/` for STT, TTS, and OCR.
+* **Verification:** Image receipts uploaded over Matrix are saved to S3/local storage, parsed via OCR jobs, and correctly recorded in Finance.
 
-### Principle 4 — Agent is not required for every task
-
-Use direct tool calling for simple deterministic operations.
-
-Use Agent only when the task requires:
-
-* Multiple steps
-* Planning
-* Iteration
-* Multiple tools
-* Long-running operations
-* Dynamic decisions
-
----
-
-### Principle 5 — PostgreSQL is the system state center
-
-PostgreSQL stores:
-
-```text
-Domain data
-Jobs
-Agent state
-Outbox
-Audit data
-User state
-Conversation metadata
-```
-
----
-
-### Principle 6 — Long-running work must be asynchronous
-
-Do not block Matrix event processing with:
-
-* STT
-* TTS
-* OCR
-* Large media processing
-* News aggregation
-* Long-running Agent tasks
-
-Use PostgreSQL-backed Jobs.
+### Phase 6: Web Console & Multi-Interface Polish
+* **Goal:** Align React 19 web frontend with the unified backend architecture.
+* **Tasks:**
+  1. Generate updated TypeScript API client and types from Axum OpenAPI spec.
+  2. Implement live UI updates driven by the unified Server-Sent Events stream.
+  3. Implement UI consoles for Job Queue monitoring and Agent Run inspection.
+* **Verification:** Actions taken in Matrix reflect instantly in the Web UI via SSE; Playwright E2E test suite passes.
 
 ---
 
-### Principle 7 — External AI providers must be replaceable
+## 15. Non-Functional Requirements & Operational Excellence
 
-Use provider interfaces.
+### 15.1 Reliability & High Availability
+* **Process Model:** Single primary daemon managing Axum REST/SSE, Matrix sync loop, Job worker pool, and Outbox dispatcher.
+* **Crash Recovery:** All pending workflows and jobs survive unexpected host restarts due to PostgreSQL transactional persistence.
+* **Graceful Shutdown:** `SIGINT` / `SIGTERM` initiates a 15-second shutdown window:
+  1. Axum stops accepting new connections; in-flight requests complete.
+  2. Matrix sync loop stops polling.
+  3. Job workers finish active steps and release claimed locks.
+  4. PostgreSQL pool flushes and closes connections cleanly.
 
-Do not tightly couple the core application to:
-
-```text
-Kokoro
-Whisper
-specific LLM
-specific OCR engine
-specific search provider
-```
-
----
-
-### Principle 8 — Design for multi-user from the beginning
-
-Even if the initial deployment has only a few users, use:
-
-```text
-user_id
-room_id
-permissions
-ownership
-```
-
-throughout the system.
+### 15.2 Observability & Telemetry
+* **Structured Logging:** Standardized on `tracing` with JSON output in production and colored human-readable logs in development.
+* **Distributed Tracing:** Spans carry `account_id`, `job_id`, `trace_id`, and `room_id` across Matrix events, application use cases, and database transactions.
+* **Health Probes:**
+  * `GET /health/live`: Basic liveness check returning `200 OK`.
+  * `GET /health/ready`: Deep readiness probe checking PostgreSQL connectivity, Matrix sync status, and storage reachability.
 
 ---
 
-# 36. Target Architecture Summary
+## 16. Architectural Acceptance Criteria
 
-The final architecture should be conceptually:
+A pull request completing any milestone of this specification must satisfy:
 
-```text
-                         ┌──────────────────┐
-                         │ Matrix Clients   │
-                         └────────┬─────────┘
-                                  │
-                         ┌────────▼─────────┐
-                         │   Rust Matrix    │
-                         │      Bot         │
-                         └────────┬─────────┘
-                                  │
-              ┌───────────────────┼───────────────────┐
-              │                   │                   │
-              ▼                   ▼                   ▼
-          Matrix API           Web API              MCP
-              │                   │                   │
-              └───────────────────┼───────────────────┘
-                                  ▼
-                       ┌────────────────────┐
-                       │ Interface / Router │
-                       └─────────┬──────────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    │                         │
-                    ▼                         ▼
-             ┌─────────────┐           ┌─────────────┐
-             │ LLM / Tools │           │    Agent    │
-             └──────┬──────┘           └──────┬──────┘
-                    │                         │
-                    └────────────┬────────────┘
-                                 ▼
-                       ┌───────────────────┐
-                       │  Application      │
-                       │  Services         │
-                       └─────────┬─────────┘
-                                 │
-                  ┌──────────────┴──────────────┐
-                  │                             │
-                  ▼                             ▼
-          ┌────────────────┐            ┌────────────────┐
-          │ Domain Layer   │            │  Job System    │
-          │                │            │                │
-          │ Todo           │            │ STT            │
-          │ Finance        │            │ TTS            │
-          │ Portfolio      │            │ OCR            │
-          │ Bills          │            │ News           │
-          │ Journal        │            │ Agent Tasks    │
-          │ Habits         │            │ Scheduled      │
-          └───────┬────────┘            └───────┬────────┘
-                  │                             │
-                  └──────────────┬──────────────┘
-                                 ▼
-                       ┌───────────────────┐
-                       │   PostgreSQL      │
-                       │                   │
-                       │ Data              │
-                       │ Jobs              │
-                       │ Agent State       │
-                       │ Outbox            │
-                       │ Audit             │
-                       └───────────────────┘
-                                 │
-                       ┌─────────┴─────────┐
-                       ▼                   ▼
-                 Object Storage       AI Media
-                    R2/S3             STT/TTS/OCR
-```
-
-# 37. Final Architectural Decisions
-
-The following decisions should be treated as the current target architecture:
-
-1. **PostgreSQL only** — do not maintain SQLite support.
-2. **PostgreSQL also acts as the durable job queue.**
-3. **Do not introduce Redis/RabbitMQ/Kafka unless there is a demonstrated scaling requirement.**
-4. **Matrix is the primary interaction interface.**
-5. **React Web UI is another interface over the same backend.**
-6. **MCP is another interface, not a separate business layer.**
-7. **LLM is the AI Interface Layer.**
-8. **Agent is an orchestration layer for complex tasks, not a replacement for normal tool calling.**
-9. **Domain Services are the source of truth for business logic.**
-10. **All interfaces should reuse the same Application/Domain/Tool capabilities.**
-11. **Long-running work uses persistent PostgreSQL Jobs.**
-12. **STT/TTS/OCR should use provider abstractions and can initially run as separate services in the same Docker Compose deployment.**
-13. **Large media files belong in object storage, not PostgreSQL.**
-14. **Agent state should be persisted in PostgreSQL.**
-15. **Use an Outbox pattern for reliable external side effects.**
-16. **Design for multiple users even if the initial deployment is small.**
-17. **Keep Agent capabilities optional and isolated from the core domain.**
-18. **Do not perform a large rewrite immediately; implement and migrate incrementally.**
-
-The key architectural relationship is:
-
-```text
-Matrix = Interface
-Web = Interface
-MCP = Interface
-LLM = AI Interface
-Agent = Orchestrator
-Application = Use Cases
-Domain = Business Capability
-Job System = Durable Background Execution
-PostgreSQL = Persistent System State
-Object Storage = Large Media
-External AI Services = Replaceable Providers
-```
-
-The target product is therefore:
-
-> **A self-hosted Personal AI / Life Workspace built around Matrix, with PostgreSQL as the persistent system core, LLM as the natural-language interface, MCP as the external AI interface, and an optional Agent Runtime for complex multi-step workflows.**
+1. **PostgreSQL Exclusivity:** Zero lines of code referencing SQLite, `rusqlite`, or `sqlx::SqlitePool`.
+2. **Compile-Time Hygiene:** Warning-free compilation with `cargo check` and clean formatting via `cargo fmt --all -- --check`.
+3. **Dual Interface Parity:** Every domain capability exposed in Matrix must be equally accessible via Web REST API and the Unified Tool Registry (MCP/Agent).
+4. **Data Isolation:** All database tables and outbox notifications strictly isolate records by `account_id`.
+5. **No Long-Running Blocks:** Any operation taking more than 500ms (STT, TTS, OCR, LLM scraping) must run as an asynchronous PostgreSQL Job.
+6. **No Phantom State:** Every mutation must be committed to PostgreSQL within an atomic transaction alongside an Outbox event.
