@@ -821,7 +821,7 @@ mod tests {
     async fn test_live_xai_grok_tool_calling() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -894,7 +894,7 @@ mod tests {
     async fn test_live_xai_grok_mutation_tools() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -973,7 +973,7 @@ mod tests {
     async fn test_live_xai_grok_multi_turn_and_context() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -1029,7 +1029,7 @@ mod tests {
     async fn test_live_xai_grok_currency_rules_and_multi_action() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);

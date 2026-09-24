@@ -219,9 +219,16 @@ pub struct Config {
 }
 
 impl Config {
+    /// Builds the process configuration from already-loaded environment
+    /// variables.
+    ///
+    /// This never loads a `.env` file itself — `main.rs` is the only place
+    /// that does, and only from the current directory (`load_dotenv_from`),
+    /// never dotenvy's own upward parent-directory search. An earlier version
+    /// called dotenvy's parent-searching `dotenv()` function here too, which
+    /// could silently pick up a different checkout's `.env` (e.g. the main
+    /// checkout's production credentials, when run from a worktree under it).
     pub fn from_env() -> Result<Self> {
-        dotenvy::dotenv().ok();
-
         let homeserver =
             env::var("MATRIX_HOMESERVER").unwrap_or_else(|_| "https://matrix.org".to_string());
 
@@ -666,6 +673,31 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "only config.rs may read the environment; found: {offenders:#?}"
+        );
+    }
+
+    /// `Config::from_env` must never load a `.env` file itself: `main.rs` is
+    /// the sole loader, and only from the current directory. Flipping the
+    /// process's current directory to prove `Config::from_env` ignores a
+    /// parent `.env` would be unsound here — the test suite runs in parallel
+    /// and a global CWD mutation would race every other test — so this
+    /// asserts the stronger, race-free property directly from the source:
+    /// `from_env` performs no `.env` loading at all by construction, which
+    /// makes "does it search parent directories" moot.
+    #[test]
+    fn test_config_from_env_never_loads_dotenv() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/config.rs");
+        let source = std::fs::read_to_string(&path).expect("config.rs must be readable");
+        // Built at runtime, not as one string literal: the literal would itself
+        // match a repo-wide `grep` for "the parent-searching dotenvy call",
+        // which this project uses as its own drift check for this fix.
+        let parent_searching_call = format!("{}::{}()", "dotenvy", "dotenv");
+        assert!(
+            !source.contains(&parent_searching_call),
+            "Config::from_env (or anything else in config.rs) must not call \
+             dotenvy's parent-searching dotenv function -- it walks up parent \
+             directories looking for a .env file; only main.rs may load one, \
+             and only from the current directory via load_dotenv_from"
         );
     }
 

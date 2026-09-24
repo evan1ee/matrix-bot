@@ -179,7 +179,7 @@ mod tests {
     async fn test_live_xai_verify_and_completion() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         println!("\n=== Live Test Config ===");
@@ -250,7 +250,7 @@ mod tests {
     async fn test_live_xai_streaming_completion() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
         if config

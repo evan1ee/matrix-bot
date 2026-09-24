@@ -319,7 +319,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a live homeserver and a bot session on disk"]
     async fn test_the_running_bot_session_is_verified_on_the_homeserver() {
-        dotenvy::dotenv().ok();
+        // Current-directory-only load, matching main.rs's load_dotenv_from --
+        // never dotenvy's own dotenv() call, which does an upward parent-directory search that
+        // would let a worktree checkout pick up the main checkout's
+        // production .env.
+        let _ = dotenvy::from_path(".env");
 
         let token = std::fs::read_to_string(token_path())
             .expect("no data/matrix_token.json — start the bot once before running this test");
