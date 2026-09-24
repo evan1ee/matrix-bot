@@ -32,7 +32,7 @@ beyond regenerated API types.
 | D2 | Existing data | Adopt the live PostgreSQL database in place | Real data lives there; SQLite data is not carried forward |
 | D3 | IDs | Row PKs stay `BIGINT`; `accounts.id` and every `owner_id` become native `UUID` | Chat commands show short numeric ids (`!todo done 3`); the account id is the one that gains from a real type and FKs |
 | D4 | Query style | `query!`/`query_as!` + committed `.sqlx/` cache, `SQLX_OFFLINE=true` in builds | Type/column mismatches become compile errors — the defect class AGENTS.md's portability tables were written to catch by hand |
-| D5 | sqlx version | Upgrade 0.7 → 0.8 first | Every query is rewritten anyway; 0.8 fixes RUSTSEC-2024-0363 and has better offline tooling |
+| D5 | sqlx version | Upgrade 0.7 → 0.9 (requires matrix-sdk 0.18 first) | Every query is rewritten anyway; fixes RUSTSEC-2024-0363 and has better offline tooling. sqlx 0.9 and matrix-sdk must agree on `libsqlite3-sys` (Cargo `links` check), hence matrix-sdk 0.18 |
 | D6 | Layout | Layer-first (roadmap §13) | Chosen explicitly; dependency direction is enforced by an architecture test |
 | D7 | Topology | Single instance, HA-ready | SKIP LOCKED jobs, advisory-lock leader for schedulers and Matrix sync, LISTEN/NOTIFY for SSE — a second replica needs no redesign |
 | D8 | Job queue | Hand-rolled on sqlx | ~300 lines, schema in our migrations, enqueue in the caller's transaction; no pre-1.0 dependency owning our schema |
@@ -255,7 +255,7 @@ outbox_deliveries (id BIGINT identity, event_id FK, destination TEXT,   -- 'webh
 
 Each step ends with master green (fmt, tests, OpenAPI drift) and deployable.
 
-1. **sqlx 0.8** — bump, fix API changes, still dual-dialect.
+1. **sqlx 0.9** — bump, fix API changes, still dual-dialect.
 2. **Postgres-only cut** — drop the `sqlite` feature; `DbPool` wraps `PgPool` only;
    macros keep their call sites but lose the SQLite arm; SQLite `DATABASE_URL`
    refused at boot; tests run on PostgreSQL only; CI jobs merged.

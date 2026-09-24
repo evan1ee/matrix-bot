@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove SQLite as an application database, move to sqlx 0.8, replace the hand-rolled `schema*.rs` runner with versioned `sqlx::migrate!` migrations that the live PostgreSQL database adopts in place, and stand up the compile-checked-query pipeline (`.sqlx/` offline cache).
+**Goal:** Remove SQLite as an application database, move to sqlx 0.9, replace the hand-rolled `schema*.rs` runner with versioned `sqlx::migrate!` migrations that the live PostgreSQL database adopts in place, and stand up the compile-checked-query pipeline (`.sqlx/` offline cache).
 
 **Architecture:** Collapse `DbPool`/`DbTx` to type aliases over `sqlx::PgPool`/`sqlx::Transaction<Postgres>` and shrink the `db_*!`/`tx_*!` macros to a single Postgres arm, so all ~540 call sites keep compiling untouched (they are rewritten to `query!` feature by feature in the next plan). Then upgrade sqlx, then transcribe today's schema into an idempotent `0001_baseline.sql` proved identical to the legacy DDL by a catalog-comparison test, and switch boot to the migrator.
 
-**Tech Stack:** Rust 2021, sqlx 0.7 → 0.8 (postgres, chrono, migrate, macros), PostgreSQL 18+ (CI image `postgres:18`), axum 0.7, matrix-sdk 0.7 (keeps its own SQLite crypto store).
+**Tech Stack:** Rust 2021, sqlx 0.7 → 0.9 (postgres, chrono, migrate, macros), PostgreSQL 18+ (CI image `postgres:18`), axum 0.7, matrix-sdk 0.7 (keeps its own SQLite crypto store).
 
 **Spec:** [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](../specs/2026-09-24-postgres-foundation-design.md) (§4, §6 steps 1–3) and roadmap [`SPEC.md`](../../../SPEC.md) §2, §4.3.
 
@@ -14,7 +14,7 @@
 
 - The application database is PostgreSQL 18+ only. The **only** SQLite left in the process is matrix-sdk's crypto store (`.sqlite_store(...)` in `backend/src/bot/client.rs`) — do not touch it.
 - `DATABASE_URL` is required and must start with `postgres://` or `postgresql://`; anything else refuses to boot with an error naming `DATABASE_URL`.
-- Order is forced: **drop the sqlx `sqlite` feature before upgrading to 0.8.** `sqlx-sqlite 0.7` and `matrix-sdk-sqlite 0.7` both link `libsqlite3-sys 0.27`; sqlx 0.8's SQLite driver needs a newer one and Cargo cannot resolve both (`links = "sqlite3"`).
+- Order is forced: **drop the sqlx `sqlite` feature before upgrading to 0.9.** `sqlx-sqlite 0.7` and `matrix-sdk-sqlite 0.7` both link `libsqlite3-sys 0.27`; sqlx 0.9's SQLite driver needs a newer one (and matrix-sdk must move to 0.18, Task 3a) and Cargo cannot resolve both (`links = "sqlite3"`).
 - Never edit a migration file after it has been committed to master; add a new one.
 - Every task ends with: `cargo fmt --all -- --check`, `cargo check -p matrix-bot --all-targets` warning-free, `TEST_DATABASE_URL=… cargo test -p matrix-bot --all-targets` green, `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`.
 - Conventional Commits; end every commit message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -28,7 +28,7 @@
 
 ### Deviations from the design doc (recorded there in Task 6)
 
-1. Design §6 put "sqlx 0.8" before "Postgres-only cut". Reversed, for the `libsqlite3-sys` reason above.
+1. Design §6 put the sqlx upgrade before "Postgres-only cut". Reversed, for the `libsqlite3-sys` reason above.
 2. `0002_account_uuid` moves out of this plan to **after** the per-feature `query!` rewrite (design step 5). With every query compile-checked, flipping `owner_id` to `UUID` turns every stale bind into a compile error; doing it now would mean hand-auditing ~540 macro call sites and ~100 tests that insert text owners such as `'@a:x'`.
 3. Tests keep the existing per-test-schema harness (`db::pool::test_pool`, 110 call sites) instead of `#[sqlx::test]`; it gives the same isolation. It now runs the real migrator with locking disabled.
 
@@ -38,7 +38,7 @@
 
 | File | Change |
 |---|---|
-| `backend/Cargo.toml` | Task 1: drop `sqlite` feature. Task 3: sqlx 0.8 |
+| `backend/Cargo.toml` | Task 1: drop `sqlite` feature. Task 3a: matrix-sdk 0.18. Task 3: sqlx 0.9 |
 | `backend/src/db/executor.rs` | Task 1: `DbPool`/`DbTx` become aliases; macros lose the SQLite arm |
 | `backend/src/db/dialect.rs` | Task 1: `Dialect` enum removed; keeps only `render_placeholders(sql)` |
 | `backend/src/db/dialect_probe.rs` | Task 1: delete |
@@ -402,20 +402,79 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Upgrade sqlx to 0.8
+### Task 3a: Upgrade matrix-sdk 0.7 → 0.18 (unblocks sqlx 0.9)
+
+**Why:** Cargo checks `links = "sqlite3"` conflicts even for optional, non-activated dependencies. sqlx 0.9.0 (via its optional `sqlx-sqlite`, also reachable through `sqlx-macros-core`) requires `libsqlite3-sys >=0.30.1, <0.38`; matrix-sdk-sqlite 0.7.1 → rusqlite 0.30 → `libsqlite3-sys ^0.27`. matrix-sdk-sqlite 0.14–0.18 use rusqlite `^0.37` → `libsqlite3-sys ^0.35` (compatible); 0.19 moves to rusqlite 0.40 → `^0.38` (not). Target: **matrix-sdk 0.18**, the newest compatible release (user decision: sqlx 0.9).
+
+**Files:**
+- Modify: `backend/Cargo.toml` (matrix-sdk line; remove the direct `libsqlite3-sys` dependency and its comment block added in Task 1)
+- Modify: every file the compiler flags — expected concentration: `backend/src/bot/{client,verification,stage,quote,reaction,reaction_targets,reply,notify,media,mod}.rs`, `backend/src/modules/rooms/mod.rs`, `backend/src/modules/ai/alert.rs`, `backend/src/modules/tts/mod.rs`, `backend/src/api/auth/types.rs`, and single uses in `modules/{voice,ocr,reminder,webhook}`
+- Read first: `docs/ARCHITECTURE.md` sections "Matrix session and crypto store" and "Verification" — their invariants must hold after the upgrade
+
+**Interfaces:**
+- Consumes: nothing from Tasks 1–2 beyond the build.
+- Produces: `matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"] }` (or the 0.18 feature names that give an E2EE client with a bundled SQLite store); `cargo tree -p matrix-bot -i libsqlite3-sys` shows `libsqlite3-sys 0.35.x` only under `rusqlite ← matrix-sdk-sqlite`. Task 3 relies on exactly this.
+
+**Invariants that must survive (from ARCHITECTURE.md / AGENTS.md):**
+- The crypto store stays at the same on-disk path; matrix-sdk-sqlite migrates its own schema in place when opened by the newer version (0.7 → 0.18 crosses several store schema versions; the SDK applies them in order). Never delete or re-create it as part of the upgrade.
+- Never keep the crypto store across a fresh login; never pin a device ID on a fresh login (whatever the code does today about this must be preserved with the 0.18 API).
+- `ensure_self_verified` runs on every boot; `Recovery::recover()` returning `Ok` is still not treated as "verified".
+- Replies still use `text_html(plain, html)`; voice replies are still sent as Ogg Opus voice messages with MSC3245 metadata.
+- `!link` is still handled before sender resolution.
+
+- [ ] **Step 1: Bump and see the damage**
+
+Edit `backend/Cargo.toml`: `matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"] }` — check matrix-sdk 0.18's `Cargo.toml` feature list (`~/.cargo/registry/src/*/matrix-sdk-0.18.*/Cargo.toml` after `cargo fetch`) and use the names that exist; delete the direct `libsqlite3-sys` dependency and its comment. Run:
+`cargo update -p matrix-sdk && cargo tree -p matrix-bot -i libsqlite3-sys`
+Expected: resolves, `libsqlite3-sys v0.35.x` via `rusqlite ← matrix-sdk-sqlite`.
+Run: `cargo check -p matrix-bot --all-targets 2>&1 | grep -c "^error"` and record the count in the report.
+
+- [ ] **Step 2: Port the API changes**
+
+Fix compile errors file by file. Consult the matrix-sdk CHANGELOG entries for every release 0.8 through 0.18 (`~/.cargo/registry/src/*/matrix-sdk-0.18.*/CHANGELOG.md`) and the ruma version it pulls in. Rules: preserve behaviour exactly; no compatibility shims; when an API was removed without a direct replacement, pick the documented successor and name it in the report. If an invariant above cannot be kept with the 0.18 API, stop and report NEEDS_CONTEXT.
+
+- [ ] **Step 3: Verify tests and the build**
+
+Run: `cargo fmt --all -- --check && cargo check -p matrix-bot --all-targets && cargo test -p matrix-bot --all-targets && cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1 && cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`
+Expected: all green, warning-free. Also `cargo check -p matrix-bot-inference` still builds (it must not depend on matrix-sdk; confirm nothing changed there).
+
+- [ ] **Step 4: Live boot check against a COPY of the crypto store**
+
+Never point the upgraded binary at the real `data/` store first. Copy it:
+```bash
+cp -r ../../../data /tmp/matrix-store-copy   # the main checkout's data/ directory
+```
+Point the store path at the copy (use the env var or constant `bot/client.rs` reads; if the path is a hard-coded constant, run from a scratch directory containing the copied `data/`), boot with the real Matrix credentials from the main checkout's `.env` and a throwaway `DATABASE_URL` database, and confirm in the log: login restored (no fresh login), store opened and migrated, `ensure_self_verified` reports verified, sync loop running. Stop the process. If credentials are not available in this environment, record that the live check was skipped and why — the controller will run it with the user before merge.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/Cargo.toml Cargo.lock backend/src
+git commit -m "chore!: upgrade matrix-sdk to 0.18
+
+matrix-sdk-sqlite 0.18 uses rusqlite 0.37 / libsqlite3-sys 0.35, the newest
+line compatible with sqlx 0.9's sqlite links requirement. The crypto store
+is migrated in place by the SDK on first open.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: Upgrade sqlx to 0.9
 
 **Files:**
 - Modify: `backend/Cargo.toml:36`, `Cargo.lock`
 - Modify: whatever the compiler flags (expected: `backend/src/db/executor.rs` macros, a few `Executor`/`Transaction` call sites)
 
 **Interfaces:**
-- Consumes: Task 1 (no `sqlite` feature, so `libsqlite3-sys` has one consumer).
-- Produces: sqlx 0.8 with features `runtime-tokio`, `tls-rustls`, `postgres`, `chrono`, `uuid`, `json`, `migrate`, `macros` for Tasks 4–6 and the next plan.
+- Consumes: Task 1 (no `sqlite` feature) and Task 3a (matrix-sdk 0.18, so `libsqlite3-sys` is 0.35.x — inside sqlx 0.9's optional `sqlx-sqlite` range `>=0.30.1, <0.38`).
+- Produces: sqlx 0.9 with features `runtime-tokio`, `tls-rustls`, `postgres`, `chrono`, `uuid`, `json`, `migrate`, `macros` for Tasks 4–6 and the next plan.
 
 - [ ] **Step 1: Bump**
 
 ```toml
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "json", "migrate", "macros"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "chrono", "uuid", "json", "migrate", "macros"] }
 ```
 
 Run: `cargo update -p sqlx && cargo tree -p matrix-bot -i libsqlite3-sys`
@@ -425,9 +484,11 @@ Expected: resolves; `libsqlite3-sys` appears only under `matrix-sdk-sqlite`. If 
 
 Run: `cargo check -p matrix-bot --all-targets 2>&1 | head -80`
 
-Known 0.8 changes and their fixes:
+Known 0.9 changes and their fixes (confirm against sqlx's CHANGELOG for 0.8.x and 0.9.0):
+- **`SqlSafeStr`:** `query`, `query_as`, `query_scalar` and `raw_sql` accept a `&'static str` or a value wrapped in `sqlx::AssertSqlSafe(...)`. The `?`-style macros build SQL at runtime (`__render` returns `Cow<str>`), so wrap it once inside each macro: `sqlx::query_as::<_, $ty>(sqlx::AssertSqlSafe(__sql.into_owned()))`. Every value is still bound, never interpolated — the wrapper asserts exactly that. Do the same in `db_ddl!` and any direct `sqlx::query(&format!(..))` call site the compiler flags.
+- MSRV is Rust 1.94.
 - `Transaction` no longer derefs to a connection usable as `&mut *tx` in some positions → use `&mut **tx` (the macros already do) or `tx.as_mut()`.
-- `sqlx::raw_sql(...)` requires a `&'static str` or `AssertSqlSafe` in newer 0.8 releases → in `db_ddl!` use `sqlx::raw_sql(sqlx::AssertSqlSafe(rendered.into_owned()))` if the compiler asks for it; otherwise leave it.
+- `sqlx::raw_sql(...)`: covered by the `SqlSafeStr` item above.
 - `query_as::<_, (T,)>` tuple `FromRow` unchanged.
 
 Fix each error at its site; do not add compatibility shims.
@@ -441,7 +502,7 @@ Expected: all green, warning-free.
 
 ```bash
 git add backend/Cargo.toml Cargo.lock backend/src
-git commit -m "chore: upgrade sqlx to 0.8
+git commit -m "chore: upgrade sqlx to 0.9
 
 Fixes RUSTSEC-2024-0363 and enables the uuid, json and macros features the
 compile-checked query rewrite needs.
@@ -863,8 +924,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Install the CLI**
 
-Run: `cargo install sqlx-cli --version ^0.8 --no-default-features --features rustls,postgres --locked`
-Expected: `cargo sqlx --version` prints `0.8.x`.
+Run: `cargo install sqlx-cli --version ^0.9 --no-default-features --features rustls,postgres --locked`
+Expected: `cargo sqlx --version` prints `0.9.x`.
 
 - [ ] **Step 2: Force offline builds by default**
 
@@ -908,7 +969,7 @@ In the `backend` job, before "Run backend tests & check targets", add:
 
 ```yaml
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli --version ^0.8 --no-default-features --features rustls,postgres --locked
+        run: cargo install sqlx-cli --version ^0.9 --no-default-features --features rustls,postgres --locked
 
       # The committed .sqlx/ cache must match both the queries and the schema.
       - name: Verify the sqlx offline cache

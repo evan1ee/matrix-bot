@@ -19,7 +19,7 @@ Changes made while reviewing this document against the codebase:
 5. **Live LLM path:** "single turn, <1s" was not achievable — a read tool needs a second completion to answer, and web search alone takes seconds. The rule is now a **bounded tool-calling loop** (a fixed maximum of rounds, no persistent planner, no background state) (§1.3, §7.1).
 6. **Outbox:** one `published` flag cannot track fan-out to several destinations; delivery is now tracked per destination in `outbox_deliveries`, which replaces `webhook_outbox` (§6).
 7. **Job queue:** added `dedupe_key` (a scheduled occurrence is enqueued once) and a heartbeat-based reaper (a long job is not stolen) (§5).
-8. **Queries:** compile-time-checked `sqlx::query!` macros with a committed `.sqlx/` offline cache, on sqlx 0.8 (§2.2).
+8. **Queries:** compile-time-checked `sqlx::query!` macros with a committed `.sqlx/` offline cache, on sqlx 0.9 (§2.2).
 9. **Consistency fixes:** Redis removed from §9.5; duplicate §7.3 renumbered; §9 heading level; §13 aligned with the approved layout; §16 criteria made testable.
 
 ---
@@ -236,7 +236,7 @@ When an incoming prompt is received from any chat interface (Matrix, Discord, Te
 Maintaining a dual-dialect database abstraction layer created massive incidental complexity and hindered system capabilities:
 
 1. **Elimination of the Dual-Dialect Macro Layer:**
-   The project previously maintained over 700 lines of complex macros in `backend/src/db/executor.rs` (`db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!`, `tx_*`) and the `DbPool` enum (`Sqlite(SqlitePool)` vs `Postgres(PgPool)`). Removing SQLite eliminates this layer entirely in favor of idiomatic, type-safe, direct `sqlx::PgPool` and `sqlx::query!` / `sqlx::query_as!` usage. The macros are checked at build time against a committed `.sqlx/` offline cache (`cargo sqlx prepare`), so builds and CI need no live database (`SQLX_OFFLINE=true`), and CI fails on a stale cache (`cargo sqlx prepare --check`). sqlx is upgraded from 0.7 to 0.8 first.
+   The project previously maintained over 700 lines of complex macros in `backend/src/db/executor.rs` (`db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!`, `tx_*`) and the `DbPool` enum (`Sqlite(SqlitePool)` vs `Postgres(PgPool)`). Removing SQLite eliminates this layer entirely in favor of idiomatic, type-safe, direct `sqlx::PgPool` and `sqlx::query!` / `sqlx::query_as!` usage. The macros are checked at build time against a committed `.sqlx/` offline cache (`cargo sqlx prepare`), so builds and CI need no live database (`SQLX_OFFLINE=true`), and CI fails on a stale cache (`cargo sqlx prepare --check`). sqlx is upgraded from 0.7 to 0.9 first.
 2. **Elimination of Runtime Query Rewriting:**
    `dialect::render_placeholders` dynamically parsed and rewrote every query from SQLite `?` syntax to PostgreSQL `$1..$n` at runtime. Eliminating this provides zero runtime translation overhead, unlocks native prepared statement caching, and allows direct SQL compilation.
 3. **Removal of Token-Substituted DDL Hackery:**
