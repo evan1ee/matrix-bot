@@ -2,7 +2,7 @@
 
 > **Version:** 2.4.0  
 > **Status:** Roadmap specification. Sub-project 1 (phases 1–3) is designed in [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](docs/superpowers/specs/2026-09-24-postgres-foundation-design.md); later phases each get their own design before implementation.  
-> **Target Database:** PostgreSQL 16+ is the only application database (SQLite removed). The Matrix SDK's own end-to-end-encryption store remains an SDK-managed SQLite file — see §2.3.  
+> **Target Database:** PostgreSQL 18+ is the only application database (SQLite removed). The Matrix SDK's own end-to-end-encryption store remains an SDK-managed SQLite file — see §2.3.  
 > **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord & Telegram ([TODO] Planned Features — Extensible Channel Framework), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)  
 > **Agent Execution Scope:** Scheduled Specific Tasks Exclusively ([TODO] Planned Feature — Extensible Task Plugin Architecture); Live User Input Handled Exclusively by Direct LLM + Tool Calling  
 
@@ -208,7 +208,7 @@ When an incoming prompt is received from any chat interface (Matrix, Discord, Te
 │                          DATA & INFRASTRUCTURE LAYER                            │
 │                                                                                 │
 │   ┌─────────────────────────────────────────────────────────────────────────┐   │
-│   │                          PostgreSQL 16+ (Only)                          │   │
+│   │                          PostgreSQL 18+ (Only)                          │   │
 │   │    Domain Tables  •  Jobs Queue (SKIP LOCKED)  •  Outbox Events         │   │
 │   │    Platform Identities • Agent State • Audit • Sessions • Full-Text     │   │
 │   └────────────────────────────────┬────────────────────────────────────────┘   │
@@ -229,7 +229,7 @@ When an incoming prompt is received from any chat interface (Matrix, Discord, Te
 
 ### 2.1 The Architectural Decision
 
-**SQLite support is completely removed from the project.** PostgreSQL 16+ is the sole supported database backend across development, testing, and production.
+**SQLite support is completely removed from the project.** PostgreSQL 18+ is the sole supported database backend across development, testing, and production.
 
 ### 2.2 Rationale and Technical Debt Elimination
 
@@ -337,7 +337,7 @@ The system is structured as a strict **Layered & Hexagonal Architecture** to enf
 
 ## 4. PostgreSQL Database Architecture & Schema Specification
 
-All relational, unstructured (JSONB), and queuing state resides in PostgreSQL 16+.
+All relational, unstructured (JSONB), and queuing state resides in PostgreSQL 18+.
 
 ### 4.1 Primary Database Standards
 
@@ -1337,7 +1337,7 @@ Phase 6: Multi-Interface Polish ◄── Phase 5: Scheduled Agent & Storage ◄
   2. Refactor `DbPool` into a thin wrapper around `sqlx::PgPool`.
   3. Replace all dual-dialect macros (`db_fetch_all!`, etc.) across all existing modules with direct `sqlx::query_as!` / `sqlx::query!` calls, backed by the committed `.sqlx/` cache.
   4. Consolidate unversioned `schema*.rs` files into forward-only PostgreSQL migrations (`migrations/*.sql`), starting with an idempotent baseline the live database adopts in place, then the `owner_id` → `UUID` migration.
-  5. Update CI workflows: merge the SQLite and PostgreSQL backend jobs into one job with a PostgreSQL 16 service container, plus `cargo sqlx prepare --check`.
+  5. Update CI workflows: merge the SQLite and PostgreSQL backend jobs into one job with a PostgreSQL 18 service container, plus `cargo sqlx prepare --check`.
 * **Verification:** `cargo test -p matrix-bot` passes warning-free against PostgreSQL; the migrations applied to a production copy preserve every row and audit chain; no application code references SQLite.
 
 ### Phase 2: Domain Layer Extraction & Use-Case Services

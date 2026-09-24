@@ -9,7 +9,7 @@
 Turn the backend into a PostgreSQL-only, layered, production-ready service without
 losing a byte of the data in the live PostgreSQL deployment:
 
-- The application database is PostgreSQL 16+ only. The dual-dialect layer
+- The application database is PostgreSQL 18+ only. The dual-dialect layer
   (`db/executor.rs`, `db/dialect.rs`, `db/dialect_probe.rs`, `db/ddl.rs`,
   `db/backfill.rs`, the `db_*!`/`tx_*!` macros, `DbPool`) is deleted.
 - Queries are compile-time checked (`sqlx::query!` / `query_as!`) against a committed
@@ -172,7 +172,7 @@ move to the router.
   `DATABASE_URL` must point at a server; locally `docker compose --profile postgres up -d`.
 - Tests that need no database stay plain `#[test]` — domain tests in particular.
 - CI: the `backend` and `backend-postgres` jobs merge into one containerised job
-  with a `postgres:16` service (the minimum supported version), running
+  with a `postgres:18` service (the supported version), running
   `cargo sqlx prepare --workspace --check`, `cargo fmt --check`, `cargo test`,
   and the OpenAPI drift check.
 

@@ -6,13 +6,13 @@
 
 **Architecture:** Collapse `DbPool`/`DbTx` to type aliases over `sqlx::PgPool`/`sqlx::Transaction<Postgres>` and shrink the `db_*!`/`tx_*!` macros to a single Postgres arm, so all ~540 call sites keep compiling untouched (they are rewritten to `query!` feature by feature in the next plan). Then upgrade sqlx, then transcribe today's schema into an idempotent `0001_baseline.sql` proved identical to the legacy DDL by a catalog-comparison test, and switch boot to the migrator.
 
-**Tech Stack:** Rust 2021, sqlx 0.7 → 0.8 (postgres, chrono, migrate, macros), PostgreSQL 16+ (CI image `postgres:16`), axum 0.7, matrix-sdk 0.7 (keeps its own SQLite crypto store).
+**Tech Stack:** Rust 2021, sqlx 0.7 → 0.8 (postgres, chrono, migrate, macros), PostgreSQL 18+ (CI image `postgres:18`), axum 0.7, matrix-sdk 0.7 (keeps its own SQLite crypto store).
 
 **Spec:** [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](../specs/2026-09-24-postgres-foundation-design.md) (§4, §6 steps 1–3) and roadmap [`SPEC.md`](../../../SPEC.md) §2, §4.3.
 
 ## Global Constraints
 
-- The application database is PostgreSQL 16+ only. The **only** SQLite left in the process is matrix-sdk's crypto store (`.sqlite_store(...)` in `backend/src/bot/client.rs`) — do not touch it.
+- The application database is PostgreSQL 18+ only. The **only** SQLite left in the process is matrix-sdk's crypto store (`.sqlite_store(...)` in `backend/src/bot/client.rs`) — do not touch it.
 - `DATABASE_URL` is required and must start with `postgres://` or `postgresql://`; anything else refuses to boot with an error naming `DATABASE_URL`.
 - Order is forced: **drop the sqlx `sqlite` feature before upgrading to 0.8.** `sqlx-sqlite 0.7` and `matrix-sdk-sqlite 0.7` both link `libsqlite3-sys 0.27`; sqlx 0.8's SQLite driver needs a newer one and Cargo cannot resolve both (`links = "sqlite3"`).
 - Never edit a migration file after it has been committed to master; add a new one.
@@ -21,7 +21,7 @@
 - Push to `gitea` (primary) and `origin` (mirror) only when the user asks.
 - Local PostgreSQL for all tests (every task):
   ```bash
-  docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:16
+  docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
   export TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres
   export PG_TEST_URL=$TEST_DATABASE_URL
   ```
@@ -339,12 +339,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: Task 1's `TEST_DATABASE_URL` requirement.
-- Produces: a single `backend` CI job running on PostgreSQL 16 (Task 6 adds a step to it).
+- Produces: a single `backend` CI job running on PostgreSQL 18 (Task 6 adds a step to it).
 
 - [ ] **Step 1: Merge the CI jobs**
 
 In `ci.yml`, delete the `backend` job and rename `backend-postgres` to `backend` (`name: Backend CI (PostgreSQL)`). In it:
-- Service image `postgres:16` (the minimum supported version — test the floor).
+- Service image `postgres:18` (the supported version).
 - Add `components: rustfmt` to the toolchain step.
 - Steps after rust-cache, in order:
 
@@ -383,11 +383,11 @@ Expected: exit 0, no output.
 - [ ] **Step 4: Update AGENTS.md and ARCHITECTURE.md**
 
 AGENTS.md:
-- Overview: "Data lives in PostgreSQL 16+ (the only application database); matrix-sdk keeps its own SQLite crypto store under `data/`."
-- Commands: replace the backend test line with the `docker run … postgres:16` + `export TEST_DATABASE_URL=…` block from this plan's Global Constraints, then `cargo test -p matrix-bot --all-targets`. Remove "Run the suite against PostgreSQL instead of in-memory SQLite" wording. Change the compose command to drop `--profile postgres` and the `DATABASE_URL=` prefix.
+- Overview: "Data lives in PostgreSQL 18+ (the only application database); matrix-sdk keeps its own SQLite crypto store under `data/`."
+- Commands: replace the backend test line with the `docker run … postgres:18` + `export TEST_DATABASE_URL=…` block from this plan's Global Constraints, then `cargo test -p matrix-bot --all-targets`. Remove "Run the suite against PostgreSQL instead of in-memory SQLite" wording. Change the compose command to drop `--profile postgres` and the `DATABASE_URL=` prefix.
 - Database & SQLx: keep the macro list for now but replace "dual-dialect macros … rewrites it to `$1..$n` for Postgres" with "`?`-style macros (PostgreSQL only; being replaced by compile-checked `query!`)"; delete the "SQLite pools: WAL…" line. Leave the portability and type tables unchanged in this task — Task 6 rewrites them when `query!` becomes the rule.
 - Gotchas: `DATABASE_URL` has no default and must be `postgres://`.
-- Testing: CI runs four jobs → three (`backend`, `inference`, `frontend`), `backend` on PostgreSQL 16.
+- Testing: CI runs four jobs → three (`backend`, `inference`, `frontend`), `backend` on PostgreSQL 18.
 
 ARCHITECTURE.md "Two databases": replace with a short section "PostgreSQL only" stating the decision, the matrix-sdk crypto-store exception, and linking the foundation design doc.
 
@@ -395,7 +395,7 @@ ARCHITECTURE.md "Two databases": replace with a short section "PostgreSQL only" 
 
 ```bash
 git add .github/workflows/ci.yml docker-compose.yml .env.example AGENTS.md docs/ARCHITECTURE.md
-git commit -m "ci: run the backend suite on PostgreSQL 16 only
+git commit -m "ci: run the backend suite on PostgreSQL 18 only
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
