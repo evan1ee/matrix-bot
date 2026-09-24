@@ -5,6 +5,7 @@
 
 pub mod ocr;
 pub mod stt;
+pub mod tts;
 
 #[cfg(test)]
 mod test_support;
