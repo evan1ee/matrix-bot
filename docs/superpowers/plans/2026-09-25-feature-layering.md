@@ -30,6 +30,9 @@
 - **D-C Matrix handlers:** each feature's `BotModule` implementation moves to `interface/chat/<feature>.rs` and calls the application service. `BotModule`/`ModuleRegistry` move to `interface/chat/mod.rs` in Task 14, when `modules/` is deleted.
 - **D-D Cross-feature reads:** a read model that aggregates several features' tables (`life`, `briefing`, `finance` net worth) lives in `infrastructure/postgres/read_models/<name>.rs` as `query!` SQL; it is the only place allowed to join across features' tables. Writes always go through the owning feature's service.
 - **D-E Coupled batches:** todo + reminder + recurring_bills + due_reminder move together (shared `source_kind`/`source_id` due-reminder linkage).
+- **D-F Service wiring:** services are constructed once in `app.rs` into an `AppServices` struct (`Arc`-free where the service is cheap to clone: it holds a `PgPool` and an `EventBroadcaster`, both clone-cheap) and passed to `ApiState` and to the Matrix `ModuleContext`. Adapters never build their own services. Task 1 creates `AppServices` with the rooms service; each later task adds its field.
+- **D-G Interface SQL allow-list:** `backend/tests/architecture.rs` holds `INTERFACE_SQL_ALLOW_LIST` (the interface files that still run SQL). Each task removes its feature's files from the list; the test fails if a listed file no longer offends, so the list only shrinks. Task 14 deletes the list.
+- **D-H Chat context types:** `QuotedMessage` (today `interface/channels/matrix/quote.rs`) is platform-neutral chat context. The first task whose application service needs it (Task 8) moves the type to `domain/chat.rs` (parsing stays in the Matrix adapter), per spec §3.3's `ChatRequest.quoted`. `StageReporter`/`notify` stay adapter-side: application code receives what it needs as plain data or a narrow trait defined in `application/`.
 
 ---
 
@@ -88,6 +91,7 @@ impl BookmarkService {
 - LLM tools (`modules/ai/tools/<f>.rs`) and MCP tools that touch `<f>` are repointed at `<F>Service` in the same task.
 - Delete `modules/<f>/` when empty; update `ModuleRegistry` registration to the new `interface/chat/<f>.rs` type.
 - AGENTS.md: after Task 1, rewrite the "Module Implementation Checklist" to this contract (paths, the openapi no-diff rule, `query!`, ≤500 lines).
+- Every task: add the feature's service to `AppServices` (D-F) and remove its interface files from `INTERFACE_SQL_ALLOW_LIST` (D-G) — the architecture test enforces the shrink.
 
 ---
 
@@ -95,6 +99,7 @@ impl BookmarkService {
 Scope: `db/rooms.rs` (`RoomRepository`, room resolution: `get_cached_rooms`, `save_cached_rooms`, `resolve_user_default_room`, `resolve_target_room`), `modules/rooms/mod.rs`, `interface/http/rooms.rs`. Tables: `account_rooms` (+ reads `user_settings.dev_room_id`, `matrix_links` via `AccountRepository::linked_mxids` — keep those as calls into their owners' code for now). Creates `application/mod.rs` with `AppError`, `infrastructure/postgres/mod.rs` + `repositories/mod.rs`, `interface/chat/mod.rs` (initially just `pub mod rooms;`).
 - [ ] Failing tests first: domain (`JoinedRoom` construction, target-resolution rules as pure functions over a room list where possible — the priority order in `resolve_user_default_room` is a business rule and belongs in domain), repository round-trip with `query!`.
 - [ ] Implement per the contract; `save_cached_rooms` keeps its transaction (delete + inserts atomically).
+- [ ] Create `AppServices` in `app.rs` (D-F) with `rooms`; thread it into `ApiState` and `ModuleContext`; remove rooms' files from `INTERFACE_SQL_ALLOW_LIST` (D-G).
 - [ ] Verify (global list); openapi no diff.
 - [ ] Rewrite AGENTS.md "Module Implementation Checklist" to the contract.
 - [ ] Commit `refactor(rooms): move rooms into the layered layout with compile-checked queries`.
@@ -150,6 +155,6 @@ Scope: `modules/ai/*` (~7 250 lines; split `handler.rs` 1 209), `modules/ai/tool
 ### Task 14: remove the interim layer
 - Delete `db/executor.rs` macros and `db/dialect.rs` (`render_placeholders`); `crate::db` keeps only pool/migrate/catalog.
 - Move `BotModule`, `ModuleRegistry`, `BackgroundWorkers` from `modules/mod.rs` to `interface/chat/mod.rs`; delete `modules/`.
-- Architecture test additions: no `db_*!`/`tx_*!` anywhere; `AssertSqlSafe` only in `infrastructure/postgres/merge.rs`; no `sqlx::` in `interface/` or `application/` other than `PgPool`/`Transaction`/`Error` types.
+- Architecture test additions: no `db_*!`/`tx_*!` anywhere; `AssertSqlSafe` only in `infrastructure/postgres/merge.rs`; no `sqlx::` in `interface/` or `application/` other than `PgPool`/`Transaction`/`Error` types; delete `INTERFACE_SQL_ALLOW_LIST` (must be empty by now). Before adding needles, make the scanner strip string literals as well as `//` comments (today `line.split("//")` truncates at URL literals, e.g. in bookmarks, hiding anything after them on that line).
 - AGENTS.md / ARCHITECTURE.md: remove every mention of the `?`-style macros and `modules/`; the Database & SQLx rules state `query!` only.
 - [ ] Verify → commit `refactor!: remove the interim query macros and modules/`.
