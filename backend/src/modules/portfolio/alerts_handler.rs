@@ -5,11 +5,11 @@ use crate::modules::finance::money::{
 };
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::models::normalise_symbol;
-use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 pub async fn handle_alert_command(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -30,7 +30,7 @@ pub async fn handle_alert_command(
         return handle_cancel_alert(pool, owner_id, &rest, broadcaster).await;
     }
 
-    handle_create_alert(pool, owner_id, trimmed, broadcaster).await
+    handle_create_alert(pool, settings, owner_id, trimmed, broadcaster).await
 }
 
 async fn handle_list_alerts(pool: &DbPool, owner_id: &str) -> String {
@@ -101,6 +101,7 @@ async fn handle_cancel_alert(
 
 async fn handle_create_alert(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -132,7 +133,7 @@ async fn handle_create_alert(
         let exp = i64::from(exponent_for(&cur));
         (cur, exp)
     } else {
-        let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+        let settings = settings.get_or_default(owner_id).await;
         let exp = i64::from(exponent_for(&settings.currency));
         (settings.currency, exp)
     };

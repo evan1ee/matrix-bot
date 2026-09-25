@@ -1,3 +1,4 @@
+use crate::application::settings::SettingsService;
 use crate::db::DbPool;
 use tracing::error;
 
@@ -12,6 +13,7 @@ use crate::utils::html_escape;
 
 pub async fn handle_portfolio_command(
     pool: &DbPool,
+    settings: &SettingsService,
     owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -29,13 +31,13 @@ pub async fn handle_portfolio_command(
         return Some(handle_summary(pool, owner_id).await);
     }
     if rest_lower.starts_with("cash") {
-        return Some(handle_cash(pool, owner_id, rest[4..].trim(), broadcaster).await);
+        return Some(handle_cash(pool, settings, owner_id, rest[4..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("buy") {
-        return Some(handle_buy(pool, owner_id, rest[3..].trim(), broadcaster).await);
+        return Some(handle_buy(pool, settings, owner_id, rest[3..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("record") || rest_lower.starts_with("import") {
-        return Some(handle_record(pool, owner_id, rest[6..].trim(), broadcaster).await);
+        return Some(handle_record(pool, settings, owner_id, rest[6..].trim(), broadcaster).await);
     }
     if rest_lower.starts_with("sell") {
         return Some(handle_sell(pool, owner_id, rest[4..].trim(), broadcaster).await);
@@ -60,6 +62,7 @@ pub async fn handle_portfolio_command(
         return Some(
             crate::modules::portfolio::alerts_handler::handle_alert_command(
                 pool,
+                settings,
                 owner_id,
                 rest[5..].trim(),
                 broadcaster,
@@ -290,10 +293,15 @@ mod tests {
     async fn test_refresh_empty_holdings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
-        let reply = handle_portfolio_command(&pool, "@alice:x", "!portfolio refresh", None)
-            .await
-            .unwrap();
+        let reply =
+            handle_portfolio_command(&pool, &settings, "@alice:x", "!portfolio refresh", None)
+                .await
+                .unwrap();
         assert!(reply.contains("no holdings to refresh"));
     }
 
@@ -301,9 +309,14 @@ mod tests {
     async fn test_record_holding_without_cash() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let reply = handle_portfolio_command(
             &pool,
+            &settings,
             "@alice:x",
             "!portfolio record AAPL 10 @ 150.00 USD initial",
             None,

@@ -14,7 +14,6 @@ use crate::modules::footprints::models::{
     CreateFootprintRequest, Footprint, FootprintsSummary, UpdateFootprintRequest,
 };
 use crate::modules::footprints::repository::FootprintRepository;
-use crate::modules::settings::repository::SettingsRepository;
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ListFootprintsQuery {
@@ -113,7 +112,10 @@ pub async fn create_footprint(
         ));
     }
 
-    let default_currency = SettingsRepository::get_or_default(&state.db.pool, &user.account_id)
+    let default_currency = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
         .await
         .currency;
     let raw_currency = payload

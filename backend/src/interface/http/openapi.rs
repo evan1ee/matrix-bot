@@ -29,7 +29,6 @@ use crate::modules::recurring_bills::models::{
     CreateBillPayload, RecurringBill, UpdateBillPayload,
 };
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
-use crate::modules::settings::UserSettings;
 use crate::modules::todo::models::{TodoItem, TodoPriority};
 use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 
@@ -206,7 +205,7 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
             auth::UserProfileResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,
-            UserSettings,
+            settings::UserSettings,
             settings::UpdateSettingsRequest,
             crate::modules::briefing::models::BriefingPayload,
             crate::modules::briefing::models::BriefingSummary,

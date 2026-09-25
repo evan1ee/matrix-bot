@@ -123,12 +123,18 @@ impl BotModule for PortfolioModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
-            .await
+        handler::handle_portfolio_command(
+            &db.pool,
+            &services.settings,
+            &ctx.owner_id,
+            &ctx.full_body,
+            broadcaster,
+        )
+        .await
     }
 
     async fn spawn_background_workers(
@@ -352,22 +358,23 @@ mod tests {
     /// like the finance module's `!expense add`.
     #[tokio::test]
     async fn test_buy_without_a_currency_uses_the_senders_default() {
-        use crate::modules::settings::{SettingsRepository, UserSettings};
+        use crate::domain::settings::UserSettings;
 
         let module = PortfolioModule::new();
         let db = db().await;
 
-        SettingsRepository::upsert(
-            &db.pool,
-            "@alice:a",
-            &UserSettings {
-                timezone: "UTC".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        crate::application::AppServices::new(&db.pool)
+            .settings
+            .save(
+                "@alice:a",
+                UserSettings {
+                    timezone: "UTC".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
         fund(&module, &db, "CNY").await;
 
         let reply = module

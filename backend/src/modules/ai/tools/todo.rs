@@ -4,7 +4,6 @@ use chrono_tz::Tz;
 
 use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::models::TodoPriority;
 use crate::modules::todo::repository::TodoRepository;
 use crate::modules::todo::service::{self, NewTodo, TodoPatch};
@@ -70,7 +69,7 @@ pub async fn execute_tool(
                     .or_else(|| args.get("due"))
                     .and_then(|v| v.as_str())
                 {
-                    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                    let settings = services.settings.get_or_default(owner_id).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
                     None
@@ -174,7 +173,7 @@ pub async fn execute_tool(
                         if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                             Some(Utc::now() + Duration::minutes(mins))
                         } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                            let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                            let settings = services.settings.get_or_default(owner_id).await;
                             parse_due_at(due_str, &settings.tz())
                         } else {
                             None

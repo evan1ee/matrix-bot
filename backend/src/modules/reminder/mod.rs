@@ -54,12 +54,13 @@ impl BotModule for ReminderModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_reminder_command(
             &db.pool,
+            &services.settings,
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,

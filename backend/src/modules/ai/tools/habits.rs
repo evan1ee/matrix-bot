@@ -5,16 +5,16 @@ use serde_json::json;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::habits::repository::HabitsRepository;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings = services.settings.get_or_default(owner_id).await;
     let today_str = Utc::now()
         .with_timezone(&settings.tz())
         .format("%Y-%m-%d")

@@ -90,7 +90,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         db = Database::connect(&config.database_url, config.db_max_connections) => db?,
     };
     let broadcaster = EventBroadcaster::default();
-    let services = AppServices::new(&db.pool);
+    let services = AppServices::with_events(&db.pool, &broadcaster);
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // and the pending merges survive a Matrix reconnect.
     let handles = BotHandles::default();

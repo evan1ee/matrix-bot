@@ -1,6 +1,6 @@
+use crate::application::settings::SettingsService;
 use crate::db::DbPool;
 use crate::events::EventBroadcaster;
-use crate::modules::settings::SettingsRepository;
 use crate::modules::todo::mutate::{
     handle_add, handle_clear, handle_delete, handle_done, handle_due, handle_edit, handle_priority,
 };
@@ -10,8 +10,13 @@ use crate::utils::html_escape;
 
 pub use crate::modules::todo::mutate::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
+// `settings` pushed this past clippy's default limit; todo still takes its
+// inputs one by one until Task 8 (feature-layering) moves it onto `services`
+// the way rooms and settings already have.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_todo_command(
     pool: &DbPool,
+    settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -29,9 +34,7 @@ pub async fn handle_todo_command(
 
     // Read after the command is claimed, so an unrelated message never costs a
     // settings query.
-    let tz = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .tz();
+    let tz = settings.get_or_default(owner_id).await.tz();
 
     if bare {
         let items = TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, 0)
@@ -105,9 +108,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_add_and_done() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let res = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -123,6 +131,7 @@ mod tests {
 
         let res_done = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -137,6 +146,7 @@ mod tests {
 
         let res_empty_add = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -152,9 +162,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_edit_and_priority() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -166,6 +181,7 @@ mod tests {
 
         let res_edit = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -179,6 +195,7 @@ mod tests {
 
         let res_prio = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -195,9 +212,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_list_and_clear() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -208,6 +230,7 @@ mod tests {
         .await;
         handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -219,6 +242,7 @@ mod tests {
 
         let res_list = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -232,6 +256,7 @@ mod tests {
 
         let res_clear = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -247,9 +272,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_unknown_command() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let res = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -265,21 +295,32 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_input_too_long() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let long_text = "x".repeat(501);
         let cmd = format!("!todo add {}", long_text);
-        let res = handle_todo_command(&pool, None, "!room:1", "@alice:1", "alice", &cmd, None)
-            .await
-            .unwrap();
+        let res = handle_todo_command(
+            &pool, &settings, None, "!room:1", "@alice:1", "alice", &cmd, None,
+        )
+        .await
+        .unwrap();
         assert!(res.contains("too long"));
     }
 
     #[tokio::test]
     async fn test_handle_todo_delete() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -290,6 +331,7 @@ mod tests {
         .await;
         let res_del = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -304,6 +346,7 @@ mod tests {
         // Alice tries to delete non-existent task
         let res_notfound = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -319,6 +362,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_todo_add_with_quoted_message() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
         let quoted = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("bob".to_string()),
             body: "Remember to review PR 42".to_string(),
@@ -328,6 +375,7 @@ mod tests {
         // !todo add without description, should take quoted body
         let res = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -343,6 +391,7 @@ mod tests {
 
         let res_list = handle_todo_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",

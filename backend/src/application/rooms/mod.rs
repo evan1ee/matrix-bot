@@ -8,10 +8,10 @@ use sqlx::PgPool;
 use tracing::warn;
 
 use crate::accounts::AccountRepository;
+use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::domain::rooms::{self as domain, CachedRoom, JoinedRoom, RoomTarget, WEB_ROOM};
 use crate::infrastructure::postgres::repositories::rooms as repo;
-use crate::modules::settings::repository::SettingsRepository;
 
 /// What the room picker shows: the cache, or — when caching a fresh
 /// discovery failed — the discovery itself, not yet cached.
@@ -24,11 +24,12 @@ pub enum PickerRooms {
 #[derive(Clone)]
 pub struct RoomService {
     pool: PgPool,
+    settings: SettingsService,
 }
 
 impl RoomService {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, settings: SettingsService) -> Self {
+        Self { pool, settings }
     }
 
     /// The account's cached rooms, in picker order.
@@ -106,12 +107,12 @@ impl RoomService {
             "linked Matrix ids",
             account_id,
         );
-        let dev_room_id = logged_or_default(
-            SettingsRepository::get(&self.pool, account_id)
-                .await
-                .map(|settings| settings.dev_room_id),
-            "dev room setting",
-            account_id,
+        let dev_room_id = self.settings.get(account_id).await.map_or_else(
+            |err| {
+                warn!(account_id, error = %err, "Resolving a room without the dev room setting");
+                None
+            },
+            |settings| settings.dev_room_id,
         );
         domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
     }
@@ -158,7 +159,8 @@ fn logged_or_default<T: Default>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::settings::models::UserSettings;
+    use crate::domain::settings::UserSettings;
+    use crate::events::EventBroadcaster;
 
     async fn service_with_account(account_id: &str) -> RoomService {
         let pool = crate::db::pool::test_pool().await;
@@ -171,7 +173,10 @@ mod tests {
         )
         .await
         .unwrap();
-        RoomService::new(pool)
+        RoomService::new(
+            pool.clone(),
+            SettingsService::new(pool, EventBroadcaster::default()),
+        )
     }
 
     fn room(room_id: &str, name: &str, is_direct: bool) -> JoinedRoom {
@@ -326,14 +331,13 @@ mod tests {
         let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
             .await
             .unwrap();
-        let service = RoomService::new(pool.clone());
+        let settings_service = SettingsService::new(pool.clone(), EventBroadcaster::default());
+        let service = RoomService::new(pool.clone(), settings_service.clone());
         let settings = UserSettings {
             dev_room_id: Some("!dev:x".to_string()),
             ..UserSettings::default()
         };
-        SettingsRepository::upsert(&pool, &account, &settings)
-            .await
-            .unwrap();
+        settings_service.save(&account, settings).await.unwrap();
         assert_eq!(
             service.default_room(&account).await.as_deref(),
             Some("!dev:x")

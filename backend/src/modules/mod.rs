@@ -23,7 +23,6 @@ pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
-pub mod settings;
 pub mod todo;
 pub mod tts;
 pub mod voice;
@@ -376,11 +375,11 @@ mod tests {
     /// `bot/mod.rs` and asserts each entry point actually comes back.
     #[tokio::test]
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
+        use crate::interface::chat::settings::SettingsModule;
         use crate::modules::core::CoreModule;
         use crate::modules::finance::FinanceModule;
         use crate::modules::portfolio::PortfolioModule;
         use crate::modules::reminder::ReminderModule;
-        use crate::modules::settings::SettingsModule;
         use crate::modules::todo::TodoModule;
         use crate::modules::tts::TtsModule;
 

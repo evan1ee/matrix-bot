@@ -82,12 +82,13 @@ impl BotModule for TodoModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_todo_command(
             &db.pool,
+            &services.settings,
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
@@ -220,7 +221,7 @@ mod tests {
     /// Before this, every bot reply was hardcoded to UTC.
     #[tokio::test]
     async fn test_due_dates_render_in_the_senders_saved_timezone() {
-        use crate::modules::settings::{SettingsRepository, UserSettings};
+        use crate::domain::settings::UserSettings;
 
         let module = TodoModule::new();
         let db = db().await;
@@ -250,17 +251,18 @@ mod tests {
             "default must render as UTC: {utc_reply}"
         );
 
-        SettingsRepository::upsert(
-            &db.pool,
-            "@alice:a",
-            &UserSettings {
-                timezone: "Asia/Shanghai".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        crate::application::AppServices::new(&db.pool)
+            .settings
+            .save(
+                "@alice:a",
+                UserSettings {
+                    timezone: "Asia/Shanghai".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let listed = module
             .handle_command(

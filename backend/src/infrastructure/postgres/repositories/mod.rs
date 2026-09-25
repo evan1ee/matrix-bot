@@ -3,3 +3,4 @@
 //! mapped into domain types before they leave the file.
 
 pub mod rooms;
+pub mod settings;

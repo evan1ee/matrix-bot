@@ -1,10 +1,8 @@
 use super::resolved_config::ResolvedAiConfig;
-use crate::db::DbPool;
 use crate::utils::html::html_escape;
 
 pub async fn build_system_prompt(
     services: &crate::application::AppServices,
-    pool: &DbPool,
     resolved_config: &ResolvedAiConfig,
     owner_id: &str,
     room_id: &str,
@@ -13,9 +11,7 @@ pub async fn build_system_prompt(
         return prompt.clone();
     }
 
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
+    let settings = services.settings.get_or_default(owner_id).await;
     let tz = settings.tz();
     let now_utc = chrono::Utc::now();
     let now_local = now_utc.with_timezone(&tz);

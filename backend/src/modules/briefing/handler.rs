@@ -1,12 +1,13 @@
+use crate::application::settings::SettingsService;
 use crate::db::DbPool;
+use crate::domain::settings::parse_briefing_time;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::briefing::generator::generate_briefing;
-use crate::modules::settings::models::parse_briefing_time;
-use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 pub async fn handle_briefing_command(
     pool: &DbPool,
+    settings: &SettingsService,
     owner_id: &str,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -20,11 +21,11 @@ pub async fn handle_briefing_command(
     let arg = parts.next().unwrap_or("").trim();
 
     match subcmd.as_str() {
-        "" | "now" | "today" => Some(generate_now(pool, owner_id, broadcaster).await),
-        "time" => Some(set_time(pool, owner_id, arg, broadcaster).await),
-        "on" | "enable" => Some(toggle(pool, owner_id, true, broadcaster).await),
-        "off" | "disable" => Some(toggle(pool, owner_id, false, broadcaster).await),
-        "status" => Some(show_status(pool, owner_id).await),
+        "" | "now" | "today" => Some(generate_now(pool, settings, owner_id, broadcaster).await),
+        "time" => Some(set_time(settings, owner_id, arg).await),
+        "on" | "enable" => Some(toggle(settings, owner_id, true).await),
+        "off" | "disable" => Some(toggle(settings, owner_id, false).await),
+        "status" => Some(show_status(settings, owner_id).await),
         "help" => Some(usage()),
         other => Some(format!(
             "⚠️ 未知简报指令 <code>{}</code>。<br/>{}",
@@ -49,10 +50,11 @@ fn strip_command<'a>(lower: &str, body: &'a str) -> Option<&'a str> {
 
 async fn generate_now(
     pool: &DbPool,
+    settings: &SettingsService,
     owner_id: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings = settings.get_or_default(owner_id).await;
     match generate_briefing(pool, owner_id, &settings).await {
         Ok(payload) => {
             if let Some(b) = broadcaster {
@@ -76,58 +78,43 @@ async fn generate_now(
     }
 }
 
-async fn set_time(
-    pool: &DbPool,
-    owner_id: &str,
-    raw_time: &str,
-    broadcaster: Option<&EventBroadcaster>,
-) -> String {
+async fn set_time(settings: &SettingsService, owner_id: &str, raw_time: &str) -> String {
     if raw_time.is_empty() {
         return "⚠️ 请提供24小时制时间，例如: <code>!briefing time 07:30</code>".to_string();
     }
 
     if let Err(e) = parse_briefing_time(raw_time) {
-        return format!("⚠️ 时间格式无效: {} (例如 07:00)", html_escape(&e));
+        return format!(
+            "⚠️ 时间格式无效: {} (例如 07:00)",
+            html_escape(&e.to_string())
+        );
     }
 
-    let mut settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    settings.briefing_time = raw_time.trim().to_string();
+    let current = settings.get_or_default(owner_id).await;
+    let updated = crate::domain::settings::UserSettings {
+        briefing_time: raw_time.trim().to_string(),
+        ..current
+    };
 
-    match SettingsRepository::upsert(pool, owner_id, &settings).await {
-        Ok(saved) => {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::SettingsUpdated {
-                    owner_id: owner_id.to_string(),
-                    settings: saved.clone(),
-                });
-            }
-            format!(
-                "✅ 早安简报时间已设置为 <b>{}</b> (时区: <code>{}</code>)。",
-                html_escape(&saved.briefing_time),
-                html_escape(&saved.timezone)
-            )
-        }
+    match settings.save(owner_id, updated).await {
+        Ok(saved) => format!(
+            "✅ 早安简报时间已设置为 <b>{}</b> (时区: <code>{}</code>)。",
+            html_escape(&saved.briefing_time),
+            html_escape(&saved.timezone)
+        ),
         Err(err) => format!("❌ 保存失败: {}", html_escape(&err.to_string())),
     }
 }
 
-async fn toggle(
-    pool: &DbPool,
-    owner_id: &str,
-    enabled: bool,
-    broadcaster: Option<&EventBroadcaster>,
-) -> String {
-    let mut settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    settings.briefing_enabled = enabled;
+async fn toggle(settings: &SettingsService, owner_id: &str, enabled: bool) -> String {
+    let current = settings.get_or_default(owner_id).await;
+    let updated = crate::domain::settings::UserSettings {
+        briefing_enabled: enabled,
+        ..current
+    };
 
-    match SettingsRepository::upsert(pool, owner_id, &settings).await {
+    match settings.save(owner_id, updated).await {
         Ok(saved) => {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::SettingsUpdated {
-                    owner_id: owner_id.to_string(),
-                    settings: saved.clone(),
-                });
-            }
             if enabled {
                 format!(
                     "✅ 每日早安简报已<b>开启</b>，将于每天 <b>{}</b> (<code>{}</code>) 发送。",
@@ -143,11 +130,13 @@ async fn toggle(
     }
 }
 
-async fn show_status(pool: &DbPool, owner_id: &str) -> String {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
-    let last_date = SettingsRepository::get_last_briefing_date(pool, owner_id)
+async fn show_status(settings: &SettingsService, owner_id: &str) -> String {
+    let settings_row = settings.get_or_default(owner_id).await;
+    let last_date = settings
+        .get_last_briefing_date(owner_id)
         .await
         .unwrap_or_else(|| "尚未发送过".to_string());
+    let settings = settings_row;
 
     let state_label = if settings.briefing_enabled {
         "<font color=\"#10b981\">已开启</font>"
@@ -181,10 +170,11 @@ fn usage() -> String {
 mod tests {
     use super::*;
 
-    async fn pool() -> DbPool {
+    async fn pool_and_settings() -> (DbPool, SettingsService) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        pool
+        let settings = SettingsService::new(pool.clone(), EventBroadcaster::default());
+        (pool, settings)
     }
 
     #[tokio::test]
@@ -200,21 +190,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_briefing_status_and_time_commands() {
-        let pool = pool().await;
+        let (pool, settings) = pool_and_settings().await;
         let owner = "@alice:example.org";
 
-        let res = handle_briefing_command(&pool, owner, "!briefing status", None)
+        let res = handle_briefing_command(&pool, &settings, owner, "!briefing status", None)
             .await
             .unwrap();
         assert!(res.contains("早安简报设置状态"));
         assert!(res.contains("07:00"));
 
-        let res_time = handle_briefing_command(&pool, owner, "!briefing time 08:30", None)
-            .await
-            .unwrap();
+        let res_time =
+            handle_briefing_command(&pool, &settings, owner, "!briefing time 08:30", None)
+                .await
+                .unwrap();
         assert!(res_time.contains("08:30"));
 
-        let res_off = handle_briefing_command(&pool, owner, "!briefing off", None)
+        let res_off = handle_briefing_command(&pool, &settings, owner, "!briefing off", None)
             .await
             .unwrap();
         assert!(res_off.contains("关闭"));

@@ -2,6 +2,7 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
+use crate::domain::settings::UserSettings;
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use crate::modules::briefing::ticker::{
     fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
@@ -11,7 +12,6 @@ use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
-use crate::modules::settings::UserSettings;
 use crate::modules::todo::models::TodoItem;
 use crate::modules::todo::repository::TodoRepository;
 use crate::utils::html_escape;

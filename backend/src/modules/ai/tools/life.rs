@@ -8,7 +8,6 @@ use crate::modules::ai::retrospective::generate_weekly_retrospective;
 use crate::modules::footprints::repository::FootprintRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
-use crate::modules::settings::repository::SettingsRepository;
 
 fn normalize_footprint_category(input: &str) -> &'static str {
     let lower = input.trim().to_lowercase();
@@ -28,13 +27,14 @@ fn normalize_footprint_category(input: &str) -> &'static str {
 }
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings = services.settings.get_or_default(owner_id).await;
     let today_str = Utc::now()
         .with_timezone(&settings.tz())
         .format("%Y-%m-%d")
@@ -142,7 +142,7 @@ pub async fn execute_tool(
 
         "get_weekly_retrospective" => Some(
             async {
-                let retro = generate_weekly_retrospective(pool, owner_id)
+                let retro = generate_weekly_retrospective(pool, &services.settings, owner_id)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&retro).map_err(|e| e.to_string())

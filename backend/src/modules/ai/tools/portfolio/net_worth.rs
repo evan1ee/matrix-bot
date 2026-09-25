@@ -3,9 +3,9 @@ use serde_json::json;
 
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::finance::net_worth::NetWorthService;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     owner_id: &str,
     name: &str,
@@ -14,7 +14,7 @@ pub async fn execute_tool(
     match name {
         "get_my_net_worth" => Some(
             async {
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let settings = services.settings.get_or_default(owner_id).await;
                 let client = reqwest::Client::new();
                 let report =
                     NetWorthService::compute_net_worth(pool, &client, owner_id, &settings.currency)

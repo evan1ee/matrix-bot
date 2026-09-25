@@ -5,10 +5,13 @@
 //! (`tests/architecture.rs`).
 
 pub mod rooms;
+pub mod settings;
 
 use sqlx::PgPool;
 
 use self::rooms::RoomService;
+use self::settings::SettingsService;
+use crate::events::EventBroadcaster;
 
 /// Why a use case failed, by boundary rather than by cause.
 ///
@@ -51,12 +54,26 @@ pub enum AppError {
 #[derive(Clone)]
 pub struct AppServices {
     pub rooms: RoomService,
+    pub settings: SettingsService,
 }
 
 impl AppServices {
+    /// The test/legacy convenience: builds a private, per-call
+    /// `EventBroadcaster` that nothing else subscribes to. Safe because
+    /// nothing built this way asserts on the events a service publishes —
+    /// a caller that needs to observe a broadcast uses [`Self::with_events`].
     pub fn new(pool: &PgPool) -> Self {
+        Self::with_events(pool, &EventBroadcaster::default())
+    }
+
+    /// Built by a composition root that already has the process's real
+    /// `EventBroadcaster` (`app.rs`), so a publishing service sends on the
+    /// same channel HTTP and chat subscribe to.
+    pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
+        let settings = SettingsService::new(pool.clone(), events.clone());
         Self {
-            rooms: RoomService::new(pool.clone()),
+            rooms: RoomService::new(pool.clone(), settings.clone()),
+            settings,
         }
     }
 }

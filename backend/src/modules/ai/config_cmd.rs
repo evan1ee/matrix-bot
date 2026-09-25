@@ -1,3 +1,4 @@
+use crate::application::settings::SettingsService;
 use crate::db::DbPool;
 use tracing::error;
 
@@ -13,6 +14,7 @@ pub fn format_error(msg: &str) -> String {
 
 pub async fn handle_show_config(
     pool: &DbPool,
+    settings: &SettingsService,
     ai: &crate::config::AiEnvConfig,
     owner_id: &str,
 ) -> String {
@@ -20,9 +22,7 @@ pub async fn handle_show_config(
         .await
         .unwrap_or(None);
     let resolved = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
+    let settings = settings.get_or_default(owner_id).await;
 
     let key_status = if resolved.api_key.is_some() {
         "Configured (Hidden)"
@@ -46,8 +46,7 @@ pub async fn handle_show_config(
 }
 
 pub async fn handle_set_history(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    settings: &SettingsService,
     owner_id: &str,
     turns_str: &str,
 ) -> String {
@@ -56,28 +55,17 @@ pub async fn handle_set_history(
         _ => return format_error("Max history turns must be an integer between 1 and 100."),
     };
 
-    let mut settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
-    settings.max_history_turns = turns;
+    let current = settings.get_or_default(owner_id).await;
+    let updated = crate::domain::settings::UserSettings {
+        max_history_turns: turns,
+        ..current
+    };
 
-    match crate::modules::settings::repository::SettingsRepository::upsert(
-        pool, owner_id, &settings,
-    )
-    .await
-    {
-        Ok(saved) => {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::SettingsUpdated {
-                    owner_id: owner_id.to_string(),
-                    settings: saved.clone(),
-                });
-            }
-            format!(
-                "✅ AI max history turns updated to: <code>{}</code>",
-                saved.max_history_turns
-            )
-        }
+    match settings.save(owner_id, updated).await {
+        Ok(saved) => format!(
+            "✅ AI max history turns updated to: <code>{}</code>",
+            saved.max_history_turns
+        ),
         Err(e) => {
             error!("Failed to update max history turns: {}", e);
             format_error("Failed to update max history turns setting.")
@@ -150,6 +138,7 @@ pub fn format_help() -> String {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_subcommand(
     pool: &DbPool,
+    settings: &SettingsService,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -160,18 +149,20 @@ pub async fn handle_ai_subcommand(
         || trimmed.eq_ignore_ascii_case("retrospective")
         || trimmed.eq_ignore_ascii_case("weekly")
     {
-        return Some(super::retrospective::handle_retrospective_command(pool, owner_id).await);
+        return Some(
+            super::retrospective::handle_retrospective_command(pool, settings, owner_id).await,
+        );
     }
     if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
         return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
     }
     if trimmed.eq_ignore_ascii_case("config") {
-        return Some(handle_show_config(pool, ai, owner_id).await);
+        return Some(handle_show_config(pool, settings, ai, owner_id).await);
     }
     if let Some(rest) = trimmed.strip_prefix("model") {
         let model_arg = rest.trim();
         if model_arg.is_empty() {
-            return Some(handle_show_config(pool, ai, owner_id).await);
+            return Some(handle_show_config(pool, settings, ai, owner_id).await);
         }
         if model_arg.len() > 500 {
             return Some(format_error(
@@ -186,9 +177,9 @@ pub async fn handle_ai_subcommand(
     {
         let num_arg = rest.trim();
         if num_arg.is_empty() {
-            return Some(handle_show_config(pool, ai, owner_id).await);
+            return Some(handle_show_config(pool, settings, ai, owner_id).await);
         }
-        return Some(handle_set_history(pool, broadcaster, owner_id, num_arg).await);
+        return Some(handle_set_history(settings, owner_id, num_arg).await);
     }
     None
 }

@@ -5,7 +5,6 @@ use axum::{extract::State, Json};
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::modules::finance::net_worth::{NetWorthResponse, NetWorthService};
-use crate::modules::settings::repository::SettingsRepository;
 
 #[utoipa::path(
     get,
@@ -21,7 +20,7 @@ pub async fn get_net_worth(
     user: AuthUser,
 ) -> Result<Json<NetWorthResponse>, ApiError> {
     let owner_id = user.owner_id();
-    let settings = SettingsRepository::get_or_default(&state.db.pool, &owner_id).await;
+    let settings = state.services.settings.get_or_default(&owner_id).await;
 
     let net_worth = NetWorthService::compute_net_worth(
         &state.db.pool,

@@ -6,7 +6,6 @@ use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::reminder::service::{self, NewReminder};
-use crate::modules::settings::repository::SettingsRepository;
 use serde_json::json;
 
 pub async fn execute_tool(
@@ -42,7 +41,7 @@ pub async fn execute_tool(
                     .unwrap_or("none");
                 let recurrence = RecurrencePattern::from_str_or_default(rec_str);
 
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let settings = services.settings.get_or_default(owner_id).await;
                 let tz = settings.tz();
 
                 let trigger_at = if let Some(mins) = args.get("in_minutes").and_then(|v| {

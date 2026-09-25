@@ -4,6 +4,7 @@
 //! (`tests/architecture.rs`).
 
 pub mod rooms;
+pub mod settings;
 
 use tracing::error;
 

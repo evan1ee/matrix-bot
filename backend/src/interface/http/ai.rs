@@ -177,11 +177,11 @@ pub async fn get_ai_config(
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
     let resolved = ResolvedAiConfig::from_user_config(&state.ai, None);
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
-        &state.db.pool,
-        &user.account_id,
-    )
-    .await;
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
     let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
@@ -243,23 +243,20 @@ pub async fn update_ai_config(
         .map_err(ApiError::bad_request)?;
 
     if let Some(turns) = input.max_history_turns {
-        let mut settings =
-            crate::modules::settings::repository::SettingsRepository::get_or_default(
-                &state.db.pool,
-                &user.account_id,
-            )
+        let current = state
+            .services
+            .settings
+            .get_or_default(&user.account_id)
             .await;
-        settings.max_history_turns = turns.clamp(1, 100);
-        let _ = crate::modules::settings::repository::SettingsRepository::upsert(
-            &state.db.pool,
-            &user.account_id,
-            &settings,
-        )
-        .await;
-        state.broadcaster.send(SystemEvent::SettingsUpdated {
-            owner_id: user.account_id.clone(),
-            settings,
-        });
+        let updated = crate::domain::settings::UserSettings {
+            max_history_turns: turns.clamp(1, 100),
+            ..current
+        };
+        let _ = state
+            .services
+            .settings
+            .save(&user.account_id, updated)
+            .await;
     }
 
     let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)
@@ -270,11 +267,11 @@ pub async fn update_ai_config(
         owner_id: user.account_id.clone(),
     });
 
-    let settings = crate::modules::settings::repository::SettingsRepository::get_or_default(
-        &state.db.pool,
-        &user.account_id,
-    )
-    .await;
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
     let mut redacted = updated.redacted();
     redacted.max_history_turns = Some(settings.max_history_turns);
 
@@ -346,9 +343,10 @@ pub async fn get_retrospective(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<WeeklyRetrospective>, ApiError> {
-    let retro = generate_weekly_retrospective(&state.db.pool, &user.account_id)
-        .await
-        .map_err(ApiError::from)?;
+    let retro =
+        generate_weekly_retrospective(&state.db.pool, &state.services.settings, &user.account_id)
+            .await
+            .map_err(ApiError::from)?;
     Ok(Json(retro))
 }
 

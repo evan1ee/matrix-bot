@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
 
+use crate::application::settings::SettingsService;
 use crate::modules::finance::money::format_amount;
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 use crate::modules::reminder::repository::ReminderRepository;
-use crate::modules::settings::repository::SettingsRepository;
 use crate::modules::todo::repository::TodoRepository;
 use crate::utils::html::html_escape;
 
@@ -59,9 +59,10 @@ pub struct WeeklyRetrospective {
 
 pub async fn generate_weekly_retrospective(
     pool: &DbPool,
+    settings: &SettingsService,
     owner_id: &str,
 ) -> anyhow::Result<WeeklyRetrospective> {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let settings = settings.get_or_default(owner_id).await;
     let tz = settings.tz();
     let default_currency = settings.currency.clone();
 
@@ -349,8 +350,12 @@ pub async fn generate_weekly_retrospective(
     })
 }
 
-pub async fn handle_retrospective_command(pool: &DbPool, owner_id: &str) -> String {
-    match generate_weekly_retrospective(pool, owner_id).await {
+pub async fn handle_retrospective_command(
+    pool: &DbPool,
+    settings: &SettingsService,
+    owner_id: &str,
+) -> String {
+    match generate_weekly_retrospective(pool, settings, owner_id).await {
         Ok(retro) => {
             let top_cat = html_escape(retro.top_expense_category.as_deref().unwrap_or("None"));
             let mood = html_escape(retro.dominant_mood.as_deref().unwrap_or("Unrecorded"));
@@ -415,11 +420,11 @@ pub async fn handle_retrospective_command(pool: &DbPool, owner_id: &str) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::settings::UserSettings;
+    use crate::events::EventBroadcaster;
     use crate::modules::finance::repository::FinanceRepository;
     use crate::modules::recurring_bills::models::CreateBillPayload;
     use crate::modules::recurring_bills::repository::RecurringBillRepository;
-    use crate::modules::settings::models::UserSettings;
-    use crate::modules::settings::repository::SettingsRepository;
 
     async fn test_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -431,19 +436,20 @@ mod tests {
     async fn test_retrospective_keeps_currencies_strictly_apart() {
         let pool = test_db().await;
         let owner = "@user:example.com";
+        let settings = SettingsService::new(pool.clone(), EventBroadcaster::default());
 
         // User sets default currency to CNY
-        SettingsRepository::upsert(
-            &pool,
-            owner,
-            &UserSettings {
-                timezone: "Asia/Shanghai".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        settings
+            .save(
+                owner,
+                UserSettings {
+                    timezone: "Asia/Shanghai".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
 
         // Add expense: Shake Shack lunch: 16.50 USD (1650 minor)
         let cat_food = FinanceRepository::create_category(&pool, owner, "Food")
@@ -543,7 +549,9 @@ mod tests {
         .await
         .unwrap();
 
-        let retro = generate_weekly_retrospective(&pool, owner).await.unwrap();
+        let retro = generate_weekly_retrospective(&pool, &settings, owner)
+            .await
+            .unwrap();
 
         // Primary currency is CNY, total_spent_minor must ONLY reflect CNY (4500), NEVER 6150 (1650 + 4500)
         assert_eq!(retro.currency, "CNY");

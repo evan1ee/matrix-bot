@@ -5,9 +5,9 @@ use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::portfolio::models::WithdrawOutcome;
 use crate::modules::portfolio::service;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -24,9 +24,7 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
-                    .await
-                    .currency;
+                let default_cur = services.settings.get_or_default(owner_id).await.currency;
                 let raw_currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -57,9 +55,7 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
-                    .await
-                    .currency;
+                let default_cur = services.settings.get_or_default(owner_id).await.currency;
                 let raw_currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())

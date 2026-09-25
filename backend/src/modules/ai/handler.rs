@@ -90,8 +90,16 @@ pub async fn handle_ai_command_with_stage(
         if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
-        if let Some(sub_reply) =
-            handle_ai_subcommand(pool, ai, broadcaster, owner_id, room_id, trimmed).await
+        if let Some(sub_reply) = handle_ai_subcommand(
+            pool,
+            &services.settings,
+            ai,
+            broadcaster,
+            owner_id,
+            room_id,
+            trimmed,
+        )
+        .await
         {
             return Some(sub_reply);
         }
@@ -148,7 +156,13 @@ pub async fn handle_ai_command_with_stage(
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
-            notify_dev_room_ai_error(pool, client_handle, owner_id, &err.to_string()).await;
+            notify_dev_room_ai_error(
+                &services.settings,
+                client_handle,
+                owner_id,
+                &err.to_string(),
+            )
+            .await;
             None
         }
     }
@@ -246,9 +260,7 @@ pub async fn run_ai_turn_with_stage(
         }
     }
 
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
+    let settings = services.settings.get_or_default(owner_id).await;
     let max_history = settings.max_history_turns.clamp(1, 100);
 
     // Load recent messages for context
@@ -259,8 +271,7 @@ pub async fn run_ai_turn_with_stage(
     let mut chat_messages = Vec::new();
 
     let sys_prompt =
-        super::prompt::build_system_prompt(services, pool, &resolved_config, owner_id, room_id)
-            .await;
+        super::prompt::build_system_prompt(services, &resolved_config, owner_id, room_id).await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),

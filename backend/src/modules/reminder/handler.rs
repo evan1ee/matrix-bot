@@ -2,18 +2,23 @@ use crate::db::DbPool;
 use chrono::{Duration as ChronoDuration, Utc};
 use tracing::error;
 
+use crate::application::settings::SettingsService;
 use crate::events::EventBroadcaster;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::reminder::service::{self, NewReminder, ReminderError};
-use crate::modules::settings::SettingsRepository;
 use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder_args};
 
 // `MAX_MESSAGE_LEN` lives in `service` now — this module owns the reply
 // wording, not the limit.
 
+// `settings` pushed this past clippy's default limit; reminder still takes
+// its inputs one by one until Task 8 (feature-layering) moves it onto
+// `services` the way rooms and settings already have.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_reminder_command(
     pool: &DbPool,
+    settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -37,9 +42,7 @@ pub async fn handle_reminder_command(
 
     // Read after the command is claimed, so an unrelated message never costs a
     // settings query.
-    let tz = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .tz();
+    let tz = settings.get_or_default(owner_id).await.tz();
 
     let is_history = clean_lower == "remind history"
         || clean_lower == "!remind history"
@@ -316,9 +319,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_reminder_set_list_cancel() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let res_set = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -332,6 +340,7 @@ mod tests {
 
         let res_list = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -346,6 +355,7 @@ mod tests {
 
         let res_cancel = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -357,21 +367,31 @@ mod tests {
         .unwrap();
         assert!(res_cancel.contains("Cancelled reminder"));
 
-        let res_bare =
-            handle_reminder_command(&pool, None, "!room:1", "@bob:1", "bob", "!remind", None)
-                .await
-                .unwrap();
+        let res_bare = handle_reminder_command(
+            &pool, &settings, None, "!room:1", "@bob:1", "bob", "!remind", None,
+        )
+        .await
+        .unwrap();
         assert!(res_bare.contains("no pending reminders"));
 
-        let res_reminders =
-            handle_reminder_command(&pool, None, "!room:1", "@bob:1", "bob", "!reminders", None)
-                .await
-                .unwrap();
+        let res_reminders = handle_reminder_command(
+            &pool,
+            &settings,
+            None,
+            "!room:1",
+            "@bob:1",
+            "bob",
+            "!reminders",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(res_reminders.contains("no pending reminders"));
 
         // Add a reminder and cancel via rm
         handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -382,6 +402,7 @@ mod tests {
         .await;
         let res_rm = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -396,6 +417,7 @@ mod tests {
         // Check history command
         let res_hist = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",
@@ -413,6 +435,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_reminder_with_quoted_message() {
         let pool = setup_test_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
         let quoted = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("alice".to_string()),
             body: "Deployment scheduled at midnight".to_string(),
@@ -421,6 +447,7 @@ mod tests {
 
         let res = handle_reminder_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@bob:1",

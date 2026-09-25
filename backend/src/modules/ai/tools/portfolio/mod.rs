@@ -12,9 +12,9 @@ use crate::modules::portfolio::history::HistoryRepository;
 use crate::modules::portfolio::models::{cost_of, normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::portfolio::service;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -22,17 +22,18 @@ pub async fn execute_tool(
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     // 1. Check cash operations
-    if let Some(res) = cash::execute_tool(pool, broadcaster, owner_id, name, args).await {
+    if let Some(res) = cash::execute_tool(services, pool, broadcaster, owner_id, name, args).await {
         return Some(res);
     }
 
     // 2. Check alert operations
-    if let Some(res) = alerts::execute_tool(pool, broadcaster, owner_id, name, args).await {
+    if let Some(res) = alerts::execute_tool(services, pool, broadcaster, owner_id, name, args).await
+    {
         return Some(res);
     }
 
     // 3. Check net worth operations
-    if let Some(res) = net_worth::execute_tool(pool, owner_id, name, args).await {
+    if let Some(res) = net_worth::execute_tool(services, pool, owner_id, name, args).await {
         return Some(res);
     }
 
@@ -123,7 +124,7 @@ pub async fn execute_tool(
                 };
 
                 let note = args.get("note").and_then(|v| v.as_str());
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
+                let default_cur = services.settings.get_or_default(owner_id)
                     .await
                     .currency;
                 let raw_currency = args
@@ -262,7 +263,7 @@ pub async fn execute_tool(
                     .get("timeframe")
                     .and_then(|v| v.as_str())
                     .unwrap_or("1m");
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
+                let default_cur = services.settings.get_or_default(owner_id)
                     .await
                     .currency;
                 let raw_currency = args
@@ -418,7 +419,16 @@ mod tests {
             "note": over_limit_note,
         });
 
-        let result = execute_tool(&pool, None, "@alice:a", "buy_portfolio_holding", &args).await;
+        let services = crate::application::AppServices::new(&pool);
+        let result = execute_tool(
+            &services,
+            &pool,
+            None,
+            "@alice:a",
+            "buy_portfolio_holding",
+            &args,
+        )
+        .await;
         let err = result
             .expect("the tool must handle this call")
             .expect_err("an over-long note must be rejected");

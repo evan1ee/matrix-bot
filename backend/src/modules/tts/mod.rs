@@ -19,7 +19,6 @@ use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::tts::{
     SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
 };
-use crate::modules::settings::SettingsRepository;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
@@ -75,7 +74,11 @@ impl TtsModule {
         }
     }
 
-    async fn handle_say(&self, ctx: &CommandContext, db: &Database) -> String {
+    async fn handle_say(
+        &self,
+        ctx: &CommandContext,
+        services: &crate::application::AppServices,
+    ) -> String {
         let text = text::speakable(ctx.raw_args.trim());
         if text.is_empty() {
             return "⚠️ <b>没有可朗读的文字</b><br/>\
@@ -90,7 +93,7 @@ impl TtsModule {
             );
         }
 
-        let settings = SettingsRepository::get_or_default(&db.pool, &ctx.owner_id).await;
+        let settings = services.settings.get_or_default(&ctx.owner_id).await;
         let voice = resolve_voice(&self.default_voice, settings.tts_voice.as_deref());
 
         let speech = match self.tts.synthesize(&text, &voice).await {
@@ -182,15 +185,15 @@ impl BotModule for TtsModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
-        db: &Database,
+        services: &crate::application::AppServices,
+        _db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         if ctx.command != "say" {
             return None;
         }
 
-        Some(self.handle_say(ctx, db).await)
+        Some(self.handle_say(ctx, services).await)
     }
 }
 

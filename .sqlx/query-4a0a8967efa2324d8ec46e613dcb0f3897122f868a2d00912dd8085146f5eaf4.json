@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_settings (owner_id, timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_voice, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP) ON CONFLICT (owner_id) DO UPDATE SET timezone = excluded.timezone, currency = excluded.currency, dev_room_id = excluded.dev_room_id, max_history_turns = excluded.max_history_turns, briefing_enabled = excluded.briefing_enabled, briefing_time = excluded.briefing_time, tts_voice = excluded.tts_voice, updated_at = CURRENT_TIMESTAMP",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a0a8967efa2324d8ec46e613dcb0f3897122f868a2d00912dd8085146f5eaf4"
+}

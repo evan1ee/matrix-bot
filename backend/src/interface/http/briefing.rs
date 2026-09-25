@@ -6,7 +6,6 @@ use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::modules::briefing::generator::generate_briefing;
 use crate::modules::briefing::models::BriefingPayload;
-use crate::modules::settings::SettingsRepository;
 
 #[utoipa::path(
     post,
@@ -21,7 +20,11 @@ pub async fn trigger_briefing(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<BriefingPayload>, ApiError> {
-    let settings = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.owner_id())
+        .await;
 
     let payload = generate_briefing(&state.db.pool, &user.owner_id(), &settings)
         .await

@@ -6,9 +6,9 @@ use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::recurring_bills::models::CreateBillPayload;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -70,7 +70,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let settings = services.settings.get_or_default(owner_id).await;
                 let today = Utc::now()
                     .with_timezone(&settings.tz())
                     .format("%Y-%m-%d")

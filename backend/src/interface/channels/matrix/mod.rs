@@ -14,6 +14,7 @@ use crate::interface::channels::matrix::handler::register_handlers;
 use crate::interface::channels::matrix::verification::{
     register_verification_handlers, VerificationPolicy,
 };
+use crate::interface::chat::settings::SettingsModule;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
 use crate::modules::footprints::FootprintsModule;
@@ -22,7 +23,6 @@ use crate::modules::life::LifeModule;
 use crate::modules::portfolio::PortfolioModule;
 use crate::modules::recurring_bills::RecurringBillsModule;
 use crate::modules::reminder::ReminderModule;
-use crate::modules::settings::SettingsModule;
 use crate::modules::todo::TodoModule;
 use crate::modules::webhook::WebhookModule;
 use crate::modules::{ModuleContext, ModuleRegistry};

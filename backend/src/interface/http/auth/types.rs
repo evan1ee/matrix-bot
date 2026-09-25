@@ -186,7 +186,7 @@ impl ApiState {
         http_client: reqwest::Client,
     ) -> Self {
         Self {
-            services: crate::application::AppServices::new(&db.pool),
+            services: crate::application::AppServices::with_events(&db.pool, &broadcaster),
             db,
             broadcaster,
             registration_secret,

@@ -7,9 +7,9 @@ use crate::modules::finance::money::{exponent_for, parse_amount};
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::models::normalise_symbol;
 use crate::modules::portfolio::repository::PortfolioRepository;
-use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -44,9 +44,7 @@ pub async fn execute_tool(
                     return Err("Field 'target_price' is required".to_string());
                 };
 
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
-                    .await
-                    .currency;
+                let default_cur = services.settings.get_or_default(owner_id).await.currency;
                 let holding = PortfolioRepository::find(pool, owner_id, &symbol)
                     .await
                     .map_err(|e| e.to_string())?;

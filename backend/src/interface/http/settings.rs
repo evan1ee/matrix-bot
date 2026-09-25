@@ -1,13 +1,11 @@
 use axum::{extract::State, Json};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::settings as domain;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
+use crate::interface::http::app_error::AppResultExt;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::finance::money::normalise_currency;
-use crate::modules::settings::models::parse_tts_voice;
-use crate::modules::settings::{parse_timezone, SettingsRepository, UserSettings};
 
 /// Both preferences are always sent together — settings are saved as a whole
 /// row, so there is no partial-update path to get wrong.
@@ -36,6 +34,89 @@ pub struct UpdateSettingsRequest {
     pub tts_voice: Option<String>,
 }
 
+impl From<UpdateSettingsRequest> for domain::RawSettingsUpdate {
+    fn from(req: UpdateSettingsRequest) -> Self {
+        Self {
+            timezone: req.timezone,
+            currency: req.currency,
+            dev_room_id: req.dev_room_id,
+            max_history_turns: req.max_history_turns,
+            briefing_enabled: req.briefing_enabled,
+            briefing_time: req.briefing_time,
+            tts_voice: req.tts_voice,
+        }
+    }
+}
+
+fn default_max_history_turns() -> i64 {
+    crate::domain::settings::DEFAULT_MAX_HISTORY_TURNS
+}
+
+fn default_briefing_enabled() -> bool {
+    crate::domain::settings::DEFAULT_BRIEFING_ENABLED
+}
+
+fn default_briefing_time() -> String {
+    crate::domain::settings::DEFAULT_BRIEFING_TIME.to_string()
+}
+
+/// One user's display preferences, keyed by the same `owner_id` every other
+/// ownership check uses (`AuthUser::owner_id`, the `owner_id` column).
+///
+/// Deliberately shared by both front doors: the SPA renders timestamps in
+/// `timezone` and pre-selects `currency`, and the Matrix command handlers format
+/// their HTML replies with the same two values, so a user sees one consistent
+/// answer no matter which door they came through.
+//
+// A `From<&domain::settings::UserSettings>` wire copy (a plain `//` comment,
+// not `///`, so it stays out of the generated schema): the domain type
+// derives neither `ToSchema` nor `Deserialize`. `Deserialize` is derived here
+// only so the `#[serde(default = ...)]` attributes below have a real
+// consumer — this type itself is never deserialized — because utoipa also
+// reads them to decide which fields the schema's `required` list omits, and
+// they need to stay to keep the generated schema byte-identical to the one
+// the old, shared type produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct UserSettings {
+    /// IANA zone name, e.g. `Asia/Shanghai`. Validated on write.
+    pub timezone: String,
+    /// ISO 4217 code, e.g. `CNY`. Validated on write.
+    pub currency: String,
+    /// Matrix room ID where development errors and alerts are sent.
+    #[serde(default)]
+    pub dev_room_id: Option<String>,
+    /// Number of recent conversation messages included as context for AI turns.
+    #[serde(default = "default_max_history_turns")]
+    pub max_history_turns: i64,
+    /// Whether automated morning briefing is enabled.
+    #[serde(default = "default_briefing_enabled")]
+    pub briefing_enabled: bool,
+    /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
+    #[serde(default = "default_briefing_time")]
+    pub briefing_time: String,
+    /// The voice `!say` speaks in, in whatever the configured provider calls
+    /// it. `None` means no preference, and `modules::tts` falls back to the
+    /// operator's `TTS_VOICE`: the same "no row until you change something"
+    /// convention `dev_room_id` uses. `Some("0")` is a real Kokoro voice, not
+    /// a stand-in for "unset". Shape-checked by `parse_tts_voice` on write.
+    #[serde(default)]
+    pub tts_voice: Option<String>,
+}
+
+impl From<&domain::UserSettings> for UserSettings {
+    fn from(s: &domain::UserSettings) -> Self {
+        Self {
+            timezone: s.timezone.clone(),
+            currency: s.currency.clone(),
+            dev_room_id: s.dev_room_id.clone(),
+            max_history_turns: s.max_history_turns,
+            briefing_enabled: s.briefing_enabled,
+            briefing_time: s.briefing_time.clone(),
+            tts_voice: s.tts_voice.clone(),
+        }
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/settings",
@@ -49,11 +130,14 @@ pub async fn get_settings(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<UserSettings>, ApiError> {
-    let settings = SettingsRepository::get(&state.db.pool, &user.owner_id())
+    let settings = state
+        .services
+        .settings
+        .get(&user.owner_id())
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .api_context("Failed to read settings")?;
 
-    Ok(Json(settings))
+    Ok(Json(UserSettings::from(&settings)))
 }
 
 #[utoipa::path(
@@ -72,90 +156,27 @@ pub async fn update_settings(
     user: AuthUser,
     Json(payload): Json<UpdateSettingsRequest>,
 ) -> Result<Json<UserSettings>, ApiError> {
-    // Validated here rather than at render time: an unknown zone stored now
-    // would silently render as UTC forever, with nothing to point at.
-    let timezone = parse_timezone(&payload.timezone).ok_or_else(|| {
-        ApiError::bad_request("Unknown timezone. Use an IANA name such as Asia/Shanghai")
-    })?;
+    let saved = state
+        .services
+        .settings
+        .update(&user.owner_id(), payload.into())
+        .await
+        .api_context("Failed to save settings")?;
 
-    let currency =
-        normalise_currency(&payload.currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-    let dev_room_id = payload.dev_room_id.and_then(|r| {
-        let trimmed = r.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    });
-
-    let current = SettingsRepository::get_or_default(&state.db.pool, &user.owner_id()).await;
-    let max_history_turns = if let Some(turns) = payload.max_history_turns {
-        if !(1..=100).contains(&turns) {
-            return Err(ApiError::bad_request(
-                "max_history_turns must be between 1 and 100",
-            ));
-        }
-        turns
-    } else {
-        current.max_history_turns
-    };
-
-    let briefing_enabled = payload.briefing_enabled.unwrap_or(current.briefing_enabled);
-    let briefing_time = if let Some(ref bt) = payload.briefing_time {
-        crate::modules::settings::models::parse_briefing_time(bt)
-            .map_err(|e| ApiError::bad_request(e))?;
-        bt.trim().to_string()
-    } else {
-        current.briefing_time
-    };
-
-    // Unlike `max_history_turns` or `briefing_time`, a missing/null value here
-    // is not "leave the current value alone" — it directly clears the
-    // preference, the same as `dev_room_id` above. A present value is still
-    // validated: it is written straight into the row, never merged against
-    // `current`.
-    let tts_voice = match payload.tts_voice.as_deref() {
-        Some(raw) => Some(parse_tts_voice(raw).map_err(ApiError::bad_request)?),
-        None => None,
-    };
-
-    let settings = SettingsRepository::upsert(
-        &state.db.pool,
-        &user.owner_id(),
-        &UserSettings {
-            timezone: timezone.name().to_string(),
-            currency,
-            dev_room_id,
-            max_history_turns,
-            briefing_enabled,
-            briefing_time,
-            tts_voice,
-        },
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(SystemEvent::SettingsUpdated {
-        owner_id: user.owner_id(),
-        settings: settings.clone(),
-    });
-
-    Ok(Json(settings))
+    Ok(Json(UserSettings::from(&saved)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
+    use crate::events::{EventBroadcaster, SystemEvent};
     use axum::http::StatusCode;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

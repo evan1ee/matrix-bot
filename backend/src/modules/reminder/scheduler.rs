@@ -5,7 +5,6 @@ use tracing::{error, info, warn};
 
 use crate::modules::reminder::models::Reminder;
 use crate::modules::reminder::repository::{ReminderRepository, MAX_DELIVERY_ATTEMPTS};
-use crate::modules::settings::SettingsRepository;
 use crate::modules::ModuleContext;
 use crate::utils::{html_escape, strip_html};
 
@@ -247,7 +246,10 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
                     reminder.id, reminder.sender_name, reminder.room_id
                 );
 
-                let tz = SettingsRepository::get_or_default(&ctx.db.pool, &reminder.owner_id)
+                let tz = ctx
+                    .services
+                    .settings
+                    .get_or_default(&reminder.owner_id)
                     .await
                     .tz();
 
