@@ -1,7 +1,11 @@
 //! Everything that talks to the outside world on the application's behalf:
 //! the HTTP API (`http`), chat channels (`channels`). Interface code
 //! translates transport payloads into application calls and back; it holds
-//! no business rules and runs no SQL of its own (see `tests/architecture.rs`).
+//! no business rules and, outside a shrinking list of interim offenders
+//! (`INTERFACE_SQL_ALLOW_LIST` in `tests/architecture.rs`), runs no SQL of
+//! its own. A file leaves the list only when its SQL moves into
+//! `application`/`infrastructure` — the test fails if a listed file no
+//! longer offends, so the list can't go stale.
 
 pub mod channels;
 pub mod http;

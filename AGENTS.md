@@ -27,7 +27,7 @@ cargo test -p matrix-bot-inference --all-targets   # inference crate; not covere
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot verified?
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
-cargo test -p matrix-bot --test architecture       # enforces dependency rules (domain/application/infrastructure/interface)
+cargo test -p matrix-bot --test architecture       # enforces dependency rules (domain/application/infrastructure/interface); interface/ may run SQL only from files in the shrinking INTERFACE_SQL_ALLOW_LIST
 cargo run                                # starts bot + API server
 
 # After changing a sqlx::query!/query_as!/query_scalar! call or a migration,

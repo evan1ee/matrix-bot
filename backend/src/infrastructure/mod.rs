@@ -2,3 +2,4 @@
 //! PostgreSQL repositories move here feature by feature.
 
 pub mod inference;
+pub mod postgres;
