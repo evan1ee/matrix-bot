@@ -4,7 +4,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -54,13 +54,25 @@ pub mod webhooks_telegram;
 
 pub use routes::api_routes;
 
+/// Parses `API_HOST` into an [`IpAddr`].
+///
+/// A malformed value used to fall back silently to `0.0.0.0` (`unwrap_or`),
+/// which meant a typo'd `API_HOST` bound the API to every interface instead
+/// of failing boot — the opposite of what an operator who set it would want.
+/// Consistent with the rest of boot: a bad config value is a boot error, not
+/// a silent fallback.
+fn parse_api_host(host: &str) -> anyhow::Result<IpAddr> {
+    host.parse()
+        .with_context(|| format!("invalid API_HOST {host:?}: not an IP address"))
+}
+
 /// Binds the configured `API_HOST:API_PORT`.
 ///
 /// Separate from [`start_api_server`] so a bind failure stops boot instead of
 /// leaving a bot running with no API (and no health probes), and so tests can
 /// hand the server a listener on an ephemeral port.
 pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
-    let host = config.api_host.parse().unwrap_or([0, 0, 0, 0].into());
+    let host = parse_api_host(&config.api_host)?;
     let addr = SocketAddr::new(host, config.api_port);
     let listener = TcpListener::bind(&addr)
         .await
@@ -318,6 +330,37 @@ mod step_up_tests {
                 "{method} {path} answered without a valid session"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod api_host_tests {
+    use super::parse_api_host;
+    use std::net::IpAddr;
+
+    #[test]
+    fn accepts_an_ipv4_address() {
+        assert_eq!(
+            parse_api_host("127.0.0.1").unwrap(),
+            "127.0.0.1".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn accepts_an_ipv6_address() {
+        assert_eq!(
+            parse_api_host("::1").unwrap(),
+            "::1".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_a_malformed_host_instead_of_defaulting_to_all_interfaces() {
+        // The old `unwrap_or([0, 0, 0, 0].into())` silently bound every
+        // interface on a typo; this must be a boot error instead.
+        assert!(parse_api_host("not-an-ip").is_err());
+        assert!(parse_api_host("").is_err());
+        assert!(parse_api_host("localhost").is_err());
     }
 }
 

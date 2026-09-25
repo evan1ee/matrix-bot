@@ -24,9 +24,51 @@ use crate::interface::http;
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
 
 /// A long-lived task `run` owns, named for the shutdown log.
-pub struct OwnedTask {
+///
+/// `pub(crate)` rather than `pub`: only `app::run` and its own tests
+/// construct these, and nothing outside the crate needs to observe or build
+/// one. Note for callers using `stop_by`: aborting the REST API server's own
+/// task does not necessarily end its per-connection tasks — axum's graceful
+/// shutdown hands those off to the runtime, and they outlive the server
+/// task's abort until the runtime itself calls `shutdown_background()`
+/// (`main.rs`), which is why closing the database pool afterward still waits
+/// on whatever connections those stragglers hold.
+pub(crate) struct OwnedTask {
     pub name: &'static str,
     pub handle: JoinHandle<()>,
+}
+
+/// Waits for `shutdown` to be cancelled, or for either front door's task to
+/// end on its own — which is always an error, since both hold a child of
+/// `shutdown` and exit only when it fires. A front door that stops on its
+/// own (task panic, or a bug that lets its loop return) would otherwise leave
+/// the process running with no API or no Matrix connection; instead this
+/// cancels `shutdown` so the rest of `run` tears down and the process exits,
+/// relying on the surrounding orchestrator (systemd, Docker, k8s) to restart
+/// it.
+async fn supervise_front_doors(
+    shutdown: &CancellationToken,
+    api: &mut JoinHandle<()>,
+    matrix: &mut JoinHandle<()>,
+) {
+    tokio::select! {
+        _ = shutdown.cancelled() => {}
+        result = &mut *api => {
+            log_early_exit("REST API server", result);
+            shutdown.cancel();
+        }
+        result = &mut *matrix => {
+            log_early_exit("Matrix sync loop", result);
+            shutdown.cancel();
+        }
+    }
+}
+
+fn log_early_exit(name: &str, result: Result<(), tokio::task::JoinError>) {
+    match result {
+        Ok(()) => error!("{name} task ended before shutdown was requested; stopping the process."),
+        Err(err) => error!("{name} task panicked: {err:?}; stopping the process."),
+    }
 }
 
 /// Builds every long-lived component, starts the API server and the Matrix
@@ -60,7 +102,8 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         listener,
         shutdown.child_token(),
     )?;
-    let matrix = tokio::spawn(run_bot_loop(
+    let mut api = api;
+    let mut matrix = tokio::spawn(run_bot_loop(
         config,
         db.clone(),
         broadcaster,
@@ -68,7 +111,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         shutdown.child_token(),
     ));
 
-    shutdown.cancelled().await;
+    supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
     info!("Shutting down Matrix Bot & Web API server...");
     let deadline = Instant::now() + SHUTDOWN_GRACE;
 
@@ -109,7 +152,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
 /// laggard is aborted rather than detached so its drop guards (e.g.
 /// `BackgroundWorkers`) run; it is not awaited again, because a task stuck
 /// outside an await point would hold the process past the bound.
-pub async fn stop_by(deadline: Instant, tasks: Vec<OwnedTask>) -> Vec<&'static str> {
+pub(crate) async fn stop_by(deadline: Instant, tasks: Vec<OwnedTask>) -> Vec<&'static str> {
     let mut laggards = Vec::new();
     for OwnedTask { name, mut handle } in tasks {
         match tokio::time::timeout_at(deadline, &mut handle).await {
@@ -212,5 +255,66 @@ mod tests {
 
         assert!(laggards.is_empty());
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_front_door_ending_early_cancels_shutdown() {
+        let shutdown = CancellationToken::new();
+        let mut api = tokio::spawn(async {}); // ends immediately, unrequested
+        let mut matrix = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+
+        supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
+
+        assert!(
+            shutdown.is_cancelled(),
+            "an unrequested exit must cancel shutdown so the process stops \
+             instead of running with a missing front door"
+        );
+        // The other task must now observe the cancellation and finish too.
+        tokio::time::timeout(Duration::from_secs(1), &mut matrix)
+            .await
+            .expect("matrix task must finish after shutdown was cancelled")
+            .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_panicking_front_door_also_cancels_shutdown() {
+        let shutdown = CancellationToken::new();
+        let mut api = tokio::spawn(async { panic!("boom") });
+        let mut matrix = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+
+        supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
+
+        assert!(shutdown.is_cancelled());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_requested_shutdown_is_not_treated_as_an_early_exit() {
+        let shutdown = CancellationToken::new();
+        let mut api = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+        let mut matrix = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+        shutdown.cancel();
+
+        // Must return promptly via the shutdown branch, not hang waiting on
+        // the tasks (which also complete once cancelled, but that's not the
+        // branch under test).
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            supervise_front_doors(&shutdown, &mut api, &mut matrix),
+        )
+        .await
+        .expect("must return promptly once shutdown was already requested");
     }
 }

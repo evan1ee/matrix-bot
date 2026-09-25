@@ -25,6 +25,12 @@ fn load_dotenv_from(path: &std::path::Path) -> Result<()> {
 /// Registered before boot, so a signal during a slow database connect is not
 /// lost. If waiting for Ctrl-C fails, shutting down is the only safe outcome:
 /// the process could otherwise no longer be stopped gracefully.
+///
+/// A second Ctrl-C does not force-quit: this handler task ends after firing
+/// `shutdown.cancel()` once, so nothing here is listening for a repeat.
+/// That is deliberate rather than an oversight — `app::SHUTDOWN_GRACE` (15 s)
+/// already bounds how long shutdown can take, aborting any laggard, so a
+/// force-quit path would only risk skipping the pool close for no benefit.
 fn cancel_on_signal(shutdown: CancellationToken) -> Result<()> {
     #[cfg(unix)]
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
