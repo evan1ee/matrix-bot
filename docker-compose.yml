@@ -6,6 +6,10 @@ services:
     image: matrix-bot:latest
     container_name: matrix-bot
     restart: unless-stopped
+    # Compose sends SIGTERM, then SIGKILL after this many seconds. Must exceed
+    # app::SHUTDOWN_GRACE (15 s) or Compose kills the process mid-drain before
+    # the graceful-shutdown bound has a chance to finish on its own.
+    stop_grace_period: 20s
     ports:
       - "${API_PORT:-8080}:8080"
     environment:

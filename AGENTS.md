@@ -225,7 +225,7 @@ Never commit code that fails compilation, formatting, or tests.
 - Cutting over an existing production deployment to this branch (PostgreSQL-only, versioned migrations, matrix-sdk 0.18) follows `docs/runbooks/postgres-foundation-cutover.md` — production rehearsal, pre-boot steps, first-boot watch list, and rollback.
 - `DATABASE_URL` has no default and must be `postgres://`; `interface/http/mod.rs` probes `web/dist` then `backend/web/dist`. The latter assumes `cargo run` from the repo root.
 - Bare `cargo run` resolves to the bot only via `default-members = ["backend"]` + `default-run = "matrix-bot"` in `backend/Cargo.toml` — keep both if you add a workspace member or a third binary.
-- `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
+- `frontend/vite.config.ts` proxies both `/api` and `/health` to `:8080`, matching `API_PORT`'s default. Change one, change the others.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.
 - Windows: loading the real Kokoro TTS model in a test needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
 - `.env` is read from the current working directory only (`main.rs` loads `./.env` via `dotenvy::from_path`, never dotenvy's own upward parent-directory search) — always run the bot binary from the repo root, and note that a git worktree checkout has its own `.env`, distinct from the main checkout's.

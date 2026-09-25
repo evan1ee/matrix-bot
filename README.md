@@ -401,9 +401,13 @@ with no inference server at all.
 docker volume create matrix-bot-data
 
 # 2. Run the container
+# --stop-timeout 20: Docker sends SIGTERM, then SIGKILL after this many
+# seconds. Must exceed app::SHUTDOWN_GRACE (15 s) or the process is killed
+# mid-drain before its own graceful-shutdown bound gets to finish.
 docker run -d \
   --name matrix-bot \
   --restart unless-stopped \
+  --stop-timeout 20 \
   -p 8080:8080 \
   --env-file .env \
   -v matrix-bot-data:/app/data \

@@ -17,6 +17,13 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      // Liveness/readiness probes live outside /api/v1 (see AGENTS.md); the
+      // dev server needs its own proxy entry or the SPA's fetch('/health/ready')
+      // hits Vite itself instead of the backend.
+      '/health': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
   build: {
