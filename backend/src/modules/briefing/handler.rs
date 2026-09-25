@@ -90,13 +90,14 @@ async fn set_time(settings: &SettingsService, owner_id: &str, raw_time: &str) ->
         );
     }
 
-    let current = settings.get_or_default(owner_id).await;
-    let updated = crate::domain::settings::UserSettings {
-        briefing_time: raw_time.trim().to_string(),
-        ..current
-    };
-
-    match settings.save(owner_id, updated).await {
+    let briefing_time = raw_time.trim().to_string();
+    match settings
+        .modify(owner_id, |current| {
+            current.briefing_time = briefing_time;
+            Ok(())
+        })
+        .await
+    {
         Ok(saved) => format!(
             "✅ 早安简报时间已设置为 <b>{}</b> (时区: <code>{}</code>)。",
             html_escape(&saved.briefing_time),
@@ -107,13 +108,13 @@ async fn set_time(settings: &SettingsService, owner_id: &str, raw_time: &str) ->
 }
 
 async fn toggle(settings: &SettingsService, owner_id: &str, enabled: bool) -> String {
-    let current = settings.get_or_default(owner_id).await;
-    let updated = crate::domain::settings::UserSettings {
-        briefing_enabled: enabled,
-        ..current
-    };
-
-    match settings.save(owner_id, updated).await {
+    match settings
+        .modify(owner_id, |current| {
+            current.briefing_enabled = enabled;
+            Ok(())
+        })
+        .await
+    {
         Ok(saved) => {
             if enabled {
                 format!(
@@ -130,13 +131,12 @@ async fn toggle(settings: &SettingsService, owner_id: &str, enabled: bool) -> St
     }
 }
 
-async fn show_status(settings: &SettingsService, owner_id: &str) -> String {
-    let settings_row = settings.get_or_default(owner_id).await;
-    let last_date = settings
+async fn show_status(service: &SettingsService, owner_id: &str) -> String {
+    let settings = service.get_or_default(owner_id).await;
+    let last_date = service
         .get_last_briefing_date(owner_id)
         .await
         .unwrap_or_else(|| "尚未发送过".to_string());
-    let settings = settings_row;
 
     let state_label = if settings.briefing_enabled {
         "<font color=\"#10b981\">已开启</font>"

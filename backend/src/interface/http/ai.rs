@@ -243,20 +243,22 @@ pub async fn update_ai_config(
         .map_err(ApiError::bad_request)?;
 
     if let Some(turns) = input.max_history_turns {
-        let current = state
+        let clamped = turns.clamp(1, 100);
+        if let Err(err) = state
             .services
             .settings
-            .get_or_default(&user.account_id)
-            .await;
-        let updated = crate::domain::settings::UserSettings {
-            max_history_turns: turns.clamp(1, 100),
-            ..current
-        };
-        let _ = state
-            .services
-            .settings
-            .save(&user.account_id, updated)
-            .await;
+            .modify(&user.account_id, |current| {
+                current.max_history_turns = clamped;
+                Ok(())
+            })
+            .await
+        {
+            tracing::warn!(
+                owner_id = %user.account_id,
+                error = %err,
+                "Failed to update max_history_turns alongside the AI config"
+            );
+        }
     }
 
     let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)

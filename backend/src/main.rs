@@ -102,8 +102,15 @@ async fn async_main() -> Result<()> {
         }
 
         // The stdio MCP server is its own composition root: no API server
-        // or Matrix loop, just the services its tools call.
-        let services = matrix_bot::application::AppServices::new(&db.pool);
+        // or Matrix loop, just the services its tools call. It has no SSE
+        // subscribers of its own, but still wires a real `EventBroadcaster`
+        // rather than the test-only `AppServices::new` — a settings change
+        // made through an MCP tool call must publish `SettingsUpdated` like
+        // any other write, in case something else in-process is listening.
+        let services = matrix_bot::application::AppServices::with_events(
+            &db.pool,
+            &matrix_bot::events::EventBroadcaster::default(),
+        );
         matrix_bot::modules::mcp::stdio::run_stdio(&services, &db.pool, &owner_id).await?;
         return Ok(());
     }

@@ -44,13 +44,14 @@ pub enum AppError {
     },
 }
 
-/// Every application service, built once by the composition root (`app.rs`)
-/// and handed to each front door — `ApiState` and the Matrix `ModuleContext`
-/// — so no adapter constructs a service of its own.
+/// Every application service, built once by the composition root (`app.rs`
+/// and `main.rs`'s stdio MCP mode) and handed to each front door —
+/// `ApiState` and the Matrix `ModuleContext` — so no adapter constructs a
+/// service of its own.
 ///
 /// Each service is cheap to clone (a `PgPool` is a handle), so this is too.
 /// A feature joins by adding its service as a field here and building it in
-/// [`AppServices::new`].
+/// [`AppServices::with_events`].
 #[derive(Clone)]
 pub struct AppServices {
     pub rooms: RoomService,
@@ -58,10 +59,13 @@ pub struct AppServices {
 }
 
 impl AppServices {
-    /// The test/legacy convenience: builds a private, per-call
-    /// `EventBroadcaster` that nothing else subscribes to. Safe because
-    /// nothing built this way asserts on the events a service publishes —
-    /// a caller that needs to observe a broadcast uses [`Self::with_events`].
+    /// Test-only: builds a private, per-call `EventBroadcaster` that nothing
+    /// else subscribes to. Every real composition root uses
+    /// [`Self::with_events`] instead — a build that silently drops every
+    /// `SystemEvent` a service publishes is a trap for whichever adapter
+    /// reaches for the constructor with the fewest arguments, not a
+    /// legitimate production shape.
+    #[cfg(test)]
     pub fn new(pool: &PgPool) -> Self {
         Self::with_events(pool, &EventBroadcaster::default())
     }

@@ -9,12 +9,21 @@
 //!
 //! `UserSettings` keeps plain `pub` fields rather than a normalising
 //! constructor: unlike `JoinedRoom`/`CachedRoom`, it has no cross-field
-//! invariant to protect — every field is independently validated by its own
-//! `parse_*` function before a `UserSettings` is ever built, and a value read
-//! back from storage is accepted as-is (an unparseable stored timezone
-//! degrades to UTC in `tz()`, rather than being rejected). AI tools also read
-//! the caller's settings and mutate individual fields directly
-//! (`modules/ai/tools/settings.rs`).
+//! invariant for a constructor to enforce — each field's rule is its own
+//! `parse_*` function, independent of every other field. That does **not**
+//! mean a `UserSettings` in memory is always valid: a caller is free to set
+//! `timezone`/`currency` to anything before handing the value to
+//! `application::settings::SettingsService`. The fields stay `pub` for
+//! reading and for building an already-valid row (most callers already ran
+//! the right `parse_*` function on the one field they changed), but the
+//! *write* path is where the guarantee actually lives —
+//! `SettingsService::save` and `SettingsService::modify` both re-validate
+//! `timezone`/`currency` before persisting anything, regardless of what the
+//! caller passed in. A value read back from storage is accepted as-is (an
+//! unparseable stored timezone degrades to UTC in `tz()`, rather than being
+//! rejected). AI tools read the caller's settings and build a modified copy
+//! through `SettingsService::modify` (`modules/ai/tools/settings.rs`) — never
+//! straight from unvalidated model output.
 
 use chrono_tz::Tz;
 use serde::Serialize;

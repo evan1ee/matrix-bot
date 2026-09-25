@@ -196,12 +196,11 @@ async fn set_history(settings: &SettingsService, owner_id: &str, value: &str) ->
         }
     };
 
-    let updated = UserSettings {
-        max_history_turns: turns,
-        ..settings.get_or_default(owner_id).await
-    };
-
-    match save(settings, owner_id, updated).await {
+    match modify(settings, owner_id, |current| {
+        current.max_history_turns = turns
+    })
+    .await
+    {
         Ok(saved) => format!(
             "✅ Max AI context history set to <b>{} messages</b>.",
             saved.max_history_turns
@@ -238,12 +237,7 @@ async fn set_voice(settings: &SettingsService, owner_id: &str, value: &str) -> S
         }
     };
 
-    let updated = UserSettings {
-        tts_voice: voice,
-        ..settings.get_or_default(owner_id).await
-    };
-
-    match save(settings, owner_id, updated).await {
+    match modify(settings, owner_id, |current| current.tts_voice = voice).await {
         Ok(saved) => match saved.tts_voice {
             Some(voice) => format!("✅ Voice set to <b>{}</b>.", html_escape(&voice)),
             None => "✅ Voice cleared — using the server default.".to_string(),
@@ -265,12 +259,8 @@ async fn set_timezone(settings: &SettingsService, owner_id: &str, value: &str) -
         );
     };
 
-    let updated = UserSettings {
-        timezone: tz.name().to_string(),
-        ..settings.get_or_default(owner_id).await
-    };
-
-    match save(settings, owner_id, updated).await {
+    let timezone = tz.name().to_string();
+    match modify(settings, owner_id, |current| current.timezone = timezone).await {
         Ok(saved) => format!(
             "✅ Timezone set to <b>{}</b>. It is currently <b>{}</b>.",
             html_escape(&saved.timezone),
@@ -295,12 +285,7 @@ async fn set_currency(settings: &SettingsService, owner_id: &str, value: &str) -
         }
     };
 
-    let updated = UserSettings {
-        currency,
-        ..settings.get_or_default(owner_id).await
-    };
-
-    match save(settings, owner_id, updated).await {
+    match modify(settings, owner_id, |current| current.currency = currency).await {
         Ok(saved) => format!(
             "✅ Default currency set to <b>{}</b>. \
              <code>!expense add 9.99 coffee</code> now books in {}.",
@@ -321,12 +306,11 @@ async fn set_dev_room(settings: &SettingsService, owner_id: &str, value: &str) -
         Some(value.to_string())
     };
 
-    let updated = UserSettings {
-        dev_room_id,
-        ..settings.get_or_default(owner_id).await
-    };
-
-    match save(settings, owner_id, updated).await {
+    match modify(settings, owner_id, |current| {
+        current.dev_room_id = dev_room_id
+    })
+    .await
+    {
         Ok(saved) => match saved.dev_room_id {
             Some(ref room) => format!(
                 "✅ Dev / Error alert room set to <code>{}</code>.",
@@ -338,16 +322,24 @@ async fn set_dev_room(settings: &SettingsService, owner_id: &str, value: &str) -
     }
 }
 
-/// Persists and announces a change via `SettingsService::save`, which owns
-/// the broadcast — the same channel every open web tab subscribes to.
-async fn save(
+/// Applies one field change through `SettingsService::modify` — a read,
+/// the mutation, and the write all in one transaction, so a concurrent
+/// `!settings` command for the same owner can never interleave and lose one
+/// side's change (see `SettingsService::modify`'s doc comment).
+async fn modify(
     settings: &SettingsService,
     owner_id: &str,
-    updated: UserSettings,
+    f: impl FnOnce(&mut UserSettings),
 ) -> Result<UserSettings, ()> {
-    settings.save(owner_id, updated).await.map_err(|err| {
-        tracing::error!("Failed to save settings for {}: {:?}", owner_id, err);
-    })
+    settings
+        .modify(owner_id, |current| {
+            f(current);
+            Ok(())
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed to save settings for {}: {:?}", owner_id, err);
+        })
 }
 
 #[cfg(test)]

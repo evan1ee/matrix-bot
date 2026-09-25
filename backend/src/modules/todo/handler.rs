@@ -6,24 +6,23 @@ use crate::modules::todo::mutate::{
 };
 use crate::modules::todo::repository::TodoRepository;
 use crate::modules::todo::view::{format_todo_list, handle_list_room, handle_list_user, PAGE_SIZE};
+use crate::modules::CommandContext;
 use crate::utils::html_escape;
 
 pub use crate::modules::todo::mutate::{MAX_ROOM_TASKS, MAX_TASK_TEXT_LEN};
 
-// `settings` pushed this past clippy's default limit; todo still takes its
-// inputs one by one until Task 8 (feature-layering) moves it onto `services`
-// the way rooms and settings already have.
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_todo_command(
     pool: &DbPool,
     settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
-    room_id: &str,
-    owner_id: &str,
-    sender_name: &str,
-    clean_body: &str,
-    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
+    ctx: &CommandContext,
 ) -> Option<String> {
+    let room_id = ctx.room_id.as_str();
+    let owner_id = ctx.owner_id.as_str();
+    let sender_name = ctx.sender_name.as_str();
+    let clean_body = ctx.full_body.as_str();
+    let quoted = ctx.quoted.as_ref();
+
     let clean_lower = clean_body.to_lowercase();
 
     // Bare "todo" or "!todo" without a space still claims the message.
@@ -105,6 +104,22 @@ mod tests {
         pool
     }
 
+    fn ctx(body: &str) -> CommandContext {
+        CommandContext {
+            room_id: "!room:1".to_string(),
+            sender_mxid: "@alice:1".to_string(),
+            owner_id: "@alice:1".to_string(),
+            sender_name: "alice".to_string(),
+            command: "todo".to_string(),
+            raw_args: String::new(),
+            full_body: body.to_string(),
+            is_direct: true,
+            is_mentioned: false,
+            quoted: None,
+            stage_reporter: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_handle_todo_add_and_done() {
         let pool = setup_test_db().await;
@@ -113,49 +128,22 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        let res = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add [high] Buy apples",
-            None,
-        )
-        .await
-        .unwrap();
+        let res = handle_todo_command(&pool, &settings, None, &ctx("!todo add [high] Buy apples"))
+            .await
+            .unwrap();
         assert!(res.contains("Added Task"));
         assert!(res.contains("Buy apples"));
         assert!(res.contains("HIGH"));
 
-        let res_done = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo done 1",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_done = handle_todo_command(&pool, &settings, None, &ctx("!todo done 1"))
+            .await
+            .unwrap();
         assert!(res_done.contains("Marked Task"));
         assert!(!res_done.contains("not found"));
 
-        let res_empty_add = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_empty_add = handle_todo_command(&pool, &settings, None, &ctx("!todo add"))
+            .await
+            .unwrap();
         assert!(res_empty_add.contains("Usage:"));
     }
 
@@ -167,44 +155,17 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add Test task",
-            None,
-        )
-        .await;
+        handle_todo_command(&pool, &settings, None, &ctx("!todo add Test task")).await;
 
-        let res_edit = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo edit 1 Updated task",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_edit =
+            handle_todo_command(&pool, &settings, None, &ctx("!todo edit 1 Updated task"))
+                .await
+                .unwrap();
         assert!(res_edit.contains("Updated Task"));
 
-        let res_prio = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo priority 1 high",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_prio = handle_todo_command(&pool, &settings, None, &ctx("!todo priority 1 high"))
+            .await
+            .unwrap();
         assert!(res_prio.contains("Set Task"));
         assert!(res_prio.contains("HIGH"));
     }
@@ -217,55 +178,17 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add Task A",
-            None,
-        )
-        .await;
-        handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo done 1",
-            None,
-        )
-        .await;
+        handle_todo_command(&pool, &settings, None, &ctx("!todo add Task A")).await;
+        handle_todo_command(&pool, &settings, None, &ctx("!todo done 1")).await;
 
-        let res_list = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo list",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_list = handle_todo_command(&pool, &settings, None, &ctx("!todo list"))
+            .await
+            .unwrap();
         assert!(res_list.contains("Your Tasks"));
 
-        let res_clear = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo clear",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_clear = handle_todo_command(&pool, &settings, None, &ctx("!todo clear"))
+            .await
+            .unwrap();
         assert!(res_clear.contains("Cleared"));
     }
 
@@ -277,18 +200,9 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        let res = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo foobar",
-            None,
-        )
-        .await
-        .unwrap();
+        let res = handle_todo_command(&pool, &settings, None, &ctx("!todo foobar"))
+            .await
+            .unwrap();
         assert!(res.contains("Unknown todo command"));
     }
 
@@ -302,11 +216,9 @@ mod tests {
 
         let long_text = "x".repeat(501);
         let cmd = format!("!todo add {}", long_text);
-        let res = handle_todo_command(
-            &pool, &settings, None, "!room:1", "@alice:1", "alice", &cmd, None,
-        )
-        .await
-        .unwrap();
+        let res = handle_todo_command(&pool, &settings, None, &ctx(&cmd))
+            .await
+            .unwrap();
         assert!(res.contains("too long"));
     }
 
@@ -318,44 +230,16 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add Task to remove",
-            None,
-        )
-        .await;
-        let res_del = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo delete 1",
-            None,
-        )
-        .await
-        .unwrap();
+        handle_todo_command(&pool, &settings, None, &ctx("!todo add Task to remove")).await;
+        let res_del = handle_todo_command(&pool, &settings, None, &ctx("!todo delete 1"))
+            .await
+            .unwrap();
         assert!(res_del.contains("Deleted Task"));
 
         // Alice tries to delete non-existent task
-        let res_notfound = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo rm 1",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_notfound = handle_todo_command(&pool, &settings, None, &ctx("!todo rm 1"))
+            .await
+            .unwrap();
         assert!(res_notfound.contains("not found"));
     }
 
@@ -371,36 +255,20 @@ mod tests {
             body: "Remember to review PR 42".to_string(),
             event_id: None,
         };
+        let mut quoted_ctx = ctx("!todo add");
+        quoted_ctx.quoted = Some(quoted);
 
         // !todo add without description, should take quoted body
-        let res = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo add",
-            Some(&quoted),
-        )
-        .await
-        .unwrap();
+        let res = handle_todo_command(&pool, &settings, None, &quoted_ctx)
+            .await
+            .unwrap();
 
         assert!(res.contains("Added Task"));
         assert!(res.contains("Remember to review PR 42"));
 
-        let res_list = handle_todo_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@alice:1",
-            "alice",
-            "!todo list",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_list = handle_todo_command(&pool, &settings, None, &ctx("!todo list"))
+            .await
+            .unwrap();
         assert!(res_list.contains("Remember to review PR 42"));
     }
 }

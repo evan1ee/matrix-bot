@@ -55,13 +55,13 @@ pub async fn handle_set_history(
         _ => return format_error("Max history turns must be an integer between 1 and 100."),
     };
 
-    let current = settings.get_or_default(owner_id).await;
-    let updated = crate::domain::settings::UserSettings {
-        max_history_turns: turns,
-        ..current
-    };
-
-    match settings.save(owner_id, updated).await {
+    match settings
+        .modify(owner_id, |current| {
+            current.max_history_turns = turns;
+            Ok(())
+        })
+        .await
+    {
         Ok(saved) => format!(
             "✅ AI max history turns updated to: <code>{}</code>",
             saved.max_history_turns

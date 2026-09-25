@@ -53,6 +53,27 @@ pub async fn get(
     Ok(row.map(UserSettings::from))
 }
 
+/// Like [`get`], but locks the row for the rest of the caller's transaction
+/// (`SELECT ... FOR UPDATE`) so a concurrent read-modify-write for the same
+/// owner blocks instead of racing. `application::settings::SettingsService::modify`
+/// is the only caller; a missing row locks nothing (there is nothing yet to
+/// lock), which is fine — the `INSERT ... ON CONFLICT` in `upsert` is what
+/// makes the first write for a new owner atomic.
+pub async fn get_for_update(
+    conn: impl PgExecutor<'_>,
+    owner_id: &str,
+) -> Result<Option<UserSettings>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        UserSettingsRow,
+        "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, \
+         briefing_time, tts_voice FROM user_settings WHERE owner_id = $1 FOR UPDATE",
+        owner_id
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(UserSettings::from))
+}
+
 /// Writes preferences, creating the row if it does not exist.
 pub async fn upsert(
     conn: impl PgExecutor<'_>,

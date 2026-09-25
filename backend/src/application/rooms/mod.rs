@@ -107,12 +107,10 @@ impl RoomService {
             "linked Matrix ids",
             account_id,
         );
-        let dev_room_id = self.settings.get(account_id).await.map_or_else(
-            |err| {
-                warn!(account_id, error = %err, "Resolving a room without the dev room setting");
-                None
-            },
-            |settings| settings.dev_room_id,
+        let dev_room_id = logged_or_default(
+            self.settings.get(account_id).await.map(|s| s.dev_room_id),
+            "dev room setting",
+            account_id,
         );
         domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
     }
@@ -144,9 +142,10 @@ impl RoomService {
 }
 
 /// Room resolution's degradation rule, in one place: log what could not be
-/// read and carry on without it.
-fn logged_or_default<T: Default>(
-    result: Result<T, sqlx::Error>,
+/// read and carry on without it. Generic over the error type so it covers
+/// both a repository's `sqlx::Error` and a service's `AppError` (settings).
+fn logged_or_default<T: Default, E: std::fmt::Display>(
+    result: Result<T, E>,
     input: &str,
     account_id: &str,
 ) -> T {

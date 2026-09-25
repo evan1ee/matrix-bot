@@ -3,12 +3,17 @@
 //!
 //! Read by nearly every other service and Matrix/AI adapter — see
 //! `domain::settings` for why the type stays a plain data record instead of
-//! a normalising constructor.
+//! a normalising constructor. Every write, from any caller, goes through
+//! [`SettingsService::modify`] (or [`SettingsService::save`], which validates
+//! the same way): the fields being `pub` makes them easy to read and build
+//! from, not a licence to persist an unvalidated row.
 
 use sqlx::PgPool;
 
 use crate::application::AppError;
-use crate::domain::settings::{RawSettingsUpdate, SettingsError, UserSettings};
+use crate::domain::settings::{
+    parse_currency, parse_timezone, RawSettingsUpdate, SettingsError, UserSettings,
+};
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::postgres::repositories::settings as repo;
 
@@ -16,6 +21,18 @@ impl From<SettingsError> for AppError {
     fn from(err: SettingsError) -> Self {
         AppError::Validation(err.to_string())
     }
+}
+
+/// Re-validates a whole row before it is ever written, regardless of which
+/// caller built it or how. `timezone`/`currency` are always re-parsed here
+/// even though every legitimate caller already validated the field it
+/// changed — a caller building a row by hand (an AI tool, a future adapter)
+/// gets the same guarantee without having to remember to call the right
+/// `parse_*` function itself.
+fn validate(settings: &UserSettings) -> Result<(), SettingsError> {
+    parse_timezone(&settings.timezone).ok_or(SettingsError::InvalidTimezone)?;
+    parse_currency(&settings.currency)?;
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -49,7 +66,11 @@ impl SettingsService {
         }
     }
 
-    /// Persists a whole-row replacement and announces the change.
+    /// Validates and persists a whole-row replacement, then announces the
+    /// change. A direct single-shot write for a caller that has already
+    /// built the exact row it wants (tests, a future typed use case); a
+    /// caller doing read-modify-write should use [`Self::modify`] instead, or
+    /// it risks the lost-update race `modify`'s row lock closes.
     ///
     /// The broadcast is what keeps an open web tab honest: every timestamp it
     /// shows is formatted against these settings, so a change made over
@@ -60,7 +81,42 @@ impl SettingsService {
         owner_id: &str,
         settings: UserSettings,
     ) -> Result<UserSettings, AppError> {
+        validate(&settings)?;
         repo::upsert(&self.pool, owner_id, &settings).await?;
+        self.events.send(SystemEvent::SettingsUpdated {
+            owner_id: owner_id.to_string(),
+            settings: settings.clone(),
+        });
+        Ok(settings)
+    }
+
+    /// Reads the caller's row, applies `f`, validates and persists the
+    /// result, and announces the change — one transaction, so a concurrent
+    /// `modify` cannot interleave and lose one side's update. The row is
+    /// read with `SELECT ... FOR UPDATE`, so a second `modify` for the same
+    /// owner blocks until this one commits or rolls back; a missing row
+    /// falls back to the documented defaults, but a read *error* propagates
+    /// rather than silently substituting them (a failed `SELECT` must not
+    /// look like "no preferences saved yet" and reset every field on the
+    /// `UPSERT` that follows).
+    ///
+    /// This is the write path every read-modify-write caller uses:
+    /// `interface/chat/settings.rs`'s `set_*` handlers, `briefing::handler`'s
+    /// `set_time`/`toggle`, `ai::config_cmd::handle_set_history`,
+    /// `interface/http/ai.rs`'s max-history-turns update, and the AI tool's
+    /// `update_my_settings`, plus [`Self::update`] below.
+    pub async fn modify<F>(&self, owner_id: &str, f: F) -> Result<UserSettings, AppError>
+    where
+        F: FnOnce(&mut UserSettings) -> Result<(), SettingsError>,
+    {
+        let mut tx = self.pool.begin().await?;
+        let mut settings = repo::get_for_update(&mut *tx, owner_id)
+            .await?
+            .unwrap_or_default();
+        f(&mut settings)?;
+        validate(&settings)?;
+        repo::upsert(&mut *tx, owner_id, &settings).await?;
+        tx.commit().await?;
         self.events.send(SystemEvent::SettingsUpdated {
             owner_id: owner_id.to_string(),
             settings: settings.clone(),
@@ -76,9 +132,11 @@ impl SettingsService {
         owner_id: &str,
         raw: RawSettingsUpdate,
     ) -> Result<UserSettings, AppError> {
-        let current = self.get_or_default(owner_id).await;
-        let updated = UserSettings::apply_update(&current, raw)?;
-        self.save(owner_id, updated).await
+        self.modify(owner_id, move |current| {
+            *current = UserSettings::apply_update(current, raw)?;
+            Ok(())
+        })
+        .await
     }
 
     /// The last date string `YYYY-MM-DD` the morning briefing was delivered,
@@ -102,9 +160,10 @@ impl SettingsService {
         Ok(repo::update_last_briefing_date(&self.pool, owner_id, date_str).await?)
     }
 
-    /// Subscribes to the events this service publishes. Exposed so a test
-    /// outside this module can observe a broadcast without reaching into the
-    /// service's private fields.
+    /// Subscribes to the events this service publishes. Test-only: a
+    /// production caller that needs the stream subscribes to the same
+    /// `EventBroadcaster` it built this service with instead.
+    #[cfg(test)]
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SystemEvent> {
         self.events.subscribe()
     }
@@ -261,5 +320,111 @@ mod tests {
             service.get_last_briefing_date(owner).await,
             Some("2026-09-18".to_string())
         );
+    }
+
+    /// I1: `save` is a public entry point too (not just `update`/`modify`),
+    /// so it must not persist a row nothing validated — the exact defect the
+    /// AI tool had before this fix.
+    #[tokio::test]
+    async fn save_rejects_an_invalid_timezone_without_persisting_anything() {
+        let service = service().await;
+        let err = service
+            .save(
+                "@evan:mbm.one",
+                UserSettings {
+                    timezone: "Mars/Olympus".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(
+            service.get("@evan:mbm.one").await.unwrap(),
+            UserSettings::default(),
+            "a rejected save must not create a row"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_rejects_an_invalid_currency() {
+        let service = service().await;
+        let err = service
+            .save(
+                "@evan:mbm.one",
+                UserSettings {
+                    currency: "EURO".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    /// I3: `modify`'s `SELECT ... FOR UPDATE` must serialize two concurrent
+    /// read-modify-writes for the same owner, or one overwrites the other's
+    /// change — the lost-update race the old `get_or_default`-then-`save`
+    /// pattern (still exactly what every read-then-save caller before this
+    /// fix did) was exposed to.
+    #[tokio::test]
+    async fn concurrent_modifies_do_not_lose_an_update() {
+        let service = service().await;
+        service
+            .save(
+                "@evan:mbm.one",
+                UserSettings {
+                    max_history_turns: 10,
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let bump = |s: &mut UserSettings| {
+            s.max_history_turns += 1;
+            Ok(())
+        };
+        let (a, b) = tokio::join!(
+            service.modify("@evan:mbm.one", bump),
+            service.modify("@evan:mbm.one", bump)
+        );
+        a.unwrap();
+        b.unwrap();
+
+        let settings = service.get("@evan:mbm.one").await.unwrap();
+        assert_eq!(
+            settings.max_history_turns, 12,
+            "both increments must land — a lost update would leave this at 11"
+        );
+    }
+
+    /// I3: a read error must abort the write rather than being treated as
+    /// "no row yet" and silently resetting every field the caller did not
+    /// touch. `modify` itself can't distinguish "no row" from "read failed"
+    /// without a live error to inject, so this exercises the same guarantee
+    /// through `update` on a pool that is closed before the call: the whole
+    /// transaction (including the `SELECT`) fails, and nothing is upserted.
+    #[tokio::test]
+    async fn update_on_a_closed_pool_fails_and_writes_nothing() {
+        let service = service().await;
+        service.pool.close().await;
+
+        let err = service
+            .update(
+                "@evan:mbm.one",
+                RawSettingsUpdate {
+                    timezone: "Asia/Tokyo".to_string(),
+                    currency: "JPY".to_string(),
+                    dev_room_id: None,
+                    max_history_turns: None,
+                    briefing_enabled: None,
+                    briefing_time: None,
+                    tts_voice: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Database(_)));
     }
 }

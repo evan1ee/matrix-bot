@@ -74,13 +74,13 @@ pub fn looks_like_currency(token: &str) -> bool {
 }
 
 /// Normalises a currency code, rejecting anything that is not three letters.
+///
+/// Delegates to `domain::settings::parse_currency`, which owns the rule (a
+/// 3-letter ISO-4217-shaped code) — finance and settings both need it, and
+/// this keeps the one place it's actually re-derived down to a single
+/// `match`, rather than two copies that could quietly drift apart.
 pub fn normalise_currency(raw: &str) -> Result<String, MoneyError> {
-    let code = raw.trim().to_uppercase();
-    if code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic()) {
-        Ok(code)
-    } else {
-        Err(MoneyError::InvalidCurrency)
-    }
+    crate::domain::settings::parse_currency(raw).map_err(|_| MoneyError::InvalidCurrency)
 }
 
 /// Decimal places for a currency's minor unit.

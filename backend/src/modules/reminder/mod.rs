@@ -58,17 +58,7 @@ impl BotModule for ReminderModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_reminder_command(
-            &db.pool,
-            &services.settings,
-            broadcaster,
-            &ctx.room_id,
-            &ctx.owner_id,
-            &ctx.sender_name,
-            &ctx.full_body,
-            ctx.quoted.as_ref(),
-        )
-        .await
+        handler::handle_reminder_command(&db.pool, &services.settings, broadcaster, ctx).await
     }
 
     async fn spawn_background_workers(

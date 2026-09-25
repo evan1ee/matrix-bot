@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::application::AppServices;
+use crate::domain::settings::{parse_currency, parse_timezone, SettingsError};
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
@@ -18,19 +19,27 @@ pub async fn execute_tool(
             .await,
         ),
 
+        // Validated the same way every other writer is: an LLM-supplied value
+        // is untrusted input, not a source of truth (AGENTS.md, AI/agent
+        // boundaries) — a bad timezone or currency is rejected here, in the
+        // domain, rather than persisted and left to render as UTC forever.
+        // `modify` reads-and-writes in one transaction, so a rejection never
+        // touches the saved row.
         "update_my_settings" => Some(
             async {
-                let mut settings = services.settings.get_or_default(owner_id).await;
-                if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
-                    settings.timezone = tz.to_string();
-                }
-                if let Some(curr) = args.get("currency").and_then(|v| v.as_str()) {
-                    settings.currency = curr.to_uppercase();
-                }
-
                 let saved = services
                     .settings
-                    .save(owner_id, settings)
+                    .modify(owner_id, |settings| {
+                        if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
+                            let parsed =
+                                parse_timezone(tz).ok_or(SettingsError::InvalidTimezone)?;
+                            settings.timezone = parsed.name().to_string();
+                        }
+                        if let Some(curr) = args.get("currency").and_then(|v| v.as_str()) {
+                            settings.currency = parse_currency(curr)?;
+                        }
+                        Ok(())
+                    })
                     .await
                     .map_err(|e| e.to_string())?;
 

@@ -7,25 +7,24 @@ use crate::events::EventBroadcaster;
 use crate::modules::reminder::models::RecurrencePattern;
 use crate::modules::reminder::repository::ReminderRepository;
 use crate::modules::reminder::service::{self, NewReminder, ReminderError};
+use crate::modules::CommandContext;
 use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder_args};
 
 // `MAX_MESSAGE_LEN` lives in `service` now — this module owns the reply
 // wording, not the limit.
 
-// `settings` pushed this past clippy's default limit; reminder still takes
-// its inputs one by one until Task 8 (feature-layering) moves it onto
-// `services` the way rooms and settings already have.
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_reminder_command(
     pool: &DbPool,
     settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
-    room_id: &str,
-    owner_id: &str,
-    sender_name: &str,
-    clean_body: &str,
-    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
+    ctx: &CommandContext,
 ) -> Option<String> {
+    let room_id = ctx.room_id.as_str();
+    let owner_id = ctx.owner_id.as_str();
+    let sender_name = ctx.sender_name.as_str();
+    let clean_body = ctx.full_body.as_str();
+    let quoted = ctx.quoted.as_ref();
+
     let clean_lower = clean_body.to_lowercase();
 
     if !(clean_lower == "remind"
@@ -316,6 +315,22 @@ mod tests {
         pool
     }
 
+    fn ctx(body: &str) -> CommandContext {
+        CommandContext {
+            room_id: "!room:1".to_string(),
+            sender_mxid: "@bob:1".to_string(),
+            owner_id: "@bob:1".to_string(),
+            sender_name: "bob".to_string(),
+            command: "remind".to_string(),
+            raw_args: String::new(),
+            full_body: body.to_string(),
+            is_direct: true,
+            is_mentioned: false,
+            quoted: None,
+            stage_reporter: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_handle_reminder_set_list_cancel() {
         let pool = setup_test_db().await;
@@ -324,109 +339,44 @@ mod tests {
             crate::events::EventBroadcaster::default(),
         );
 
-        let res_set = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind 10s Check oven",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_set =
+            handle_reminder_command(&pool, &settings, None, &ctx("!remind 10s Check oven"))
+                .await
+                .unwrap();
         assert!(res_set.contains("Reminder #1 set!"));
 
-        let res_list = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind list",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_list = handle_reminder_command(&pool, &settings, None, &ctx("!remind list"))
+            .await
+            .unwrap();
         assert!(res_list.contains("Pending Reminders for bob"));
         assert!(res_list.contains("Check oven"));
 
-        let res_cancel = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind cancel 1",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_cancel = handle_reminder_command(&pool, &settings, None, &ctx("!remind cancel 1"))
+            .await
+            .unwrap();
         assert!(res_cancel.contains("Cancelled reminder"));
 
-        let res_bare = handle_reminder_command(
-            &pool, &settings, None, "!room:1", "@bob:1", "bob", "!remind", None,
-        )
-        .await
-        .unwrap();
+        let res_bare = handle_reminder_command(&pool, &settings, None, &ctx("!remind"))
+            .await
+            .unwrap();
         assert!(res_bare.contains("no pending reminders"));
 
-        let res_reminders = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!reminders",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_reminders = handle_reminder_command(&pool, &settings, None, &ctx("!reminders"))
+            .await
+            .unwrap();
         assert!(res_reminders.contains("no pending reminders"));
 
         // Add a reminder and cancel via rm
-        handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind 20s Check water",
-            None,
-        )
-        .await;
-        let res_rm = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind rm 2",
-            None,
-        )
-        .await
-        .unwrap();
+        handle_reminder_command(&pool, &settings, None, &ctx("!remind 20s Check water")).await;
+        let res_rm = handle_reminder_command(&pool, &settings, None, &ctx("!remind rm 2"))
+            .await
+            .unwrap();
         assert!(res_rm.contains("Cancelled reminder"));
 
         // Check history command
-        let res_hist = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind history",
-            None,
-        )
-        .await
-        .unwrap();
+        let res_hist = handle_reminder_command(&pool, &settings, None, &ctx("!remind history"))
+            .await
+            .unwrap();
         assert!(res_hist.contains("Reminder History for bob"));
         assert!(res_hist.contains("Check oven"));
         assert!(res_hist.contains("[Cancelled 🗑️]"));
@@ -444,19 +394,12 @@ mod tests {
             body: "Deployment scheduled at midnight".to_string(),
             event_id: None,
         };
+        let mut quoted_ctx = ctx("!remind 10m");
+        quoted_ctx.quoted = Some(quoted);
 
-        let res = handle_reminder_command(
-            &pool,
-            &settings,
-            None,
-            "!room:1",
-            "@bob:1",
-            "bob",
-            "!remind 10m",
-            Some(&quoted),
-        )
-        .await
-        .unwrap();
+        let res = handle_reminder_command(&pool, &settings, None, &quoted_ctx)
+            .await
+            .unwrap();
 
         assert!(res.contains("Reminder #1 set!"));
         assert!(res.contains("Deployment scheduled at midnight"));

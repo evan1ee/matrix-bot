@@ -86,17 +86,7 @@ impl BotModule for TodoModule {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_todo_command(
-            &db.pool,
-            &services.settings,
-            broadcaster,
-            &ctx.room_id,
-            &ctx.owner_id,
-            &ctx.sender_name,
-            &ctx.full_body,
-            ctx.quoted.as_ref(),
-        )
-        .await
+        handler::handle_todo_command(&db.pool, &services.settings, broadcaster, ctx).await
     }
 }
 
