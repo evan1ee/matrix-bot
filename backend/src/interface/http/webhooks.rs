@@ -36,8 +36,8 @@ pub(crate) async fn queue_and_broadcast(
 ) -> Result<String, ApiError> {
     let target_room = if let Some(ref override_room) = room_override {
         let client_guard = state.bot_client.read().await;
-        let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-            &state.db.pool,
+        let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+            &state.services.rooms,
             client_guard.as_ref(),
             &webhook.owner_id,
             override_room,
@@ -219,8 +219,8 @@ pub async fn create_webhook(
     }
 
     let client_guard = state.bot_client.read().await;
-    let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-        &state.db.pool,
+    let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+        &state.services.rooms,
         client_guard.as_ref(),
         &user.account_id,
         input.default_room_id.trim(),
@@ -272,8 +272,8 @@ pub async fn update_webhook(
 ) -> Result<Json<Webhook>, ApiError> {
     if let Some(ref new_room) = input.default_room_id {
         let client_guard = state.bot_client.read().await;
-        let is_auth = crate::modules::rooms::is_room_authorized_for_account(
-            &state.db.pool,
+        let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+            &state.services.rooms,
             client_guard.as_ref(),
             &user.account_id,
             new_room.trim(),

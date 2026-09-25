@@ -5,6 +5,7 @@ use matrix_sdk::{Client, LoopCtrl};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
@@ -49,6 +50,7 @@ pub mod verification;
 pub struct MatrixBot {
     client: Client,
     db: Database,
+    services: AppServices,
     registry: Arc<ModuleRegistry>,
     broadcaster: Option<EventBroadcaster>,
     /// Shared with the API, so a merge confirmed in the web UI is the same one
@@ -61,6 +63,7 @@ impl MatrixBot {
     pub async fn new_full(
         config: &Config,
         db: Database,
+        services: AppServices,
         broadcaster: Option<EventBroadcaster>,
         handles: crate::interface::channels::matrix::handles::BotHandles,
     ) -> Result<Self> {
@@ -128,6 +131,7 @@ impl MatrixBot {
         Ok(Self {
             client,
             db,
+            services,
             registry: registry_arc,
             broadcaster,
             handles,
@@ -139,6 +143,7 @@ impl MatrixBot {
         let module_ctx = ModuleContext {
             client: self.client.clone(),
             db: self.db.clone(),
+            services: self.services.clone(),
             broadcaster: self.broadcaster.clone(),
         };
 

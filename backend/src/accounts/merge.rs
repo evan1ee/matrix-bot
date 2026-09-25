@@ -13,7 +13,7 @@
 //!
 //! The rewrite runs inside one transaction. It previously did not, on the
 //! grounds that no repository here used `pool.begin()` — which stopped being
-//! true once `modules::portfolio::trade` and `db::rooms` adopted one. A merge
+//! true once `modules::portfolio::trade` and the rooms cache adopted one. A merge
 //! moves rows across twenty-odd tables and then deletes the account they used
 //! to belong to; a half-applied one is exactly what a transaction is for.
 //!

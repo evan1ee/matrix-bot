@@ -3,7 +3,6 @@ use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use std::time::Duration as StdDuration;
 use tracing::{error, info, warn};
 
-use crate::db::rooms::RoomRepository;
 use crate::events::SystemEvent;
 use crate::modules::briefing::generator::generate_briefing;
 use crate::modules::settings::models::parse_briefing_time;
@@ -84,9 +83,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let mut delivered = false;
 
         // 3. Deliver to user's direct or default Matrix room
-        if let Some(target_room) =
-            RoomRepository::resolve_user_default_room(&ctx.db.pool, &owner_id).await
-        {
+        if let Some(target_room) = ctx.services.rooms.default_room(&owner_id).await {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
                 let content =
                     RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);

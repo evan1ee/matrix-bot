@@ -172,19 +172,14 @@ pub async fn create_todo(
         .map(TodoPriority::from_str_or_default)
         .unwrap_or(TodoPriority::Medium);
 
-    let room_id = crate::db::rooms::resolve_target_room(
-        &state.db.pool,
-        &user.owner_id(),
-        payload.room_id.as_deref(),
-    )
-    .await;
+    let rooms = &state.services.rooms;
+    let room_id = rooms
+        .resolve_target_room(&user.owner_id(), payload.room_id.as_deref())
+        .await;
 
-    let remind_room = if let Some(rr) = payload.remind_room_id.as_deref() {
-        Some(
-            crate::db::rooms::resolve_target_room(&state.db.pool, &user.owner_id(), Some(rr)).await,
-        )
-    } else {
-        None
+    let remind_room = match payload.remind_room_id.as_deref() {
+        Some(rr) => Some(rooms.resolve_target_room(&user.owner_id(), Some(rr)).await),
+        None => None,
     };
 
     let item = service::create(

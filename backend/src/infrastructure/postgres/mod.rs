@@ -5,6 +5,8 @@
 //! running its readiness ping directly. More repositories move here as
 //! `modules/` features migrate to the target layer-first layout.
 
+pub mod repositories;
+
 use sqlx::PgPool;
 
 /// A trivial round-trip query: succeeds only if the pool can still reach the

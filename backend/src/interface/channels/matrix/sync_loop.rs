@@ -6,6 +6,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
@@ -49,6 +50,7 @@ fn should_reset_backoff(
 pub async fn run_bot_loop(
     config: Config,
     db: Database,
+    services: AppServices,
     broadcaster: EventBroadcaster,
     handles: BotHandles,
     shutdown: CancellationToken,
@@ -61,6 +63,7 @@ pub async fn run_bot_loop(
         let build = MatrixBot::new_full(
             &config,
             db.clone(),
+            services.clone(),
             Some(broadcaster.clone()),
             handles.clone(),
         );

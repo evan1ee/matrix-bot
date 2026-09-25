@@ -1,3 +1,4 @@
+use crate::application::rooms::RoomService;
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
@@ -211,10 +212,13 @@ pub async fn execute_tool(
                     Utc::now()
                 };
 
+                // TODO(feature-layering Task 13): use `AppServices::rooms` once
+                // the AI tool executor receives `AppServices`.
+                let rooms = RoomService::new(pool.clone());
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    rooms.resolve_target_room(owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
+                    rooms.resolve_target_room(owner_id, None).await
                 } else {
                     room_id.to_string()
                 };

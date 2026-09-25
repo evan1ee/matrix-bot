@@ -23,7 +23,6 @@ pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminder;
-pub mod rooms;
 pub mod settings;
 pub mod todo;
 pub mod tts;
@@ -128,6 +127,8 @@ pub struct ModuleContext {
     pub client: Client,
     /// The shared database connection pool.
     pub db: Database,
+    /// Application services, built once in `app.rs`.
+    pub services: crate::application::AppServices,
     /// Optional event broadcaster for real-time SSE streaming.
     pub broadcaster: Option<crate::events::EventBroadcaster>,
 }

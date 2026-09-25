@@ -13,6 +13,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
@@ -89,6 +90,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         db = Database::connect(&config.database_url, config.db_max_connections) => db?,
     };
     let broadcaster = EventBroadcaster::default();
+    let services = AppServices::new(&db.pool);
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // and the pending merges survive a Matrix reconnect.
     let handles = BotHandles::default();
@@ -97,6 +99,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let api = http::start_api_server(
         &config,
         db.clone(),
+        services.clone(),
         broadcaster.clone(),
         handles.clone(),
         listener,
@@ -106,6 +109,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let mut matrix = tokio::spawn(run_bot_loop(
         config,
         db.clone(),
+        services,
         broadcaster,
         handles,
         shutdown.child_token(),

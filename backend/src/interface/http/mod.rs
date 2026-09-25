@@ -20,6 +20,7 @@ use crate::events::EventBroadcaster;
 
 pub mod account;
 pub mod ai;
+pub mod app_error;
 pub mod auth;
 pub mod bookmarks;
 pub mod briefing;
@@ -90,12 +91,14 @@ pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
 pub fn start_api_server(
     config: &Config,
     db: Database,
+    services: crate::application::AppServices,
     broadcaster: EventBroadcaster,
     handles: crate::interface::channels::matrix::handles::BotHandles,
     listener: TcpListener,
     shutdown: CancellationToken,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let state = auth::ApiState::from_config(config, db, broadcaster, handles, shutdown.clone())?;
+    let state =
+        auth::ApiState::from_config(config, db, services, broadcaster, handles, shutdown.clone())?;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -420,7 +423,8 @@ mod server_shutdown_tests {
 
         let server = start_api_server(
             &config,
-            Database { pool },
+            Database { pool: pool.clone() },
+            crate::application::AppServices::new(&pool),
             EventBroadcaster::default(),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             listener,

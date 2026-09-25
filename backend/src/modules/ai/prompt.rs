@@ -1,5 +1,7 @@
 use super::resolved_config::ResolvedAiConfig;
+use crate::application::rooms::RoomService;
 use crate::db::DbPool;
+use crate::domain::rooms::CachedRoom;
 use crate::utils::html::html_escape;
 
 pub async fn build_system_prompt(
@@ -22,17 +24,25 @@ pub async fn build_system_prompt(
     let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let now_utc_str = now_utc.to_rfc3339();
 
-    let default_room_id = crate::db::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id)
-        .await
-        .unwrap_or_default();
+    // TODO(feature-layering Task 13): use `AppServices::rooms` once the AI
+    // turn receives `AppServices`.
+    let rooms = RoomService::new(pool.clone());
+    let default_room_id = rooms.default_room(owner_id).await;
+    let cached_rooms = rooms.cached_rooms(owner_id).await.unwrap_or_else(|err| {
+        tracing::warn!(owner_id, error = %err, "Prompting without the room list");
+        Vec::new()
+    });
     let room_desc: Vec<_> = cached_rooms
         .iter()
-        .map(|r| {
-            if r.is_direct {
-                format!("'{}' (user direct chat room, id: {})", r.name, r.room_id)
+        .map(|CachedRoom { room: r, .. }| {
+            if r.is_direct() {
+                format!(
+                    "'{}' (user direct chat room, id: {})",
+                    r.name(),
+                    r.room_id()
+                )
             } else {
-                format!("'{}' (id: {})", r.name, r.room_id)
+                format!("'{}' (id: {})", r.name(), r.room_id())
             }
         })
         .collect();

@@ -1,7 +1,6 @@
 use axum::{extract::State, Json};
 use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 
-use crate::db::rooms::RoomRepository;
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
@@ -31,9 +30,7 @@ pub async fn trigger_briefing(
     // Attempt delivery to user's direct or default Matrix room if configured
     let client_guard = state.bot_client.read().await;
     if let Some(ref client) = *client_guard {
-        if let Some(target_room) =
-            RoomRepository::resolve_user_default_room(&state.db.pool, &user.owner_id()).await
-        {
+        if let Some(target_room) = state.services.rooms.default_room(&user.owner_id()).await {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
                 let content =
                     RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);

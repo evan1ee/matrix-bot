@@ -84,6 +84,9 @@ impl AuthUser {
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Database,
+    /// Application services, built once in `app.rs`. Handlers call these
+    /// instead of reaching repositories or the pool.
+    pub services: crate::application::AppServices,
     pub broadcaster: crate::events::EventBroadcaster,
     pub registration_secret: Option<String>,
     pub registration_open: bool,
@@ -183,6 +186,7 @@ impl ApiState {
         http_client: reqwest::Client,
     ) -> Self {
         Self {
+            services: crate::application::AppServices::new(&db.pool),
             db,
             broadcaster,
             registration_secret,
@@ -225,6 +229,7 @@ impl ApiState {
     pub fn from_config(
         config: &crate::config::Config,
         db: Database,
+        services: crate::application::AppServices,
         broadcaster: crate::events::EventBroadcaster,
         handles: crate::interface::channels::matrix::handles::BotHandles,
         shutdown: tokio_util::sync::CancellationToken,
@@ -249,6 +254,7 @@ impl ApiState {
 
         Ok(Self {
             db,
+            services,
             broadcaster,
             registration_secret: config.registration_secret.clone(),
             registration_open: config.registration_open,
@@ -477,7 +483,8 @@ mod tests {
 
         let state = ApiState::from_config(
             &config,
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool: pool.clone() },
+            crate::application::AppServices::new(&pool),
             crate::events::EventBroadcaster::default(),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
@@ -524,7 +531,8 @@ mod tests {
 
         assert!(ApiState::from_config(
             &config,
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool: pool.clone() },
+            crate::application::AppServices::new(&pool),
             crate::events::EventBroadcaster::default(),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
