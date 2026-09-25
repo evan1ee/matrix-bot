@@ -1,4 +1,3 @@
-use crate::application::rooms::RoomService;
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
@@ -12,6 +11,7 @@ use crate::modules::finance::service::{self, NewTransaction};
 use crate::modules::settings::repository::SettingsRepository;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -212,9 +212,7 @@ pub async fn execute_tool(
                     Utc::now()
                 };
 
-                // TODO(feature-layering Task 13): use `AppServices::rooms` once
-                // the AI tool executor receives `AppServices`.
-                let rooms = RoomService::new(pool.clone());
+                let rooms = &services.rooms;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
                     rooms.resolve_target_room(owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
@@ -417,6 +415,7 @@ mod tests {
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
 
         let result = execute_tool(
+            &crate::application::AppServices::new(&pool),
             &pool,
             None,
             "@alice:a",

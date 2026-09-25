@@ -162,6 +162,7 @@ impl<'a> Attachment<'a> {
     async fn run_module(
         &self,
         db: &Database,
+        services: &crate::application::AppServices,
         ai: &AiEnvConfig,
         broadcaster: Option<&EventBroadcaster>,
         room: &Room,
@@ -173,6 +174,7 @@ impl<'a> Attachment<'a> {
             Self::Image { content, ocr } => {
                 crate::modules::ocr::process_image_event(
                     db,
+                    services,
                     ai,
                     broadcaster,
                     room,
@@ -191,6 +193,7 @@ impl<'a> Attachment<'a> {
             } => {
                 crate::modules::voice::process_audio_event(
                     db,
+                    services,
                     ai,
                     broadcaster,
                     room,
@@ -222,6 +225,7 @@ pub async fn handle_attachment(
     own_id: &UserId,
     is_direct: bool,
     db: &Database,
+    services: &crate::application::AppServices,
     ai_config: &AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     ocr: &crate::infrastructure::inference::ocr::OcrClient,
@@ -286,6 +290,7 @@ pub async fn handle_attachment(
     let reporter = stage_indicator.reporter();
     let result = std::panic::AssertUnwindSafe(attachment.run_module(
         db,
+        services,
         ai_config,
         broadcaster,
         room,

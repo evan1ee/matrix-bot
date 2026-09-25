@@ -3,9 +3,11 @@ use serde::Serialize;
 use tracing::warn;
 use utoipa::ToSchema;
 
+use crate::application::rooms::PickerRooms;
 use crate::domain::rooms::{CachedRoom, JoinedRoom};
 use crate::error::ApiError;
 use crate::interface::chat::rooms::discover_rooms_for_account;
+use crate::interface::http::app_error::AppResultExt;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
 // A room in the web room picker. `updated_at` is when it was cached; a room
@@ -30,17 +32,24 @@ impl From<&JoinedRoom> for JoinedRoomInfo {
     }
 }
 
-impl From<CachedRoom> for JoinedRoomInfo {
-    fn from(cached: CachedRoom) -> Self {
+impl From<&CachedRoom> for JoinedRoomInfo {
+    fn from(cached: &CachedRoom) -> Self {
         Self {
-            updated_at: Some(cached.updated_at),
-            ..Self::from(&cached.room)
+            updated_at: Some(cached.updated_at().to_owned()),
+            ..Self::from(cached.room())
         }
     }
 }
 
-fn to_dtos(cached: Vec<CachedRoom>) -> Json<Vec<JoinedRoomInfo>> {
-    Json(cached.into_iter().map(JoinedRoomInfo::from).collect())
+fn to_dtos(cached: &[CachedRoom]) -> Json<Vec<JoinedRoomInfo>> {
+    Json(cached.iter().map(JoinedRoomInfo::from).collect())
+}
+
+fn picker_dtos(rooms: &PickerRooms) -> Json<Vec<JoinedRoomInfo>> {
+    match rooms {
+        PickerRooms::Cached(cached) => to_dtos(cached),
+        PickerRooms::Uncached(found) => Json(found.iter().map(JoinedRoomInfo::from).collect()),
+    }
 }
 
 #[utoipa::path(
@@ -68,25 +77,15 @@ pub async fn list_rooms(
             Vec::new()
         });
     if !cached.is_empty() {
-        return Ok(to_dtos(cached));
+        return Ok(to_dtos(&cached));
     }
 
     let Some(client) = state.bot_client.read().await.clone() else {
         return Ok(Json(Vec::new()));
     };
     let discovered = discover_rooms_for_account(rooms, &client, &user.account_id).await;
-    if discovered.is_empty() {
-        return Ok(Json(Vec::new()));
-    }
-
-    // Caching is an optimisation here: the picker still gets the rooms.
-    match rooms.replace_cached(&user.account_id, &discovered).await {
-        Ok(saved) => Ok(to_dtos(saved)),
-        Err(err) => {
-            warn!(account_id = %user.account_id, error = %err, "Could not cache discovered rooms");
-            Ok(Json(discovered.iter().map(JoinedRoomInfo::from).collect()))
-        }
-    }
+    let adopted = rooms.adopt_discovery(&user.account_id, discovered).await;
+    Ok(picker_dtos(&adopted))
 }
 
 #[utoipa::path(
@@ -109,8 +108,11 @@ pub async fn sync_rooms(
 
     let rooms = &state.services.rooms;
     let discovered = discover_rooms_for_account(rooms, &client, &user.account_id).await;
-    let saved = rooms.replace_cached(&user.account_id, &discovered).await?;
-    Ok(to_dtos(saved))
+    let saved = rooms
+        .replace_cached(&user.account_id, &discovered)
+        .await
+        .api_context("Failed to save cached rooms")?;
+    Ok(to_dtos(&saved))
 }
 
 #[cfg(test)]

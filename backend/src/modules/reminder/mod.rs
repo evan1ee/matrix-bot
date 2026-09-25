@@ -54,6 +54,7 @@ impl BotModule for ReminderModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -126,15 +127,30 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!remind list"), &db, None)
+            .handle_command(
+                &ctx("!remind list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -153,7 +169,12 @@ mod tests {
         let mut rx = broadcaster.subscribe();
 
         let reply = ReminderModule::new()
-            .handle_command(&ctx("!remind 10s check oven"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!remind 10s check oven"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .expect("the set must be handled");
         assert!(

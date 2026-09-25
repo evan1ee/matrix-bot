@@ -19,6 +19,7 @@ pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 #[allow(clippy::too_many_arguments)]
 pub async fn process_image_event(
     db: &Database,
+    services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
@@ -75,6 +76,7 @@ pub async fn process_image_event(
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
     match crate::modules::ai::handler::run_ai_turn_with_stage(
+        services,
         &db.pool,
         ai,
         broadcaster,

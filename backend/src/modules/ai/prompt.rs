@@ -1,10 +1,9 @@
 use super::resolved_config::ResolvedAiConfig;
-use crate::application::rooms::RoomService;
 use crate::db::DbPool;
-use crate::domain::rooms::CachedRoom;
 use crate::utils::html::html_escape;
 
 pub async fn build_system_prompt(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     resolved_config: &ResolvedAiConfig,
     owner_id: &str,
@@ -24,9 +23,7 @@ pub async fn build_system_prompt(
     let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let now_utc_str = now_utc.to_rfc3339();
 
-    // TODO(feature-layering Task 13): use `AppServices::rooms` once the AI
-    // turn receives `AppServices`.
-    let rooms = RoomService::new(pool.clone());
+    let rooms = &services.rooms;
     let default_room_id = rooms.default_room(owner_id).await;
     let cached_rooms = rooms.cached_rooms(owner_id).await.unwrap_or_else(|err| {
         tracing::warn!(owner_id, error = %err, "Prompting without the room list");
@@ -34,7 +31,8 @@ pub async fn build_system_prompt(
     });
     let room_desc: Vec<_> = cached_rooms
         .iter()
-        .map(|CachedRoom { room: r, .. }| {
+        .map(|cached| {
+            let r = cached.room();
             if r.is_direct() {
                 format!(
                     "'{}' (user direct chat room, id: {})",

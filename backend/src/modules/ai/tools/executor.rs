@@ -15,6 +15,7 @@ use super::webhooks;
 use crate::events::EventBroadcaster;
 
 pub async fn execute(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -56,22 +57,46 @@ pub async fn execute(
     }
 
     // 2. Try finance tools
-    if let Some(res) =
-        finance::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = finance::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 3. Try reminder tools
-    if let Some(res) =
-        reminder::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = reminder::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 4. Try todo tools
-    if let Some(res) =
-        todo::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = todo::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }

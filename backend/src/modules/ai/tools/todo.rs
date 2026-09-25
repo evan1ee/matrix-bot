@@ -1,4 +1,3 @@
-use crate::application::rooms::RoomService;
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -31,6 +30,7 @@ fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
 }
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -77,9 +77,7 @@ pub async fn execute_tool(
                 };
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
-                // TODO(feature-layering Task 13): use `AppServices::rooms` once
-                // the AI tool executor receives `AppServices`.
-                let rooms = RoomService::new(pool.clone());
+                let rooms = &services.rooms;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
                     rooms.resolve_target_room(owner_id, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
@@ -370,7 +368,16 @@ mod tests {
         let over_limit = "x".repeat(service::MAX_TASK_TEXT_LEN + 1);
         let args = json!({ "text": over_limit });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args).await;
+        let result = execute_tool(
+            &crate::application::AppServices::new(&db.pool),
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "add_todo",
+            &args,
+        )
+        .await;
         assert!(matches!(result, Some(Err(_))));
     }
 
@@ -387,10 +394,18 @@ mod tests {
             "remind_before_minutes": 60,
         });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args)
-            .await
-            .unwrap()
-            .unwrap();
+        let result = execute_tool(
+            &crate::application::AppServices::new(&db.pool),
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "add_todo",
+            &args,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let todo: serde_json::Value = serde_json::from_str(&result).unwrap();
         let todo_id = todo["id"].as_i64().unwrap();
 

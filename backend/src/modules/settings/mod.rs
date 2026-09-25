@@ -73,6 +73,7 @@ impl BotModule for SettingsModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -132,24 +133,49 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!settings"), &db, None)
+            .handle_command(
+                &ctx("!settings"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!settings tz Asia/Tokyo"), &db, None)
+            .handle_command(
+                &ctx("!settings tz Asia/Tokyo"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &db, None)
+            .handle_command(
+                &ctx("hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -163,20 +189,40 @@ mod tests {
         let settings = SettingsModule::new();
         let todo = TodoModule::new();
 
-        todo.handle_command(&ctx("!todo add ship it"), &db, None)
-            .await
-            .unwrap();
-        todo.handle_command(&ctx("!todo due 1 2d"), &db, None)
-            .await
-            .unwrap();
+        todo.handle_command(
+            &ctx("!todo add ship it"),
+            &crate::application::AppServices::new(&db.pool),
+            &db,
+            None,
+        )
+        .await
+        .unwrap();
+        todo.handle_command(
+            &ctx("!todo due 1 2d"),
+            &crate::application::AppServices::new(&db.pool),
+            &db,
+            None,
+        )
+        .await
+        .unwrap();
 
         settings
-            .handle_command(&ctx("!settings timezone Asia/Tokyo"), &db, None)
+            .handle_command(
+                &ctx("!settings timezone Asia/Tokyo"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
         let listed = todo
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(

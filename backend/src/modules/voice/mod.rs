@@ -27,6 +27,7 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
 #[allow(clippy::too_many_arguments)]
 pub async fn process_audio_event(
     db: &Database,
+    services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
@@ -98,6 +99,7 @@ pub async fn process_audio_event(
 
     // 3. Run AI turn with full domain tool capabilities
     match crate::modules::ai::handler::run_ai_turn_with_stage(
+        services,
         &db.pool,
         ai,
         broadcaster,

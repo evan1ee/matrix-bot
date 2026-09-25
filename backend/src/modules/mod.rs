@@ -160,9 +160,14 @@ pub trait BotModule: Send + Sync {
     /// that mutates state must send its `SystemEvent` through it, exactly as the
     /// REST handlers do — otherwise a change made over Matrix leaves every open
     /// web client showing stale data.
+    ///
+    /// `services` is the application layer built once in `app.rs`; a moved
+    /// feature's command handler calls its service through it. Modules not
+    /// yet moved ignore it.
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String>;
@@ -201,11 +206,12 @@ impl ModuleRegistry {
     pub async fn dispatch(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         for module in &self.modules {
-            if let Some(reply) = module.handle_command(ctx, db, broadcaster).await {
+            if let Some(reply) = module.handle_command(ctx, services, db, broadcaster).await {
                 return Some(reply);
             }
         }
@@ -434,7 +440,15 @@ mod tests {
                 stage_reporter: None,
             };
             assert!(
-                registry.dispatch(&ctx, &db, None).await.is_some(),
+                registry
+                    .dispatch(
+                        &ctx,
+                        &crate::application::AppServices::new(&db.pool),
+                        &db,
+                        None
+                    )
+                    .await
+                    .is_some(),
                 "`{body}` reached no module"
             );
         }
@@ -470,6 +484,7 @@ mod tests {
             async fn handle_command(
                 &self,
                 ctx: &CommandContext,
+                _services: &crate::application::AppServices,
                 _db: &Database,
                 _broadcaster: Option<&EventBroadcaster>,
             ) -> Option<String> {
@@ -497,7 +512,12 @@ mod tests {
         correct.register(tts_module());
         correct.register(DirectMessageCatchAll);
         let reply = correct
-            .dispatch(&ctx_for("say"), &db, None)
+            .dispatch(
+                &ctx_for("say"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("TTS claims `say`");
         assert!(
@@ -510,7 +530,12 @@ mod tests {
         swapped.register(DirectMessageCatchAll);
         swapped.register(tts_module());
         let reply = swapped
-            .dispatch(&ctx_for("say"), &db, None)
+            .dispatch(
+                &ctx_for("say"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the catch-all claims every direct message");
         assert!(
@@ -544,6 +569,7 @@ mod tests {
         async fn handle_command(
             &self,
             ctx: &CommandContext,
+            _services: &crate::application::AppServices,
             _db: &Database,
             _broadcaster: Option<&EventBroadcaster>,
         ) -> Option<String> {
@@ -588,7 +614,14 @@ mod tests {
             claims: "shared",
         });
 
-        let reply = registry.dispatch(&ctx_for("shared"), &db, None).await;
+        let reply = registry
+            .dispatch(
+                &ctx_for("shared"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await;
         assert_eq!(reply.as_deref(), Some("handled by first"));
     }
 
@@ -604,7 +637,12 @@ mod tests {
         });
 
         assert!(registry
-            .dispatch(&ctx_for("nonsense"), &db, None)
+            .dispatch(
+                &ctx_for("nonsense"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -622,7 +660,14 @@ mod tests {
             claims: "expense",
         });
 
-        let reply = registry.dispatch(&ctx_for("expense"), &db, None).await;
+        let reply = registry
+            .dispatch(
+                &ctx_for("expense"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await;
         assert_eq!(reply.as_deref(), Some("handled by finance"));
     }
 

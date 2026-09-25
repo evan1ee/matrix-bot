@@ -82,6 +82,7 @@ impl BotModule for TodoModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -155,15 +156,30 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!expense add 1 EUR x"), &db, None)
+            .handle_command(
+                &ctx("!expense add 1 EUR x"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &db, None)
+            .handle_command(
+                &ctx("!remind me later"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -174,11 +190,21 @@ mod tests {
         let db = db().await;
 
         module
-            .handle_command(&ctx("!todo add <img src=x onerror=1>"), &db, None)
+            .handle_command(
+                &ctx("!todo add <img src=x onerror=1>"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         let listed = module
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
@@ -200,13 +226,23 @@ mod tests {
         let db = db().await;
 
         module
-            .handle_command(&ctx("!todo add ship it"), &db, None)
+            .handle_command(
+                &ctx("!todo add ship it"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
         // With no preference saved, the reply stays in UTC.
         let utc_reply = module
-            .handle_command(&ctx("!todo due 1 2d"), &db, None)
+            .handle_command(
+                &ctx("!todo due 1 2d"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -227,7 +263,12 @@ mod tests {
         .unwrap();
 
         let listed = module
-            .handle_command(&ctx("!todo list"), &db, None)
+            .handle_command(
+                &ctx("!todo list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -254,7 +295,12 @@ mod tests {
         let mut rx = broadcaster.subscribe();
 
         let reply = TodoModule::new()
-            .handle_command(&ctx("!todo add Buy milk"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!todo add Buy milk"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Added Task"), "unexpected reply: {reply}");

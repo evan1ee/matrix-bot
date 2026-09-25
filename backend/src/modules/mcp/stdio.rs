@@ -6,13 +6,17 @@ use super::protocol::{error_codes, JsonRpcRequest, JsonRpcResponse};
 use super::service::McpService;
 
 /// Runs the MCP server in STDIO mode for local CLI subprocesses (Claude Desktop, Cursor, etc.).
-pub async fn run_stdio(pool: &DbPool, owner_id: &str) -> anyhow::Result<()> {
+pub async fn run_stdio(
+    services: &crate::application::AppServices,
+    pool: &DbPool,
+    owner_id: &str,
+) -> anyhow::Result<()> {
     eprintln!(
         "[MCP] Starting matrix-bot MCP server in STDIO mode for owner '{}'...",
         owner_id
     );
 
-    let service = McpService::new(pool, None, owner_id);
+    let service = McpService::new(services, pool, None, owner_id);
 
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();

@@ -19,10 +19,10 @@ struct CachedRoomRow {
 // (`JoinedRoom::new` normalises the name instead of rejecting it).
 impl From<CachedRoomRow> for CachedRoom {
     fn from(row: CachedRoomRow) -> Self {
-        CachedRoom {
-            room: JoinedRoom::new(row.room_id, Some(&row.name), row.is_direct),
-            updated_at: row.updated_at,
-        }
+        CachedRoom::new(
+            JoinedRoom::new(row.room_id, Some(&row.name), row.is_direct),
+            row.updated_at,
+        )
     }
 }
 
@@ -130,10 +130,10 @@ mod tests {
 
         let cached = list_for_account(&pool, "acct_a").await.unwrap();
 
-        let ids: Vec<&str> = cached.iter().map(|c| c.room.room_id()).collect();
+        let ids: Vec<&str> = cached.iter().map(|c| c.room().room_id()).collect();
         assert_eq!(ids, ["!dm:x", "!d:x", "!g:x"]);
-        assert!(cached[0].room.is_direct());
-        assert!(cached.iter().all(|c| !c.updated_at.is_empty()));
+        assert!(cached[0].room().is_direct());
+        assert!(cached.iter().all(|c| !c.updated_at().is_empty()));
     }
 
     #[tokio::test]
@@ -160,7 +160,26 @@ mod tests {
 
         let cached = list_for_account(&pool, "acct_a").await.unwrap();
         assert_eq!(cached.len(), 1);
-        assert_eq!(cached[0].room.name(), "first");
+        assert_eq!(cached[0].room().name(), "first");
+    }
+
+    // Rows cached before names were normalised on write may carry padding
+    // or be blank; reading them goes through `JoinedRoom::new` like any other.
+    #[tokio::test]
+    async fn a_stored_name_is_normalised_on_read() {
+        let pool = pool_with_accounts(&["acct_a"]).await;
+        sqlx::query!(
+            "INSERT INTO account_rooms (account_id, room_id, name) \
+             VALUES ('acct_a', '!padded:x', '  Ops  '), ('acct_a', '!blank:x', '   ')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let cached = list_for_account(&pool, "acct_a").await.unwrap();
+
+        let names: Vec<&str> = cached.iter().map(|c| c.room().name()).collect();
+        assert_eq!(names, ["!blank:x", "Ops"]);
     }
 
     #[tokio::test]

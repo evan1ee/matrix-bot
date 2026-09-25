@@ -95,8 +95,9 @@ async fn linked_user_ids(rooms: &RoomService, account_id: &str) -> Vec<OwnedUser
 }
 
 /// Discovers the rooms where both the bot and at least one of the account's
-/// linked Matrix ids are joined, in picker order. Accepts pending invites
-/// first, so a room the user just invited the bot to is included.
+/// linked Matrix ids are joined, in no particular order (the service orders
+/// what it returns). Accepts pending invites first, so a room the user just
+/// invited the bot to is included.
 pub async fn discover_rooms_for_account(
     rooms: &RoomService,
     client: &Client,
@@ -130,7 +131,6 @@ pub async fn discover_rooms_for_account(
         }
     }
 
-    found.sort_by(JoinedRoom::picker_order);
     found
 }
 

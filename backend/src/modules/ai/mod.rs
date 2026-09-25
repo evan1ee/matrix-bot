@@ -80,10 +80,12 @@ impl BotModule for AiModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_ai_command_with_stage(
+            services,
             &db.pool,
             &self.ai,
             broadcaster,

@@ -31,6 +31,7 @@ pub struct AiTurnResult {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -46,6 +47,7 @@ pub async fn handle_ai_command(
     quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -66,6 +68,7 @@ pub async fn handle_ai_command(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command_with_stage(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -122,6 +125,7 @@ pub async fn handle_ai_command_with_stage(
     }
 
     match run_ai_turn_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -150,7 +154,11 @@ pub async fn handle_ai_command_with_stage(
     }
 }
 
+// Allowed like its siblings: the AI turn takes its inputs one by one until
+// the ai+mcp task (feature-layering Task 13) gathers them into one context.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -160,6 +168,7 @@ pub async fn run_ai_turn(
     prompt: &str,
 ) -> Result<AiTurnResult, AiError> {
     run_ai_turn_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -174,6 +183,7 @@ pub async fn run_ai_turn(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn_with_stage(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -249,7 +259,8 @@ pub async fn run_ai_turn_with_stage(
     let mut chat_messages = Vec::new();
 
     let sys_prompt =
-        super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
+        super::prompt::build_system_prompt(services, pool, &resolved_config, owner_id, room_id)
+            .await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),
@@ -355,6 +366,7 @@ pub async fn run_ai_turn_with_stage(
                                 iteration, max_iterations, func_name, owner_id
                             );
                             let result_str = match ToolRegistry::execute_tool(
+                                services,
                                 pool,
                                 broadcaster,
                                 owner_id,
@@ -557,6 +569,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let help = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -576,6 +589,7 @@ mod tests {
         assert!(help.contains("AI Assistant Commands"));
 
         let config = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -601,6 +615,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let res = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -620,6 +635,7 @@ mod tests {
         assert!(res.contains("AI model updated to: <code>gpt-4o-mini</code>"));
 
         let hist = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -639,6 +655,7 @@ mod tests {
         assert!(hist.contains("AI max history turns updated to: <code>20</code>"));
 
         let config2 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -658,6 +675,7 @@ mod tests {
         assert!(config2.contains("Max History Turns:</b> <code>20</code>"));
 
         let reset = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -695,6 +713,7 @@ mod tests {
             .unwrap();
 
         let result1 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -720,6 +739,7 @@ mod tests {
 
         // Second failure during same outage
         let result2 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -859,6 +879,7 @@ mod tests {
 
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -906,6 +927,7 @@ mod tests {
 
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -937,6 +959,7 @@ mod tests {
 
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -984,7 +1007,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         // Turn 1: Add a task
-        let turn1 = run_ai_turn(
+        let turn1 = run_ai_turn( &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1003,6 +1026,7 @@ mod tests {
 
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1039,7 +1063,7 @@ mod tests {
 
         let (db, owner) = setup_test().await;
 
-        let result = run_ai_turn(
+        let result = run_ai_turn( &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1107,6 +1131,7 @@ mod tests {
 
         // When neither mentioned nor direct, unrecognized command returns None immediately
         let unhandled = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -1138,6 +1163,7 @@ mod tests {
 
         // When mentioned in a room, prompt is routed to AI
         let _ = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -1184,6 +1210,7 @@ mod tests {
 
         // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
         let _ = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,

@@ -12,9 +12,11 @@ use self::rooms::RoomService;
 
 /// Why a use case failed, by boundary rather than by cause.
 ///
-/// Adapters decide what each variant means to their caller (`interface/http`
-/// maps it to `ApiError`); the message of the first four is safe to show a
-/// user, the payload of the last two is diagnostic and must not be.
+/// Adapters decide what each variant means to their caller:
+/// `interface/http/app_error.rs` maps it to `ApiError`,
+/// `interface/chat::error_reply` to a chat reply. The message of the first
+/// four is safe to show a user; the payload of the last two is diagnostic
+/// and must never reach one.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     /// The input broke a domain rule. A feature's own domain error converts
@@ -29,8 +31,14 @@ pub enum AppError {
     Conflict(String),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
-    #[error("external service error: {0}")]
-    External(String),
+    /// A dependency outside the database failed. `service` names it (e.g.
+    /// "ocr") so an adapter can match on it without comparing strings.
+    #[error("{service} failed")]
+    External {
+        service: &'static str,
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 /// Every application service, built once by the composition root (`app.rs`)

@@ -101,7 +101,10 @@ async fn async_main() -> Result<()> {
             );
         }
 
-        matrix_bot::modules::mcp::stdio::run_stdio(&db.pool, &owner_id).await?;
+        // The stdio MCP server is its own composition root: no API server
+        // or Matrix loop, just the services its tools call.
+        let services = matrix_bot::application::AppServices::new(&db.pool);
+        matrix_bot::modules::mcp::stdio::run_stdio(&services, &db.pool, &owner_id).await?;
         return Ok(());
     }
 

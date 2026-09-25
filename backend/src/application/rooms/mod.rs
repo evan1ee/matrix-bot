@@ -13,6 +13,14 @@ use crate::domain::rooms::{self as domain, CachedRoom, JoinedRoom, RoomTarget, W
 use crate::infrastructure::postgres::repositories::rooms as repo;
 use crate::modules::settings::repository::SettingsRepository;
 
+/// What the room picker shows: the cache, or — when caching a fresh
+/// discovery failed — the discovery itself, not yet cached.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PickerRooms {
+    Cached(Vec<CachedRoom>),
+    Uncached(Vec<JoinedRoom>),
+}
+
 #[derive(Clone)]
 pub struct RoomService {
     pool: PgPool,
@@ -45,6 +53,28 @@ impl RoomService {
         }
         tx.commit().await?;
         self.cached_rooms(account_id).await
+    }
+
+    /// Adopts a live discovery made because the cache was empty. Caching is
+    /// an optimisation here, so a failure is logged and the discovery itself
+    /// is the answer, in the same picker order the cache would give. An empty
+    /// discovery leaves the cache alone.
+    pub async fn adopt_discovery(
+        &self,
+        account_id: &str,
+        mut discovered: Vec<JoinedRoom>,
+    ) -> PickerRooms {
+        if discovered.is_empty() {
+            return PickerRooms::Uncached(discovered);
+        }
+        match self.replace_cached(account_id, &discovered).await {
+            Ok(saved) => PickerRooms::Cached(saved),
+            Err(err) => {
+                warn!(account_id, error = %err, "Could not cache discovered rooms");
+                discovered.sort_by(JoinedRoom::picker_order);
+                PickerRooms::Uncached(discovered)
+            }
+        }
     }
 
     pub async fn is_cached(&self, account_id: &str, room_id: &str) -> Result<bool, AppError> {
@@ -149,7 +179,7 @@ mod tests {
     }
 
     fn ids(rooms: &[CachedRoom]) -> Vec<&str> {
-        rooms.iter().map(|c| c.room.room_id()).collect()
+        rooms.iter().map(|c| c.room().room_id()).collect()
     }
 
     #[tokio::test]
@@ -188,6 +218,60 @@ mod tests {
         assert!(matches!(result, Err(AppError::Database(_))));
         let cached = service.cached_rooms("acct_a").await.unwrap();
         assert_eq!(ids(&cached), ["!kept:x"]);
+    }
+
+    #[tokio::test]
+    async fn an_adopted_discovery_is_cached() {
+        let service = service_with_account("acct_a").await;
+        let adopted = service
+            .adopt_discovery(
+                "acct_a",
+                vec![room("!g:x", "general", false), room("!dm:x", "evan", true)],
+            )
+            .await;
+
+        let PickerRooms::Cached(saved) = adopted else {
+            panic!("expected the discovery to be cached: {adopted:?}");
+        };
+        assert_eq!(ids(&saved), ["!dm:x", "!g:x"]);
+    }
+
+    #[tokio::test]
+    async fn a_discovery_that_cannot_be_cached_is_returned_in_picker_order() {
+        let service = service_with_account("acct_a").await;
+        service.pool.close().await;
+
+        let adopted = service
+            .adopt_discovery(
+                "acct_a",
+                vec![room("!g:x", "general", false), room("!dm:x", "evan", true)],
+            )
+            .await;
+
+        assert_eq!(
+            adopted,
+            PickerRooms::Uncached(vec![
+                room("!dm:x", "evan", true),
+                room("!g:x", "general", false)
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_discovery_leaves_the_cache_alone() {
+        let service = service_with_account("acct_a").await;
+        service
+            .replace_cached("acct_a", &[room("!kept:x", "kept", false)])
+            .await
+            .unwrap();
+
+        let adopted = service.adopt_discovery("acct_a", Vec::new()).await;
+
+        assert_eq!(adopted, PickerRooms::Uncached(Vec::new()));
+        assert_eq!(
+            ids(&service.cached_rooms("acct_a").await.unwrap()),
+            ["!kept:x"]
+        );
     }
 
     #[tokio::test]

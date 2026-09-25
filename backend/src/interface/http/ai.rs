@@ -67,6 +67,7 @@ pub async fn chat(
     let turn_result = tokio::time::timeout(
         std::time::Duration::from_secs(180),
         run_ai_turn(
+            &state.services,
             &state.db.pool,
             &state.ai,
             Some(&state.broadcaster),

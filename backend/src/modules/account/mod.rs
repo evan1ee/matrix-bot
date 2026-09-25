@@ -101,6 +101,7 @@ impl BotModule for AccountModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -393,7 +394,12 @@ mod tests {
 
         for (command, _) in WEB_ONLY {
             let reply = module
-                .handle_command(&ctx(command, "acct_evan", true), &db, None)
+                .handle_command(
+                    &ctx(command, "acct_evan", true),
+                    &crate::application::AppServices::new(&db.pool),
+                    &db,
+                    None,
+                )
                 .await
                 .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"));
 
@@ -413,7 +419,12 @@ mod tests {
     async fn test_unrelated_commands_are_not_claimed() {
         let db = db().await;
         assert!(module()
-            .handle_command(&ctx("todo", "acct_evan", true), &db, None)
+            .handle_command(
+                &ctx("todo", "acct_evan", true),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -427,7 +438,12 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, false), &db, None)
+            .handle_command(
+                &ctx("recover", &account, false),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
@@ -451,7 +467,12 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &db, None)
+            .handle_command(
+                &ctx("recover", &account, true),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
@@ -471,7 +492,12 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &db, None)
+            .handle_command(
+                &ctx("recover", &account, true),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
@@ -549,7 +575,12 @@ mod tests {
         let mut public_ctx = ctx("passkey", &account, false);
         public_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(&public_ctx, &db, None)
+            .handle_command(
+                &public_ctx,
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("direct message"));
@@ -557,7 +588,15 @@ mod tests {
         // In DM: generates ?enroll= token link
         let mut dm_ctx = ctx("passkey", &account, true);
         dm_ctx.raw_args = "add".into();
-        let reply = module().handle_command(&dm_ctx, &db, None).await.unwrap();
+        let reply = module()
+            .handle_command(
+                &dm_ctx,
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await
+            .unwrap();
         assert!(reply.contains("?enroll="));
         assert!(reply.contains("bot.mbm.one"));
     }
@@ -583,7 +622,15 @@ mod tests {
         for (command, args) in [("passkey", "add"), ("passkey", "enroll"), ("web", "")] {
             let mut dm = ctx(command, &account, true);
             dm.raw_args = args.into();
-            let reply = module().handle_command(&dm, &db, None).await.unwrap();
+            let reply = module()
+                .handle_command(
+                    &dm,
+                    &crate::application::AppServices::new(&db.pool),
+                    &db,
+                    None,
+                )
+                .await
+                .unwrap();
 
             assert!(
                 !reply.contains("?enroll="),
@@ -631,7 +678,15 @@ mod tests {
         for args in ["sessions", "matrix @evan:other.org"] {
             let mut dm = ctx("unlink", &account, true);
             dm.raw_args = args.into();
-            let reply = module().handle_command(&dm, &db, None).await.unwrap();
+            let reply = module()
+                .handle_command(
+                    &dm,
+                    &crate::application::AppServices::new(&db.pool),
+                    &db,
+                    None,
+                )
+                .await
+                .unwrap();
             assert!(
                 reply.contains("web app"),
                 "`!unlink {args}` must point to the web app: {reply}"
@@ -664,7 +719,15 @@ mod tests {
 
         // Initially no passkeys
         let list_ctx = ctx("passkeys", &account, true);
-        let reply = module().handle_command(&list_ctx, &db, None).await.unwrap();
+        let reply = module()
+            .handle_command(
+                &list_ctx,
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await
+            .unwrap();
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
@@ -678,7 +741,15 @@ mod tests {
             .unwrap();
 
         // List passkeys
-        let reply = module().handle_command(&list_ctx, &db, None).await.unwrap();
+        let reply = module()
+            .handle_command(
+                &list_ctx,
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await
+            .unwrap();
         assert!(reply.contains("MacBook"));
         assert!(reply.contains("iPhone"));
 
@@ -686,7 +757,12 @@ mod tests {
         let mut remove_ctx = ctx("passkey", &account, true);
         remove_ctx.raw_args = "rm 1".into();
         let reply = module()
-            .handle_command(&remove_ctx, &db, None)
+            .handle_command(
+                &remove_ctx,
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("Passkey Removal Requires Verification"));

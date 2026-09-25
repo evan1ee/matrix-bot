@@ -76,6 +76,7 @@ impl BotModule for FinanceModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -148,28 +149,58 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!income list"), &db, None)
+            .handle_command(
+                &ctx("!income list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!category list"), &db, None)
+            .handle_command(
+                &ctx("!category list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo add milk"), &db, None)
+            .handle_command(
+                &ctx("!todo add milk"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &db, None)
+            .handle_command(
+                &ctx("!remind me later"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &db, None)
+            .handle_command(
+                &ctx("hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -181,7 +212,12 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db, None)
+            .handle_command(
+                &ctx("!expense add 15.50 EUR lunch"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer");
         assert!(
@@ -191,7 +227,12 @@ mod tests {
         assert!(reply.contains("EUR"));
 
         let listed = module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -208,7 +249,12 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
+            .handle_command(
+                &ctx("!expense add 15.50 lunch"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -245,7 +291,12 @@ mod tests {
         .unwrap();
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
+            .handle_command(
+                &ctx("!expense add 15.50 lunch"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -260,7 +311,12 @@ mod tests {
 
         // An explicit code still wins over the preference.
         let explicit = module
-            .handle_command(&ctx("!expense add 9.99 EUR coffee"), &db, None)
+            .handle_command(
+                &ctx("!expense add 9.99 EUR coffee"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -286,6 +342,7 @@ mod tests {
         let reply = FinanceModule::new()
             .handle_command(
                 &ctx("!expense add 15.50 EUR lunch"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 Some(&broadcaster),
             )
@@ -311,6 +368,7 @@ mod tests {
         let reply = module
             .handle_command(
                 &ctx("!expense add 1.00 EUR <script>alert(1)</script>"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 None,
             )

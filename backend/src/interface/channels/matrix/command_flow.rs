@@ -28,6 +28,7 @@ pub async fn handle_text(
     is_direct: bool,
     registry: &Arc<ModuleRegistry>,
     db: &Database,
+    services: &crate::application::AppServices,
     broadcaster: Option<&EventBroadcaster>,
     pending_merges: Option<&PendingMerges>,
 ) {
@@ -131,9 +132,10 @@ pub async fn handle_text(
         None
     };
 
-    let dispatch_res = std::panic::AssertUnwindSafe(registry.dispatch(&cmd_ctx, db, broadcaster))
-        .catch_unwind()
-        .await;
+    let dispatch_res =
+        std::panic::AssertUnwindSafe(registry.dispatch(&cmd_ctx, services, db, broadcaster))
+            .catch_unwind()
+            .await;
 
     if let Some(mut guard) = typing_guard {
         guard.stop().await;

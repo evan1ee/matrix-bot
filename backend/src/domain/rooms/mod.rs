@@ -66,12 +66,33 @@ impl JoinedRoom {
 }
 
 /// A joined room as remembered in the account's room cache.
+///
+/// Private fields like [`JoinedRoom`]'s: a cached room is only ever built
+/// from a valid `JoinedRoom` plus the time it was cached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedRoom {
-    pub room: JoinedRoom,
-    /// When the room was cached, as PostgreSQL's `NOW()::text`. Compared as
-    /// text, which orders correctly because every value shares that format.
-    pub updated_at: String,
+    room: JoinedRoom,
+    updated_at: String,
+}
+
+impl CachedRoom {
+    pub fn new(room: JoinedRoom, updated_at: impl Into<String>) -> Self {
+        Self {
+            room,
+            updated_at: updated_at.into(),
+        }
+    }
+
+    pub fn room(&self) -> &JoinedRoom {
+        &self.room
+    }
+
+    /// When the room was cached, as PostgreSQL's `NOW()::text`: legacy TEXT
+    /// rather than a `DateTime<Utc>`. Compared as text, which orders
+    /// correctly because every value shares that format.
+    pub fn updated_at(&self) -> &str {
+        &self.updated_at
+    }
 }
 
 /// What a caller asked for when it named a target room.
@@ -128,6 +149,10 @@ pub fn match_named<'a>(query: &'a str, rooms: &'a [CachedRoom]) -> &'a str {
 ///    set is typically named after the other member;
 /// 3. the dev room from the user's settings, if not blank;
 /// 4. the most recently cached room of any kind.
+///
+/// `rooms` must be in picker order (as the repository returns them). Every
+/// pick takes the first qualifying room in that order: rooms cached by one
+/// replacement share an `updated_at`, so "most recent" is usually a tie.
 pub fn default_room<'a>(
     rooms: &'a [CachedRoom],
     linked_mxids: &[String],
@@ -137,7 +162,14 @@ pub fn default_room<'a>(
         rooms
             .iter()
             .filter(|r| !direct_only || r.room.is_direct)
-            .max_by(|a, b| a.updated_at.cmp(&b.updated_at))
+            // Not `max_by`: it keeps the *last* of equal maxima.
+            .reduce(|best, r| {
+                if r.updated_at > best.updated_at {
+                    r
+                } else {
+                    best
+                }
+            })
             .map(|r| r.room.room_id.as_str())
     };
     let named_after_user = || {
@@ -171,10 +203,7 @@ mod tests {
     use super::*;
 
     fn cached(room_id: &str, name: &str, is_direct: bool, updated_at: &str) -> CachedRoom {
-        CachedRoom {
-            room: JoinedRoom::new(room_id, Some(name), is_direct),
-            updated_at: updated_at.to_string(),
-        }
+        CachedRoom::new(JoinedRoom::new(room_id, Some(name), is_direct), updated_at)
     }
 
     fn mxids(ids: &[&str]) -> Vec<String> {
@@ -195,7 +224,7 @@ mod tests {
 
     #[test]
     fn the_picker_lists_direct_rooms_first_then_by_name_ignoring_case() {
-        let mut rooms = vec![
+        let mut rooms = [
             JoinedRoom::new("!b:x", Some("general"), false),
             JoinedRoom::new("!c:x", Some("Zed"), true),
             JoinedRoom::new("!a:x", Some("DEV"), false),
@@ -301,6 +330,51 @@ mod tests {
             cached("!newer:x", "b", false, "2026-09-02"),
         ];
         assert_eq!(default_room(&rooms, &[], Some("  ")), Some("!newer:x"));
+    }
+
+    // One `replace_cached` stamps every row with the same `updated_at`
+    // (`NOW()` is the transaction start), so ties are the common case. The
+    // old `ORDER BY … updated_at DESC LIMIT 1` over the picker-ordered cache
+    // took the first; changing that would move deliveries to another DM.
+    #[test]
+    fn among_direct_rooms_cached_together_the_first_in_picker_order_wins() {
+        let rooms = [
+            cached("!first_dm:x", "alice", true, "2026-09-02"),
+            cached("!second_dm:x", "bob", true, "2026-09-02"),
+            cached("!older_dm:x", "carol", true, "2026-09-01"),
+        ];
+        assert_eq!(default_room(&rooms, &[], None), Some("!first_dm:x"));
+    }
+
+    #[test]
+    fn among_plain_rooms_cached_together_the_first_in_picker_order_wins() {
+        let rooms = [
+            cached("!first:x", "dev", false, "2026-09-02"),
+            cached("!second:x", "general", false, "2026-09-02"),
+        ];
+        assert_eq!(default_room(&rooms, &[], None), Some("!first:x"));
+    }
+
+    #[test]
+    fn a_later_room_wins_only_when_strictly_more_recent() {
+        let rooms = [
+            cached("!first:x", "a", false, "2026-09-01"),
+            cached("!newest:x", "b", false, "2026-09-03"),
+            cached("!tied:x", "c", false, "2026-09-03"),
+        ];
+        assert_eq!(default_room(&rooms, &[], None), Some("!newest:x"));
+    }
+
+    #[test]
+    fn like_wildcards_in_a_name_are_matched_literally() {
+        let rooms = [
+            cached("!plain:x", "general", false, "1"),
+            cached("!pct:x", "100% uptime", false, "1"),
+            cached("!under:x", "on_call", false, "1"),
+        ];
+        assert_eq!(match_named("%", &rooms), "!pct:x");
+        assert_eq!(match_named("_", &rooms), "!under:x");
+        assert_eq!(match_named("gen%", &rooms), "gen%");
     }
 
     #[test]

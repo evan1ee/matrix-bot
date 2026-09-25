@@ -153,6 +153,7 @@ impl MatrixBot {
             &self.config,
             self.registry.clone(),
             self.db.clone(),
+            self.services.clone(),
             self.broadcaster.clone(),
             Some(self.handles.pending_merges.clone()),
         );

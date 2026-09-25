@@ -182,6 +182,7 @@ impl BotModule for TtsModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -255,7 +256,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         assert!(module
-            .handle_command(&ctx_for("todo", "list"), &db, None)
+            .handle_command(
+                &ctx_for("todo", "list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -265,7 +271,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         let reply = module
-            .handle_command(&ctx_for("say", "hello there"), &db, None)
+            .handle_command(
+                &ctx_for("say", "hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("语音合成不可用"), "{}", reply);
@@ -276,7 +287,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         let reply = module
-            .handle_command(&ctx_for("say", "✅🎉"), &db, None)
+            .handle_command(
+                &ctx_for("say", "✅🎉"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("没有可朗读的文字"), "{}", reply);
@@ -288,7 +304,12 @@ mod tests {
         let db = memory_db().await;
         let long = "字".repeat(MAX_SPEAK_CHARS + 1);
         let reply = module
-            .handle_command(&ctx_for("say", &long), &db, None)
+            .handle_command(
+                &ctx_for("say", &long),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("文字过长"), "{}", reply);
@@ -321,7 +342,12 @@ mod tests {
         let db = memory_db().await;
 
         let reply = module
-            .handle_command(&ctx_for("say", "hello"), &db, None)
+            .handle_command(
+                &ctx_for("say", "hello"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 

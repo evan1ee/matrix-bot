@@ -15,6 +15,7 @@ pub fn register_handlers(
     config: &crate::config::Config,
     registry: Arc<ModuleRegistry>,
     db: Database,
+    services: crate::application::AppServices,
     broadcaster: Option<EventBroadcaster>,
     pending_merges: Option<Arc<crate::interface::channels::matrix::linking::PendingMerges>>,
 ) {
@@ -56,6 +57,7 @@ pub fn register_handlers(
         let own_id = bot_user_id.clone();
         let registry = registry.clone();
         let db = db.clone();
+        let services = services.clone();
         let broadcaster = broadcaster.clone();
         let pending_merges = pending_merges.clone();
         let ocr_client = ocr_client.clone();
@@ -85,6 +87,7 @@ pub fn register_handlers(
                         &own_id,
                         is_direct,
                         &db,
+                        &services,
                         &ai_config,
                         broadcaster.as_ref(),
                         &ocr_client,
@@ -101,6 +104,7 @@ pub fn register_handlers(
                         is_direct,
                         &registry,
                         &db,
+                        &services,
                         broadcaster.as_ref(),
                         pending_merges.as_deref(),
                     )
