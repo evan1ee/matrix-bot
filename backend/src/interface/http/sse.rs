@@ -49,10 +49,15 @@ pub async fn sse_handler(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let stream = owned_events(&state.broadcaster, user.owner_id()).filter_map(|msg| async move {
-        let json_str = serde_json::to_string(&msg).ok()?;
-        Some(Ok(Event::default().data(json_str)))
-    });
+    // Ends when the server shuts down: an SSE response never finishes on its
+    // own, so without this every open tab would hold graceful shutdown open
+    // until the composition root's deadline aborted the server.
+    let stream = owned_events(&state.broadcaster, user.owner_id())
+        .take_until(state.shutdown.clone().cancelled_owned())
+        .filter_map(|msg| async move {
+            let json_str = serde_json::to_string(&msg).ok()?;
+            Some(Ok(Event::default().data(json_str)))
+        });
 
     Ok(Sse::new(stream)
         .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15))))
@@ -189,5 +194,36 @@ mod tests {
             SystemEvent::TodoDeleted { id, .. } => assert_eq!(*id, 3),
             other => panic!("unexpected second event: {:?}", other),
         }
+    }
+
+    /// An SSE response never finishes on its own; it must end when the server
+    /// shuts down, or every open tab holds graceful shutdown open until the
+    /// composition root's deadline aborts the server.
+    #[tokio::test]
+    async fn test_stream_ends_when_the_server_shuts_down() {
+        use axum::response::IntoResponse;
+
+        let pool = crate::db::pool::test_pool().await;
+        let state = test_state(pool);
+        let shutdown = state.shutdown.clone();
+        // Held open as the running server holds it: dropping the last sender
+        // would end the stream on its own and hide a missing shutdown hook.
+        let _broadcaster = state.broadcaster.clone();
+        let sse = sse_handler(State(state), AuthUser::for_account("acct_alice"))
+            .await
+            .unwrap();
+
+        shutdown.cancel();
+
+        let body = sse.into_response().into_body();
+        let drained = tokio::time::timeout(
+            Duration::from_secs(1),
+            axum::body::to_bytes(body, usize::MAX),
+        )
+        .await;
+        assert!(
+            matches!(drained, Ok(Ok(_))),
+            "the SSE body must end once shutdown is cancelled"
+        );
     }
 }

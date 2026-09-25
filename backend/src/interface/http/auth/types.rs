@@ -131,6 +131,9 @@ pub struct ApiState {
     pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     /// When the Matrix sync loop last completed a sync, read by `/health/ready`.
     pub sync_health: crate::interface::channels::matrix::sync_health::SyncHealth,
+    /// The API server's shutdown token. Long-lived responses (SSE) end on it,
+    /// or graceful shutdown would wait on every open browser tab.
+    pub shutdown: tokio_util::sync::CancellationToken,
     pub ocr_config: crate::modules::ocr::OcrConfig,
     pub ocr: crate::infrastructure::inference::ocr::OcrClient,
     pub voice_config: crate::modules::voice::VoiceConfig,
@@ -199,6 +202,7 @@ impl ApiState {
             webauthn_origin: "http://localhost:8080".to_string(),
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
+            shutdown: tokio_util::sync::CancellationToken::new(),
             ocr_config: crate::modules::ocr::OcrConfig::default(),
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(None),
             voice_config: crate::modules::voice::VoiceConfig::default(),
@@ -223,6 +227,7 @@ impl ApiState {
         db: Database,
         broadcaster: crate::events::EventBroadcaster,
         handles: crate::interface::channels::matrix::handles::BotHandles,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<Self> {
         // Bound outbound calls so a stalled homeserver cannot pin a request task
         // indefinitely -- but generously. Reaching a homeserver through a VPN or
@@ -259,6 +264,7 @@ impl ApiState {
             webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
             pending_merges: handles.pending_merges,
             sync_health: handles.sync_health,
+            shutdown,
             ocr_config: crate::modules::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
                 base_url: config.ocr_base_url.clone(),
@@ -474,6 +480,7 @@ mod tests {
             crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::interface::channels::matrix::handles::BotHandles::default(),
+            tokio_util::sync::CancellationToken::new(),
         )
         .expect("a valid Relying Party must build");
 
@@ -520,6 +527,7 @@ mod tests {
             crate::db::Database { pool: pool },
             crate::events::EventBroadcaster::default(),
             crate::interface::channels::matrix::handles::BotHandles::default(),
+            tokio_util::sync::CancellationToken::new(),
         )
         .is_err());
     }

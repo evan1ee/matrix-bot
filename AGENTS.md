@@ -165,7 +165,7 @@ When creating or enhancing a feature module:
 
 One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 
-- **Single process, two front doors** — `main.rs` boots one `Config`/`Database`/`EventBroadcaster` and spawns the Axum API server and the Matrix sync loop, coupled through shared handles (bot token, Matrix client, pending merges). [Details](docs/ARCHITECTURE.md#single-process-two-front-doors).
+- **Single process, two front doors** — `app.rs` is the composition root: `app::run` builds one `Database`/`EventBroadcaster`/`BotHandles` and starts the Axum API server and the Matrix sync loop, coupled through shared handles (bot token, Matrix client, pending merges, sync health); `main.rs` keeps only `.env`, tracing, the `mcp` stdio mode and signal handling. Shutdown is one `CancellationToken` tree (root in `main.rs`, a child per front door) bounded at 15 s (`app::SHUTDOWN_GRACE`) including the pool close; a laggard is logged and aborted. Anything long-lived you add gets a child token and joins `app::run`'s shutdown, never a detached task. [Details](docs/ARCHITECTURE.md#single-process-two-front-doors).
 - **Backend module plugin system** — features are `BotModule`s dispatched in registration order by `ModuleRegistry`; background work runs through `spawn_background_workers`. [Details](docs/ARCHITECTURE.md#backend-module-plugin-system).
 - **Event flow (SSE)** — every mutation broadcasts a `SystemEvent`, delivered per-owner via `owner_id()`. [Details](docs/ARCHITECTURE.md#event-flow-sse).
 - **Matrix session and crypto store** — never keep the crypto store across a fresh login, and never pin a device ID on one, or peers see broken encryption or a silent key rotation. [Details](docs/ARCHITECTURE.md#matrix-session-and-crypto-store).

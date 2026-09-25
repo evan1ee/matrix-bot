@@ -1,90 +1,10 @@
-// matrix-sdk 0.18's crypto futures nest deeper than the default limit of 128
-// when rustc proves the spawned sync task is `Send`; rustc's own suggestion.
-#![recursion_limit = "256"]
-
 use anyhow::{Context, Result};
-use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use matrix_bot::config::Config;
 use matrix_bot::db::Database;
-use matrix_bot::events::EventBroadcaster;
-use matrix_bot::interface::channels::matrix::MatrixBot;
-use matrix_bot::interface::http;
-
-/// Reconnect backoff bounds for the Matrix sync loop.
-const RECONNECT_MIN: Duration = Duration::from_secs(5);
-const RECONNECT_MAX: Duration = Duration::from_secs(300);
-
-/// Runs the Matrix sync loop until shutdown is signalled.
-///
-/// Every await that can block for a long time — building the client, syncing,
-/// and backing off — sits inside a `select!` against the shutdown channel. An
-/// earlier version awaited `bot.run()` in a select *branch body*, which is
-/// outside the select, so once syncing started Ctrl-C could not interrupt it and
-/// the process simply exited from under the running task.
-async fn run_bot_loop(
-    config: Config,
-    db: Database,
-    broadcaster: EventBroadcaster,
-    handles: matrix_bot::interface::channels::matrix::handles::BotHandles,
-    mut shutdown: broadcast::Receiver<()>,
-) {
-    let mut backoff = RECONNECT_MIN;
-
-    loop {
-        info!("Starting Matrix bot event loop sync...");
-
-        let build = MatrixBot::new_full(
-            &config,
-            db.clone(),
-            Some(broadcaster.clone()),
-            handles.clone(),
-        );
-
-        let bot = tokio::select! {
-            _ = shutdown.recv() => {
-                info!("Matrix bot loop shutting down cleanly...");
-                return;
-            }
-            built = build => built,
-        };
-
-        match bot {
-            Ok(bot) => {
-                let outcome = tokio::select! {
-                    _ = shutdown.recv() => {
-                        info!("Matrix bot loop shutting down cleanly...");
-                        return;
-                    }
-                    outcome = bot.run() => outcome,
-                };
-
-                match outcome {
-                    // A clean return means sync stopped on its own; reconnect promptly.
-                    Ok(()) => backoff = RECONNECT_MIN,
-                    Err(err) => error!("Matrix bot sync error: {:?}", err),
-                }
-            }
-            Err(err) => error!("Failed to initialize Matrix bot client: {:?}", err),
-        }
-
-        info!("Reconnecting to Matrix in {:?}...", backoff);
-        tokio::select! {
-            _ = shutdown.recv() => {
-                info!("Matrix bot loop shutting down cleanly...");
-                return;
-            }
-            _ = tokio::time::sleep(backoff) => {}
-        }
-
-        // Back off on repeated failures so a persistently unreachable homeserver
-        // is not hammered every five seconds.
-        backoff = (backoff * 2).min(RECONNECT_MAX);
-    }
-}
 
 /// Loads `.env` from the given path only -- never dotenvy's own upward
 /// directory search, which would silently pick up a `.env` from a parent
@@ -100,8 +20,44 @@ fn load_dotenv_from(path: &std::path::Path) -> Result<()> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Cancels `shutdown` on SIGINT or SIGTERM.
+///
+/// Registered before boot, so a signal during a slow database connect is not
+/// lost. If waiting for Ctrl-C fails, shutting down is the only safe outcome:
+/// the process could otherwise no longer be stopped gracefully.
+fn cancel_on_signal(shutdown: CancellationToken) -> Result<()> {
+    #[cfg(unix)]
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        let signal = tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = term.recv() => Ok(()),
+        };
+        #[cfg(not(unix))]
+        let signal = tokio::signal::ctrl_c().await;
+
+        match signal {
+            Ok(()) => info!("Received SIGINT/SIGTERM..."),
+            Err(err) => error!("Failed to listen for Ctrl-C, shutting down: {err:?}"),
+        }
+        shutdown.cancel();
+    });
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new().context("failed to start the Tokio runtime")?;
+    let result = runtime.block_on(async_main());
+    // Every task `app::run` owns has stopped or been aborted by now. Dropping
+    // the runtime would instead wait, unbounded, for in-flight blocking-pool
+    // work, which would break the 15 s shutdown bound (`app::SHUTDOWN_GRACE`).
+    runtime.shutdown_background();
+    result
+}
+
+async fn async_main() -> Result<()> {
     // Read only ./.env -- run from the repo root. See load_dotenv_from's doc
     // comment for why this must not search parent directories.
     load_dotenv_from(std::path::Path::new(".env"))?;
@@ -155,64 +111,9 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     config.validate()?;
 
-    if config.registration_secret.is_some() {
-        info!("Registration mode: INVITE-ONLY (invite secret configured)");
-    } else if config.registration_open {
-        info!("Registration mode: OPEN (open registration enabled)");
-    } else {
-        info!("Registration mode: CLOSED (release default: open internet scanners cannot register accounts)");
-    }
-    let db = Database::connect(&config.database_url, config.db_max_connections).await?;
-    let broadcaster = EventBroadcaster::default();
-    let handles = matrix_bot::interface::channels::matrix::handles::BotHandles::default();
-
-    let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
-
-    // 1. Start background Axum REST API & Web Server with graceful shutdown
-    http::start_api_server(
-        &config,
-        db.clone(),
-        broadcaster.clone(),
-        handles.clone(),
-        shutdown_rx,
-    )
-    .await?;
-
-    // 2. Start Matrix Bot Event Loop with automatic reconnection & retry
-    let bot_task = tokio::spawn(run_bot_loop(
-        config.clone(),
-        db.clone(),
-        broadcaster.clone(),
-        handles,
-        shutdown_tx.subscribe(),
-    ));
-
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut term = signal(SignalKind::terminate())?;
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => info!("Received SIGINT..."),
-            _ = term.recv() => info!("Received SIGTERM..."),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c().await?;
-    }
-
-    info!("Shutting down Matrix Bot & Web API server...");
-    let _ = shutdown_tx.send(());
-
-    // Wait for the bot loop to actually observe the signal rather than assuming
-    // a fixed grace period is enough.
-    match tokio::time::timeout(Duration::from_secs(10), bot_task).await {
-        Ok(Ok(())) => info!("Matrix bot loop stopped."),
-        Ok(Err(err)) => error!("Matrix bot task panicked: {:?}", err),
-        Err(_) => error!("Matrix bot loop did not stop within 10s; exiting anyway."),
-    }
-
-    Ok(())
+    let shutdown = CancellationToken::new();
+    cancel_on_signal(shutdown.clone())?;
+    matrix_bot::app::run(config, shutdown).await
 }
 
 #[cfg(test)]

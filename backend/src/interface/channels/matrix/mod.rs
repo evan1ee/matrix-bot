@@ -43,6 +43,7 @@ pub mod reply;
 pub mod self_verify;
 pub mod stage;
 pub mod sync_health;
+pub mod sync_loop;
 pub mod verification;
 
 pub struct MatrixBot {

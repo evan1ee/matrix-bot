@@ -1,9 +1,13 @@
+use anyhow::Context;
 use axum::{
     http::{header, HeaderValue, Method},
     routing::{get, post},
     Router,
 };
 use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -50,14 +54,36 @@ pub mod webhooks_telegram;
 
 pub use routes::api_routes;
 
-pub async fn start_api_server(
+/// Binds the configured `API_HOST:API_PORT`.
+///
+/// Separate from [`start_api_server`] so a bind failure stops boot instead of
+/// leaving a bot running with no API (and no health probes), and so tests can
+/// hand the server a listener on an ephemeral port.
+pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
+    let host = config.api_host.parse().unwrap_or([0, 0, 0, 0].into());
+    let addr = SocketAddr::new(host, config.api_port);
+    let listener = TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("failed to bind the REST API address {addr}"))?;
+    info!("Starting REST API & Web Server at http://{}", addr);
+    Ok(listener)
+}
+
+/// Serves the API on `listener` until `shutdown` is cancelled.
+///
+/// Returns the server task so the composition root can bound its shutdown;
+/// it completes once graceful shutdown has drained open connections. SSE
+/// streams end on the same token (see `sse.rs`), so an open browser tab does
+/// not hold the drain open.
+pub fn start_api_server(
     config: &Config,
     db: Database,
     broadcaster: EventBroadcaster,
     handles: crate::interface::channels::matrix::handles::BotHandles,
-    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> anyhow::Result<()> {
-    let state = auth::ApiState::from_config(config, db, broadcaster, handles)?;
+    listener: TcpListener,
+    shutdown: CancellationToken,
+) -> anyhow::Result<JoinHandle<()>> {
+    let state = auth::ApiState::from_config(config, db, broadcaster, handles, shutdown.clone())?;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -122,34 +148,20 @@ pub async fn start_api_server(
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
         .with_state(state);
 
-    let host = config.api_host.parse().unwrap_or([0, 0, 0, 0].into());
-    let addr = SocketAddr::new(host, config.api_port);
+    Ok(tokio::spawn(async move {
+        let serve = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled().await;
+            info!("Axum REST API server received shutdown signal.");
+        });
 
-    info!("Starting REST API & Web Server at http://{}", addr);
-
-    tokio::spawn(async move {
-        match tokio::net::TcpListener::bind(&addr).await {
-            Ok(listener) => {
-                let serve_future = axum::serve(
-                    listener,
-                    app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-                )
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.recv().await;
-                    info!("Axum REST API server received shutdown signal.");
-                });
-
-                if let Err(err) = serve_future.await {
-                    tracing::error!("REST API server error: {:?}", err);
-                }
-            }
-            Err(err) => {
-                tracing::error!("Failed to bind REST API address {}: {:?}", addr, err);
-            }
+        if let Err(err) = serve.await {
+            tracing::error!("REST API server error: {:?}", err);
         }
-    });
-
-    Ok(())
+    }))
 }
 
 #[cfg(test)]
@@ -306,5 +318,89 @@ mod step_up_tests {
                 "{method} {path} answered without a valid session"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod server_shutdown_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn local_config() -> Config {
+        Config {
+            homeserver: "https://matrix.example.com".to_string(),
+            username: "bot".to_string(),
+            password: "secretpassword".to_string(),
+            recovery_key: None,
+            verification_allowlist: Vec::new(),
+            database_url: "postgres://unused@127.0.0.1:1/unused".to_string(),
+            api_host: "127.0.0.1".to_string(),
+            api_port: 0,
+            registration_secret: None,
+            registration_open: false,
+            db_max_connections: 1,
+            cors_allowed_origins: Vec::new(),
+            webauthn_rp_id: "localhost".to_string(),
+            webauthn_origin: "http://localhost:8080".to_string(),
+            cookie_secure: false,
+            web_url: "http://localhost:8080".to_string(),
+            ocr_enabled: false,
+            ocr_base_url: None,
+            voice_enabled: false,
+            voice_language: "auto".to_string(),
+            stt_base_url: None,
+            stt_api_key: None,
+            stt_model: "sensevoice-small".to_string(),
+            tts_base_url: None,
+            tts_api_key: None,
+            tts_model: "kokoro".to_string(),
+            tts_voice: "0".to_string(),
+            tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
+            trust_forwarded_for: false,
+            ai: crate::config::AiEnvConfig::default(),
+        }
+    }
+
+    /// The server task `start_api_server` returns is what the composition root
+    /// bounds its shutdown on, so it must actually finish once the token is
+    /// cancelled — including with a kept-alive client connection open.
+    #[tokio::test]
+    async fn test_server_task_completes_promptly_after_cancel() {
+        let config = local_config();
+        // Lazy: nothing here touches the database, so the test needs no server.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy(&config.database_url)
+            .unwrap();
+        let listener = bind(&config).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = CancellationToken::new();
+
+        let server = start_api_server(
+            &config,
+            Database { pool },
+            EventBroadcaster::default(),
+            crate::interface::channels::matrix::handles::BotHandles::default(),
+            listener,
+            shutdown.clone(),
+        )
+        .unwrap();
+
+        // Serving, and leaves a keep-alive connection in the client's pool.
+        let client = reqwest::Client::new();
+        let live = client
+            .get(format!("http://{addr}/health/live"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(live.status(), reqwest::StatusCode::OK);
+
+        shutdown.cancel();
+
+        let stopped = tokio::time::timeout(Duration::from_secs(1), server).await;
+        assert!(
+            matches!(stopped, Ok(Ok(()))),
+            "the server task must finish within 1 s of cancel: {stopped:?}"
+        );
+        drop(client);
     }
 }

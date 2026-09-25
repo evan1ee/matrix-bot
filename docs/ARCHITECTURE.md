@@ -6,12 +6,21 @@ section per area, each covered once.
 
 ## Single process, two front doors
 
-`backend/src/main.rs` boots one `Config` + one shared `Database` + one `EventBroadcaster`, then spawns:
+`backend/src/app.rs` is the composition root. `main.rs` only loads `./.env`, sets up tracing, handles the `mcp` stdio mode, installs the signal handler, and calls `app::run(config, token)`. `app::run` builds one shared `Database`, one `EventBroadcaster` and one `BotHandles`, then starts:
 
-1. The Axum API server (`interface::http::start_api_server`), which returns three shared handles — `Arc<RwLock<Option<String>>>` (bot access token), `Arc<RwLock<Option<Client>>>` (Matrix SDK client), and `Arc<PendingMerges>` (merges a `!link` recorded, waiting on web confirmation).
-2. The Matrix sync loop in a `tokio::spawn` retry loop (reconnects every 5s on error), receiving those same handles via `MatrixBot::new_full`.
+1. The Axum API server (`interface::http::start_api_server`), on a listener `app::run` binds first (`interface::http::bind`) so a bind failure stops boot rather than leaving a bot with no API and no health probes. It returns the server's `JoinHandle`.
+2. The Matrix sync loop (`interface/channels/matrix/sync_loop.rs::run_bot_loop`), a reconnect loop with 5 s → 300 s backoff, receiving the same `BotHandles` via `MatrixBot::new_full`. `BotHandles` is built once and cloned into every reconnect generation, so `SyncHealth` and pending merges survive a reconnect.
 
-Those handles are the coupling point, in both directions: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that need homeserver access, and the bot writes into `pending_merges` so a link begun in a Matrix DM can be finished in the web UI. Shutdown is a `broadcast::channel::<()>` fanned out to both halves on Ctrl-C.
+`BotHandles` (bot access token, Matrix SDK client, pending merges, sync health) is the coupling point, in both directions: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that need homeserver access, and the bot writes into `pending_merges` so a link begun in a Matrix DM can be finished in the web UI.
+
+**Shutdown is one `CancellationToken` tree, bounded at 15 s** (`app::SHUTDOWN_GRACE`, spec §5.3). `main.rs` owns the root and cancels it on SIGINT/SIGTERM (the handler is installed before boot, and boot's database connect is itself cancellable). The API server and the Matrix loop each get a `child_token()`:
+
+- The API server stops through axum's graceful shutdown. SSE responses never end on their own, so `sse_handler` ends its stream on the same token (`ApiState::shutdown`) — otherwise every open browser tab would hold the drain open until the deadline.
+- The Matrix loop has every long await (client build, sync, backoff) inside a `select!` against `shutdown.cancelled()`. That structure is a deliberate fix: an earlier version awaited `bot.run()` inside a select *branch body*, where Ctrl-C could not reach it. Returning drops the running generation, and with it its `BackgroundWorkers` guard, which aborts that generation's scheduler tasks (the same guard that prevents duplicate deliveries across reconnects).
+
+After cancellation `app::stop_by` waits for both tasks against one deadline (signal + 15 s); any task still running then is named in a `warn!` and aborted — not detached, so its drop guards run, and not awaited again, since a task stuck outside an await point would hold the process past the bound. `db.pool.close()` gets whatever remains of the same deadline. Finally `main.rs` drops the runtime with `shutdown_background()`, because an ordinary runtime drop waits without limit for in-flight blocking-pool work.
+
+The `mcp` stdio mode is not part of the tree: it is a separate process invocation that ends at stdin EOF and starts neither front door.
 
 `BotHandles` (`interface/channels/matrix/handles.rs`) also carries `sync_health: SyncHealth` — a lock-free `Arc<AtomicI64>` of the last completed sync's unix millis, written by the sync loop's `sync_with_callback` after every successful response and read by `/health/ready`. `sync_with_callback`, not plain `sync`, is the point of the change: it is the only hook that fires once per completed response rather than once for the whole (otherwise-infinite) sync loop, so it is the one place "a sync completed" can be observed and recorded.
 

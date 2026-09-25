@@ -4,7 +4,13 @@
 //! `generate-openapi` — can reuse the API types instead of the OpenAPI document
 //! being produced as a side effect of the test suite.
 
+// matrix-sdk 0.18's crypto futures nest deeper than the default limit of 128
+// when rustc proves the spawned sync task (`app::run`) is `Send`; rustc's own
+// suggestion.
+#![recursion_limit = "256"]
+
 pub mod accounts;
+pub mod app;
 pub mod application;
 pub mod config;
 pub mod db;
