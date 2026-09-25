@@ -4,14 +4,9 @@ import { useSession } from '../../core/session';
 import { useSettings, formatDateTimeInZone } from '../../core/settings';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Activity, Radio, Database, Server } from 'lucide-react';
+import type { components } from '../../types/api';
 
-interface ReadyResponse {
-  status: 'ready' | 'not_ready';
-  checks: {
-    database: { ok: boolean };
-    matrix_sync: { ok: boolean; last_sync_at: string | null };
-  };
-}
+type ReadyResponse = components['schemas']['ReadyResponse'];
 
 /**
  * `/health/ready` lives outside `/api/v1` (see AGENTS.md: liveness/readiness
