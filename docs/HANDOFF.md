@@ -111,7 +111,7 @@ backend/src/
 | 4 | accounts merge (dynamic SQL behind an allow-list, D-A) | ✅ |
 | 5 | bookmarks | ✅ |
 | 6 | footprints + habits | ✅ |
-| 7 | webhook | ☐ |
+| 7 | webhook | ✅ |
 | 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ☐ |
 | 9 | finance | ☐ |
 | 10 | portfolio | ☐ |
@@ -123,9 +123,9 @@ backend/src/
 
 Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALLOW_LIST`; the list can only shrink):
 - `interface/channels/matrix/{invite,reaction,reaction_targets}.rs`
-- `interface/http/{life_activity,mcp,mod,reminders,webhooks}.rs`
+- `interface/http/{life_activity,mcp,mod,reminders}.rs`
 
-The last full test run: **825 passed / 0 failed / 11 ignored**.
+The last full test run: **828 passed / 0 failed / 11 ignored**.
 
 ## 5. How to work
 

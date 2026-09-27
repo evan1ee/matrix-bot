@@ -10,6 +10,7 @@ pub mod footprints;
 pub mod habits;
 pub mod rooms;
 pub mod settings;
+pub mod webhooks;
 
 use sqlx::PgPool;
 
@@ -19,6 +20,7 @@ use self::footprints::FootprintService;
 use self::habits::HabitService;
 use self::rooms::RoomService;
 use self::settings::SettingsService;
+use self::webhooks::WebhookService;
 use crate::events::EventBroadcaster;
 
 /// Why a use case failed, by boundary rather than by cause.
@@ -68,6 +70,7 @@ pub struct AppServices {
     pub habits: HabitService,
     pub rooms: RoomService,
     pub settings: SettingsService,
+    pub webhooks: WebhookService,
 }
 
 impl AppServices {
@@ -92,6 +95,7 @@ impl AppServices {
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
+        let webhooks = WebhookService::new(pool.clone(), events.clone());
         Self {
             accounts,
             bookmarks,
@@ -99,6 +103,7 @@ impl AppServices {
             habits,
             rooms,
             settings,
+            webhooks,
         }
     }
 }

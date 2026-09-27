@@ -8,11 +8,11 @@ use axum::{
 };
 use chrono::Utc;
 
+use crate::domain::webhooks::hash_token;
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
-use crate::modules::webhook::{
-    models::{TelegramMessageResult, TelegramQuery, TelegramResponse, WebhookSeverity},
-    repository::{hash_token, WebhookRepository},
+use crate::interface::http::webhooks::{
+    TelegramMessageResult, TelegramQuery, TelegramResponse, WebhookSeverity,
 };
 
 /// Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of
@@ -40,7 +40,10 @@ pub async fn telegram_send_message_post(
     body_bytes: Bytes,
 ) -> Result<Json<TelegramResponse>, ApiError> {
     let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
+    let webhook = state
+        .services
+        .webhooks
+        .find_by_token_hash(&token_hash)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;
@@ -122,7 +125,10 @@ pub async fn telegram_send_message_get(
     Query(q): Query<TelegramQuery>,
 ) -> Result<Json<TelegramResponse>, ApiError> {
     let token_hash = hash_token(&token);
-    let webhook = WebhookRepository::find_by_token_hash(&state.db.pool, &token_hash)
+    let webhook = state
+        .services
+        .webhooks
+        .find_by_token_hash(&token_hash)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::unauthorized("Invalid or inactive webhook token"))?;

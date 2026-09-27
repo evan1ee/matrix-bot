@@ -11,6 +11,7 @@ use crate::interface::http::habits::{
     CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
     ToggleHabitRequest, UpdateHabitRequest,
 };
+use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
     footprints, habits, health, life, life_activity, mcp, ocr, portfolio, portfolio_alerts,
@@ -31,7 +32,6 @@ use crate::modules::recurring_bills::models::{
 };
 use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
 use crate::modules::todo::models::{TodoItem, TodoPriority};
-use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -270,15 +270,15 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
             RecurringBill,
             CreateBillPayload,
             UpdateBillPayload,
-            crate::modules::webhook::models::Webhook,
-            crate::modules::webhook::models::WebhookOutboxItem,
-            crate::modules::webhook::models::WebhookSeverity,
-            crate::modules::webhook::models::CreatedWebhookResponse,
-            crate::modules::webhook::models::CreateWebhookInput,
-            crate::modules::webhook::models::UpdateWebhookInput,
-            crate::modules::webhook::models::InboundPayload,
-            crate::modules::webhook::models::InboundAcceptedResponse,
-            crate::modules::webhook::models::WebhookLogsResponse,
+            crate::interface::http::webhooks::Webhook,
+            crate::interface::http::webhooks::WebhookOutboxItem,
+            crate::interface::http::webhooks::WebhookSeverity,
+            crate::interface::http::webhooks::CreatedWebhookResponse,
+            crate::interface::http::webhooks::CreateWebhookInput,
+            crate::interface::http::webhooks::UpdateWebhookInput,
+            crate::interface::http::webhooks::InboundPayload,
+            crate::interface::http::webhooks::InboundAcceptedResponse,
+            crate::interface::http::webhooks::WebhookLogsResponse,
             crate::modules::ai::models::AiUserConfig,
             crate::modules::ai::models::UpdateAiConfigInput,
             crate::modules::ai::models::VerifyAiKeyInput,

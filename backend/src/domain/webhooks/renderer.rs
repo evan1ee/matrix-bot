@@ -1,4 +1,6 @@
-use crate::modules::webhook::models::WebhookSeverity;
+//! Webhook alert message rendering, markdown parsing, and HTML sanitization.
+
+use crate::domain::webhooks::WebhookSeverity;
 use crate::utils::html::{html_escape, strip_html};
 
 /// Converts basic Markdown styling into safe Matrix-compatible HTML.
@@ -49,7 +51,6 @@ fn format_inline_markdown(escaped: &str) -> String {
 
     while let Some(c) = chars.next() {
         if c == '`' {
-            // Check for inline code
             let mut code = String::new();
             let mut closed = false;
             for next_c in chars.by_ref() {
@@ -270,7 +271,6 @@ mod tests {
         assert!(!sanitized.contains("<img"));
         assert!(sanitized.contains("&lt;img"));
 
-        // Test newly secured event handlers and dangerous attributes:
         let bypass_input = "<a href=\"#\" autofocus onfocus=\"alert(1)\">Click</a> <font onanimationstart=\"steal()\">text</font> <span ontoggle=\"leak()\">badge</span>";
         let bypass_sanitized = sanitize_html(bypass_input);
         assert!(!bypass_sanitized.contains("<a href=\"#\" autofocus onfocus=\"alert(1)\">"));

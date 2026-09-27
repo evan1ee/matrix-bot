@@ -8,3 +8,4 @@ pub mod footprints;
 pub mod habits;
 pub mod rooms;
 pub mod settings;
+pub mod webhooks;

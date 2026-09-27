@@ -22,7 +22,6 @@ pub mod reminder;
 pub mod todo;
 pub mod tts;
 pub mod voice;
-pub mod webhook;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.

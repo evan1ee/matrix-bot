@@ -2,13 +2,13 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::domain::settings::UserSettings;
+use crate::domain::webhooks::Webhook;
 use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::portfolio::audit::PortfolioAuditEntry;
 use crate::modules::portfolio::models::Holding;
 use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::reminder::models::Reminder;
 use crate::modules::todo::models::TodoItem;
-use crate::modules::webhook::models::Webhook;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///

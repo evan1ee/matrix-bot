@@ -115,7 +115,7 @@ pub fn format_response(
     } else {
         markdown_text
     };
-    let html = crate::modules::webhook::renderer::markdown_to_html(text);
+    let html = crate::domain::webhooks::renderer::markdown_to_html(text);
     let footer = render_bot_footer(model_name, pipeline_feature, tools_executed);
     format!("{}{}", html, footer)
 }

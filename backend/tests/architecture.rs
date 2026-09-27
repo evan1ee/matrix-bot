@@ -134,7 +134,6 @@ const INTERFACE_SQL_ALLOW_LIST: &[&str] = &[
     "interface/http/mcp.rs",
     "interface/http/mod.rs",
     "interface/http/reminders.rs",
-    "interface/http/webhooks.rs",
 ];
 
 #[test]

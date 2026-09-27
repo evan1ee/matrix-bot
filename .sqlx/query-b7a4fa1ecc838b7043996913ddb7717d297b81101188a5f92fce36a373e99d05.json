@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7a4fa1ecc838b7043996913ddb7717d297b81101188a5f92fce36a373e99d05"
+}

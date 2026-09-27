@@ -1,3 +1,5 @@
+//! Data Transfer Objects and schemas for webhooks.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -12,45 +14,33 @@ pub enum WebhookSeverity {
     Default,
 }
 
+impl From<crate::domain::webhooks::WebhookSeverity> for WebhookSeverity {
+    fn from(s: crate::domain::webhooks::WebhookSeverity) -> Self {
+        match s {
+            crate::domain::webhooks::WebhookSeverity::Critical => Self::Critical,
+            crate::domain::webhooks::WebhookSeverity::Warning => Self::Warning,
+            crate::domain::webhooks::WebhookSeverity::Info => Self::Info,
+            crate::domain::webhooks::WebhookSeverity::Success => Self::Success,
+            crate::domain::webhooks::WebhookSeverity::Default => Self::Default,
+        }
+    }
+}
+
+impl From<WebhookSeverity> for crate::domain::webhooks::WebhookSeverity {
+    fn from(s: WebhookSeverity) -> Self {
+        match s {
+            WebhookSeverity::Critical => Self::Critical,
+            WebhookSeverity::Warning => Self::Warning,
+            WebhookSeverity::Info => Self::Info,
+            WebhookSeverity::Success => Self::Success,
+            WebhookSeverity::Default => Self::Default,
+        }
+    }
+}
+
 impl WebhookSeverity {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Critical => "critical",
-            Self::Warning => "warning",
-            Self::Info => "info",
-            Self::Success => "success",
-            Self::Default => "default",
-        }
-    }
-
     pub fn from_str_or_default(s: &str) -> Self {
-        match s.trim().to_lowercase().as_str() {
-            "critical" | "error" | "fatal" | "alert" | "danger" => Self::Critical,
-            "warning" | "warn" => Self::Warning,
-            "success" | "ok" => Self::Success,
-            "default" | "normal" => Self::Default,
-            _ => Self::Info,
-        }
-    }
-
-    pub fn emoji(&self) -> &'static str {
-        match self {
-            Self::Critical => "🔴",
-            Self::Warning => "🟡",
-            Self::Info => "ℹ️",
-            Self::Success => "🟢",
-            Self::Default => "🔔",
-        }
-    }
-
-    pub fn color_hex(&self) -> &'static str {
-        match self {
-            Self::Critical => "#e5484d",
-            Self::Warning => "#f5a623",
-            Self::Info => "#3b82f6",
-            Self::Success => "#30a46c",
-            Self::Default => "#8b8d98",
-        }
+        crate::domain::webhooks::WebhookSeverity::from_str_or_default(s).into()
     }
 }
 
@@ -63,27 +53,7 @@ pub enum OutboxStatus {
     Failed,
 }
 
-impl OutboxStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Sending => "sending",
-            Self::Delivered => "delivered",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn from_str_or_default(s: &str) -> Self {
-        match s.trim().to_lowercase().as_str() {
-            "sending" => Self::Sending,
-            "delivered" => Self::Delivered,
-            "failed" => Self::Failed,
-            _ => Self::Pending,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Webhook {
     pub id: String,
     pub owner_id: String,
@@ -97,7 +67,24 @@ pub struct Webhook {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+impl From<crate::domain::webhooks::Webhook> for Webhook {
+    fn from(w: crate::domain::webhooks::Webhook) -> Self {
+        Self {
+            id: w.id,
+            owner_id: w.owner_id.to_string(),
+            name: w.name,
+            token_prefix: w.token_prefix,
+            default_room_id: w.default_room_id,
+            is_active: w.is_active,
+            total_delivered_count: w.total_delivered_count,
+            failure_count: w.failure_count,
+            last_triggered_at: w.last_triggered_at,
+            created_at: w.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WebhookOutboxItem {
     pub id: String,
     pub webhook_id: String,
@@ -114,6 +101,28 @@ pub struct WebhookOutboxItem {
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub delivered_at: Option<DateTime<Utc>>,
+}
+
+impl From<crate::domain::webhooks::WebhookOutboxItem> for WebhookOutboxItem {
+    fn from(item: crate::domain::webhooks::WebhookOutboxItem) -> Self {
+        Self {
+            id: item.id,
+            webhook_id: item.webhook_id,
+            owner_id: item.owner_id.to_string(),
+            room_id: item.room_id,
+            severity: item.severity,
+            title: item.title,
+            html_body: item.html_body,
+            plain_body: item.plain_body,
+            status: item.status,
+            attempts: item.attempts,
+            max_attempts: item.max_attempts,
+            next_attempt_at: item.next_attempt_at,
+            last_error: item.last_error,
+            created_at: item.created_at,
+            delivered_at: item.delivered_at,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -186,4 +195,13 @@ pub struct WebhookLogsResponse {
     pub total: i64,
     pub limit: i64,
     pub offset: i64,
+}
+
+pub fn build_example_curls(raw_token: &str) -> (String, String) {
+    let json = format!(
+        r#"curl -X POST https://<host>/api/v1/webhooks/{raw_token} -H "Content-Type: application/json" -d '{{"title":"Alert","message":"Server is down","level":"critical"}}'"#
+    );
+    let tg =
+        format!(r#"curl -X POST https://<host>/bot{raw_token}/sendMessage -d "text=Server alert""#);
+    (json, tg)
 }

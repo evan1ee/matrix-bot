@@ -138,7 +138,7 @@ pub async fn execute(
     }
 
     // 9. Try webhook tools
-    if let Some(res) = webhooks::execute_tool(pool, owner_id, name, &parsed_args).await {
+    if let Some(res) = webhooks::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 
