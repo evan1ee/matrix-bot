@@ -2,18 +2,172 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use serde::Deserialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use tracing::warn;
-use utoipa::IntoParams;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
-use crate::modules::footprints::models::{
-    CreateFootprintRequest, Footprint, FootprintsSummary, UpdateFootprintRequest,
-};
-use crate::modules::footprints::repository::FootprintRepository;
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Footprint {
+    pub id: i64,
+    pub owner_id: String,
+    pub title: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub country: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub arrival_date: String,
+    pub departure_date: Option<String>,
+    pub stay_duration_days: i64,
+    pub spend_amount_minor: i64,
+    pub spend_currency: String,
+    pub spend_currency_exponent: i64,
+    pub rating: i64,
+    pub category: String,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<crate::domain::footprints::Footprint> for Footprint {
+    fn from(fp: crate::domain::footprints::Footprint) -> Self {
+        Self {
+            id: fp.id,
+            owner_id: fp.owner_id.into_inner(),
+            title: fp.title,
+            latitude: fp.latitude,
+            longitude: fp.longitude,
+            country: fp.country,
+            city: fp.city,
+            address: fp.address,
+            arrival_date: fp.arrival_date,
+            departure_date: fp.departure_date,
+            stay_duration_days: fp.stay_duration_days,
+            spend_amount_minor: fp.spend_amount_minor,
+            spend_currency: fp.spend_currency,
+            spend_currency_exponent: fp.spend_currency_exponent,
+            rating: fp.rating,
+            category: fp.category,
+            note: fp.note,
+            created_at: fp.created_at,
+            updated_at: fp.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreateFootprintRequest {
+    pub title: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub country: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub arrival_date: String,
+    pub departure_date: Option<String>,
+    pub spend_amount: Option<String>,
+    pub spend_currency: Option<String>,
+    pub rating: Option<i64>,
+    pub category: Option<String>,
+    pub note: Option<String>,
+}
+
+impl From<CreateFootprintRequest> for crate::application::footprints::CreateFootprintInput {
+    fn from(req: CreateFootprintRequest) -> Self {
+        Self {
+            title: req.title,
+            latitude: req.latitude,
+            longitude: req.longitude,
+            country: req.country,
+            city: req.city,
+            address: req.address,
+            arrival_date: req.arrival_date,
+            departure_date: req.departure_date,
+            spend_amount: req.spend_amount,
+            spend_currency: req.spend_currency,
+            rating: req.rating,
+            category: req.category,
+            note: req.note,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpdateFootprintRequest {
+    pub title: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub country: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub arrival_date: Option<String>,
+    pub departure_date: Option<String>,
+    pub spend_amount: Option<String>,
+    pub spend_currency: Option<String>,
+    pub rating: Option<i64>,
+    pub category: Option<String>,
+    pub note: Option<String>,
+}
+
+impl From<UpdateFootprintRequest> for crate::application::footprints::UpdateFootprintInput {
+    fn from(req: UpdateFootprintRequest) -> Self {
+        Self {
+            title: req.title,
+            latitude: req.latitude,
+            longitude: req.longitude,
+            country: req.country,
+            city: req.city,
+            address: req.address,
+            arrival_date: req.arrival_date,
+            departure_date: req.departure_date,
+            spend_amount: req.spend_amount,
+            spend_currency: req.spend_currency,
+            rating: req.rating,
+            category: req.category,
+            note: req.note,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FootprintCurrencySpend {
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub total_spend_minor: i64,
+}
+
+impl From<crate::domain::footprints::FootprintCurrencySpend> for FootprintCurrencySpend {
+    fn from(s: crate::domain::footprints::FootprintCurrencySpend) -> Self {
+        Self {
+            currency: s.currency,
+            currency_exponent: s.currency_exponent,
+            total_spend_minor: s.total_spend_minor,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FootprintsSummary {
+    pub total_places: i64,
+    pub total_countries: i64,
+    pub total_days_traveled: i64,
+    pub spend_by_currency: Vec<FootprintCurrencySpend>,
+}
+
+impl From<crate::domain::footprints::FootprintsSummary> for FootprintsSummary {
+    fn from(s: crate::domain::footprints::FootprintsSummary) -> Self {
+        Self {
+            total_places: s.total_places,
+            total_countries: s.total_countries,
+            total_days_traveled: s.total_days_traveled,
+            spend_by_currency: s.spend_by_currency.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ListFootprintsQuery {
@@ -45,17 +199,19 @@ pub async fn list_footprints(
     State(state): State<ApiState>,
     Query(params): Query<ListFootprintsQuery>,
 ) -> Result<Json<Vec<Footprint>>, ApiError> {
-    let items = FootprintRepository::list_by_owner(
-        &state.db.pool,
-        &user.account_id,
-        params.country.as_deref(),
-        params.category.as_deref(),
-        params.search.as_deref(),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let items = state
+        .services
+        .footprints
+        .list(
+            &user.account_id,
+            params.country.as_deref(),
+            params.category.as_deref(),
+            params.search.as_deref(),
+        )
+        .await?;
 
-    Ok(Json(items))
+    let dtos = items.into_iter().map(Footprint::from).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -75,12 +231,8 @@ pub async fn get_footprint(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Footprint>, ApiError> {
-    let fp = FootprintRepository::find_owned(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
-
-    Ok(Json(fp))
+    let fp = state.services.footprints.get(&user.account_id, id).await?;
+    Ok(Json(fp.into()))
 }
 
 #[utoipa::path(
@@ -100,71 +252,12 @@ pub async fn create_footprint(
     State(state): State<ApiState>,
     Json(payload): Json<CreateFootprintRequest>,
 ) -> Result<Json<Footprint>, ApiError> {
-    let title = payload.title.trim();
-    if title.is_empty() {
-        return Err(ApiError::bad_request(
-            "Title / Place Name is required".to_string(),
-        ));
-    }
-    if title.len() > 500 {
-        return Err(ApiError::bad_request(
-            "Title exceeds 500 characters".to_string(),
-        ));
-    }
-
-    let default_currency = state
+    let created = state
         .services
-        .settings
-        .get_or_default(&user.account_id)
-        .await
-        .currency;
-    let raw_currency = payload
-        .spend_currency
-        .as_deref()
-        .unwrap_or(&default_currency);
-    let currency =
-        normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let exp = exponent_for(&currency);
-
-    let spend_minor = if let Some(ref s) = payload.spend_amount {
-        if s.trim().is_empty() {
-            0
-        } else {
-            parse_amount(s.trim(), exp).map_err(|e| ApiError::bad_request(e.to_string()))?
-        }
-    } else {
-        0
-    };
-
-    let rating = payload.rating.unwrap_or(5).clamp(1, 5);
-    let category = payload.category.as_deref().unwrap_or("travel");
-
-    let created = FootprintRepository::create(
-        &state.db.pool,
-        &user.account_id,
-        title,
-        payload.latitude,
-        payload.longitude,
-        payload.country.as_deref(),
-        payload.city.as_deref(),
-        payload.address.as_deref(),
-        &payload.arrival_date,
-        payload.departure_date.as_deref(),
-        spend_minor,
-        &currency,
-        exp as i64,
-        rating,
-        category,
-        payload.note.as_deref(),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::FootprintCreated(created.clone()));
-
-    Ok(Json(created))
+        .footprints
+        .create(&user.account_id, payload.into())
+        .await?;
+    Ok(Json(created.into()))
 }
 
 #[utoipa::path(
@@ -187,82 +280,12 @@ pub async fn update_footprint(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateFootprintRequest>,
 ) -> Result<Json<Footprint>, ApiError> {
-    let existing = FootprintRepository::find_owned(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
-
-    let title = payload.title.as_deref().unwrap_or(&existing.title).trim();
-    if title.is_empty() {
-        return Err(ApiError::bad_request(
-            "Title / Place Name cannot be empty".to_string(),
-        ));
-    }
-
-    let lat = payload.latitude.unwrap_or(existing.latitude);
-    let lon = payload.longitude.unwrap_or(existing.longitude);
-    let country = payload.country.as_deref().or(existing.country.as_deref());
-    let city = payload.city.as_deref().or(existing.city.as_deref());
-    let address = payload.address.as_deref().or(existing.address.as_deref());
-    let arrival_date = payload
-        .arrival_date
-        .as_deref()
-        .unwrap_or(&existing.arrival_date);
-    let departure_date = payload
-        .departure_date
-        .as_deref()
-        .or(existing.departure_date.as_deref());
-
-    let raw_currency = payload
-        .spend_currency
-        .as_deref()
-        .unwrap_or(&existing.spend_currency);
-    let currency =
-        normalise_currency(raw_currency).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let exp = exponent_for(&currency);
-
-    let spend_minor = if let Some(ref s) = payload.spend_amount {
-        if s.trim().is_empty() {
-            0
-        } else {
-            parse_amount(s.trim(), exp).map_err(|e| ApiError::bad_request(e.to_string()))?
-        }
-    } else {
-        existing.spend_amount_minor
-    };
-
-    let rating = payload.rating.unwrap_or(existing.rating).clamp(1, 5);
-    let category = payload.category.as_deref().unwrap_or(&existing.category);
-    let note = payload.note.as_deref().or(existing.note.as_deref());
-
-    let updated = FootprintRepository::update(
-        &state.db.pool,
-        id,
-        &user.account_id,
-        title,
-        lat,
-        lon,
-        country,
-        city,
-        address,
-        arrival_date,
-        departure_date,
-        spend_minor,
-        &currency,
-        exp as i64,
-        rating,
-        category,
-        note,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found(format!("Footprint #{} not found", id)))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::FootprintUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    let updated = state
+        .services
+        .footprints
+        .update(&user.account_id, id, payload.into())
+        .await?;
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -282,19 +305,11 @@ pub async fn delete_footprint(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = FootprintRepository::delete(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    if !deleted {
-        return Err(ApiError::not_found(format!("Footprint #{} not found", id)));
-    }
-
-    state.broadcaster.send(SystemEvent::FootprintDeleted {
-        id,
-        owner_id: user.account_id.to_string(),
-    });
-
+    state
+        .services
+        .footprints
+        .delete(&user.account_id, id)
+        .await?;
     Ok(Json(serde_json::json!({ "success": true, "id": id })))
 }
 
@@ -312,11 +327,12 @@ pub async fn get_summary_stats(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<FootprintsSummary>, ApiError> {
-    let stats = FootprintRepository::summary_stats(&state.db.pool, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(stats))
+    let stats = state
+        .services
+        .footprints
+        .summary_stats(&user.account_id)
+        .await?;
+    Ok(Json(stats.into()))
 }
 
 /// Reverse or forward geocoding proxy using OpenStreetMap Nominatim.

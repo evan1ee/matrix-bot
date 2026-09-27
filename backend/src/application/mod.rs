@@ -6,6 +6,8 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod footprints;
+pub mod habits;
 pub mod rooms;
 pub mod settings;
 
@@ -13,6 +15,8 @@ use sqlx::PgPool;
 
 use self::accounts::AccountService;
 use self::bookmarks::BookmarkService;
+use self::footprints::FootprintService;
+use self::habits::HabitService;
 use self::rooms::RoomService;
 use self::settings::SettingsService;
 use crate::events::EventBroadcaster;
@@ -60,6 +64,8 @@ pub enum AppError {
 pub struct AppServices {
     pub accounts: AccountService,
     pub bookmarks: BookmarkService,
+    pub footprints: FootprintService,
+    pub habits: HabitService,
     pub rooms: RoomService,
     pub settings: SettingsService,
 }
@@ -83,10 +89,14 @@ impl AppServices {
         let accounts = AccountService::new(pool.clone(), events.clone());
         let bookmarks = BookmarkService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool.clone(), events.clone());
+        let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
+        let habits = HabitService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         Self {
             accounts,
             bookmarks,
+            footprints,
+            habits,
             rooms,
             settings,
         }

@@ -1,0 +1,244 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, owner_id, title, latitude, longitude, country, city, address,\n               arrival_date, departure_date, stay_duration_days,\n               spend_amount_minor, spend_currency, spend_currency_exponent,\n               rating, category, note, created_at, updated_at\n        FROM footprints\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "latitude",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "latitude"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "longitude",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "longitude"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "country",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "country"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "city",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "city"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "address",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "address"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "arrival_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "arrival_date"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "departure_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "departure_date"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "stay_duration_days",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "stay_duration_days"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "spend_amount_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "spend_amount_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "spend_currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "spend_currency"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "spend_currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "spend_currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "rating",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "rating"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "footprints",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "abea1ec26deb754354a39288e70fddced49e157722a7964e3d4fecc20999c3ef"
+}

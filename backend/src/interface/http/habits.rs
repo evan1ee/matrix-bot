@@ -2,18 +2,121 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::habits::models::{Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay};
-use crate::modules::habits::repository::HabitsRepository;
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ListHabitsQuery {
     pub today: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct Habit {
+    pub id: i64,
+    pub owner_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub frequency: String,
+    pub category: String,
+    pub target_days_per_week: i64,
+    pub archived: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl From<crate::domain::habits::Habit> for Habit {
+    fn from(h: crate::domain::habits::Habit) -> Self {
+        Self {
+            id: h.id,
+            owner_id: h.owner_id.into_inner(),
+            name: h.name,
+            description: h.description,
+            frequency: h.frequency,
+            category: h.category,
+            target_days_per_week: h.target_days_per_week,
+            archived: h.archived,
+            created_at: h.created_at,
+            updated_at: h.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct DayStatus {
+    pub date: String,
+    pub completed: bool,
+}
+
+impl From<crate::domain::habits::DayStatus> for DayStatus {
+    fn from(d: crate::domain::habits::DayStatus) -> Self {
+        Self {
+            date: d.date,
+            completed: d.completed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct HabitWithStatus {
+    #[serde(flatten)]
+    pub habit: Habit,
+    pub completed_today: bool,
+    pub current_streak: i64,
+    pub longest_streak: i64,
+    pub total_completions: i64,
+    pub last_7_days: Vec<DayStatus>,
+}
+
+impl From<crate::domain::habits::HabitWithStatus> for HabitWithStatus {
+    fn from(h: crate::domain::habits::HabitWithStatus) -> Self {
+        Self {
+            habit: h.habit.into(),
+            completed_today: h.completed_today,
+            current_streak: h.current_streak,
+            longest_streak: h.longest_streak,
+            total_completions: h.total_completions,
+            last_7_days: h.last_7_days.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct HeatmapDay {
+    pub date: String,
+    pub count: i64,
+}
+
+impl From<crate::domain::habits::HeatmapDay> for HeatmapDay {
+    fn from(d: crate::domain::habits::HeatmapDay) -> Self {
+        Self {
+            date: d.date,
+            count: d.count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct HabitStatsSummary {
+    pub total_active_habits: i64,
+    pub completed_today: i64,
+    pub completion_rate_today_percent: i64,
+    pub best_streak: i64,
+    pub total_all_time_completions: i64,
+}
+
+impl From<crate::domain::habits::HabitStatsSummary> for HabitStatsSummary {
+    fn from(s: crate::domain::habits::HabitStatsSummary) -> Self {
+        Self {
+            total_active_habits: s.total_active_habits,
+            completed_today: s.completed_today,
+            completion_rate_today_percent: s.completion_rate_today_percent,
+            best_streak: s.best_streak,
+            total_all_time_completions: s.total_all_time_completions,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -67,11 +170,14 @@ pub async fn list_habits(
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<Vec<HabitWithStatus>>, ApiError> {
     let today = get_today_string(params.today.as_deref());
-    let items = HabitsRepository::find_all_with_status(&state.db.pool, &user.account_id, &today)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let items = state
+        .services
+        .habits
+        .list_with_status(&user.account_id, &today)
+        .await?;
 
-    Ok(Json(items))
+    let dtos = items.into_iter().map(HabitWithStatus::from).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -91,33 +197,20 @@ pub async fn create_habit(
     State(state): State<ApiState>,
     Json(payload): Json<CreateHabitRequest>,
 ) -> Result<Json<Habit>, ApiError> {
-    let name = payload.name.trim();
-    if name.is_empty() {
-        return Err(ApiError::bad_request("Habit name is required."));
-    }
-    if name.len() > 100 {
-        return Err(ApiError::bad_request(
-            "Habit name must be 100 characters or fewer.",
-        ));
-    }
+    let habit = state
+        .services
+        .habits
+        .create_habit(
+            &user.account_id,
+            &payload.name,
+            payload.description.as_deref(),
+            payload.frequency.as_deref(),
+            payload.category.as_deref(),
+            payload.target_days_per_week,
+        )
+        .await?;
 
-    let habit = HabitsRepository::create_habit(
-        &state.db.pool,
-        &user.account_id,
-        name,
-        payload.description.as_deref(),
-        payload.frequency.as_deref().unwrap_or("daily"),
-        payload.category.as_deref().unwrap_or("wellness"),
-        payload.target_days_per_week.unwrap_or(7),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::HabitCreated(habit.clone()));
-
-    Ok(Json(habit))
+    Ok(Json(habit.into()))
 }
 
 #[utoipa::path(
@@ -140,35 +233,21 @@ pub async fn update_habit(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateHabitRequest>,
 ) -> Result<Json<Habit>, ApiError> {
-    let name = payload.name.trim();
-    if name.is_empty() {
-        return Err(ApiError::bad_request("Habit name cannot be empty."));
-    }
-    if name.len() > 100 {
-        return Err(ApiError::bad_request(
-            "Habit name must be 100 characters or fewer.",
-        ));
-    }
+    let habit = state
+        .services
+        .habits
+        .update_habit(
+            &user.account_id,
+            id,
+            &payload.name,
+            payload.description.as_deref(),
+            payload.frequency.as_deref(),
+            payload.category.as_deref(),
+            payload.target_days_per_week,
+        )
+        .await?;
 
-    let habit = HabitsRepository::update_habit(
-        &state.db.pool,
-        id,
-        &user.account_id,
-        name,
-        payload.description.as_deref(),
-        payload.frequency.as_deref().unwrap_or("daily"),
-        payload.category.as_deref().unwrap_or("wellness"),
-        payload.target_days_per_week.unwrap_or(7),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found(format!("Habit #{} not found", id)))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::HabitUpdated(habit.clone()));
-
-    Ok(Json(habit))
+    Ok(Json(habit.into()))
 }
 
 #[utoipa::path(
@@ -188,19 +267,11 @@ pub async fn delete_habit(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = HabitsRepository::delete_habit(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    if !deleted {
-        return Err(ApiError::not_found(format!("Habit #{} not found", id)));
-    }
-
-    state.broadcaster.send(SystemEvent::HabitDeleted {
-        id,
-        owner_id: user.account_id.to_string(),
-    });
-
+    state
+        .services
+        .habits
+        .delete_habit(&user.account_id, id)
+        .await?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
@@ -223,32 +294,16 @@ pub async fn toggle_habit_log(
     Path(id): Path<i64>,
     Json(payload): Json<ToggleHabitRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let habit = HabitsRepository::find_by_id(&state.db.pool, id, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("Habit #{} not found", id)))?;
-
     let log_date = get_today_string(payload.date.as_deref());
 
-    let new_completed = HabitsRepository::toggle_log(
-        &state.db.pool,
-        habit.id,
-        &user.account_id,
-        &log_date,
-        payload.note.as_deref(),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(SystemEvent::HabitLogToggled {
-        habit_id: habit.id,
-        owner_id: user.account_id.to_string(),
-        log_date: log_date.clone(),
-        completed: new_completed,
-    });
+    let new_completed = state
+        .services
+        .habits
+        .toggle_log(&user.account_id, id, &log_date, payload.note.as_deref())
+        .await?;
 
     Ok(Json(serde_json::json!({
-        "habit_id": habit.id,
+        "habit_id": id,
         "log_date": log_date,
         "completed": new_completed,
     })))
@@ -268,21 +323,15 @@ pub async fn get_heatmap(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<HeatmapDay>>, ApiError> {
-    let days = HabitsRepository::get_heatmap(&state.db.pool, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(days))
+    let days = state.services.habits.get_heatmap(&user.account_id).await?;
+    let dtos = days.into_iter().map(HeatmapDay::from).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
     get,
     tag = "habits",
     path = "/api/v1/habits/stats",
-    // `utoipa::path` defaults the operation id to the function name, and
-    // `bookmarks::get_stats` already claims plain "get_stats" — an explicit id
-    // keeps the generated OpenAPI operations (and so the TS client) from
-    // colliding. See `portfolio::summary` for the same pattern.
     operation_id = "habits_get_stats",
     params(ListHabitsQuery),
     responses(
@@ -297,9 +346,11 @@ pub async fn get_stats(
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<HabitStatsSummary>, ApiError> {
     let today = get_today_string(params.today.as_deref());
-    let stats = HabitsRepository::get_summary_stats(&state.db.pool, &user.account_id, &today)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let stats = state
+        .services
+        .habits
+        .get_summary_stats(&user.account_id, &today)
+        .await?;
 
-    Ok(Json(stats))
+    Ok(Json(stats.into()))
 }

@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use utoipa::ToSchema;
 
 use crate::application::settings::SettingsService;
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::modules::finance::money::format_amount;
 use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
 use crate::modules::reminder::repository::ReminderRepository;
@@ -208,8 +208,8 @@ pub async fn generate_weekly_retrospective(
     let active_tasks_count = all_tasks.iter().filter(|t| !t.completed).count();
 
     // 3. Habits
-    let habits_with_status =
-        HabitsRepository::find_all_with_status(pool, owner_id, &period_end).await?;
+    let acct = crate::domain::accounts::AccountId::new(owner_id);
+    let habits_with_status = habits_repo::find_all_with_status(pool, &acct, &period_end).await?;
     let active_habits_count = habits_with_status.len();
     let mut total_possible_habit_days = 0;
     let mut total_completed_habit_days = 0;

@@ -118,14 +118,14 @@ pub enum SystemEvent {
     AiConfigUpdated {
         owner_id: String,
     },
-    FootprintCreated(crate::modules::footprints::models::Footprint),
-    FootprintUpdated(crate::modules::footprints::models::Footprint),
+    FootprintCreated(crate::domain::footprints::Footprint),
+    FootprintUpdated(crate::domain::footprints::Footprint),
     FootprintDeleted {
         id: i64,
         owner_id: String,
     },
-    HabitCreated(crate::modules::habits::models::Habit),
-    HabitUpdated(crate::modules::habits::models::Habit),
+    HabitCreated(crate::domain::habits::Habit),
+    HabitUpdated(crate::domain::habits::Habit),
     HabitDeleted {
         id: i64,
         owner_id: String,

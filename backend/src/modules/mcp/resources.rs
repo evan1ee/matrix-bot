@@ -2,8 +2,8 @@ use crate::db::DbPool;
 use chrono::{Duration, Utc};
 
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::repository::PortfolioRepository;
@@ -108,8 +108,9 @@ pub async fn read_resource(
             })
         }
         "matrixbot://habits/today" => {
+            let acct = crate::domain::accounts::AccountId::new(owner_id);
             let today_str = Utc::now().format("%Y-%m-%d").to_string();
-            let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+            let habits = habits_repo::find_all_with_status(pool, &acct, &today_str)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&habits).map_err(|e| e.to_string())?;

@@ -14,11 +14,11 @@ use crate::interface::channels::matrix::handler::register_handlers;
 use crate::interface::channels::matrix::verification::{
     register_verification_handlers, VerificationPolicy,
 };
+use crate::interface::chat::footprints::FootprintsModule;
+use crate::interface::chat::habits::HabitsModule;
 use crate::interface::chat::settings::SettingsModule;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
-use crate::modules::footprints::FootprintsModule;
-use crate::modules::habits::HabitsModule;
 use crate::modules::life::LifeModule;
 use crate::modules::portfolio::PortfolioModule;
 use crate::modules::recurring_bills::RecurringBillsModule;

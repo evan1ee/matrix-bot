@@ -12,8 +12,6 @@ pub mod briefing;
 pub mod core;
 pub mod due_reminder;
 pub mod finance;
-pub mod footprints;
-pub mod habits;
 pub mod journal;
 pub mod life;
 pub mod mcp;

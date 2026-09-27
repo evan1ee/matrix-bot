@@ -2,13 +2,13 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
+use crate::domain::habits::HabitWithStatus;
 use crate::domain::settings::UserSettings;
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use crate::modules::briefing::ticker::{
     fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
 };
-use crate::modules::habits::models::HabitWithStatus;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::modules::recurring_bills::models::RecurringBill;
 use crate::modules::recurring_bills::repository::RecurringBillRepository;
@@ -46,10 +46,10 @@ pub async fn generate_briefing(
         .unwrap_or_default();
 
     // 3. Today's habits
-    let habits: Vec<HabitWithStatus> =
-        HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
-            .await
-            .unwrap_or_default();
+    let acct = crate::domain::accounts::AccountId::new(owner_id);
+    let habits: Vec<HabitWithStatus> = habits_repo::find_all_with_status(pool, &acct, &today_str)
+        .await
+        .unwrap_or_default();
 
     // 4. Upcoming bills due in the next 3 days
     let bills = RecurringBillRepository::list_by_owner(pool, owner_id)

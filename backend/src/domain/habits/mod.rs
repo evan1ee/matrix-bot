@@ -1,13 +1,21 @@
+//! Pure domain types, invariants, and streak calculations for Habits.
+//!
+//! Depends only on std, chrono, serde, and thiserror.
+
+use std::collections::HashSet;
+
 use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
-use std::collections::HashSet;
-use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
+use crate::domain::accounts::AccountId;
+
+pub const MAX_HABIT_NAME_LEN: usize = 100;
+
+/// A configured habit tracking routine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Habit {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub name: String,
     pub description: Option<String>,
     pub frequency: String,
@@ -18,20 +26,21 @@ pub struct Habit {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq)]
+/// A daily check-in log record for a habit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HabitLog {
     pub id: i64,
     pub habit_id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub log_date: String,
     pub completed: bool,
     pub note: Option<String>,
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+/// Habit accompanied by computed status (streaks, today's completion, trailing week).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HabitWithStatus {
-    #[serde(flatten)]
     pub habit: Habit,
     pub completed_today: bool,
     pub current_streak: i64,
@@ -40,19 +49,22 @@ pub struct HabitWithStatus {
     pub last_7_days: Vec<DayStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+/// Completion state for a specific date.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DayStatus {
     pub date: String,
     pub completed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, PartialEq, Eq, ToSchema)]
+/// Aggregate completion counts per day for heatmap visualization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeatmapDay {
     pub date: String,
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+/// Summary statistics for all active habits of an owner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HabitStatsSummary {
     pub total_active_habits: i64,
     pub completed_today: i64,
@@ -61,7 +73,30 @@ pub struct HabitStatsSummary {
     pub total_all_time_completions: i64,
 }
 
-/// Computes (current_streak, longest_streak) from a set of completed YYYY-MM-DD date strings.
+impl HabitStatsSummary {
+    pub fn from_habits(habits: &[HabitWithStatus]) -> Self {
+        let total_active_habits = habits.len() as i64;
+        let completed_today = habits.iter().filter(|h| h.completed_today).count() as i64;
+        let completion_rate_today_percent = if total_active_habits > 0 {
+            (completed_today * 100) / total_active_habits
+        } else {
+            0
+        };
+
+        let best_streak = habits.iter().map(|h| h.current_streak).max().unwrap_or(0);
+        let total_all_time_completions: i64 = habits.iter().map(|h| h.total_completions).sum();
+
+        Self {
+            total_active_habits,
+            completed_today,
+            completion_rate_today_percent,
+            best_streak,
+            total_all_time_completions,
+        }
+    }
+}
+
+/// Computes (current_streak, longest_streak) from a list of completed YYYY-MM-DD date strings.
 pub fn calculate_streaks(completed_dates: &[String], today_str: &str) -> (i64, i64) {
     if completed_dates.is_empty() {
         return (0, 0);
@@ -142,5 +177,18 @@ mod tests {
         let (current_gap, longest_gap) = calculate_streaks(&dates, "2026-09-06");
         assert_eq!(current_gap, 0);
         assert_eq!(longest_gap, 5);
+    }
+
+    #[test]
+    fn test_calculate_streaks_empty() {
+        assert_eq!(calculate_streaks(&[], "2026-09-03"), (0, 0));
+        assert_eq!(
+            calculate_streaks(&["invalid".to_string()], "2026-09-03"),
+            (0, 0)
+        );
+        assert_eq!(
+            calculate_streaks(&["2026-09-03".to_string()], "invalid"),
+            (0, 0)
+        );
     }
 }

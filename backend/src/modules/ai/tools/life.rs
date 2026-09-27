@@ -5,8 +5,6 @@ use serde_json::json;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::ai::retrospective::generate_weekly_retrospective;
-use crate::modules::footprints::repository::FootprintRepository;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 
 fn normalize_footprint_category(input: &str) -> &'static str {
@@ -127,7 +125,9 @@ pub async fn execute_tool(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let habits = HabitsRepository::find_all_with_status(pool, owner_id, &date_str)
+                let habits = services
+                    .habits
+                    .list_with_status(&acct, &date_str)
                     .await
                     .unwrap_or_default();
 
@@ -153,10 +153,11 @@ pub async fn execute_tool(
 
         "get_my_footprints" => Some(
             async {
-                let footprints =
-                    FootprintRepository::list_by_owner(pool, owner_id, None, None, None)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                let footprints = services
+                    .footprints
+                    .list(&acct, None, None, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10) as usize;
                 let sliced: Vec<_> = footprints.into_iter().take(limit).collect();
                 serde_json::to_string(&sliced).map_err(|e| e.to_string())
@@ -190,10 +191,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0)
                     .clamp(0, 5);
-                let spend_str = args
-                    .get("spend_amount")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("0");
+                let spend_str = args.get("spend_amount").and_then(|v| v.as_str());
                 let currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -205,32 +203,27 @@ pub async fn execute_tool(
                     .unwrap_or(&today_str);
                 let departure_date = args.get("departure_date").and_then(|v| v.as_str());
 
-                let spend_minor = (spend_str.parse::<f64>().unwrap_or(0.0) * 100.0) as i64;
+                let input = crate::application::footprints::CreateFootprintInput {
+                    title: title.to_string(),
+                    latitude: lat,
+                    longitude: lon,
+                    country: country.map(|s| s.to_string()),
+                    city: city.map(|s| s.to_string()),
+                    address: None,
+                    arrival_date: arrival_date.to_string(),
+                    departure_date: departure_date.map(|s| s.to_string()),
+                    spend_amount: spend_str.map(|s| s.to_string()),
+                    spend_currency: Some(currency.to_string()),
+                    rating: Some(rating),
+                    category: Some(category.to_string()),
+                    note: note.map(|s| s.to_string()),
+                };
 
-                let fp = FootprintRepository::create(
-                    pool,
-                    owner_id,
-                    title,
-                    lat,
-                    lon,
-                    country,
-                    city,
-                    None,
-                    arrival_date,
-                    departure_date,
-                    spend_minor,
-                    currency,
-                    2,
-                    rating,
-                    category,
-                    note,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::FootprintCreated(fp.clone()));
-                }
+                let fp = services
+                    .footprints
+                    .create(&acct, input)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&fp).map_err(|e| e.to_string())
             }
@@ -243,20 +236,11 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let ok = FootprintRepository::delete(pool, id, owner_id)
+                services
+                    .footprints
+                    .delete(&acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!("Footprint #{} not found or not owned by user", id));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::FootprintDeleted {
-                        id,
-                        owner_id: owner_id.to_string(),
-                    });
-                }
 
                 serde_json::to_string(&json!({
                     "id": id,

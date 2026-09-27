@@ -4,5 +4,7 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod footprints;
+pub mod habits;
 pub mod rooms;
 pub mod settings;

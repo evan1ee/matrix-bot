@@ -3,6 +3,14 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::error::ApiErrorResponse;
+use crate::interface::http::footprints::{
+    CreateFootprintRequest, Footprint, FootprintCurrencySpend, FootprintsSummary,
+    UpdateFootprintRequest,
+};
+use crate::interface::http::habits::{
+    CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
+    ToggleHabitRequest, UpdateHabitRequest,
+};
 use crate::interface::http::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
     footprints, habits, health, life, life_activity, mcp, ocr, portfolio, portfolio_alerts,
@@ -11,13 +19,6 @@ use crate::interface::http::{
 };
 use crate::modules::finance::models::{
     Category, CategoryTotal, CurrencySummary, Direction, Transaction,
-};
-use crate::modules::footprints::models::{
-    CreateFootprintRequest, Footprint, FootprintCurrencySpend, FootprintsSummary,
-    UpdateFootprintRequest,
-};
-use crate::modules::habits::models::{
-    DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
 };
 use crate::modules::life::activity::{ActivityEvent, ActivityStats, DayActivityResponse};
 use crate::modules::life::models::{
@@ -311,9 +312,9 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
             DayStatus,
             HeatmapDay,
             HabitStatsSummary,
-            habits::CreateHabitRequest,
-            habits::UpdateHabitRequest,
-            habits::ToggleHabitRequest,
+            CreateHabitRequest,
+            UpdateHabitRequest,
+            ToggleHabitRequest,
             LifeProfile,
             LifeDayLog,
             LifeHorizonDay,
