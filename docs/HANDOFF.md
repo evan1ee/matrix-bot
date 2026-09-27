@@ -22,7 +22,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
    2. `AGENTS.md` (hard rules, Engineering Principles, Definition of Done);
    3. `docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` (the binding design for the current sub-project);
    4. `docs/superpowers/plans/2026-09-25-feature-layering.md` (the plan in progress).
-3. Start the test database (§5) and run the verification list (§5). It must be green before you change anything.
+3. Set up the environment and start the test database (`docs/DEVELOPMENT.md`), then run the verification list (§5). It must be green before you change anything.
 4. Continue at **§7 Next actions**.
 
 ## 1. What the refactor is
@@ -320,3 +320,5 @@ These need the human. Prepare them; don't perform them.
 | `docs/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
 | `AGENTS.md` | Hard rules, Engineering Principles, Definition of Done, Security Rules |
 | `docs/ARCHITECTURE.md` | Rationale behind the non-obvious design choices |
+| `docs/DEVELOPMENT.md` | Environment setup, test database, every test suite, troubleshooting |
+| `docs/GITEA.md` | Remotes, branches, pull requests, Gitea Actions CI, agent rules for the forge |
