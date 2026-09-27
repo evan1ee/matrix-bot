@@ -198,7 +198,7 @@ pub async fn delete_habit(
 
     state.broadcaster.send(SystemEvent::HabitDeleted {
         id,
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
     });
 
     Ok(Json(serde_json::json!({ "success": true })))
@@ -242,7 +242,7 @@ pub async fn toggle_habit_log(
 
     state.broadcaster.send(SystemEvent::HabitLogToggled {
         habit_id: habit.id,
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
         log_date: log_date.clone(),
         completed: new_completed,
     });

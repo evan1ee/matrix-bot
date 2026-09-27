@@ -150,7 +150,8 @@ async fn handle_cash_deposit(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = settings.get_or_default(owner_id).await.currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -203,7 +204,8 @@ async fn handle_cash_withdraw(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = settings.get_or_default(owner_id).await.currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {

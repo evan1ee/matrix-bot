@@ -120,7 +120,7 @@ impl MatrixBot {
             handles.client.clone(),
             config.ai.clone(),
         ));
-        registry.register(crate::modules::account::AccountModule::new(
+        registry.register(crate::interface::chat::account::AccountModule::new(
             handles.client.clone(),
             config.web_url.clone(),
         ));

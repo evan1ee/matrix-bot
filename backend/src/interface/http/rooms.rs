@@ -156,7 +156,7 @@ mod tests {
             .services
             .rooms
             .replace_cached(
-                "acct_test_rooms",
+                &crate::domain::accounts::AccountId::new("acct_test_rooms"),
                 &[
                     JoinedRoom::new("!room1:example.com", Some("General"), false),
                     JoinedRoom::new("!room2:example.com", Some("DEV"), false),

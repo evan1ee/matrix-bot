@@ -13,7 +13,8 @@ pub async fn execute_tool(
     match name {
         "get_my_settings" => Some(
             async {
-                let settings = services.settings.get_or_default(owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 serde_json::to_string(&settings).map_err(|e| e.to_string())
             }
             .await,
@@ -27,9 +28,10 @@ pub async fn execute_tool(
         // touches the saved row.
         "update_my_settings" => Some(
             async {
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let saved = services
                     .settings
-                    .modify(owner_id, |settings| {
+                    .modify(&acct, |settings| {
                         if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
                             let parsed =
                                 parse_timezone(tz).ok_or(SettingsError::InvalidTimezone)?;

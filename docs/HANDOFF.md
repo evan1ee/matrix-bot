@@ -106,8 +106,8 @@ backend/src/
 | Task | Scope | State |
 |---|---|---|
 | 1 | rooms (the template) | ✅ `14c74ab`, fix `60d14b3` |
-| 2 | settings | ⏳ `227c95c`, fix `ecef800`. **The scoped re-review of the fix is still pending** (§7.1) |
-| 3 | accounts core + `AccountId` newtype | ☐ |
+| 2 | settings | ✅ `227c95c`, fix `ecef800` |
+| 3 | accounts core + `AccountId` newtype | ✅ |
 | 4 | accounts merge (dynamic SQL behind an allow-list, D-A) | ☐ |
 | 5 | bookmarks | ☐ |
 | 6 | footprints + habits | ☐ |
@@ -122,8 +122,8 @@ backend/src/
 | — | whole-branch review + one fix wave | ☐ |
 
 Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALLOW_LIST`; the list can only shrink):
-- `interface/channels/matrix/{invite,linking,reaction,reaction_targets}.rs`
-- `interface/http/{account/mod,auth/mod,auth/webauthn,life_activity,mcp,mod,reminders,webhooks}.rs`
+- `interface/channels/matrix/{invite,reaction,reaction_targets}.rs`
+- `interface/http/{life_activity,mcp,mod,reminders,webhooks}.rs`
 
 The last full test run: **808 passed / 0 failed / 11 ignored**.
 

@@ -89,9 +89,11 @@ impl BotModule for SettingsModule {
     }
 }
 
+use crate::domain::accounts::AccountId;
+
 async fn handle_settings_command(
     settings: &SettingsService,
-    owner_id: &str,
+    owner_id: &AccountId,
     clean_body: &str,
 ) -> Option<String> {
     let body = clean_body.trim();
@@ -146,7 +148,7 @@ fn usage() -> String {
     )
 }
 
-async fn show(settings: &SettingsService, owner_id: &str) -> String {
+async fn show(settings: &SettingsService, owner_id: &AccountId) -> String {
     let settings = settings.get_or_default(owner_id).await;
     let now = format_datetime(&chrono::Utc::now(), &settings.tz());
     let dev_room_display = settings
@@ -177,7 +179,7 @@ async fn show(settings: &SettingsService, owner_id: &str) -> String {
     )
 }
 
-async fn set_history(settings: &SettingsService, owner_id: &str, value: &str) -> String {
+async fn set_history(settings: &SettingsService, owner_id: &AccountId, value: &str) -> String {
     if value.is_empty() {
         return format!("⚠️ How many history messages?<br/>{}", usage());
     }
@@ -209,7 +211,7 @@ async fn set_history(settings: &SettingsService, owner_id: &str, value: &str) ->
     }
 }
 
-async fn set_voice(settings: &SettingsService, owner_id: &str, value: &str) -> String {
+async fn set_voice(settings: &SettingsService, owner_id: &AccountId, value: &str) -> String {
     if value.is_empty() {
         return format!(
             "⚠️ Which voice? A voice name or id (or <code>none</code> to clear).<br/>{}",
@@ -246,7 +248,7 @@ async fn set_voice(settings: &SettingsService, owner_id: &str, value: &str) -> S
     }
 }
 
-async fn set_timezone(settings: &SettingsService, owner_id: &str, value: &str) -> String {
+async fn set_timezone(settings: &SettingsService, owner_id: &AccountId, value: &str) -> String {
     if value.is_empty() {
         return format!("⚠️ Which timezone?<br/>{}", usage());
     }
@@ -270,7 +272,7 @@ async fn set_timezone(settings: &SettingsService, owner_id: &str, value: &str) -
     }
 }
 
-async fn set_currency(settings: &SettingsService, owner_id: &str, value: &str) -> String {
+async fn set_currency(settings: &SettingsService, owner_id: &AccountId, value: &str) -> String {
     if value.is_empty() {
         return format!("⚠️ Which currency?<br/>{}", usage());
     }
@@ -296,7 +298,7 @@ async fn set_currency(settings: &SettingsService, owner_id: &str, value: &str) -
     }
 }
 
-async fn set_dev_room(settings: &SettingsService, owner_id: &str, value: &str) -> String {
+async fn set_dev_room(settings: &SettingsService, owner_id: &AccountId, value: &str) -> String {
     let dev_room_id = if value.is_empty()
         || value.eq_ignore_ascii_case("none")
         || value.eq_ignore_ascii_case("clear")
@@ -328,7 +330,7 @@ async fn set_dev_room(settings: &SettingsService, owner_id: &str, value: &str) -
 /// side's change (see `SettingsService::modify`'s doc comment).
 async fn modify(
     settings: &SettingsService,
-    owner_id: &str,
+    owner_id: &AccountId,
     f: impl FnOnce(&mut UserSettings),
 ) -> Result<UserSettings, ()> {
     settings
@@ -338,7 +340,7 @@ async fn modify(
         })
         .await
         .map_err(|err| {
-            tracing::error!("Failed to save settings for {}: {:?}", owner_id, err);
+            tracing::error!(%owner_id, "Failed to save settings: {:?}", err);
         })
 }
 
@@ -353,8 +355,12 @@ mod tests {
         SettingsService::new(pool, EventBroadcaster::default())
     }
 
+    fn alice() -> AccountId {
+        AccountId::from("@alice:a")
+    }
+
     async fn run(settings: &SettingsService, body: &str) -> String {
-        handle_settings_command(settings, "@alice:a", body)
+        handle_settings_command(settings, &alice(), body)
             .await
             .expect("the handler must claim its own command")
     }
@@ -465,7 +471,7 @@ mod tests {
         let settings = service().await;
         let mut rx = settings.subscribe();
 
-        handle_settings_command(&settings, "@alice:a", "!settings tz Asia/Tokyo")
+        handle_settings_command(&settings, &alice(), "!settings tz Asia/Tokyo")
             .await
             .unwrap();
 
@@ -480,10 +486,10 @@ mod tests {
         let settings = service().await;
         let mut rx = settings.subscribe();
 
-        handle_settings_command(&settings, "@alice:a", "!settings tz Mars/Olympus")
+        handle_settings_command(&settings, &alice(), "!settings tz Mars/Olympus")
             .await
             .unwrap();
-        handle_settings_command(&settings, "@alice:a", "!settings")
+        handle_settings_command(&settings, &alice(), "!settings")
             .await
             .unwrap();
 
@@ -542,14 +548,14 @@ mod tests {
         let reply = run(&settings, "!settings voice alloy").await;
         assert!(reply.contains("alloy"), "{reply}");
         assert_eq!(
-            settings.get("@alice:a").await.unwrap().tts_voice.as_deref(),
+            settings.get(&alice()).await.unwrap().tts_voice.as_deref(),
             Some("alloy")
         );
 
         let reply2 = run(&settings, "!settings speaker 21m00Tcm4TlvDq8ikWAM").await;
         assert!(reply2.contains("21m00Tcm4TlvDq8ikWAM"), "{reply2}");
         assert_eq!(
-            settings.get("@alice:a").await.unwrap().tts_voice.as_deref(),
+            settings.get(&alice()).await.unwrap().tts_voice.as_deref(),
             Some("21m00Tcm4TlvDq8ikWAM")
         );
     }
@@ -563,7 +569,7 @@ mod tests {
         let reply = run(&settings, "!settings voice 0").await;
         assert!(reply.contains('0'), "{reply}");
 
-        let saved = settings.get("@alice:a").await.unwrap();
+        let saved = settings.get(&alice()).await.unwrap();
         assert_eq!(saved.tts_voice.as_deref(), Some("0"));
     }
 
@@ -575,7 +581,7 @@ mod tests {
         let reply = run(&settings, "!settings voice none").await;
         assert!(reply.contains("cleared"), "{reply}");
 
-        let saved = settings.get("@alice:a").await.unwrap();
+        let saved = settings.get(&alice()).await.unwrap();
         assert_eq!(saved.tts_voice, None);
     }
 
@@ -594,7 +600,7 @@ mod tests {
             assert!(reply.contains("⚠️"), "{bad} -> {reply}");
         }
 
-        let saved = settings.get("@alice:a").await.unwrap();
+        let saved = settings.get(&alice()).await.unwrap();
         assert_eq!(
             saved.tts_voice.as_deref(),
             Some("alloy"),
@@ -607,13 +613,13 @@ mod tests {
         let settings = service().await;
         let mut rx = settings.subscribe();
 
-        handle_settings_command(&settings, "@alice:a", "!settings voice alloy")
+        handle_settings_command(&settings, &alice(), "!settings voice alloy")
             .await
             .unwrap();
         let event = rx.try_recv().expect("a valid voice change must broadcast");
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
 
-        handle_settings_command(&settings, "@alice:a", "!settings voice a/b")
+        handle_settings_command(&settings, &alice(), "!settings voice a/b")
             .await
             .unwrap();
         assert!(
@@ -628,34 +634,32 @@ mod tests {
     async fn test_claims_only_its_own_commands() {
         let settings = service().await;
 
-        assert!(handle_settings_command(&settings, "@alice:a", "!settings")
+        assert!(handle_settings_command(&settings, &alice(), "!settings")
             .await
             .is_some());
         assert!(
-            handle_settings_command(&settings, "@alice:a", "!settings tz Asia/Tokyo")
+            handle_settings_command(&settings, &alice(), "!settings tz Asia/Tokyo")
                 .await
                 .is_some()
         );
-        assert!(handle_settings_command(&settings, "@alice:a", "!todo list")
+        assert!(handle_settings_command(&settings, &alice(), "!todo list")
             .await
             .is_none());
         assert!(
-            handle_settings_command(&settings, "@alice:a", "!expense list")
+            handle_settings_command(&settings, &alice(), "!expense list")
                 .await
                 .is_none()
         );
-        assert!(
-            handle_settings_command(&settings, "@alice:a", "hello there")
-                .await
-                .is_none()
-        );
+        assert!(handle_settings_command(&settings, &alice(), "hello there")
+            .await
+            .is_none());
     }
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: alice(),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()

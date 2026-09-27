@@ -11,6 +11,7 @@
 use sqlx::PgPool;
 
 use crate::application::AppError;
+use crate::domain::accounts::AccountId;
 use crate::domain::settings::{
     parse_currency, parse_timezone, RawSettingsUpdate, SettingsError, UserSettings,
 };
@@ -48,15 +49,17 @@ impl SettingsService {
 
     /// The caller's settings, or the documented defaults if they have never
     /// saved any (AGENTS.md: a missing row means defaults, never an error).
-    pub async fn get(&self, owner_id: &str) -> Result<UserSettings, AppError> {
-        Ok(repo::get(&self.pool, owner_id).await?.unwrap_or_default())
+    pub async fn get(&self, owner_id: &AccountId) -> Result<UserSettings, AppError> {
+        Ok(repo::get(&self.pool, owner_id.as_str())
+            .await?
+            .unwrap_or_default())
     }
 
     /// Reads settings for a caller that cannot fail its own work over a
     /// settings lookup (a command reply, another feature's read path): a
     /// database error degrades to the defaults and is logged, rather than
     /// aborting whatever the caller was actually doing.
-    pub async fn get_or_default(&self, owner_id: &str) -> UserSettings {
+    pub async fn get_or_default(&self, owner_id: &AccountId) -> UserSettings {
         match self.get(owner_id).await {
             Ok(settings) => settings,
             Err(err) => {
@@ -78,11 +81,11 @@ impl SettingsService {
     /// silently keeps rendering the old values.
     pub async fn save(
         &self,
-        owner_id: &str,
+        owner_id: &AccountId,
         settings: UserSettings,
     ) -> Result<UserSettings, AppError> {
         validate(&settings)?;
-        repo::upsert(&self.pool, owner_id, &settings).await?;
+        repo::upsert(&self.pool, owner_id.as_str(), &settings).await?;
         self.events.send(SystemEvent::SettingsUpdated {
             owner_id: owner_id.to_string(),
             settings: settings.clone(),
@@ -105,17 +108,17 @@ impl SettingsService {
     /// `set_time`/`toggle`, `ai::config_cmd::handle_set_history`,
     /// `interface/http/ai.rs`'s max-history-turns update, and the AI tool's
     /// `update_my_settings`, plus [`Self::update`] below.
-    pub async fn modify<F>(&self, owner_id: &str, f: F) -> Result<UserSettings, AppError>
+    pub async fn modify<F>(&self, owner_id: &AccountId, f: F) -> Result<UserSettings, AppError>
     where
         F: FnOnce(&mut UserSettings) -> Result<(), SettingsError>,
     {
         let mut tx = self.pool.begin().await?;
-        let mut settings = repo::get_for_update(&mut *tx, owner_id)
+        let mut settings = repo::get_for_update(&mut *tx, owner_id.as_str())
             .await?
             .unwrap_or_default();
         f(&mut settings)?;
         validate(&settings)?;
-        repo::upsert(&mut *tx, owner_id, &settings).await?;
+        repo::upsert(&mut *tx, owner_id.as_str(), &settings).await?;
         tx.commit().await?;
         self.events.send(SystemEvent::SettingsUpdated {
             owner_id: owner_id.to_string(),
@@ -129,7 +132,7 @@ impl SettingsService {
     /// one use case behind the HTTP `PUT /api/v1/settings` endpoint.
     pub async fn update(
         &self,
-        owner_id: &str,
+        owner_id: &AccountId,
         raw: RawSettingsUpdate,
     ) -> Result<UserSettings, AppError> {
         self.modify(owner_id, move |current| {
@@ -143,8 +146,8 @@ impl SettingsService {
     /// or `None` on a read failure — briefing delivery degrades to "not yet
     /// delivered today" rather than skipping every account because one read
     /// failed.
-    pub async fn get_last_briefing_date(&self, owner_id: &str) -> Option<String> {
-        repo::get_last_briefing_date(&self.pool, owner_id)
+    pub async fn get_last_briefing_date(&self, owner_id: &AccountId) -> Option<String> {
+        repo::get_last_briefing_date(&self.pool, owner_id.as_str())
             .await
             .unwrap_or_else(|err| {
                 tracing::warn!("Could not read last briefing date for {owner_id}: {err:?}");
@@ -154,10 +157,10 @@ impl SettingsService {
 
     pub async fn update_last_briefing_date(
         &self,
-        owner_id: &str,
+        owner_id: &AccountId,
         date_str: &str,
     ) -> Result<(), AppError> {
-        Ok(repo::update_last_briefing_date(&self.pool, owner_id, date_str).await?)
+        Ok(repo::update_last_briefing_date(&self.pool, owner_id.as_str(), date_str).await?)
     }
 
     /// Subscribes to the events this service publishes. Test-only: a
@@ -182,12 +185,10 @@ mod tests {
     #[tokio::test]
     async fn a_caller_with_no_saved_row_gets_the_defaults() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
+        assert_eq!(service.get(&owner).await.unwrap(), UserSettings::default());
         assert_eq!(
-            service.get("@evan:mbm.one").await.unwrap(),
-            UserSettings::default()
-        );
-        assert_eq!(
-            service.get_or_default("@evan:mbm.one").await,
+            service.get_or_default(&owner).await,
             UserSettings::default()
         );
     }
@@ -195,14 +196,15 @@ mod tests {
     #[tokio::test]
     async fn get_or_default_degrades_instead_of_failing_on_a_closed_pool() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         service.pool.close().await;
 
         assert_eq!(
-            service.get_or_default("@evan:mbm.one").await,
+            service.get_or_default(&owner).await,
             UserSettings::default()
         );
         assert!(matches!(
-            service.get("@evan:mbm.one").await,
+            service.get(&owner).await,
             Err(AppError::Database(_))
         ));
     }
@@ -211,10 +213,11 @@ mod tests {
     async fn save_persists_and_broadcasts_to_the_owner() {
         let service = service().await;
         let mut rx = service.events.subscribe();
+        let owner = AccountId::new("@evan:mbm.one");
 
         let saved = service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     timezone: "Asia/Shanghai".to_string(),
                     currency: "CNY".to_string(),
@@ -225,7 +228,7 @@ mod tests {
             .unwrap();
         assert_eq!(saved.timezone, "Asia/Shanghai");
 
-        let read_back = service.get("@evan:mbm.one").await.unwrap();
+        let read_back = service.get(&owner).await.unwrap();
         assert_eq!(read_back, saved);
 
         let event = rx.try_recv().unwrap();
@@ -236,9 +239,10 @@ mod tests {
     #[tokio::test]
     async fn update_validates_before_saving_anything() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     timezone: "Asia/Shanghai".to_string(),
                     ..UserSettings::default()
@@ -249,7 +253,7 @@ mod tests {
 
         let err = service
             .update(
-                "@evan:mbm.one",
+                &owner,
                 RawSettingsUpdate {
                     timezone: "Mars/Olympus".to_string(),
                     currency: "USD".to_string(),
@@ -265,16 +269,17 @@ mod tests {
         assert!(matches!(err, AppError::Validation(_)));
 
         // Rejected input must not have clobbered the previously saved value.
-        let unchanged = service.get("@evan:mbm.one").await.unwrap();
+        let unchanged = service.get(&owner).await.unwrap();
         assert_eq!(unchanged.timezone, "Asia/Shanghai");
     }
 
     #[tokio::test]
     async fn update_merges_with_the_current_row() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     max_history_turns: 42,
                     ..UserSettings::default()
@@ -285,7 +290,7 @@ mod tests {
 
         let updated = service
             .update(
-                "@evan:mbm.one",
+                &owner,
                 RawSettingsUpdate {
                     timezone: "Asia/Tokyo".to_string(),
                     currency: "JPY".to_string(),
@@ -308,29 +313,27 @@ mod tests {
     #[tokio::test]
     async fn last_briefing_date_round_trips() {
         let service = service().await;
-        let owner = "@evan:mbm.one";
-        assert_eq!(service.get_last_briefing_date(owner).await, None);
+        let owner = AccountId::new("@evan:mbm.one");
+        assert_eq!(service.get_last_briefing_date(&owner).await, None);
 
         service
-            .update_last_briefing_date(owner, "2026-09-18")
+            .update_last_briefing_date(&owner, "2026-09-18")
             .await
             .unwrap();
 
         assert_eq!(
-            service.get_last_briefing_date(owner).await,
+            service.get_last_briefing_date(&owner).await,
             Some("2026-09-18".to_string())
         );
     }
 
-    /// I1: `save` is a public entry point too (not just `update`/`modify`),
-    /// so it must not persist a row nothing validated — the exact defect the
-    /// AI tool had before this fix.
     #[tokio::test]
     async fn save_rejects_an_invalid_timezone_without_persisting_anything() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         let err = service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     timezone: "Mars/Olympus".to_string(),
                     ..UserSettings::default()
@@ -340,7 +343,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
         assert_eq!(
-            service.get("@evan:mbm.one").await.unwrap(),
+            service.get(&owner).await.unwrap(),
             UserSettings::default(),
             "a rejected save must not create a row"
         );
@@ -349,9 +352,10 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_an_invalid_currency() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         let err = service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     currency: "EURO".to_string(),
                     ..UserSettings::default()
@@ -362,17 +366,13 @@ mod tests {
         assert!(matches!(err, AppError::Validation(_)));
     }
 
-    /// I3: `modify`'s `SELECT ... FOR UPDATE` must serialize two concurrent
-    /// read-modify-writes for the same owner, or one overwrites the other's
-    /// change — the lost-update race the old `get_or_default`-then-`save`
-    /// pattern (still exactly what every read-then-save caller before this
-    /// fix did) was exposed to.
     #[tokio::test]
     async fn concurrent_modifies_do_not_lose_an_update() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         service
             .save(
-                "@evan:mbm.one",
+                &owner,
                 UserSettings {
                     max_history_turns: 10,
                     ..UserSettings::default()
@@ -385,34 +385,26 @@ mod tests {
             s.max_history_turns += 1;
             Ok(())
         };
-        let (a, b) = tokio::join!(
-            service.modify("@evan:mbm.one", bump),
-            service.modify("@evan:mbm.one", bump)
-        );
+        let (a, b) = tokio::join!(service.modify(&owner, bump), service.modify(&owner, bump));
         a.unwrap();
         b.unwrap();
 
-        let settings = service.get("@evan:mbm.one").await.unwrap();
+        let settings = service.get(&owner).await.unwrap();
         assert_eq!(
             settings.max_history_turns, 12,
             "both increments must land — a lost update would leave this at 11"
         );
     }
 
-    /// I3: a read error must abort the write rather than being treated as
-    /// "no row yet" and silently resetting every field the caller did not
-    /// touch. `modify` itself can't distinguish "no row" from "read failed"
-    /// without a live error to inject, so this exercises the same guarantee
-    /// through `update` on a pool that is closed before the call: the whole
-    /// transaction (including the `SELECT`) fails, and nothing is upserted.
     #[tokio::test]
     async fn update_on_a_closed_pool_fails_and_writes_nothing() {
         let service = service().await;
+        let owner = AccountId::new("@evan:mbm.one");
         service.pool.close().await;
 
         let err = service
             .update(
-                "@evan:mbm.one",
+                &owner,
                 RawSettingsUpdate {
                     timezone: "Asia/Tokyo".to_string(),
                     currency: "JPY".to_string(),

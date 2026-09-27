@@ -50,6 +50,14 @@ impl AccountRepository {
         Ok(())
     }
 
+    pub async fn delete(pool: &DbPool, account_id: &str) -> Result<(), sqlx::Error> {
+        crate::infrastructure::postgres::repositories::accounts::core::delete(
+            pool,
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
+    }
+
     pub async fn find(pool: &DbPool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
         crate::db_fetch_optional!(
             pool,

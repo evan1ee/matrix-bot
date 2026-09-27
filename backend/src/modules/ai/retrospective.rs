@@ -62,7 +62,8 @@ pub async fn generate_weekly_retrospective(
     settings: &SettingsService,
     owner_id: &str,
 ) -> anyhow::Result<WeeklyRetrospective> {
-    let settings = settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
     let tz = settings.tz();
     let default_currency = settings.currency.clone();
 
@@ -441,7 +442,7 @@ mod tests {
         // User sets default currency to CNY
         settings
             .save(
-                owner,
+                &crate::domain::accounts::AccountId::new(owner),
                 UserSettings {
                     timezone: "Asia/Shanghai".to_string(),
                     currency: "CNY".to_string(),

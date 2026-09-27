@@ -133,7 +133,7 @@ pub async fn get_settings(
     let settings = state
         .services
         .settings
-        .get(&user.owner_id())
+        .get(&user.account_id)
         .await
         .api_context("Failed to read settings")?;
 
@@ -159,7 +159,7 @@ pub async fn update_settings(
     let saved = state
         .services
         .settings
-        .update(&user.owner_id(), payload.into())
+        .update(&user.account_id, payload.into())
         .await
         .api_context("Failed to save settings")?;
 

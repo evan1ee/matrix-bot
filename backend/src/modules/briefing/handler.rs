@@ -54,7 +54,8 @@ async fn generate_now(
     owner_id: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let settings = settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
     match generate_briefing(pool, owner_id, &settings).await {
         Ok(payload) => {
             if let Some(b) = broadcaster {
@@ -91,8 +92,9 @@ async fn set_time(settings: &SettingsService, owner_id: &str, raw_time: &str) ->
     }
 
     let briefing_time = raw_time.trim().to_string();
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
     match settings
-        .modify(owner_id, |current| {
+        .modify(&acct, |current| {
             current.briefing_time = briefing_time;
             Ok(())
         })
@@ -108,8 +110,9 @@ async fn set_time(settings: &SettingsService, owner_id: &str, raw_time: &str) ->
 }
 
 async fn toggle(settings: &SettingsService, owner_id: &str, enabled: bool) -> String {
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
     match settings
-        .modify(owner_id, |current| {
+        .modify(&acct, |current| {
             current.briefing_enabled = enabled;
             Ok(())
         })
@@ -132,9 +135,10 @@ async fn toggle(settings: &SettingsService, owner_id: &str, enabled: bool) -> St
 }
 
 async fn show_status(service: &SettingsService, owner_id: &str) -> String {
-    let settings = service.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = service.get_or_default(&acct).await;
     let last_date = service
-        .get_last_briefing_date(owner_id)
+        .get_last_briefing_date(&acct)
         .await
         .unwrap_or_else(|| "尚未发送过".to_string());
 

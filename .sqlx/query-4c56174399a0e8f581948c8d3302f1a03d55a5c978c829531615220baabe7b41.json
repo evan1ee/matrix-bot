@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id, passkey_json, label, created_at, last_used_at FROM webauthn_credentials WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "passkey_json",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "passkey_json"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_used_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "webauthn_credentials",
+            "name": "last_used_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "4c56174399a0e8f581948c8d3302f1a03d55a5c978c829531615220baabe7b41"
+}

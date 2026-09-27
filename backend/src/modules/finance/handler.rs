@@ -82,7 +82,8 @@ pub async fn handle_finance_command(
         let args = rest[3..].trim();
         // The user's saved currency, so `!expense add 9.99 coffee` books in the
         // currency they actually spend in rather than a hardcoded USD.
-        let default_currency = settings.get_or_default(owner_id).await.currency;
+        let acct = crate::domain::accounts::AccountId::from(owner_id);
+        let default_currency = settings.get_or_default(&acct).await.currency;
         return handle_add(
             pool,
             broadcaster,

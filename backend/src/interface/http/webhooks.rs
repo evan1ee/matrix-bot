@@ -36,10 +36,11 @@ pub(crate) async fn queue_and_broadcast(
 ) -> Result<String, ApiError> {
     let target_room = if let Some(ref override_room) = room_override {
         let client_guard = state.bot_client.read().await;
+        let owner_id = crate::domain::accounts::AccountId::from(webhook.owner_id.as_str());
         let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
             &state.services.rooms,
             client_guard.as_ref(),
-            &webhook.owner_id,
+            &owner_id,
             override_room,
         )
         .await;
@@ -393,7 +394,7 @@ pub async fn delete_webhook(
 
     state.broadcaster.send(SystemEvent::WebhookDeleted {
         id,
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
     });
 
     Ok(StatusCode::NO_CONTENT)

@@ -71,7 +71,8 @@ pub async fn handle_buy(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = settings.get_or_default(owner_id).await.currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
 
     let parsed = match parse_buy(args, &default_currency) {
         Ok(p) => p,
@@ -153,7 +154,8 @@ pub async fn handle_record(
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = settings.get_or_default(owner_id).await.currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let parsed = match parse_buy(args, &default_currency) {
         Ok(p) => p,
         Err(err) => return format!("⚠️ {}.", html_escape(&err)),

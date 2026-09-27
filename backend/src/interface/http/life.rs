@@ -84,7 +84,7 @@ pub async fn upsert_profile(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     state.broadcaster.send(SystemEvent::LifeProfileUpdated {
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
         profile: profile.clone(),
     });
 
@@ -356,7 +356,7 @@ pub async fn delete_day(
 
     if deleted {
         state.broadcaster.send(SystemEvent::LifeDayCleared {
-            owner_id: user.account_id.clone(),
+            owner_id: user.account_id.to_string(),
             date: date.clone(),
         });
     }
@@ -394,7 +394,7 @@ mod tests {
     async fn test_profile_and_day_api_flow() {
         let (state, _) = create_test_state().await;
         let user = AuthUser {
-            account_id: "user_api_1".to_string(),
+            account_id: crate::domain::accounts::AccountId::new("user_api_1"),
             display_name: "User Api 1".to_string(),
             session_id_hash: "hash_1".to_string(),
             last_verified_at: chrono::Utc::now(),

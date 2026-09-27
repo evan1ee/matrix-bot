@@ -24,7 +24,8 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let default_cur = services.settings.get_or_default(owner_id).await.currency;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let raw_currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -55,7 +56,8 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let default_cur = services.settings.get_or_default(owner_id).await.currency;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let raw_currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())

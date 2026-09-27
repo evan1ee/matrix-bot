@@ -1,0 +1,568 @@
+//! Pure accounts domain types, invariants, and business rules.
+//!
+//! Owns the `AccountId` identity type, account status, link rules,
+//! security event types, session invariants, and the `WEB_ONLY` Matrix command ceiling.
+//! Depends only on std, chrono, uuid, serde, and thiserror.
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// The single owner identifier used across all application tables.
+/// Wraps the `acct_<32 hex chars>` string representation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AccountId(String);
+
+impl AccountId {
+    /// Creates a new `AccountId` from a string-like value.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// Borrows the underlying string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consumes the wrapper and returns the owned string.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Converts this account ID to a UUID WebAuthn user handle if it matches
+    /// the `acct_<32 hex characters>` format.
+    pub fn to_handle(&self) -> Option<uuid::Uuid> {
+        uuid::Uuid::parse_str(self.0.strip_prefix("acct_")?).ok()
+    }
+
+    /// Converts a UUID WebAuthn user handle back into an `AccountId`.
+    pub fn from_handle(handle: &uuid::Uuid) -> Self {
+        Self(format!("acct_{}", handle.simple()))
+    }
+}
+
+impl std::fmt::Display for AccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::ops::Deref for AccountId {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for AccountId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for AccountId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for AccountId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for AccountId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<&String> for AccountId {
+    fn from(s: &String) -> Self {
+        Self(s.clone())
+    }
+}
+
+impl From<AccountId> for String {
+    fn from(id: AccountId) -> Self {
+        id.0
+    }
+}
+
+/// An account that has a credential of its own.
+pub const STATUS_ACTIVE: &str = "active";
+
+/// An account auto-provisioned for an MXID, reachable only through that MXID
+/// until someone claims it by registering a credential.
+pub const STATUS_UNCLAIMED: &str = "unclaimed";
+
+/// Every table that carries an `owner_id` and whose rows follow a merge.
+pub const OWNED_TABLES: &[&str] = &[
+    "todos",
+    "reminders",
+    "transactions",
+    "recurring_bills",
+    "portfolio_holdings",
+    "portfolio_cash_balances",
+    "portfolio_daily_snapshots",
+    "portfolio_price_alerts",
+    "finance_categories",
+    "finance_shares",
+    "user_settings",
+    "bookmarks",
+    "habits",
+    "habit_logs",
+    "life_day_logs",
+    "life_profiles",
+    "footprints",
+    "ai_conversations",
+    "ai_user_configs",
+    "webhooks",
+    "webhook_outbox",
+    "bot_message_targets",
+];
+
+/// Tables carrying `owner_id` that a merge moves through a dedicated routine.
+pub const OWNER_ID_MERGED_SEPARATELY: &[&str] = &["portfolio_audit_log"];
+
+/// Tables keyed by `account_id` whose rows follow the absorbed account.
+pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
+    "matrix_links",
+    "webauthn_credentials",
+    "security_events",
+    "account_rooms",
+];
+
+/// Tables keyed by `account_id` whose rows are destroyed rather than moved.
+pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
+    "sessions",
+    "recovery_codes",
+    "recovery_requests",
+    "mcp_tokens",
+    "passkey_enrollment_tokens",
+    "matrix_link_challenges",
+];
+
+/// Tables carrying `account_id` that a merge deliberately leaves alone.
+pub const ACCOUNT_ID_UNTOUCHED: &[&str] = &["web_users"];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Account {
+    pub id: AccountId,
+    pub display_name: String,
+    pub status: String,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl Account {
+    pub fn is_unclaimed(&self) -> bool {
+        self.status == STATUS_UNCLAIMED
+    }
+}
+
+/// A Matrix user ID bound to an account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatrixLink {
+    pub mxid: String,
+    pub account_id: AccountId,
+    pub linked_at: Option<DateTime<Utc>>,
+}
+
+/// A link challenge issued for an account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkChallenge {
+    pub code: String,
+    pub account_id: AccountId,
+    pub expires_at: DateTime<Utc>,
+    pub consumed_at: Option<DateTime<Utc>>,
+}
+
+/// Outcome of attempting to claim a Matrix link code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkOutcome {
+    NotADirectMessage,
+    UnknownCode,
+    AlreadyLinked,
+    Linked {
+        account_id: AccountId,
+    },
+    NeedsMergeConfirmation {
+        account_id: AccountId,
+        from_account: AccountId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityEventKind {
+    SignedIn,
+    PasskeyAdded,
+    PasskeyRemoved,
+    PasskeyRenamed,
+    MatrixLinked,
+    MatrixUnlinked,
+    AccountsMerged,
+    RecoveryCodesIssued,
+    RecoveryCodeUsed,
+    RecoveryRequested,
+    RecoveryCancelled,
+    RecoveryCompleted,
+    SessionsRevoked,
+    FinancialDataExported,
+}
+
+impl SecurityEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SignedIn => "signed_in",
+            Self::PasskeyAdded => "passkey_added",
+            Self::PasskeyRemoved => "passkey_removed",
+            Self::PasskeyRenamed => "passkey_renamed",
+            Self::MatrixLinked => "matrix_linked",
+            Self::MatrixUnlinked => "matrix_unlinked",
+            Self::AccountsMerged => "accounts_merged",
+            Self::RecoveryCodesIssued => "recovery_codes_issued",
+            Self::RecoveryCodeUsed => "recovery_code_used",
+            Self::RecoveryRequested => "recovery_requested",
+            Self::RecoveryCancelled => "recovery_cancelled",
+            Self::RecoveryCompleted => "recovery_completed",
+            Self::SessionsRevoked => "sessions_revoked",
+            Self::FinancialDataExported => "financial_data_exported",
+        }
+    }
+
+    pub fn warrants_a_dm(&self) -> bool {
+        !matches!(self, Self::SignedIn)
+    }
+
+    pub fn message(&self, detail: Option<&str>) -> String {
+        let suffix = detail.map(|d| format!(" ({d})")).unwrap_or_default();
+        match self {
+            Self::SignedIn => format!("Signed in{suffix}."),
+            Self::PasskeyAdded => format!("A passkey was added to your account{suffix}."),
+            Self::PasskeyRemoved => format!("A passkey was removed from your account{suffix}."),
+            Self::PasskeyRenamed => format!("A passkey was renamed{suffix}."),
+            Self::MatrixLinked => format!("A Matrix account was linked{suffix}."),
+            Self::MatrixUnlinked => format!("A Matrix account was unlinked{suffix}."),
+            Self::AccountsMerged => format!("Existing data was merged into your account{suffix}."),
+            Self::RecoveryCodesIssued => {
+                format!("New recovery codes were generated{suffix}. Your old codes no longer work.")
+            }
+            Self::RecoveryCodeUsed => {
+                format!("A recovery code was used to sign in{suffix}.")
+            }
+            Self::RecoveryRequested => format!(
+                "Account recovery was requested{suffix}. It will not take effect for 24 hours — \
+                 if this was not you, cancel it from any signed-in device now."
+            ),
+            Self::RecoveryCancelled => format!("Account recovery was cancelled{suffix}."),
+            Self::RecoveryCompleted => format!("Account recovery completed{suffix}."),
+            Self::SessionsRevoked => format!("Other sessions were signed out{suffix}."),
+            Self::FinancialDataExported => format!("Financial data was exported{suffix}."),
+        }
+    }
+}
+
+impl std::str::FromStr for SecurityEventKind {
+    type Err = AccountsError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "signed_in" => Ok(Self::SignedIn),
+            "passkey_added" => Ok(Self::PasskeyAdded),
+            "passkey_removed" => Ok(Self::PasskeyRemoved),
+            "passkey_renamed" => Ok(Self::PasskeyRenamed),
+            "matrix_linked" => Ok(Self::MatrixLinked),
+            "matrix_unlinked" => Ok(Self::MatrixUnlinked),
+            "accounts_merged" => Ok(Self::AccountsMerged),
+            "recovery_codes_issued" => Ok(Self::RecoveryCodesIssued),
+            "recovery_code_used" => Ok(Self::RecoveryCodeUsed),
+            "recovery_requested" => Ok(Self::RecoveryRequested),
+            "recovery_cancelled" => Ok(Self::RecoveryCancelled),
+            "recovery_completed" => Ok(Self::RecoveryCompleted),
+            "sessions_revoked" => Ok(Self::SessionsRevoked),
+            "financial_data_exported" => Ok(Self::FinancialDataExported),
+            _ => Err(AccountsError::Validation(format!(
+                "unknown security event kind: {s}"
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Display for SecurityEventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityEvent {
+    pub id: i64,
+    pub account_id: AccountId,
+    pub kind: String,
+    pub detail: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+pub const COOKIE_NAME: &str = "mbm_session";
+pub const IDLE_TIMEOUT_DAYS: i64 = 30;
+pub const ABSOLUTE_TIMEOUT_DAYS: i64 = 90;
+pub const STEP_UP_WINDOW_MINUTES: i64 = 15;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Session {
+    pub id_hash: String,
+    pub account_id: AccountId,
+    pub created_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub last_verified_at: DateTime<Utc>,
+    pub restricted_until: Option<DateTime<Utc>>,
+    pub user_agent: Option<String>,
+    pub ip: Option<String>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl Session {
+    pub fn is_recently_verified(&self, now: DateTime<Utc>) -> bool {
+        now.signed_duration_since(self.last_verified_at) < Duration::minutes(STEP_UP_WINDOW_MINUTES)
+    }
+
+    pub fn is_restricted(&self, now: DateTime<Utc>) -> bool {
+        self.restricted_until.is_some_and(|until| now < until)
+    }
+
+    pub fn is_live(&self, now: DateTime<Utc>) -> bool {
+        self.revoked_at.is_none()
+            && now.signed_duration_since(self.last_seen_at) < Duration::days(IDLE_TIMEOUT_DAYS)
+            && now.signed_duration_since(self.created_at) < Duration::days(ABSOLUTE_TIMEOUT_DAYS)
+    }
+}
+
+/// Hashes a session cookie into its storage key.
+pub fn hash_token(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, byte| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{byte:02x}");
+            acc
+        })
+}
+
+/// A registered passkey row as stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredCredential {
+    pub id: String,
+    pub account_id: AccountId,
+    pub passkey_json: String,
+    pub label: String,
+    pub created_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+impl StoredCredential {
+    pub fn passkey(&self) -> Option<webauthn_rs::prelude::Passkey> {
+        match serde_json::from_str(&self.passkey_json) {
+            Ok(passkey) => Some(passkey),
+            Err(err) => {
+                tracing::error!("Credential {} will not deserialise: {:?}", self.id, err);
+                None
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeleteOutcome {
+    Removed,
+    NotFound,
+    WouldLockOut,
+}
+
+pub const RECOVERY_CODE_COUNT: usize = 10;
+pub const RECOVERY_DELAY_HOURS: i64 = 24;
+pub const RECOVERY_WINDOW_HOURS: i64 = 48;
+pub const RECOVERY_RESTRICTION_HOURS: i64 = 72;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RecoveryOutcome {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MaturedRecovery {
+    Ready { account_id: AccountId },
+    TooEarly,
+    Unavailable,
+}
+
+/// Commands that exist on the web only, and what to say about each.
+pub const WEB_ONLY: &[(&str, &str)] = &[
+    ("export", "Exporting financial data"),
+    ("sessions", "Managing signed-in devices"),
+    ("recoverycodes", "Generating recovery codes"),
+    (
+        "unlink",
+        "Unlinking passkeys, Matrix accounts and signed-in devices",
+    ),
+];
+
+pub fn web_only_command_description(cmd: &str) -> Option<&'static str> {
+    let clean = cmd.trim().trim_start_matches('!').to_lowercase();
+    WEB_ONLY
+        .iter()
+        .find(|(name, _)| *name == clean)
+        .map(|(_, desc)| *desc)
+}
+
+/// Accepts the link code however a human typed it — lower case, spaces, missing dash.
+pub fn normalise_link_code(code: &str) -> String {
+    let cleaned: String = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+
+    if cleaned.len() == 8 {
+        format!("{}-{}", &cleaned[..4], &cleaned[4..])
+    } else {
+        cleaned
+    }
+}
+
+/// Accepts the recovery code however a human typed it — lower case, spaces, missing dash.
+pub fn normalise_recovery_code(code: &str) -> String {
+    let cleaned: String = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+
+    if cleaned.len() == 10 {
+        format!("{}-{}", &cleaned[..5], &cleaned[5..])
+    } else {
+        cleaned
+    }
+}
+
+/// The display name to give an account provisioned for `mxid`.
+pub fn display_name_for_mxid(mxid: &str) -> String {
+    mxid.trim_start_matches('@')
+        .split(':')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(mxid)
+        .to_string()
+}
+
+pub fn account_id_to_handle(account_id: &str) -> Option<uuid::Uuid> {
+    uuid::Uuid::parse_str(account_id.strip_prefix("acct_")?).ok()
+}
+
+pub fn handle_to_account_id(handle: &uuid::Uuid) -> String {
+    format!("acct_{}", handle.simple())
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum AccountsError {
+    #[error("Account not found")]
+    AccountNotFound,
+    #[error("That command is available on the web app only: {0}")]
+    WebOnlyCommand(&'static str),
+    #[error("An account that already has a passkey cannot add another via Matrix")]
+    FirstPasskeyOnly,
+    #[error("Send this command in a direct message")]
+    NotADirectMessage,
+    #[error("Invalid or expired code")]
+    InvalidCode,
+    #[error("This Matrix account is already linked to another account")]
+    AlreadyLinked,
+    #[error("Invalid recovery code")]
+    InvalidRecoveryCode,
+    #[error("Recovery is not yet matured")]
+    RecoveryNotMatured,
+    #[error("Validation error: {0}")]
+    Validation(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_account_id_handle_round_trip() {
+        let id = AccountId::new("acct_26ab01c0f4c19b7d854f46dca154ee89");
+        let handle = id.to_handle().expect("valid handle");
+        assert_eq!(AccountId::from_handle(&handle), id);
+    }
+
+    #[test]
+    fn test_malformed_account_ids_have_no_handle() {
+        for bad in [
+            "26ab01c0f4c19b7d854f46dca154ee89",
+            "acct_",
+            "acct_nothex",
+            "@user:server",
+            "",
+        ] {
+            assert!(AccountId::new(bad).to_handle().is_none());
+        }
+    }
+
+    #[test]
+    fn test_display_name_extraction() {
+        assert_eq!(display_name_for_mxid("@evan:mbm.one"), "evan");
+        assert_eq!(display_name_for_mxid("nonsense"), "nonsense");
+        assert_eq!(display_name_for_mxid("@"), "@");
+    }
+
+    #[test]
+    fn test_web_only_command_gate() {
+        assert!(web_only_command_description("export").is_some());
+        assert!(web_only_command_description("!export").is_some());
+        assert!(web_only_command_description("sessions").is_some());
+        assert!(web_only_command_description("unlink").is_some());
+        assert!(web_only_command_description("todo").is_none());
+    }
+
+    #[test]
+    fn test_security_event_kind_round_trip() {
+        let kind = SecurityEventKind::SignedIn;
+        assert_eq!(kind.as_str(), "signed_in");
+        assert_eq!("signed_in".parse::<SecurityEventKind>().unwrap(), kind);
+    }
+
+    #[test]
+    fn test_session_live_and_verified_invariants() {
+        let now = Utc::now();
+        let session = Session {
+            id_hash: "hash".to_string(),
+            account_id: AccountId::new("acct_1"),
+            created_at: now - Duration::days(5),
+            last_seen_at: now - Duration::minutes(10),
+            last_verified_at: now - Duration::minutes(5),
+            restricted_until: None,
+            user_agent: None,
+            ip: None,
+            revoked_at: None,
+        };
+
+        assert!(session.is_live(now));
+        assert!(session.is_recently_verified(now));
+        assert!(!session.is_restricted(now));
+
+        // Revoked session is not live
+        let mut revoked = session.clone();
+        revoked.revoked_at = Some(now);
+        assert!(!revoked.is_live(now));
+
+        // Idle expired session (> 30 days) is not live
+        let mut idle = session.clone();
+        idle.last_seen_at = now - Duration::days(31);
+        assert!(!idle.is_live(now));
+    }
+}

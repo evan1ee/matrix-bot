@@ -7,7 +7,6 @@ use tracing::info;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
-pub mod account;
 pub mod ai;
 pub mod bookmarks;
 pub mod briefing;
@@ -59,7 +58,7 @@ impl ParsedCommand {
     /// Binds this command to the account that will own anything it creates.
     pub fn for_owner(
         self,
-        owner_id: impl Into<String>,
+        owner_id: impl Into<crate::domain::accounts::AccountId>,
         sender_mxid: impl Into<String>,
         is_direct: bool,
     ) -> CommandContext {
@@ -90,7 +89,7 @@ pub struct CommandContext {
     /// — never the MXID itself. Two MXIDs linked to the same account produce
     /// the same value here, which is what makes a user's data follow them
     /// across Matrix identities and the web UI alike.
-    pub owner_id: String,
+    pub owner_id: crate::domain::accounts::AccountId,
     /// The Matrix identity that sent this, for provenance and for the two
     /// commands that act on a Matrix account rather than on data.
     ///
@@ -423,7 +422,7 @@ mod tests {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
                 sender_mxid: "@tester:x".to_string(),
-                owner_id: "@alice:a".to_string(),
+                owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
                 sender_name: "alice".to_string(),
                 command: body
                     .split_whitespace()
@@ -580,7 +579,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: command.to_string(),
             raw_args: String::new(),

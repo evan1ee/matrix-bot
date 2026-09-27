@@ -11,10 +11,8 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
-use crate::accounts::{
-    AccountRepository, RecoveryRepository, SecurityEventKind, SecurityEventRepository,
-    SessionRepository, RECOVERY_RESTRICTION_HOURS,
-};
+use crate::accounts::RECOVERY_RESTRICTION_HOURS;
+use crate::domain::accounts::SecurityEventKind;
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::{with_session_cookie, SessionResponse};
@@ -102,14 +100,22 @@ pub async fn redeem_recovery(
     }
 
     // 1. Try static backup recovery codes
-    let mut resolved_account_id = RecoveryRepository::redeem(&state.db.pool, code)
+    let mut resolved_account_id = state
+        .services
+        .accounts
+        .redeem_recovery_code(code)
         .await
         .map_err(|e| ApiError::internal(format!("Database error during recovery check: {e}")))?;
 
     // 2. If not found in static codes, try 24-hour matured recovery requests
     if resolved_account_id.is_none() {
-        if let Ok(account_id) =
-            crate::modules::account::redeem_matured_recovery(&state.db, None, code).await
+        if let Ok(account_id) = crate::interface::chat::account::redeem_matured_recovery(
+            &state.services.accounts,
+            &state.db,
+            None,
+            code,
+        )
+        .await
         {
             resolved_account_id = Some(account_id);
         }
@@ -118,7 +124,10 @@ pub async fn redeem_recovery(
     let account_id = resolved_account_id
         .ok_or_else(|| ApiError::unauthorized("Invalid or expired recovery code"))?;
 
-    let account = AccountRepository::find(&state.db.pool, &account_id)
+    let account = state
+        .services
+        .accounts
+        .find(&account_id)
         .await
         .map_err(|err| ApiError::internal(format!("Could not read account: {err}")))?
         .ok_or_else(|| ApiError::unauthorized("Account not found"))?;
@@ -132,7 +141,11 @@ pub async fn redeem_recovery(
             crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
         {
             let old_id_hash = crate::accounts::session::hash_token(old_token);
-            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
+            let _ = state
+                .services
+                .accounts
+                .revoke_session(&account_id, &old_id_hash)
+                .await;
         }
     }
 
@@ -142,27 +155,27 @@ pub async fn redeem_recovery(
 
     // Mint a restricted session (restricted to registering a new passkey)
     let restricted_until = Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS);
-    let token = SessionRepository::create(
-        &state.db.pool,
-        &account_id,
-        user_agent,
-        Some(&client_ip),
-        Some(restricted_until),
-    )
-    .await
-    .map_err(|err| ApiError::internal(format!("Could not open restricted session: {err}")))?;
+    let token = state
+        .services
+        .accounts
+        .create_session(
+            &account_id,
+            user_agent,
+            Some(&client_ip),
+            Some(restricted_until),
+        )
+        .await
+        .map_err(|err| ApiError::internal(format!("Could not open restricted session: {err}")))?;
 
     // Record security event
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &account_id,
-        SecurityEventKind::RecoveryCompleted,
-        None,
-    )
-    .await;
+    state
+        .services
+        .accounts
+        .record_security_event(&account_id, SecurityEventKind::RecoveryCompleted, None)
+        .await;
 
     let body = Json(SessionResponse {
-        account_id,
+        account_id: account_id.to_string(),
         display_name: account.display_name,
     });
 
@@ -172,7 +185,6 @@ pub async fn redeem_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::AccountRepository;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
@@ -188,12 +200,17 @@ mod tests {
             reqwest::Client::new(),
         );
 
-        let account_id =
-            AccountRepository::create(&pool, "Recovery User", crate::accounts::STATUS_ACTIVE)
-                .await
-                .unwrap();
+        let account_id = state
+            .services
+            .accounts
+            .create("Recovery User", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
 
-        let codes = RecoveryRepository::issue_codes(&pool, &account_id)
+        let codes = state
+            .services
+            .accounts
+            .issue_recovery_codes(&account_id)
             .await
             .unwrap();
         let valid_code = &codes[0];

@@ -271,7 +271,7 @@ pub async fn delete_bookmark(
 
     state.broadcaster.send(SystemEvent::BookmarkDeleted {
         id,
-        owner_id: user.account_id,
+        owner_id: user.account_id.to_string(),
     });
 
     Ok(StatusCode::NO_CONTENT)

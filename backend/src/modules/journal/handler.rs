@@ -324,7 +324,7 @@ mod tests {
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@user:1".to_string(),
-            owner_id: owner.to_string(),
+            owner_id: crate::domain::accounts::AccountId::new(owner),
             sender_name: "Tester".to_string(),
             command: "journal".to_string(),
             raw_args: "help".to_string(),

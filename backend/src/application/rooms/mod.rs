@@ -7,9 +7,10 @@
 use sqlx::PgPool;
 use tracing::warn;
 
-use crate::accounts::AccountRepository;
+use crate::application::accounts::AccountService;
 use crate::application::settings::SettingsService;
 use crate::application::AppError;
+use crate::domain::accounts::AccountId;
 use crate::domain::rooms::{self as domain, CachedRoom, JoinedRoom, RoomTarget, WEB_ROOM};
 use crate::infrastructure::postgres::repositories::rooms as repo;
 
@@ -25,16 +26,21 @@ pub enum PickerRooms {
 pub struct RoomService {
     pool: PgPool,
     settings: SettingsService,
+    accounts: AccountService,
 }
 
 impl RoomService {
-    pub fn new(pool: PgPool, settings: SettingsService) -> Self {
-        Self { pool, settings }
+    pub fn new(pool: PgPool, settings: SettingsService, accounts: AccountService) -> Self {
+        Self {
+            pool,
+            settings,
+            accounts,
+        }
     }
 
     /// The account's cached rooms, in picker order.
-    pub async fn cached_rooms(&self, account_id: &str) -> Result<Vec<CachedRoom>, AppError> {
-        Ok(repo::list_for_account(&self.pool, account_id).await?)
+    pub async fn cached_rooms(&self, account_id: &AccountId) -> Result<Vec<CachedRoom>, AppError> {
+        Ok(repo::list_for_account(&self.pool, account_id.as_str()).await?)
     }
 
     /// Replaces the account's cache with a fresh discovery and returns the
@@ -44,13 +50,13 @@ impl RoomService {
     /// never a mix of old and new rooms or an empty cache.
     pub async fn replace_cached(
         &self,
-        account_id: &str,
+        account_id: &AccountId,
         rooms: &[JoinedRoom],
     ) -> Result<Vec<CachedRoom>, AppError> {
         let mut tx = self.pool.begin().await?;
-        repo::delete_for_account(&mut *tx, account_id).await?;
+        repo::delete_for_account(&mut *tx, account_id.as_str()).await?;
         for room in rooms {
-            repo::insert(&mut *tx, account_id, room).await?;
+            repo::insert(&mut *tx, account_id.as_str(), room).await?;
         }
         tx.commit().await?;
         self.cached_rooms(account_id).await
@@ -62,7 +68,7 @@ impl RoomService {
     /// discovery leaves the cache alone.
     pub async fn adopt_discovery(
         &self,
-        account_id: &str,
+        account_id: &AccountId,
         mut discovered: Vec<JoinedRoom>,
     ) -> PickerRooms {
         if discovered.is_empty() {
@@ -71,27 +77,31 @@ impl RoomService {
         match self.replace_cached(account_id, &discovered).await {
             Ok(saved) => PickerRooms::Cached(saved),
             Err(err) => {
-                warn!(account_id, error = %err, "Could not cache discovered rooms");
+                warn!(%account_id, error = %err, "Could not cache discovered rooms");
                 discovered.sort_by(JoinedRoom::picker_order);
                 PickerRooms::Uncached(discovered)
             }
         }
     }
 
-    pub async fn is_cached(&self, account_id: &str, room_id: &str) -> Result<bool, AppError> {
-        Ok(repo::is_cached(&self.pool, account_id, room_id).await?)
+    pub async fn is_cached(&self, account_id: &AccountId, room_id: &str) -> Result<bool, AppError> {
+        Ok(repo::is_cached(&self.pool, account_id.as_str(), room_id).await?)
     }
 
     /// Caches a room whose membership the caller has just proven live, so the
     /// next check takes the cached path.
-    pub async fn remember(&self, account_id: &str, room: &JoinedRoom) -> Result<(), AppError> {
-        Ok(repo::insert(&self.pool, account_id, room).await?)
+    pub async fn remember(
+        &self,
+        account_id: &AccountId,
+        room: &JoinedRoom,
+    ) -> Result<(), AppError> {
+        Ok(repo::insert(&self.pool, account_id.as_str(), room).await?)
     }
 
     /// The Matrix identities linked to the account: a room is reachable for
     /// the account when one of them has joined it.
-    pub async fn linked_mxids(&self, account_id: &str) -> Result<Vec<String>, AppError> {
-        Ok(AccountRepository::linked_mxids(&self.pool, account_id).await?)
+    pub async fn linked_mxids(&self, account_id: &AccountId) -> Result<Vec<String>, AppError> {
+        self.accounts.linked_mxids(account_id).await
     }
 
     /// The room an action is delivered to when it names none; see
@@ -100,17 +110,17 @@ impl RoomService {
     /// Infallible by design: the result only picks where a message goes, so
     /// an input that cannot be read is logged and treated as absent, and
     /// resolution carries on with the others.
-    pub async fn default_room(&self, account_id: &str) -> Option<String> {
+    pub async fn default_room(&self, account_id: &AccountId) -> Option<String> {
         let rooms = self.cached_rooms_or_empty(account_id).await;
         let mxids = logged_or_default(
-            AccountRepository::linked_mxids(&self.pool, account_id).await,
+            self.accounts.linked_mxids(account_id).await,
             "linked Matrix ids",
-            account_id,
+            account_id.as_str(),
         );
         let dev_room_id = logged_or_default(
             self.settings.get(account_id).await.map(|s| s.dev_room_id),
             "dev room setting",
-            account_id,
+            account_id.as_str(),
         );
         domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
     }
@@ -118,7 +128,7 @@ impl RoomService {
     /// The room an action asked for by `query` (a room id, a room name, or
     /// nothing), falling back to [`WEB_ROOM`] when no Matrix room resolves.
     /// Infallible for the same reason as [`Self::default_room`].
-    pub async fn resolve_target_room(&self, account_id: &str, query: Option<&str>) -> String {
+    pub async fn resolve_target_room(&self, account_id: &AccountId, query: Option<&str>) -> String {
         match RoomTarget::parse(query) {
             RoomTarget::RoomId(room_id) => room_id.to_owned(),
             RoomTarget::Named(name) => {
@@ -132,11 +142,11 @@ impl RoomService {
         }
     }
 
-    async fn cached_rooms_or_empty(&self, account_id: &str) -> Vec<CachedRoom> {
+    async fn cached_rooms_or_empty(&self, account_id: &AccountId) -> Vec<CachedRoom> {
         logged_or_default(
-            repo::list_for_account(&self.pool, account_id).await,
+            repo::list_for_account(&self.pool, account_id.as_str()).await,
             "room cache",
-            account_id,
+            account_id.as_str(),
         )
     }
 }
@@ -161,20 +171,18 @@ mod tests {
     use crate::domain::settings::UserSettings;
     use crate::events::EventBroadcaster;
 
-    async fn service_with_account(account_id: &str) -> RoomService {
+    async fn service_with_account(account_id: &AccountId) -> RoomService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        AccountRepository::create_with_id(
-            &pool,
-            account_id,
-            "Tester",
-            crate::accounts::STATUS_ACTIVE,
-        )
-        .await
-        .unwrap();
+        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        accounts
+            .create_with_id(account_id, "Tester", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
         RoomService::new(
             pool.clone(),
             SettingsService::new(pool, EventBroadcaster::default()),
+            accounts,
         )
     }
 
@@ -188,14 +196,15 @@ mod tests {
 
     #[tokio::test]
     async fn replacing_the_cache_drops_rooms_no_longer_discovered() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         service
-            .replace_cached("acct_a", &[room("!old:x", "old", false)])
+            .replace_cached(&acct, &[room("!old:x", "old", false)])
             .await
             .unwrap();
 
         let saved = service
-            .replace_cached("acct_a", &[room("!new:x", "new", false)])
+            .replace_cached(&acct, &[room("!new:x", "new", false)])
             .await
             .unwrap();
 
@@ -204,9 +213,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_replacement_keeps_the_previous_cache_whole() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         service
-            .replace_cached("acct_a", &[room("!kept:x", "kept", false)])
+            .replace_cached(&acct, &[room("!kept:x", "kept", false)])
             .await
             .unwrap();
 
@@ -214,22 +224,23 @@ mod tests {
         // after the delete and the first insert have already run.
         let result = service
             .replace_cached(
-                "acct_a",
+                &acct,
                 &[room("!new:x", "new", false), room("!bad\0:x", "bad", false)],
             )
             .await;
 
         assert!(matches!(result, Err(AppError::Database(_))));
-        let cached = service.cached_rooms("acct_a").await.unwrap();
+        let cached = service.cached_rooms(&acct).await.unwrap();
         assert_eq!(ids(&cached), ["!kept:x"]);
     }
 
     #[tokio::test]
     async fn an_adopted_discovery_is_cached() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         let adopted = service
             .adopt_discovery(
-                "acct_a",
+                &acct,
                 vec![room("!g:x", "general", false), room("!dm:x", "evan", true)],
             )
             .await;
@@ -242,12 +253,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_discovery_that_cannot_be_cached_is_returned_in_picker_order() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         service.pool.close().await;
 
         let adopted = service
             .adopt_discovery(
-                "acct_a",
+                &acct,
                 vec![room("!g:x", "general", false), room("!dm:x", "evan", true)],
             )
             .await;
@@ -263,42 +275,45 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_discovery_leaves_the_cache_alone() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         service
-            .replace_cached("acct_a", &[room("!kept:x", "kept", false)])
+            .replace_cached(&acct, &[room("!kept:x", "kept", false)])
             .await
             .unwrap();
 
-        let adopted = service.adopt_discovery("acct_a", Vec::new()).await;
+        let adopted = service.adopt_discovery(&acct, Vec::new()).await;
 
         assert_eq!(adopted, PickerRooms::Uncached(Vec::new()));
         assert_eq!(
-            ids(&service.cached_rooms("acct_a").await.unwrap()),
+            ids(&service.cached_rooms(&acct).await.unwrap()),
             ["!kept:x"]
         );
     }
 
     #[tokio::test]
     async fn a_remembered_room_is_cached() {
-        let service = service_with_account("acct_a").await;
-        assert!(!service.is_cached("acct_a", "!r:x").await.unwrap());
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
+        assert!(!service.is_cached(&acct, "!r:x").await.unwrap());
 
         service
-            .remember("acct_a", &room("!r:x", "r", false))
+            .remember(&acct, &room("!r:x", "r", false))
             .await
             .unwrap();
 
-        assert!(service.is_cached("acct_a", "!r:x").await.unwrap());
+        assert!(service.is_cached(&acct, "!r:x").await.unwrap());
     }
 
     #[tokio::test]
     async fn targets_resolve_against_the_cache() {
-        let service = service_with_account("acct_a").await;
-        assert_eq!(service.resolve_target_room("acct_a", None).await, WEB_ROOM);
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
+        assert_eq!(service.resolve_target_room(&acct, None).await, WEB_ROOM);
 
         service
             .replace_cached(
-                "acct_a",
+                &acct,
                 &[
                     room("!direct:x", "Direct Chat", true),
                     room("!dev:x", "Dev Channel", false),
@@ -316,7 +331,7 @@ mod tests {
             (Some("ops"), "ops"),
         ] {
             assert_eq!(
-                service.resolve_target_room("acct_a", query).await,
+                service.resolve_target_room(&acct, query).await,
                 expected,
                 "{query:?}"
             );
@@ -327,11 +342,13 @@ mod tests {
     async fn the_default_room_reads_linked_ids_and_settings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let account = AccountRepository::resolve_or_provision(&pool, "@evan:mbm.one")
+        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        let account = accounts
+            .resolve_or_provision("@evan:mbm.one")
             .await
             .unwrap();
         let settings_service = SettingsService::new(pool.clone(), EventBroadcaster::default());
-        let service = RoomService::new(pool.clone(), settings_service.clone());
+        let service = RoomService::new(pool.clone(), settings_service.clone(), accounts);
         let settings = UserSettings {
             dev_room_id: Some("!dev:x".to_string()),
             ..UserSettings::default()
@@ -354,10 +371,11 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreadable_database_resolves_to_the_web_room() {
-        let service = service_with_account("acct_a").await;
+        let acct = AccountId::new("acct_a");
+        let service = service_with_account(&acct).await;
         service.pool.close().await;
 
-        assert_eq!(service.default_room("acct_a").await, None);
-        assert_eq!(service.resolve_target_room("acct_a", None).await, WEB_ROOM);
+        assert_eq!(service.default_room(&acct).await, None);
+        assert_eq!(service.resolve_target_room(&acct, None).await, WEB_ROOM);
     }
 }

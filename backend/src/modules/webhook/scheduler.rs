@@ -42,10 +42,11 @@ async fn deliver_outbox_item(ctx: &ModuleContext, item: &WebhookOutboxItem) -> R
         .ok_or_else(|| format!("Bot is not joined to room: {}", item.room_id))?;
 
     // Verify that the webhook owner is authorized for this room before delivery
+    let owner_id = crate::domain::accounts::AccountId::from(item.owner_id.as_str());
     let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
         &ctx.services.rooms,
         Some(&ctx.client),
-        &item.owner_id,
+        &owner_id,
         &item.room_id,
     )
     .await;

@@ -20,9 +20,12 @@ use matrix_sdk::Client;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::accounts::recovery::RECOVERY_DELAY_HOURS;
-use crate::accounts::{AccountRepository, MaturedRecovery, RecoveryRepository, SecurityEventKind};
+use crate::application::accounts::AccountService;
+use crate::application::AppServices;
 use crate::db::Database;
+use crate::domain::accounts::{
+    AccountId, MaturedRecovery, SecurityEventKind, RECOVERY_DELAY_HOURS,
+};
 use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::notify::notify_account;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
@@ -101,7 +104,7 @@ impl BotModule for AccountModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
+        services: &AppServices,
         db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -117,8 +120,8 @@ impl BotModule for AccountModule {
         }
 
         match command.as_str() {
-            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, db).await),
-            "recover" => Some(self.handle_recover(ctx, db).await),
+            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
+            "recover" => Some(self.handle_recover(ctx, services, db).await),
             _ => None,
         }
     }
@@ -129,7 +132,12 @@ impl AccountModule {
     ///
     /// Refused outside a direct message: the code is in the reply, and a reply
     /// in a shared room would hand it to everyone present.
-    async fn handle_recover(&self, ctx: &CommandContext, db: &Database) -> String {
+    async fn handle_recover(
+        &self,
+        ctx: &CommandContext,
+        services: &AppServices,
+        db: &Database,
+    ) -> String {
         if !ctx.is_direct {
             return "Send <code>!recover</code> in a direct message — the reply contains \
                     a code that must not be shown to a room."
@@ -139,7 +147,7 @@ impl AccountModule {
         // The sender's account is whatever this MXID reaches. An MXID linked to
         // nothing has only the empty account the resolver just made it, and
         // recovering that is meaningless.
-        let account = match AccountRepository::find(&db.pool, &ctx.owner_id).await {
+        let account = match services.accounts.find(&ctx.owner_id).await {
             Ok(Some(account)) => account,
             _ => return "Could not read your account. Try again shortly.".to_string(),
         };
@@ -153,7 +161,7 @@ impl AccountModule {
             );
         }
 
-        let (code, valid_after) = match RecoveryRepository::request(&db.pool, &ctx.owner_id).await {
+        let (code, valid_after) = match services.accounts.request_recovery(&ctx.owner_id).await {
             Ok(result) => result,
             Err(err) => {
                 tracing::error!("Could not start recovery for {}: {:?}", ctx.owner_id, err);
@@ -168,7 +176,7 @@ impl AccountModule {
         notify_account(
             client.as_ref(),
             db,
-            &ctx.owner_id,
+            ctx.owner_id.as_str(),
             SecurityEventKind::RecoveryRequested,
             Some(&format!("requested from {}", ctx.sender_mxid)),
         )
@@ -186,7 +194,7 @@ impl AccountModule {
         )
     }
 
-    async fn handle_passkey(&self, ctx: &CommandContext, db: &Database) -> String {
+    async fn handle_passkey(&self, ctx: &CommandContext, services: &AppServices) -> String {
         let trimmed = ctx.raw_args.trim();
         let subcmd = trimmed
             .split_whitespace()
@@ -206,9 +214,7 @@ impl AccountModule {
             // First enrollment only. Once a passkey exists, a link from here
             // would let the Matrix account alone add another and sign in
             // fully verified — exactly what the `!recover` delay exists to stop.
-            match crate::accounts::CredentialRepository::count_for_account(&db.pool, &ctx.owner_id)
-                .await
-            {
+            match services.accounts.count_passkeys(&ctx.owner_id).await {
                 Ok(0) => {}
                 Ok(_) => {
                     return format!(
@@ -225,7 +231,11 @@ impl AccountModule {
                 }
             }
 
-            match crate::accounts::EnrollmentRepository::issue(&db.pool, &ctx.owner_id, 10).await {
+            match services
+                .accounts
+                .issue_enrollment_token(&ctx.owner_id, 10)
+                .await
+            {
                 Ok(token) => {
                     let enroll_url =
                         format!("{}/?enroll={}", self.web_url.trim_end_matches('/'), token);
@@ -251,9 +261,7 @@ impl AccountModule {
         } else if subcmd == "rm" || subcmd == "delete" || subcmd == "remove" {
             self.handle_remove_passkey(ctx)
         } else {
-            match crate::accounts::CredentialRepository::list_for_account(&db.pool, &ctx.owner_id)
-                .await
-            {
+            match services.accounts.list_passkeys(&ctx.owner_id).await {
                 Ok(creds) => {
                     if creds.is_empty() {
                         format!(
@@ -310,21 +318,18 @@ impl AccountModule {
 }
 
 /// Redeems a matured recovery code presented in the web UI.
-///
-/// Lives here rather than in `api/` because the whole flow — request, delay,
-/// warning — is one story, and splitting its two halves across modules would
-/// make the fence harder to see.
 pub async fn redeem_matured_recovery(
+    accounts: &AccountService,
     db: &Database,
     client: Option<&Client>,
     code: &str,
-) -> Result<String, RecoveryRejection> {
-    match RecoveryRepository::redeem_request(&db.pool, code).await {
+) -> Result<AccountId, RecoveryRejection> {
+    match accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
             notify_account(
                 client,
                 db,
-                &account_id,
+                account_id.as_str(),
                 SecurityEventKind::RecoveryCompleted,
                 None,
             )
@@ -349,12 +354,14 @@ pub enum RecoveryRejection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::infrastructure::postgres::repositories::accounts as repo;
 
-    async fn db() -> Database {
+    async fn setup() -> (Database, AppServices) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        Database { pool: pool }
+        let services = AppServices::new(&pool);
+        (Database { pool }, services)
     }
 
     fn module() -> AccountModule {
@@ -364,14 +371,14 @@ mod tests {
         )
     }
 
-    fn ctx(command: &str, owner_id: &str, is_direct: bool) -> CommandContext {
+    fn ctx(command: &str, owner_id: &AccountId, is_direct: bool) -> CommandContext {
         CommandContext {
             room_id: if is_direct {
                 "!dm:x".into()
             } else {
                 "!public:x".into()
             },
-            owner_id: owner_id.to_string(),
+            owner_id: owner_id.clone(),
             sender_mxid: "@evan:mbm.one".to_string(),
             sender_name: "evan".to_string(),
             command: command.to_string(),
@@ -384,22 +391,15 @@ mod tests {
         }
     }
 
-    /// The ceiling. Every one of these needs a passkey, and Matrix cannot
-    /// prompt for one — so none of them may work here, whatever the sender's
-    /// account can do on the web.
     #[tokio::test]
     async fn test_sensitive_commands_are_refused_with_a_pointer() {
-        let db = db().await;
+        let (db, services) = setup().await;
         let module = module();
+        let acct = AccountId::from("acct_evan");
 
         for (command, _) in WEB_ONLY {
             let reply = module
-                .handle_command(
-                    &ctx(command, "acct_evan", true),
-                    &crate::application::AppServices::new(&db.pool),
-                    &db,
-                    None,
-                )
+                .handle_command(&ctx(command, &acct, true), &services, &db, None)
                 .await
                 .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"));
 
@@ -414,42 +414,35 @@ mod tests {
         }
     }
 
-    /// An ordinary command must fall through to the module that owns it.
     #[tokio::test]
     async fn test_unrelated_commands_are_not_claimed() {
-        let db = db().await;
+        let (db, services) = setup().await;
+        let acct = AccountId::from("acct_evan");
         assert!(module()
-            .handle_command(
-                &ctx("todo", "acct_evan", true),
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
-            )
+            .handle_command(&ctx("todo", &acct, true), &services, &db, None,)
             .await
             .is_none());
     }
 
-    /// The reply carries the recovery code, so a shared room must not get one.
     #[tokio::test]
     async fn test_recover_is_refused_outside_a_direct_message() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
         let reply = module()
-            .handle_command(
-                &ctx("recover", &account, false),
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&ctx("recover", &account, false), &services, &db, None)
             .await
             .unwrap();
 
         assert!(reply.contains("direct message"));
         assert!(
-            RecoveryRepository::pending(&db.pool, &account)
+            services
+                .accounts
+                .pending_recovery(&account)
                 .await
                 .unwrap()
                 .is_none(),
@@ -457,47 +450,40 @@ mod tests {
         );
     }
 
-    /// An MXID that reaches only its own auto-provisioned account has no web
-    /// account to recover, and is told so rather than handed a useless code.
     #[tokio::test]
     async fn test_recover_needs_a_claimed_account() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_UNCLAIMED)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_UNCLAIMED)
             .await
             .unwrap();
 
         let reply = module()
-            .handle_command(
-                &ctx("recover", &account, true),
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&ctx("recover", &account, true), &services, &db, None)
             .await
             .unwrap();
 
         assert!(reply.contains("!link"), "it should say how to link instead");
-        assert!(RecoveryRepository::pending(&db.pool, &account)
+        assert!(services
+            .accounts
+            .pending_recovery(&account)
             .await
             .unwrap()
             .is_none());
     }
 
-    /// The happy path: a code now, usable in a day, cancellable until then.
     #[tokio::test]
     async fn test_recover_issues_a_delayed_code_and_says_so() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
         let reply = module()
-            .handle_command(
-                &ctx("recover", &account, true),
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&ctx("recover", &account, true), &services, &db, None)
             .await
             .unwrap();
 
@@ -506,59 +492,67 @@ mod tests {
             "the delay must be stated: {reply}"
         );
         assert!(reply.contains("cancel"), "the way out must be stated");
-        assert!(RecoveryRepository::pending(&db.pool, &account)
+        assert!(services
+            .accounts
+            .pending_recovery(&account)
             .await
             .unwrap()
             .is_some());
 
-        // And it is logged, so the web UI shows it even with no DM delivered.
-        let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = services
+            .accounts
+            .list_security_events(&account, 10)
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_requested");
     }
 
-    /// A code presented before it matures must be refused, not honoured early.
     #[tokio::test]
     async fn test_a_premature_code_is_refused_in_the_web_ui_too() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account)
-            .await
-            .unwrap();
+        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&db, None, &code).await.unwrap_err(),
+            redeem_matured_recovery(&services.accounts, &db, None, &code)
+                .await
+                .unwrap_err(),
             RecoveryRejection::TooEarly
         );
     }
 
     #[tokio::test]
     async fn test_a_matured_code_opens_the_account_and_is_logged() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = RecoveryRepository::request(&db.pool, &account)
-            .await
-            .unwrap();
+        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
 
-        crate::db_execute!(
+        repo::recovery::set_valid_after(
             &db.pool,
-            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+            &account,
             chrono::Utc::now() - chrono::Duration::minutes(1),
-            &account
         )
+        .await
         .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&db, None, &code).await.unwrap(),
+            redeem_matured_recovery(&services.accounts, &db, None, &code)
+                .await
+                .unwrap(),
             account
         );
 
-        let events = crate::accounts::SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = services
+            .accounts
+            .list_security_events(&account, 10)
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_completed");
@@ -566,8 +560,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_passkey_add_generates_enroll_link_in_dm() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
@@ -575,12 +571,7 @@ mod tests {
         let mut public_ctx = ctx("passkey", &account, false);
         public_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(
-                &public_ctx,
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&public_ctx, &services, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("direct message"));
@@ -589,46 +580,33 @@ mod tests {
         let mut dm_ctx = ctx("passkey", &account, true);
         dm_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(
-                &dm_ctx,
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&dm_ctx, &services, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("?enroll="));
         assert!(reply.contains("bot.mbm.one"));
     }
 
-    /// Matrix may mint an account's *first* passkey — for an account with none,
-    /// the Matrix identity is already its only way in. Once a passkey exists,
-    /// an enrollment link would let whoever holds the Matrix account alone add
-    /// their own and sign in fully verified, skipping the `!recover` fence.
     #[tokio::test]
     async fn test_passkey_add_is_refused_once_the_account_has_a_passkey() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
-             VALUES ('pk1', ?, '{}', 'MacBook')",
-            &account
-        )
-        .unwrap();
+
+        services
+            .accounts
+            .add_passkey(&account, "pk1", "{}", "MacBook")
+            .await
+            .unwrap();
 
         for (command, args) in [("passkey", "add"), ("passkey", "enroll"), ("web", "")] {
             let mut dm = ctx(command, &account, true);
             dm.raw_args = args.into();
             let reply = module()
-                .handle_command(
-                    &dm,
-                    &crate::application::AppServices::new(&db.pool),
-                    &db,
-                    None,
-                )
+                .handle_command(&dm, &services, &db, None)
                 .await
                 .unwrap();
 
@@ -642,49 +620,39 @@ mod tests {
             );
         }
 
-        let issued: i64 = crate::db_scalar_one!(
-            &db.pool,
-            _,
-            "SELECT COUNT(*) FROM passkey_enrollment_tokens WHERE account_id = ?",
-            &account
-        )
-        .unwrap();
+        let issued = repo::credentials::count_enrollment_tokens(&db.pool, &account)
+            .await
+            .unwrap();
         assert_eq!(issued, 0, "no token may be minted for a passkey account");
     }
 
-    /// Revoking devices and dropping a linked identity both need `VerifiedUser`
-    /// on the web. From Matrix they would let the Matrix account alone sign the
-    /// owner out while `!recover` counts down, or cut the other identities that
-    /// the request is announced to.
     #[tokio::test]
     async fn test_unlink_changes_nothing_from_matrix() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO matrix_links (mxid, account_id) \
-             VALUES ('@evan:mbm.one', ?), ('@evan:other.org', ?)",
-            &account,
-            &account
-        )
-        .unwrap();
-        let session =
-            crate::accounts::SessionRepository::create(&db.pool, &account, None, None, None)
-                .await
-                .unwrap();
+
+        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
+            .await
+            .unwrap();
+        repo::linking::link(&db.pool, &account, "@evan:other.org")
+            .await
+            .unwrap();
+
+        let session = services
+            .accounts
+            .create_session(&account, None, None, None)
+            .await
+            .unwrap();
 
         for args in ["sessions", "matrix @evan:other.org"] {
             let mut dm = ctx("unlink", &account, true);
             dm.raw_args = args.into();
             let reply = module()
-                .handle_command(
-                    &dm,
-                    &crate::application::AppServices::new(&db.pool),
-                    &db,
-                    None,
-                )
+                .handle_command(&dm, &services, &db, None)
                 .await
                 .unwrap();
             assert!(
@@ -694,60 +662,53 @@ mod tests {
         }
 
         assert!(
-            crate::accounts::SessionRepository::resolve(&db.pool, &session)
+            services
+                .accounts
+                .resolve_session(&session)
                 .await
                 .unwrap()
                 .is_some(),
             "the web session must survive"
         );
-        let links: i64 = crate::db_scalar_one!(
-            &db.pool,
-            _,
-            "SELECT COUNT(*) FROM matrix_links WHERE account_id = ?",
-            &account
-        )
-        .unwrap();
-        assert_eq!(links, 2, "the second identity must stay linked");
+        let links = services.accounts.linked_mxids(&account).await.unwrap();
+        assert_eq!(links.len(), 2, "the second identity must stay linked");
     }
 
     #[tokio::test]
     async fn test_passkeys_list_and_remove_flow() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
 
         // Initially no passkeys
         let list_ctx = ctx("passkeys", &account, true);
         let reply = module()
-            .handle_command(
-                &list_ctx,
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&list_ctx, &services, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
-            &account
-        )
-        .unwrap();
-        crate::db_execute!(&db.pool, "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ('pk1', ?, '{}', 'MacBook'), ('pk2', ?, '{}', 'iPhone')", &account, &account)
+        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
+            .await
+            .unwrap();
+        services
+            .accounts
+            .add_passkey(&account, "pk1", "{}", "MacBook")
+            .await
+            .unwrap();
+        services
+            .accounts
+            .add_passkey(&account, "pk2", "{}", "iPhone")
+            .await
             .unwrap();
 
         // List passkeys
         let reply = module()
-            .handle_command(
-                &list_ctx,
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&list_ctx, &services, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("MacBook"));
@@ -757,22 +718,14 @@ mod tests {
         let mut remove_ctx = ctx("passkey", &account, true);
         remove_ctx.raw_args = "rm 1".into();
         let reply = module()
-            .handle_command(
-                &remove_ctx,
-                &crate::application::AppServices::new(&db.pool),
-                &db,
-                None,
-            )
+            .handle_command(&remove_ctx, &services, &db, None)
             .await
             .unwrap();
         assert!(reply.contains("Passkey Removal Requires Verification"));
         assert!(reply.contains("/account"));
 
         // Verify passkeys were NOT deleted from database
-        let creds_after =
-            crate::accounts::CredentialRepository::list_for_account(&db.pool, &account)
-                .await
-                .unwrap();
+        let creds_after = services.accounts.list_passkeys(&account).await.unwrap();
         assert_eq!(creds_after.len(), 2);
     }
 }

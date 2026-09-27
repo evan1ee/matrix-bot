@@ -2,7 +2,6 @@
 
 use axum::{extract::State, Json};
 
-use crate::accounts::{SecurityEventKind, SecurityEventRepository, SessionRepository};
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -21,7 +20,10 @@ pub async fn list_sessions(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<SessionSummary>>, ApiError> {
-    let sessions = SessionRepository::list_for_account(&state.db.pool, &user.account_id)
+    let sessions = state
+        .services
+        .accounts
+        .list_sessions(&user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -50,21 +52,12 @@ pub async fn revoke_other_sessions(
     State(state): State<ApiState>,
     user: VerifiedUser,
 ) -> Result<Json<u64>, ApiError> {
-    let revoked = SessionRepository::revoke_all_for_account(
-        &state.db.pool,
-        &user.account_id,
-        Some(&user.session_id_hash),
-    )
-    .await
-    .map_err(ApiError::from)?;
-
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::SessionsRevoked,
-        Some(&format!("{revoked} session(s)")),
-    )
-    .await;
+    let revoked = state
+        .services
+        .accounts
+        .revoke_all_sessions(&user.account_id, Some(&user.session_id_hash))
+        .await
+        .map_err(ApiError::from)?;
 
     Ok(Json(revoked))
 }
@@ -82,7 +75,10 @@ pub async fn revoke_session(
     axum::extract::Path(id): axum::extract::Path<String>,
     user: VerifiedUser,
 ) -> Result<Json<bool>, ApiError> {
-    let sessions = SessionRepository::list_for_account(&state.db.pool, &user.account_id)
+    let sessions = state
+        .services
+        .accounts
+        .list_sessions(&user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -90,17 +86,12 @@ pub async fn revoke_session(
         return Err(ApiError::not_found("Session not found"));
     }
 
-    SessionRepository::revoke(&state.db.pool, &id)
+    state
+        .services
+        .accounts
+        .revoke_session(&user.account_id, &id)
         .await
         .map_err(ApiError::from)?;
-
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::SessionsRevoked,
-        Some("1 session"),
-    )
-    .await;
 
     Ok(Json(true))
 }

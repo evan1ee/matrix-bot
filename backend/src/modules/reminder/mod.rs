@@ -78,7 +78,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()

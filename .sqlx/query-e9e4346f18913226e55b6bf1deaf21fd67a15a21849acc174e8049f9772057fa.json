@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE passkey_enrollment_tokens SET consumed_at = $1 WHERE token = $2 AND consumed_at IS NULL AND expires_at > $1 AND NOT EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.account_id = passkey_enrollment_tokens.account_id) RETURNING account_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "passkey_enrollment_tokens",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e9e4346f18913226e55b6bf1deaf21fd67a15a21849acc174e8049f9772057fa"
+}

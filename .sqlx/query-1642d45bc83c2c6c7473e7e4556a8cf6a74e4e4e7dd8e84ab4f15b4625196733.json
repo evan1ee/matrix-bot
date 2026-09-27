@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET revoked_at = $1 WHERE account_id = $2 AND revoked_at IS NULL AND id_hash IS DISTINCT FROM $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1642d45bc83c2c6c7473e7e4556a8cf6a74e4e4e7dd8e84ab4f15b4625196733"
+}

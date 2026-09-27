@@ -40,8 +40,8 @@ pub async fn handle_reminder_command(
     }
 
     // Read after the command is claimed, so an unrelated message never costs a
-    // settings query.
-    let tz = settings.get_or_default(owner_id).await.tz();
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let tz = settings.get_or_default(&acct).await.tz();
 
     let is_history = clean_lower == "remind history"
         || clean_lower == "!remind history"
@@ -319,7 +319,7 @@ mod tests {
         CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@bob:1".to_string(),
-            owner_id: "@bob:1".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@bob:1"),
             sender_name: "bob".to_string(),
             command: "remind".to_string(),
             raw_args: String::new(),

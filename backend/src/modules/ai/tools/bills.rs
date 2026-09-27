@@ -70,7 +70,8 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let settings = services.settings.get_or_default(owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 let today = Utc::now()
                     .with_timezone(&settings.tz())
                     .format("%Y-%m-%d")

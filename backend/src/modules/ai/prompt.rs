@@ -11,7 +11,8 @@ pub async fn build_system_prompt(
         return prompt.clone();
     }
 
-    let settings = services.settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = services.settings.get_or_default(&acct).await;
     let tz = settings.tz();
     let now_utc = chrono::Utc::now();
     let now_local = now_utc.with_timezone(&tz);
@@ -20,8 +21,8 @@ pub async fn build_system_prompt(
     let now_utc_str = now_utc.to_rfc3339();
 
     let rooms = &services.rooms;
-    let default_room_id = rooms.default_room(owner_id).await;
-    let cached_rooms = rooms.cached_rooms(owner_id).await.unwrap_or_else(|err| {
+    let default_room_id = rooms.default_room(&acct).await;
+    let cached_rooms = rooms.cached_rooms(&acct).await.unwrap_or_else(|err| {
         tracing::warn!(owner_id, error = %err, "Prompting without the room list");
         Vec::new()
     });

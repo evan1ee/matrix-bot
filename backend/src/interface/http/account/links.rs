@@ -3,8 +3,8 @@
 use axum::{extract::State, Json};
 
 use crate::accounts::{
-    linking::LINK_CODE_TTL_MINUTES, AccountRepository, LinkRepository, MergePreview,
-    MergeRepository, SecurityEventKind, SecurityEventRepository,
+    linking::LINK_CODE_TTL_MINUTES, MergePreview, MergeRepository, SecurityEventKind,
+    SecurityEventRepository,
 };
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
@@ -25,7 +25,10 @@ pub async fn list_links(
     user: AuthUser,
 ) -> Result<Json<Vec<String>>, ApiError> {
     Ok(Json(
-        AccountRepository::linked_mxids(&state.db.pool, &user.account_id)
+        state
+            .services
+            .accounts
+            .linked_mxids(&user.account_id)
             .await
             .map_err(ApiError::from)?,
     ))
@@ -42,7 +45,10 @@ pub async fn start_link(
     State(state): State<ApiState>,
     user: VerifiedUser,
 ) -> Result<Json<LinkCodeResponse>, ApiError> {
-    let code = LinkRepository::issue(&state.db.pool, &user.account_id)
+    let code = state
+        .services
+        .accounts
+        .issue_link_challenge(&user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -72,7 +78,7 @@ pub async fn pending_merge(
         .pending_merges
         .read()
         .await
-        .get(&user.account_id)
+        .get(user.account_id.as_str())
         .cloned();
 
     let Some(from_account) = pending else {
@@ -108,7 +114,7 @@ pub async fn confirm_merge(
         .pending_merges
         .read()
         .await
-        .get(&user.account_id)
+        .get(user.account_id.as_str())
         .is_some_and(|from| *from == payload.from_account);
 
     if !authorised {
@@ -119,7 +125,11 @@ pub async fn confirm_merge(
         .await
         .map_err(ApiError::from)?;
 
-    state.pending_merges.write().await.remove(&user.account_id);
+    state
+        .pending_merges
+        .write()
+        .await
+        .remove(user.account_id.as_str());
 
     SecurityEventRepository::record(
         &state.db.pool,
@@ -145,7 +155,10 @@ pub async fn unlink(
     user: VerifiedUser,
     Json(payload): Json<UnlinkRequest>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    let removed = LinkRepository::unlink(&state.db.pool, &user.account_id, &payload.mxid)
+    let removed = state
+        .services
+        .accounts
+        .unlink(&user.account_id, &payload.mxid)
         .await
         .map_err(ApiError::from)?;
 
@@ -154,14 +167,6 @@ pub async fn unlink(
             "That Matrix account is not linked here",
         ));
     }
-
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::MatrixUnlinked,
-        Some(&payload.mxid),
-    )
-    .await;
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

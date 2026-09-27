@@ -260,7 +260,8 @@ pub async fn run_ai_turn_with_stage(
         }
     }
 
-    let settings = services.settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = services.settings.get_or_default(&acct).await;
     let max_history = settings.max_history_turns.clamp(1, 100);
 
     // Load recent messages for context

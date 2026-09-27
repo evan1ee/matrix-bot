@@ -77,6 +77,7 @@ pub async fn handle_text(
     // first-time link into a pointless merge of nothing.
     if parsed.command.eq_ignore_ascii_case("link") {
         let reply = crate::interface::channels::matrix::linking::handle_link_command(
+            &services.accounts,
             db,
             &parsed.raw_args,
             ev.sender.as_str(),
@@ -94,11 +95,10 @@ pub async fn handle_text(
     // seen. Deliberately after the parse: an unrelated room message
     // must not cost a query, and must not create an account for
     // someone who only ever said hello to a room the bot is in.
-    let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-        &db.pool,
-        ev.sender.as_str(),
-    )
-    .await
+    let owner_id = match services
+        .accounts
+        .resolve_or_provision(ev.sender.as_str())
+        .await
     {
         Ok(owner_id) => owner_id,
         Err(err) => {

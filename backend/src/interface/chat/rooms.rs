@@ -74,12 +74,14 @@ async fn describe_room(room: &Room, bot_id: &UserId) -> Option<JoinedRoom> {
     ))
 }
 
+use crate::domain::accounts::AccountId;
+
 /// Parses the account's linked Matrix ids, skipping (and logging) any that
 /// are not valid. A failed lookup is logged and treated as no links, so the
 /// caller sees no reachable rooms rather than an error.
-async fn linked_user_ids(rooms: &RoomService, account_id: &str) -> Vec<OwnedUserId> {
+async fn linked_user_ids(rooms: &RoomService, account_id: &AccountId) -> Vec<OwnedUserId> {
     let linked = rooms.linked_mxids(account_id).await.unwrap_or_else(|err| {
-        warn!(account_id, error = %err, "Could not read linked Matrix ids");
+        warn!(%account_id, error = %err, "Could not read linked Matrix ids");
         Vec::new()
     });
     linked
@@ -101,7 +103,7 @@ async fn linked_user_ids(rooms: &RoomService, account_id: &str) -> Vec<OwnedUser
 pub async fn discover_rooms_for_account(
     rooms: &RoomService,
     client: &Client,
-    account_id: &str,
+    account_id: &AccountId,
 ) -> Vec<JoinedRoom> {
     let callers = linked_user_ids(rooms, account_id).await;
     if callers.is_empty() {
@@ -150,14 +152,14 @@ async fn any_is_joined(room: &Room, users: &[OwnedUserId]) -> bool {
 pub async fn is_room_authorized_for_account(
     rooms: &RoomService,
     client: Option<&Client>,
-    account_id: &str,
+    account_id: &AccountId,
     room_id: &str,
 ) -> bool {
     match rooms.is_cached(account_id, room_id).await {
         Ok(true) => return true,
         Ok(false) => {}
         // Not fatal: the live check below can still prove membership.
-        Err(err) => warn!(account_id, room_id, error = %err, "Room cache unreadable"),
+        Err(err) => warn!(%account_id, room_id, error = %err, "Room cache unreadable"),
     }
 
     let Some(client) = client else {
@@ -179,7 +181,7 @@ pub async fn is_room_authorized_for_account(
     let joined = JoinedRoom::new(room_id, room.name().as_deref(), false);
     if let Err(err) = rooms.remember(account_id, &joined).await {
         // Membership is already proven; only the cache shortcut is lost.
-        warn!(account_id, room_id, error = %err, "Could not cache an authorized room");
+        warn!(%account_id, room_id, error = %err, "Could not cache an authorized room");
     }
     true
 }

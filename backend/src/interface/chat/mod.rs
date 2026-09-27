@@ -3,6 +3,7 @@
 //! calling that feature's application service. Holds no SQL
 //! (`tests/architecture.rs`).
 
+pub mod account;
 pub mod rooms;
 pub mod settings;
 

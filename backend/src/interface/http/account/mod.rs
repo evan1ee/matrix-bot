@@ -20,17 +20,17 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::accounts::linking::LINK_CODE_TTL_MINUTES;
-    use crate::accounts::{session::hash_token, LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
-    use crate::accounts::{
-        AccountRepository, LinkRepository, RecoveryRepository, SecurityEventKind,
-        SecurityEventRepository, SessionRepository,
-    };
+    use crate::accounts::session::hash_token;
+    use crate::domain::accounts::{LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::events::EventBroadcaster;
+    use crate::infrastructure::postgres::repositories::accounts as repo;
     use crate::interface::http::account::{
         audit::*, links::*, passkeys::*, recovery::*, sessions::*,
     };
     use crate::interface::http::auth::extractor::VerifiedUser;
     use crate::interface::http::auth::types::{ApiState, AuthUser};
+    use crate::modules::todo::models::TodoPriority;
+    use crate::modules::todo::repository::TodoRepository;
     use axum::extract::{Path, State};
     use axum::Json;
 
@@ -38,7 +38,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
@@ -49,13 +49,18 @@ mod tests {
     /// A caller whose session is genuinely in the database, so `session_id_hash`
     /// matches a real row.
     async fn signed_in(state: &ApiState, name: &str) -> AuthUser {
-        let account = AccountRepository::create(&state.db.pool, name, STATUS_ACTIVE)
+        let account = state
+            .services
+            .accounts
+            .create(name, STATUS_ACTIVE)
             .await
             .unwrap();
-        let token =
-            SessionRepository::create(&state.db.pool, &account, Some("Test/1.0"), None, None)
-                .await
-                .unwrap();
+        let token = state
+            .services
+            .accounts
+            .create_session(&account, Some("Test/1.0"), None, None)
+            .await
+            .unwrap();
 
         AuthUser {
             account_id: account,
@@ -76,7 +81,10 @@ mod tests {
             .unwrap();
         assert_eq!(res.expires_in_seconds, LINK_CODE_TTL_MINUTES * 60);
 
-        let outcome = LinkRepository::claim(&state.db.pool, &res.code, "@evan:mbm.one", true)
+        let outcome = state
+            .services
+            .accounts
+            .claim_link(&res.code, "@evan:mbm.one", true)
             .await
             .unwrap();
         assert_eq!(
@@ -96,12 +104,9 @@ mod tests {
         let mine = signed_in(&state, "mine").await;
         let theirs = signed_in(&state, "theirs").await;
 
-        crate::db_execute!(
-            &state.db.pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
-            &theirs.account_id
-        )
-        .unwrap();
+        repo::linking::link(&state.db.pool, &theirs.account_id, "@evan:mbm.one")
+            .await
+            .unwrap();
 
         let err = unlink(
             State(state.clone()),
@@ -116,7 +121,10 @@ mod tests {
 
         // Still linked to its real owner.
         assert_eq!(
-            AccountRepository::find_by_mxid(&state.db.pool, "@evan:mbm.one")
+            state
+                .services
+                .accounts
+                .find_by_mxid("@evan:mbm.one")
                 .await
                 .unwrap(),
             Some(theirs.account_id)
@@ -129,58 +137,70 @@ mod tests {
     async fn test_a_merge_cannot_be_confirmed_without_a_pending_link() {
         let state = state().await;
         let attacker = signed_in(&state, "attacker").await;
-        let victim = AccountRepository::create(&state.db.pool, "victim", STATUS_UNCLAIMED)
+        let victim = state
+            .services
+            .accounts
+            .create("victim", STATUS_UNCLAIMED)
             .await
             .unwrap();
 
-        crate::db_execute!(
+        let todo = TodoRepository::add(
             &state.db.pool,
-            "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('web', ?, 'victim', 'private', 'medium', FALSE)",
-            &victim
+            "web",
+            victim.as_str(),
+            "victim",
+            "private",
+            TodoPriority::Medium,
+            None,
+            None,
         )
+        .await
         .unwrap();
 
         let err = confirm_merge(
             State(state.clone()),
             VerifiedUser(attacker.clone()),
             Json(ConfirmMergeRequest {
-                from_account: victim.clone(),
+                from_account: victim.to_string(),
             }),
         )
         .await
         .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
 
-        let owner: String = crate::db_scalar_one!(
-            &state.db.pool,
-            _,
-            "SELECT owner_id FROM todos WHERE text = 'private'"
-        )
-        .unwrap();
-        assert_eq!(owner, victim, "the victim's row must not have moved");
+        let item = TodoRepository::find_owned(&state.db.pool, todo.id, victim.as_str())
+            .await
+            .unwrap();
+        assert!(item.is_some(), "the victim's row must not have moved");
     }
 
     #[tokio::test]
     async fn test_a_pending_merge_can_be_previewed_then_confirmed() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let old = AccountRepository::resolve_or_provision(&state.db.pool, "@evan:mbm.one")
+        let old = state
+            .services
+            .accounts
+            .resolve_or_provision("@evan:mbm.one")
             .await
             .unwrap();
 
         for text in ["one", "two"] {
-            crate::db_execute!(
+            TodoRepository::add(
                 &state.db.pool,
-                "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-                 VALUES ('!r:x', ?, 'evan', ?, 'medium', FALSE)",
-                &old,
-                text
+                "!r:x",
+                old.as_str(),
+                "evan",
+                text,
+                TodoPriority::Medium,
+                None,
+                None,
             )
+            .await
             .unwrap();
         }
 
-        note_pending_merge(&state, &user.account_id, &old).await;
+        note_pending_merge(&state, user.account_id.as_str(), old.as_str()).await;
 
         let pending = pending_merge(State(state.clone()), user.clone())
             .await
@@ -191,7 +211,9 @@ mod tests {
         let moved = confirm_merge(
             State(state.clone()),
             VerifiedUser(user.clone()),
-            Json(ConfirmMergeRequest { from_account: old }),
+            Json(ConfirmMergeRequest {
+                from_account: old.to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -206,13 +228,12 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
 
-        crate::db_execute!(
-            &state.db.pool,
-            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
-             VALUES ('only', ?, '{}', 'Only key')",
-            &user.account_id
-        )
-        .unwrap();
+        state
+            .services
+            .accounts
+            .add_passkey(&user.account_id, "only", "{}", "Only key")
+            .await
+            .unwrap();
 
         let err = delete_passkey(
             State(state.clone()),
@@ -228,15 +249,12 @@ mod tests {
     async fn test_sessions_list_marks_the_current_one() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        SessionRepository::create(
-            &state.db.pool,
-            &user.account_id,
-            Some("Other/1.0"),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        state
+            .services
+            .accounts
+            .create_session(&user.account_id, Some("Other/1.0"), None, None)
+            .await
+            .unwrap();
 
         let sessions = list_sessions(State(state), user.clone()).await.unwrap();
         assert_eq!(sessions.0.len(), 2);
@@ -250,7 +268,10 @@ mod tests {
     async fn test_revoking_others_leaves_this_session_alone() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let other = SessionRepository::create(&state.db.pool, &user.account_id, None, None, None)
+        let other = state
+            .services
+            .accounts
+            .create_session(&user.account_id, None, None, None)
             .await
             .unwrap();
 
@@ -259,7 +280,10 @@ mod tests {
             .unwrap();
         assert_eq!(revoked.0, 1);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other)
+        assert!(state
+            .services
+            .accounts
+            .resolve_session(&other)
             .await
             .unwrap()
             .is_none());
@@ -273,7 +297,10 @@ mod tests {
     async fn test_revoking_single_session_works() {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
-        let other = SessionRepository::create(&state.db.pool, &user.account_id, None, None, None)
+        let other = state
+            .services
+            .accounts
+            .create_session(&user.account_id, None, None, None)
             .await
             .unwrap();
         let other_hash = hash_token(&other);
@@ -287,7 +314,10 @@ mod tests {
         .unwrap();
         assert!(res.0);
 
-        assert!(SessionRepository::resolve(&state.db.pool, &other)
+        assert!(state
+            .services
+            .accounts
+            .resolve_session(&other)
             .await
             .unwrap()
             .is_none());
@@ -319,15 +349,19 @@ mod tests {
         let state = state().await;
         let user = signed_in(&state, "evan").await;
 
-        RecoveryRepository::request(&state.db.pool, &user.account_id)
+        state
+            .services
+            .accounts
+            .request_recovery(&user.account_id)
             .await
             .unwrap();
-        assert!(
-            RecoveryRepository::pending(&state.db.pool, &user.account_id)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(state
+            .services
+            .accounts
+            .pending_recovery(&user.account_id)
+            .await
+            .unwrap()
+            .is_some());
 
         // Deliberately a stale session: it could not pass `VerifiedUser`.
         let stale = AuthUser {
@@ -338,12 +372,13 @@ mod tests {
 
         let cancelled = cancel_recovery(State(state.clone()), stale).await.unwrap();
         assert_eq!(cancelled.0, 1);
-        assert!(
-            RecoveryRepository::pending(&state.db.pool, &user.account_id)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(state
+            .services
+            .accounts
+            .pending_recovery(&user.account_id)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -371,20 +406,22 @@ mod tests {
         let mine = signed_in(&state, "mine").await;
         let theirs = signed_in(&state, "theirs").await;
 
-        crate::db_execute!(
-            &state.db.pool,
-            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
-             VALUES ('theirs', ?, '{}', 'Their key')",
-            &theirs.account_id
-        )
-        .unwrap();
-        SecurityEventRepository::record(
-            &state.db.pool,
-            &theirs.account_id,
-            SecurityEventKind::SignedIn,
-            None,
-        )
-        .await;
+        state
+            .services
+            .accounts
+            .add_passkey(&theirs.account_id, "theirs", "{}", "Their key")
+            .await
+            .unwrap();
+
+        state
+            .services
+            .accounts
+            .record_security_event(
+                &theirs.account_id,
+                crate::domain::accounts::SecurityEventKind::SignedIn,
+                None,
+            )
+            .await;
 
         assert!(list_passkeys(State(state.clone()), mine.clone())
             .await

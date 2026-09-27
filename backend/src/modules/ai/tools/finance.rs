@@ -94,7 +94,8 @@ pub async fn execute_tool(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let default_cur = services.settings.get_or_default(owner_id).await.currency;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let target_cur = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -176,7 +177,8 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or(category_name);
 
-                let settings = services.settings.get_or_default(owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 let tz = settings.tz();
                 let raw_currency = args
                     .get("currency")
@@ -211,9 +213,9 @@ pub async fn execute_tool(
 
                 let rooms = &services.rooms;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    rooms.resolve_target_room(owner_id, Some(r)).await
+                    rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    rooms.resolve_target_room(owner_id, None).await
+                    rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()
                 };

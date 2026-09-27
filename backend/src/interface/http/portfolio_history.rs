@@ -60,7 +60,7 @@ mod tests {
             reqwest::Client::new(),
         );
         let user = AuthUser {
-            account_id: "user_test_hist".to_string(),
+            account_id: crate::domain::accounts::AccountId::new("user_test_hist"),
             display_name: "Test Hist User".to_string(),
             session_id_hash: "hash".to_string(),
             last_verified_at: chrono::Utc::now(),

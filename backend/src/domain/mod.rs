@@ -4,5 +4,6 @@
 //! (`tests/architecture.rs`). Features move here one at a time from
 //! `modules/<feature>/models.rs` as the per-feature plan reaches them.
 
+pub mod accounts;
 pub mod rooms;
 pub mod settings;

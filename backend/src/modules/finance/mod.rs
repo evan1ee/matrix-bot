@@ -103,7 +103,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()
@@ -283,7 +283,7 @@ mod tests {
         services
             .settings
             .save(
-                "@alice:a",
+                &crate::domain::accounts::AccountId::new("@alice:a"),
                 UserSettings {
                     timezone: "UTC".to_string(),
                     currency: "CNY".to_string(),

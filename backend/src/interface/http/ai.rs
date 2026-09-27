@@ -159,7 +159,7 @@ pub async fn delete_conversation(
 
     state.broadcaster.send(SystemEvent::AiConversationDeleted {
         id,
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
     });
 
     Ok(StatusCode::NO_CONTENT)
@@ -210,7 +210,7 @@ pub async fn get_ai_config(
             redacted
         })
         .unwrap_or_else(|| AiUserConfig {
-            owner_id: user.account_id.clone(),
+            owner_id: user.account_id.to_string(),
             api_base_url: Some(resolved.api_base_url),
             api_key: None,
             model_name: Some(resolved.model_name),
@@ -266,7 +266,7 @@ pub async fn update_ai_config(
         .map_err(ApiError::from)?;
 
     state.broadcaster.send(SystemEvent::AiConfigUpdated {
-        owner_id: user.account_id.clone(),
+        owner_id: user.account_id.to_string(),
     });
 
     let settings = state

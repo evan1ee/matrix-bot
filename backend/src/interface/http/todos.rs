@@ -174,11 +174,11 @@ pub async fn create_todo(
 
     let rooms = &state.services.rooms;
     let room_id = rooms
-        .resolve_target_room(&user.owner_id(), payload.room_id.as_deref())
+        .resolve_target_room(&user.account_id, payload.room_id.as_deref())
         .await;
 
     let remind_room = match payload.remind_room_id.as_deref() {
-        Some(rr) => Some(rooms.resolve_target_room(&user.owner_id(), Some(rr)).await),
+        Some(rr) => Some(rooms.resolve_target_room(&user.account_id, Some(rr)).await),
         None => None,
     };
 

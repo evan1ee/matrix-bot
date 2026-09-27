@@ -197,7 +197,7 @@ async fn handle_delete(
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::RecurringBillDeleted {
                     id,
-                    owner_id: ctx.owner_id.clone(),
+                    owner_id: ctx.owner_id.to_string(),
                 });
             }
             Some(format!("Deleted bill <b>#{}</b>.", id))

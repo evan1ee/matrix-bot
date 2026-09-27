@@ -2,5 +2,6 @@
 //! `impl sqlx::PgExecutor`, compile-checked `query!` SQL, private row structs
 //! mapped into domain types before they leave the file.
 
+pub mod accounts;
 pub mod rooms;
 pub mod settings;

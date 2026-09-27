@@ -22,7 +22,8 @@ pub async fn handle_show_config(
         .await
         .unwrap_or(None);
     let resolved = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
-    let settings = settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
 
     let key_status = if resolved.api_key.is_some() {
         "Configured (Hidden)"
@@ -55,8 +56,9 @@ pub async fn handle_set_history(
         _ => return format_error("Max history turns must be an integer between 1 and 100."),
     };
 
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
     match settings
-        .modify(owner_id, |current| {
+        .modify(&acct, |current| {
             current.max_history_turns = turns;
             Ok(())
         })

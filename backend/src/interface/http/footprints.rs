@@ -292,7 +292,7 @@ pub async fn delete_footprint(
 
     state.broadcaster.send(SystemEvent::FootprintDeleted {
         id,
-        owner_id: user.account_id,
+        owner_id: user.account_id.to_string(),
     });
 
     Ok(Json(serde_json::json!({ "success": true, "id": id })))

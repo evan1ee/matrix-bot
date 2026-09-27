@@ -31,9 +31,8 @@ pub async fn handle_todo_command(
         return None;
     }
 
-    // Read after the command is claimed, so an unrelated message never costs a
-    // settings query.
-    let tz = settings.get_or_default(owner_id).await.tz();
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let tz = settings.get_or_default(&acct).await.tz();
 
     if bare {
         let items = TodoRepository::list_all_user(pool, owner_id, None, PAGE_SIZE, 0)
@@ -108,7 +107,7 @@ mod tests {
         CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@alice:1".to_string(),
-            owner_id: "@alice:1".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:1"),
             sender_name: "alice".to_string(),
             command: "todo".to_string(),
             raw_args: String::new(),

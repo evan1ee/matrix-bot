@@ -168,12 +168,9 @@ mod tests {
         let state = state().await;
         let (account, token) = signed_in(&state, "evan").await;
 
-        crate::db_execute!(
-            &state.db.pool,
-            "DELETE FROM accounts WHERE id = ?",
-            &account
-        )
-        .unwrap();
+        AccountRepository::delete(&state.db.pool, &account)
+            .await
+            .unwrap();
 
         let err = extract(&state, Method::GET, Some(&token), None)
             .await

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recovery_requests SET consumed_at = $1 WHERE id = $2 AND consumed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "537c90687b734df620a37fc417deabcac2a5aa4c8b64c43a6f2ad36d7c719720"
+}

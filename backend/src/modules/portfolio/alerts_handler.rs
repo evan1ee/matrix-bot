@@ -133,7 +133,8 @@ async fn handle_create_alert(
         let exp = i64::from(exponent_for(&cur));
         (cur, exp)
     } else {
-        let settings = settings.get_or_default(owner_id).await;
+        let acct = crate::domain::accounts::AccountId::from(owner_id);
+        let settings = settings.get_or_default(&acct).await;
         let exp = i64::from(exponent_for(&settings.currency));
         (settings.currency, exp)
     };

@@ -246,12 +246,8 @@ pub fn start_reminder_scheduler(ctx: ModuleContext) -> tokio::task::JoinHandle<(
                     reminder.id, reminder.sender_name, reminder.room_id
                 );
 
-                let tz = ctx
-                    .services
-                    .settings
-                    .get_or_default(&reminder.owner_id)
-                    .await
-                    .tz();
+                let owner_id = crate::domain::accounts::AccountId::from(reminder.owner_id.as_str());
+                let tz = ctx.services.settings.get_or_default(&owner_id).await.tz();
 
                 let alert_html = format_reminder_alert(
                     &reminder.message,

@@ -5,9 +5,7 @@ use axum::{
     Json,
 };
 
-use crate::accounts::{
-    credentials::DeleteOutcome, CredentialRepository, SecurityEventKind, SecurityEventRepository,
-};
+use crate::domain::accounts::DeleteOutcome;
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -27,10 +25,15 @@ pub async fn add_passkey_start(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<CeremonyStart>, ApiError> {
-    let handle = crate::accounts::account_id_to_handle(&user.account_id)
+    let handle = user
+        .account_id
+        .to_handle()
         .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
 
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &user.account_id)
+    let stored = state
+        .services
+        .accounts
+        .list_passkeys(&user.account_id)
         .await
         .unwrap_or_default();
     let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
@@ -54,7 +57,7 @@ pub async fn add_passkey_start(
 
     let ceremony_id = state
         .stash_ceremony(Ceremony::Registration {
-            account_id: user.account_id,
+            account_id: user.account_id.to_string(),
             display_name: user.display_name,
             state: reg_state,
         })
@@ -78,7 +81,10 @@ pub async fn list_passkeys(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<PasskeySummary>>, ApiError> {
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &user.account_id)
+    let stored = state
+        .services
+        .accounts
+        .list_passkeys(&user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -116,21 +122,16 @@ pub async fn rename_passkey(
         ));
     }
 
-    let renamed = CredentialRepository::rename(&state.db.pool, &user.account_id, &id, label)
+    let renamed = state
+        .services
+        .accounts
+        .rename_passkey(&user.account_id, &id, label)
         .await
         .map_err(ApiError::from)?;
 
     if !renamed {
         return Err(ApiError::not_found("No such passkey"));
     }
-
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::PasskeyRenamed,
-        Some(label),
-    )
-    .await;
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -150,20 +151,14 @@ pub async fn delete_passkey(
     user: VerifiedUser,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    match CredentialRepository::delete(&state.db.pool, &user.account_id, &id)
+    match state
+        .services
+        .accounts
+        .delete_passkey(&user.account_id, &id)
         .await
         .map_err(ApiError::from)?
     {
-        DeleteOutcome::Removed => {
-            SecurityEventRepository::record(
-                &state.db.pool,
-                &user.account_id,
-                SecurityEventKind::PasskeyRemoved,
-                None,
-            )
-            .await;
-            Ok(axum::http::StatusCode::NO_CONTENT)
-        }
+        DeleteOutcome::Removed => Ok(axum::http::StatusCode::NO_CONTENT),
         DeleteOutcome::NotFound => Err(ApiError::not_found("No such passkey")),
         DeleteOutcome::WouldLockOut => Err(ApiError::conflict(
             "That is your only passkey. Add another before removing this one.",

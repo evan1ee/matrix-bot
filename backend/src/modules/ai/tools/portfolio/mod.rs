@@ -124,7 +124,8 @@ pub async fn execute_tool(
                 };
 
                 let note = args.get("note").and_then(|v| v.as_str());
-                let default_cur = services.settings.get_or_default(owner_id)
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct)
                     .await
                     .currency;
                 let raw_currency = args
@@ -263,7 +264,8 @@ pub async fn execute_tool(
                     .get("timeframe")
                     .and_then(|v| v.as_str())
                     .unwrap_or("1m");
-                let default_cur = services.settings.get_or_default(owner_id)
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct)
                     .await
                     .currency;
                 let raw_currency = args

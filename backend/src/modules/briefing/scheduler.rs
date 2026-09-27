@@ -27,7 +27,8 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
     let now_utc = Utc::now();
 
-    for owner_id in accounts {
+    for owner_str in accounts {
+        let owner_id = crate::domain::accounts::AccountId::from(owner_str);
         let settings = ctx.services.settings.get_or_default(&owner_id).await;
         if !settings.briefing_enabled {
             continue;
@@ -71,7 +72,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
             now_local.minute()
         );
 
-        let payload = match generate_briefing(&ctx.db.pool, &owner_id, &settings).await {
+        let payload = match generate_briefing(&ctx.db.pool, owner_id.as_str(), &settings).await {
             Ok(p) => p,
             Err(err) => {
                 error!(
@@ -119,7 +120,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         // 5. Broadcast SSE event
         if let Some(ref broadcaster) = ctx.broadcaster {
             broadcaster.send(SystemEvent::MorningBriefingSent {
-                owner_id: owner_id.clone(),
+                owner_id: owner_id.to_string(),
                 delivered_at: today_local_str.clone(),
                 summary: format!(
                     "{} tasks, {} habits, {} bills, {} holdings",

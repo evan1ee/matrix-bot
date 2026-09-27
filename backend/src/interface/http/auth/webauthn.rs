@@ -249,16 +249,17 @@ pub async fn register_finish(
         })?;
 
     // Activate or create the account.
-    crate::db_execute!(
-        &state.db.pool,
-        "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, 'active') \
-         ON CONFLICT(id) DO UPDATE SET status = 'active'",
-        &account_id,
-        &display_name
-    )
-    .map_err(|err| {
-        ApiError::internal(format!("could not activate or create the account: {err}"))
-    })?;
+    state
+        .services
+        .accounts
+        .activate_or_create(
+            &crate::domain::accounts::AccountId::new(&account_id),
+            &display_name,
+        )
+        .await
+        .map_err(|err| {
+            ApiError::internal(format!("could not activate or create the account: {err}"))
+        })?;
 
     let label = payload
         .label
@@ -616,8 +617,7 @@ mod tests {
         .await
         .unwrap();
 
-        let accounts: i64 =
-            crate::db_scalar_one!(&state.db.pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
+        let accounts = state.services.accounts.count().await.unwrap();
         assert_eq!(
             accounts, 0,
             "the account is written only when the ceremony finishes"
@@ -804,12 +804,14 @@ mod tests {
         let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
             .await
             .unwrap();
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::credentials::add(
             &state.db.pool,
-            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
-             VALUES ('pk1', ?, '{}', 'MacBook')",
-            &account_id
+            &crate::domain::accounts::AccountId::new(&account_id),
+            "pk1",
+            "{}",
+            "MacBook",
         )
+        .await
         .unwrap();
 
         let err = enroll_start(State(state.clone()), Json(EnrollStartRequest { token }))

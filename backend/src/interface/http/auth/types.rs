@@ -12,6 +12,8 @@ const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 /// Ceiling on establishing the TCP/TLS connection alone.
 const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
+use crate::domain::accounts::AccountId;
+
 /// An authenticated caller, resolved from the session cookie.
 ///
 /// There is one identity space now. Callers used to arrive as either a Matrix
@@ -22,7 +24,7 @@ const HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     /// The `accounts.id` this caller acts as. The only ownership key there is.
-    pub account_id: String,
+    pub account_id: AccountId,
     /// The human-facing name persisted in `sender_name`. Display only — it is
     /// never used to decide who owns a row.
     pub display_name: String,
@@ -41,7 +43,7 @@ impl AuthUser {
     ///
     /// Every ownership check compares against this and nothing else.
     pub fn owner_id(&self) -> String {
-        self.account_id.clone()
+        self.account_id.to_string()
     }
 
     /// Whether a passkey assertion happened recently enough for a sensitive
@@ -59,7 +61,7 @@ impl AuthUser {
 
     /// Test-only constructor. Production builds this from a session row.
     #[cfg(test)]
-    pub fn for_account(account_id: impl Into<String>) -> Self {
+    pub fn for_account(account_id: impl Into<AccountId>) -> Self {
         let account_id = account_id.into();
         Self {
             display_name: account_id.trim_start_matches("acct_").to_string(),
@@ -73,7 +75,7 @@ impl AuthUser {
     /// Test-only: a caller whose display name is set independently of the
     /// account, so tests can prove a shared name never implies shared data.
     #[cfg(test)]
-    pub fn named(display_name: impl Into<String>, account_id: impl Into<String>) -> Self {
+    pub fn named(display_name: impl Into<String>, account_id: impl Into<AccountId>) -> Self {
         Self {
             display_name: display_name.into(),
             ..Self::for_account(account_id)

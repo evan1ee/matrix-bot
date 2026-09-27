@@ -93,7 +93,7 @@ mod tests {
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@user:1".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@user:1"),
             sender_name: "Alice".to_string(),
             command: "hello".to_string(),
             raw_args: "".to_string(),

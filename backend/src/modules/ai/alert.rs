@@ -51,8 +51,8 @@ pub async fn notify_dev_room_ai_error(
 
     // Determine target DEV room:
     // 1. Check user's settings.dev_room_id
-    // 2. Fallback: Search joined rooms for a room named "DEV" (case-insensitive)
-    let settings = settings.get_or_default(owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
     let target_room_id = if let Some(ref room_id) = settings.dev_room_id {
         Some(room_id.clone())
     } else {

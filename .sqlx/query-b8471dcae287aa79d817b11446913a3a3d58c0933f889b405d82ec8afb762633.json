@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recovery_codes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recovery_codes",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "code_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recovery_codes",
+            "name": "code_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b8471dcae287aa79d817b11446913a3a3d58c0933f889b405d82ec8afb762633"
+}

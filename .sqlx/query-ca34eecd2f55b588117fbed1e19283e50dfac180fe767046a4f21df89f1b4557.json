@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE matrix_link_challenges SET consumed_at = $1 WHERE code = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca34eecd2f55b588117fbed1e19283e50dfac180fe767046a4f21df89f1b4557"
+}

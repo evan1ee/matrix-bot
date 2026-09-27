@@ -209,7 +209,7 @@ pub async fn handle_bookmark_subcommands(
                     if let Some(bc) = broadcaster {
                         bc.send(SystemEvent::BookmarkDeleted {
                             id,
-                            owner_id: ctx.owner_id.clone(),
+                            owner_id: ctx.owner_id.to_string(),
                         });
                     }
                     format!("🗑️ Deleted bookmark <b>#{}</b>", id)
@@ -238,14 +238,14 @@ pub fn format_help() -> String {
 mod tests {
     use super::*;
 
-    async fn setup_db() -> (DbPool, String) {
+    async fn setup_db() -> (DbPool, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
                 .await
                 .unwrap();
-        (pool, owner)
+        (pool, crate::domain::accounts::AccountId::new(owner))
     }
 
     #[tokio::test]

@@ -44,7 +44,8 @@ pub async fn execute_tool(
                     return Err("Field 'target_price' is required".to_string());
                 };
 
-                let default_cur = services.settings.get_or_default(owner_id).await.currency;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let holding = PortfolioRepository::find(pool, owner_id, &symbol)
                     .await
                     .map_err(|e| e.to_string())?;

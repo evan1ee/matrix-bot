@@ -2,7 +2,6 @@
 
 use axum::{extract::State, Json};
 
-use crate::accounts::{RecoveryRepository, SecurityEventKind, SecurityEventRepository};
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -21,17 +20,12 @@ pub async fn regenerate_recovery_codes(
     State(state): State<ApiState>,
     user: VerifiedUser,
 ) -> Result<Json<RecoveryCodesResponse>, ApiError> {
-    let codes = RecoveryRepository::issue_codes(&state.db.pool, &user.account_id)
+    let codes = state
+        .services
+        .accounts
+        .issue_recovery_codes(&user.account_id)
         .await
         .map_err(ApiError::from)?;
-
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::RecoveryCodesIssued,
-        None,
-    )
-    .await;
 
     Ok(Json(RecoveryCodesResponse { codes }))
 }
@@ -47,10 +41,16 @@ pub async fn recovery_status(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let remaining = RecoveryRepository::remaining(&state.db.pool, &user.account_id)
+    let remaining = state
+        .services
+        .accounts
+        .remaining_recovery_codes(&user.account_id)
         .await
         .unwrap_or(0);
-    let pending = RecoveryRepository::pending(&state.db.pool, &user.account_id)
+    let pending = state
+        .services
+        .accounts
+        .pending_recovery(&user.account_id)
         .await
         .unwrap_or(None);
 
@@ -77,19 +77,12 @@ pub async fn cancel_recovery(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<u64>, ApiError> {
-    let cancelled = RecoveryRepository::cancel_all(&state.db.pool, &user.account_id)
+    let cancelled = state
+        .services
+        .accounts
+        .cancel_recovery(&user.account_id)
         .await
         .map_err(ApiError::from)?;
-
-    if cancelled > 0 {
-        SecurityEventRepository::record(
-            &state.db.pool,
-            &user.account_id,
-            SecurityEventKind::RecoveryCancelled,
-            None,
-        )
-        .await;
-    }
 
     Ok(Json(cancelled))
 }

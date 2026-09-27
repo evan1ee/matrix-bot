@@ -95,7 +95,7 @@ pub async fn get_current_user(
     };
 
     Ok(Json(UserProfileResponse {
-        account_id: auth_user.account_id,
+        account_id: auth_user.account_id.to_string(),
         username: auth_user.display_name.clone(),
         display_name: final_display_name,
         avatar_url,

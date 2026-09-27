@@ -69,7 +69,8 @@ pub async fn execute_tool(
                     .or_else(|| args.get("due"))
                     .and_then(|v| v.as_str())
                 {
-                    let settings = services.settings.get_or_default(owner_id).await;
+                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let settings = services.settings.get_or_default(&acct).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
                     None
@@ -77,10 +78,11 @@ pub async fn execute_tool(
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
                 let rooms = &services.rooms;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    rooms.resolve_target_room(owner_id, Some(r)).await
+                    rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    rooms.resolve_target_room(owner_id, None).await
+                    rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -173,7 +175,8 @@ pub async fn execute_tool(
                         if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                             Some(Utc::now() + Duration::minutes(mins))
                         } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                            let settings = services.settings.get_or_default(owner_id).await;
+                            let acct = crate::domain::accounts::AccountId::from(owner_id);
+                            let settings = services.settings.get_or_default(&acct).await;
                             parse_due_at(due_str, &settings.tz())
                         } else {
                             None

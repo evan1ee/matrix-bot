@@ -33,6 +33,7 @@ pub mod repository;
 pub mod security_events;
 pub mod session;
 
+pub use crate::domain::accounts::AccountId;
 pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
 pub use merge::{MergePreview, MergeRepository};
