@@ -177,7 +177,8 @@ impl LinkRepository {
 
                 if let Some(prev) = previous_account {
                     if prev != challenge.account_id {
-                        let preview = super::MergeRepository::preview(pool, &prev)
+                        let prev_id = crate::domain::accounts::AccountId::new(&prev);
+                        let preview = super::MergeRepository::preview(pool, &prev_id)
                             .await
                             .unwrap_or_default();
                         if preview.total() > 0 {

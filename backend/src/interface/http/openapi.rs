@@ -200,7 +200,7 @@ use crate::modules::webhook::models::{TelegramMessageResult, TelegramQuery, Tele
             account::ConfirmMergeRequest,
             account::RecoveryCodesResponse,
             account::RenamePasskeyRequest,
-            crate::accounts::MergePreview,
+            account::MergePreview,
             crate::accounts::security_events::SecurityEvent,
             auth::UserProfileResponse,
             auth::MediaProxyQuery,

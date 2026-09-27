@@ -66,6 +66,7 @@ impl SttClient {
             .filter(|k| !k.is_empty());
 
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(REQUEST_TIMEOUT)
             .build()
             .unwrap_or_default();

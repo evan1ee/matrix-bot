@@ -48,6 +48,7 @@ impl OcrClient {
             .filter(|u| !u.is_empty());
 
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(REQUEST_TIMEOUT)
             .build()
             .unwrap_or_default();

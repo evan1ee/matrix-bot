@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) VALUES ($1, 'AAPL', 100000000, 15000, 'USD')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "32fe08c341ae4628fc14d0a31472d4d4fce8b06194aa2a1bada8248b2c48bf10"
+}

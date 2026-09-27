@@ -4,9 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 
 use super::core;
-use crate::domain::accounts::{normalise_link_code, AccountId, LinkChallenge, LinkOutcome};
-
-const LINK_CODE_TTL_MINUTES: i64 = 15;
+use crate::domain::accounts::{
+    normalise_link_code, AccountId, LinkChallenge, LinkOutcome, LINK_CODE_TTL_MINUTES,
+};
 
 struct LinkChallengeRow {
     code: String,
@@ -146,7 +146,7 @@ pub async fn claim(
             if let Some(prev) = previous_account {
                 let prev_id = AccountId::new(prev);
                 if prev_id != challenge.account_id {
-                    let preview = crate::accounts::MergeRepository::preview(pool, prev_id.as_str())
+                    let preview = crate::infrastructure::postgres::merge::preview(pool, &prev_id)
                         .await
                         .unwrap_or_default();
                     if preview.total() > 0 {

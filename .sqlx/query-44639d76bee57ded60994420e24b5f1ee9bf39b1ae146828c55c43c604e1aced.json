@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_id FROM bot_message_targets WHERE event_id = 'ev1'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bot_message_targets",
+            "name": "owner_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "44639d76bee57ded60994420e24b5f1ee9bf39b1ae146828c55c43c604e1aced"
+}

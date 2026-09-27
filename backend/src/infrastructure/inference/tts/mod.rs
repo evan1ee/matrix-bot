@@ -130,6 +130,7 @@ impl TtsClient {
         // at, and a 307/308 would re-post the user's text there too. Neither
         // provider needs redirects, so following them is a pure liability.
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(REQUEST_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()

@@ -2,10 +2,7 @@
 
 use axum::{extract::State, Json};
 
-use crate::accounts::{
-    linking::LINK_CODE_TTL_MINUTES, MergePreview, MergeRepository, SecurityEventKind,
-    SecurityEventRepository,
-};
+use crate::domain::accounts::{AccountId, SecurityEventKind, LINK_CODE_TTL_MINUTES};
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -85,13 +82,17 @@ pub async fn pending_merge(
         return Ok(Json(None));
     };
 
-    let preview = MergeRepository::preview(&state.db.pool, &from_account)
+    let from_id = AccountId::new(from_account.clone());
+    let domain_preview = state
+        .services
+        .accounts
+        .preview_merge(&from_id)
         .await
         .map_err(ApiError::from)?;
 
     Ok(Json(Some(PendingMerge {
         from_account,
-        preview,
+        preview: MergePreview::from(domain_preview),
     })))
 }
 
@@ -121,7 +122,11 @@ pub async fn confirm_merge(
         return Err(ApiError::not_found("No merge is waiting for confirmation"));
     }
 
-    let outcome = MergeRepository::merge(&state.db.pool, &payload.from_account, &user.account_id)
+    let from_id = AccountId::new(payload.from_account);
+    let outcome = state
+        .services
+        .accounts
+        .merge(&from_id, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -131,15 +136,17 @@ pub async fn confirm_merge(
         .await
         .remove(user.account_id.as_str());
 
-    SecurityEventRepository::record(
-        &state.db.pool,
-        &user.account_id,
-        SecurityEventKind::AccountsMerged,
-        Some(&format!("{} rows", outcome.moved.total())),
-    )
-    .await;
+    state
+        .services
+        .accounts
+        .record_security_event(
+            &user.account_id,
+            SecurityEventKind::AccountsMerged,
+            Some(&format!("{} rows", outcome.moved.total())),
+        )
+        .await;
 
-    Ok(Json(outcome.moved))
+    Ok(Json(MergePreview::from(outcome.moved)))
 }
 
 #[utoipa::path(

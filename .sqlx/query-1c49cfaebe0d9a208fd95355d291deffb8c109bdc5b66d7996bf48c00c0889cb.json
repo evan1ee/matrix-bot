@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_id FROM portfolio_audit_log WHERE action = 'deposit'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_audit_log",
+            "name": "owner_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c49cfaebe0d9a208fd95355d291deffb8c109bdc5b66d7996bf48c00c0889cb"
+}

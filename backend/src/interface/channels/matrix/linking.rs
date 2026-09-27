@@ -19,7 +19,7 @@ pub type PendingMerges = tokio::sync::RwLock<std::collections::HashMap<String, S
 /// Handles `!link <code>` and returns the HTML reply.
 pub async fn handle_link_command(
     accounts: &AccountService,
-    db: &Database,
+    _db: &Database,
     args: &str,
     sender_mxid: &str,
     is_direct: bool,
@@ -59,10 +59,10 @@ pub async fn handle_link_command(
             account_id,
             from_account,
         }) => {
-            let preview =
-                crate::accounts::MergeRepository::preview(&db.pool, from_account.as_str())
-                    .await
-                    .unwrap_or_default();
+            let preview = accounts
+                .preview_merge(&from_account)
+                .await
+                .unwrap_or_default();
 
             if let Some(pending) = pending_merges {
                 pending

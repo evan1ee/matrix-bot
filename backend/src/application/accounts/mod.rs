@@ -3,10 +3,13 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+pub mod merge;
+pub use merge::MergeService;
+
 use crate::application::AppError;
 use crate::domain::accounts::{
-    Account, AccountId, AccountsError, DeleteOutcome, LinkOutcome, MaturedRecovery, SecurityEvent,
-    SecurityEventKind, Session, StoredCredential,
+    Account, AccountId, AccountsError, DeleteOutcome, LinkOutcome, MaturedRecovery, MergeOutcome,
+    MergePreview, SecurityEvent, SecurityEventKind, Session, StoredCredential,
 };
 use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::accounts::{
@@ -345,5 +348,19 @@ impl AccountService {
         limit: i64,
     ) -> Result<Vec<SecurityEvent>, AppError> {
         Ok(security_events::list(&self.pool, account_id, limit).await?)
+    }
+
+    // --- Merge ---
+
+    pub async fn preview_merge(&self, from: &AccountId) -> Result<MergePreview, AppError> {
+        MergeService::preview(&self.pool, from).await
+    }
+
+    pub async fn merge(
+        &self,
+        from: &AccountId,
+        into: &AccountId,
+    ) -> Result<MergeOutcome, AppError> {
+        MergeService::merge(&self.pool, from, into).await
     }
 }

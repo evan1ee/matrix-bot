@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b0032207e0489d06c9058ef3c1cce0b08d3540b213fa57432f60be0259c3d7c9"
+}

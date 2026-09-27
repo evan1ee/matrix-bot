@@ -5,6 +5,7 @@
 //! running its readiness ping directly. More repositories move here as
 //! `modules/` features migrate to the target layer-first layout.
 
+pub mod merge;
 pub mod repositories;
 
 use sqlx::PgPool;
