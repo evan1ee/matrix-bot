@@ -3,15 +3,143 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
-use crate::modules::bookmarks::models::{
-    Bookmark, BookmarkQuery, BookmarkStats, CreateBookmarkInput, UpdateBookmarkInput,
-};
-use crate::modules::bookmarks::repository::BookmarksRepository;
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct Bookmark {
+    pub id: i64,
+    pub owner_id: String,
+    pub url: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub author: Option<String>,
+    pub image_url: Option<String>,
+    pub domain: String,
+    pub reader_content: Option<String>,
+    pub reading_time_minutes: i64,
+    pub is_favorite: bool,
+    pub is_archived: bool,
+    pub tags: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<crate::domain::bookmarks::Bookmark> for Bookmark {
+    fn from(b: crate::domain::bookmarks::Bookmark) -> Self {
+        Self {
+            id: b.id,
+            owner_id: b.owner_id.into_inner(),
+            url: b.url,
+            title: b.title,
+            description: b.description,
+            author: b.author,
+            image_url: b.image_url,
+            domain: b.domain,
+            reader_content: b.reader_content,
+            reading_time_minutes: b.reading_time_minutes,
+            is_favorite: b.is_favorite,
+            is_archived: b.is_archived,
+            tags: b.tags,
+            created_at: b.created_at,
+            updated_at: b.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateBookmarkInput {
+    pub url: String,
+    pub title: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct UpdateBookmarkInput {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub is_favorite: Option<bool>,
+    pub is_archived: Option<bool>,
+}
+
+impl From<UpdateBookmarkInput> for crate::domain::bookmarks::UpdateBookmark {
+    fn from(input: UpdateBookmarkInput) -> Self {
+        Self {
+            title: input.title,
+            description: input.description,
+            tags: input.tags,
+            is_favorite: input.is_favorite,
+            is_archived: input.is_archived,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema, Default)]
+pub struct BookmarkQuery {
+    pub archived: Option<bool>,
+    pub favorite: Option<bool>,
+    pub tag: Option<String>,
+    pub domain: Option<String>,
+    pub search: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+impl From<BookmarkQuery> for crate::domain::bookmarks::BookmarkQuery {
+    fn from(q: BookmarkQuery) -> Self {
+        Self {
+            archived: q.archived,
+            favorite: q.favorite,
+            tag: q.tag,
+            domain: q.domain,
+            search: q.search,
+            limit: q.limit,
+            offset: q.offset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DomainCount {
+    pub domain: String,
+    pub count: i64,
+}
+
+impl From<crate::domain::bookmarks::DomainCount> for DomainCount {
+    fn from(d: crate::domain::bookmarks::DomainCount) -> Self {
+        Self {
+            domain: d.domain,
+            count: d.count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BookmarkStats {
+    pub total_count: i64,
+    pub unread_count: i64,
+    pub archived_count: i64,
+    pub favorite_count: i64,
+    pub tags: Vec<String>,
+    pub top_domains: Vec<DomainCount>,
+}
+
+impl From<crate::domain::bookmarks::BookmarkStats> for BookmarkStats {
+    fn from(s: crate::domain::bookmarks::BookmarkStats) -> Self {
+        Self {
+            total_count: s.total_count,
+            unread_count: s.unread_count,
+            archived_count: s.archived_count,
+            favorite_count: s.favorite_count,
+            tags: s.tags,
+            top_domains: s.top_domains.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 
 #[utoipa::path(
     get,
@@ -34,11 +162,15 @@ pub async fn list_bookmarks(
     State(state): State<ApiState>,
     Query(query): Query<BookmarkQuery>,
 ) -> Result<Json<Vec<Bookmark>>, ApiError> {
-    let items = BookmarksRepository::list(&state.db.pool, &user.account_id, &query)
+    let domain_query: crate::domain::bookmarks::BookmarkQuery = query.into();
+    let items = state
+        .services
+        .bookmarks
+        .list(&user.account_id, &domain_query)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
-    Ok(Json(items))
+    Ok(Json(items.into_iter().map(Into::into).collect()))
 }
 
 #[utoipa::path(
@@ -52,11 +184,14 @@ pub async fn get_stats(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<BookmarkStats>, ApiError> {
-    let stats = BookmarksRepository::get_stats(&state.db.pool, &user.account_id)
+    let stats = state
+        .services
+        .bookmarks
+        .get_stats(&user.account_id)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
-    Ok(Json(stats))
+    Ok(Json(stats.into()))
 }
 
 #[utoipa::path(
@@ -72,74 +207,27 @@ pub async fn create_bookmark(
     State(state): State<ApiState>,
     Json(payload): Json<CreateBookmarkInput>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let url = payload.url.trim();
-    if url.is_empty() {
-        return Err(ApiError::bad_request("URL cannot be empty"));
-    }
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(ApiError::bad_request(
-            "URL must begin with http:// or https://",
-        ));
-    }
-    if url.len() > 2048 {
-        return Err(ApiError::bad_request(
-            "URL exceeds maximum length of 2048 characters",
-        ));
-    }
-
-    if let Some(ref t) = payload.title {
-        if t.len() > 500 {
-            return Err(ApiError::bad_request("Title exceeds 500 characters"));
-        }
-    }
-
-    if let Some(ref tags) = payload.tags {
-        if tags.len() > 20 {
-            return Err(ApiError::bad_request("Cannot specify more than 20 tags"));
-        }
-        for tag in tags {
-            if tag.len() > 50 {
-                return Err(ApiError::bad_request("Tag exceeds 50 characters"));
-            }
-        }
-    }
-
-    let tags_str = payload
-        .tags
-        .as_ref()
-        .map(|tags| {
-            tags.iter()
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-
-    let meta =
-        fetch_and_extract_metadata(Some(&state.http_client), url, payload.title.as_deref()).await;
-
-    let bookmark = BookmarksRepository::create(
-        &state.db.pool,
-        &user.account_id,
-        url,
-        &meta.title,
-        meta.description.as_deref(),
-        meta.author.as_deref(),
-        meta.image_url.as_deref(),
-        &meta.domain,
-        meta.reader_content.as_deref(),
-        meta.reading_time_minutes,
-        &tags_str,
+    let meta = crate::infrastructure::web::fetch_and_extract_metadata(
+        Some(&state.http_client),
+        &payload.url,
+        payload.title.as_deref(),
     )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    .await;
 
-    state
-        .broadcaster
-        .send(SystemEvent::BookmarkCreated(bookmark.clone()));
+    let bookmark = state
+        .services
+        .bookmarks
+        .create(
+            &user.account_id,
+            &payload.url,
+            payload.title.as_deref(),
+            payload.tags.as_deref(),
+            meta,
+        )
+        .await
+        .map_err(ApiError::from)?;
 
-    Ok(Json(bookmark))
+    Ok(Json(bookmark.into()))
 }
 
 #[utoipa::path(
@@ -155,12 +243,14 @@ pub async fn get_bookmark(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let bookmark = BookmarksRepository::find_by_id(&state.db.pool, id, &user.account_id)
+    let bookmark = state
+        .services
+        .bookmarks
+        .get(&user.account_id, id)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found("Bookmark not found"))?;
+        .map_err(ApiError::from)?;
 
-    Ok(Json(bookmark))
+    Ok(Json(bookmark.into()))
 }
 
 #[utoipa::path(
@@ -178,26 +268,14 @@ pub async fn update_bookmark(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateBookmarkInput>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    if let Some(ref title) = payload.title {
-        if title.len() > 500 {
-            return Err(ApiError::bad_request("Title exceeds 500 characters"));
-        }
-    }
-    if let Some(ref desc) = payload.description {
-        if desc.len() > 2000 {
-            return Err(ApiError::bad_request("Description exceeds 2000 characters"));
-        }
-    }
-
-    let updated = BookmarksRepository::update(&state.db.pool, id, &user.account_id, &payload)
+    let updated = state
+        .services
+        .bookmarks
+        .update(&user.account_id, id, payload.into())
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::BookmarkUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -213,15 +291,14 @@ pub async fn toggle_favorite(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let updated = BookmarksRepository::toggle_favorite(&state.db.pool, id, &user.account_id)
+    let updated = state
+        .services
+        .bookmarks
+        .toggle_favorite(&user.account_id, id)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::BookmarkUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -237,15 +314,14 @@ pub async fn toggle_archive(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let updated = BookmarksRepository::toggle_archived(&state.db.pool, id, &user.account_id)
+    let updated = state
+        .services
+        .bookmarks
+        .toggle_archived(&user.account_id, id)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::BookmarkUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -261,18 +337,12 @@ pub async fn delete_bookmark(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = BookmarksRepository::delete(&state.db.pool, id, &user.account_id)
+    state
+        .services
+        .bookmarks
+        .delete(&user.account_id, id)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    if !deleted {
-        return Err(ApiError::not_found("Bookmark not found"));
-    }
-
-    state.broadcaster.send(SystemEvent::BookmarkDeleted {
-        id,
-        owner_id: user.account_id.to_string(),
-    });
+        .map_err(ApiError::from)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -291,7 +361,7 @@ mod tests {
                 .await
                 .unwrap();
         let state = ApiState::new(
-            Database { pool: pool },
+            Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

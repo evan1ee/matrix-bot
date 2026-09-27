@@ -1,18 +1,92 @@
-use crate::db::DbPool;
+//! Matrix bot module for Bookmarks.
+
+use async_trait::async_trait;
 use reqwest::Client;
 
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
-use crate::modules::bookmarks::models::BookmarkQuery;
-use crate::modules::bookmarks::repository::BookmarksRepository;
-use crate::modules::CommandContext;
+use crate::application::AppServices;
+use crate::db::Database;
+use crate::domain::bookmarks::BookmarkQuery;
+use crate::events::EventBroadcaster;
+use crate::infrastructure::web::fetch_and_extract_metadata;
+use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
+
+pub struct BookmarksModule {
+    http_client: Client,
+}
+
+impl BookmarksModule {
+    pub fn new() -> Self {
+        Self {
+            http_client: Client::new(),
+        }
+    }
+}
+
+impl Default for BookmarksModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl BotModule for BookmarksModule {
+    fn name(&self) -> &str {
+        "Bookmarks"
+    }
+
+    fn commands(&self) -> Vec<CommandHelp> {
+        vec![
+            CommandHelp {
+                name: "save".to_string(),
+                usage: "!save <url> [tag1,tag2]".to_string(),
+                description: "Save web page with OpenGraph metadata and reader view".to_string(),
+            },
+            CommandHelp {
+                name: "bookmarks".to_string(),
+                usage: "!bookmarks [tag]".to_string(),
+                description: "List unread bookmarks in reading list".to_string(),
+            },
+            CommandHelp {
+                name: "bookmark fav".to_string(),
+                usage: "!bookmark fav <id>".to_string(),
+                description: "Toggle star/favorite on a bookmark".to_string(),
+            },
+            CommandHelp {
+                name: "bookmark archive".to_string(),
+                usage: "!bookmark archive <id>".to_string(),
+                description: "Archive a bookmark or mark as read".to_string(),
+            },
+            CommandHelp {
+                name: "bookmark rm".to_string(),
+                usage: "!bookmark rm <id>".to_string(),
+                description: "Delete a bookmark".to_string(),
+            },
+        ]
+    }
+
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        services: &AppServices,
+        _db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
+        match ctx.command.as_str() {
+            "save" => Some(handle_save_command(ctx, services, Some(&self.http_client)).await),
+            "bookmarks" | "reading" => Some(handle_list_command(ctx, services).await),
+            "bookmark" => {
+                Some(handle_bookmark_subcommands(ctx, services, Some(&self.http_client)).await)
+            }
+            _ => None,
+        }
+    }
+}
 
 pub async fn handle_save_command(
     ctx: &CommandContext,
-    pool: &DbPool,
+    services: &AppServices,
     http_client: Option<&Client>,
-    broadcaster: Option<&EventBroadcaster>,
 ) -> String {
     let args = ctx.raw_args.trim();
     if args.is_empty() {
@@ -32,40 +106,26 @@ pub async fn handle_save_command(
     }
 
     let tags = parts.collect::<Vec<_>>().join(" ");
-    let clean_tags = tags
+    let clean_tags: Vec<String> = tags
         .split(',')
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join(",");
+        .collect();
 
-    if clean_tags.len() > 500 {
+    let joined_tags = clean_tags.join(",");
+    if joined_tags.len() > 500 {
         return "❌ <b>Invalid tags:</b> Tags exceed maximum length of 500 characters.".to_string();
     }
 
     let meta = fetch_and_extract_metadata(http_client, url_candidate, None).await;
 
-    let bookmark_res = BookmarksRepository::create(
-        pool,
-        &ctx.owner_id,
-        url_candidate,
-        &meta.title,
-        meta.description.as_deref(),
-        meta.author.as_deref(),
-        meta.image_url.as_deref(),
-        &meta.domain,
-        meta.reader_content.as_deref(),
-        meta.reading_time_minutes,
-        &clean_tags,
-    )
-    .await;
+    let bookmark_res = services
+        .bookmarks
+        .create(&ctx.owner_id, url_candidate, None, Some(&clean_tags), meta)
+        .await;
 
     match bookmark_res {
         Ok(b) => {
-            if let Some(bc) = broadcaster {
-                bc.send(SystemEvent::BookmarkCreated(b.clone()));
-            }
-
             let title_esc = html_escape(&b.title);
             let domain_esc = html_escape(&b.domain);
             let url_esc = html_escape(&b.url);
@@ -88,7 +148,7 @@ pub async fn handle_save_command(
     }
 }
 
-pub async fn handle_list_command(ctx: &CommandContext, pool: &DbPool) -> String {
+pub async fn handle_list_command(ctx: &CommandContext, services: &AppServices) -> String {
     let tag = if ctx.raw_args.trim().is_empty() {
         None
     } else {
@@ -103,7 +163,7 @@ pub async fn handle_list_command(ctx: &CommandContext, pool: &DbPool) -> String 
         ..Default::default()
     };
 
-    let items = match BookmarksRepository::list(pool, &ctx.owner_id, &query).await {
+    let items = match services.bookmarks.list(&ctx.owner_id, &query).await {
         Ok(res) => res,
         Err(e) => {
             return format!(
@@ -136,27 +196,23 @@ pub async fn handle_list_command(ctx: &CommandContext, pool: &DbPool) -> String 
 
 pub async fn handle_bookmark_subcommands(
     ctx: &CommandContext,
-    pool: &DbPool,
+    services: &AppServices,
     http_client: Option<&Client>,
-    broadcaster: Option<&EventBroadcaster>,
 ) -> String {
     let raw = ctx.raw_args.trim();
     let mut parts = raw.split_whitespace();
     let sub = parts.next().unwrap_or("");
 
     match sub {
-        "" | "list" => handle_list_command(ctx, pool).await,
+        "" | "list" => handle_list_command(ctx, services).await,
         "fav" | "star" | "favorite" => {
             let id = parts.next().and_then(|s| s.parse::<i64>().ok());
             let Some(id) = id else {
                 return "❌ <b>Usage:</b> <code>!bookmark fav &lt;id&gt;</code>".to_string();
             };
 
-            match BookmarksRepository::toggle_favorite(pool, id, &ctx.owner_id).await {
+            match services.bookmarks.toggle_favorite(&ctx.owner_id, id).await {
                 Ok(b) => {
-                    if let Some(bc) = broadcaster {
-                        bc.send(SystemEvent::BookmarkUpdated(b.clone()));
-                    }
                     let state = if b.is_favorite {
                         "Starred ⭐"
                     } else {
@@ -178,11 +234,8 @@ pub async fn handle_bookmark_subcommands(
                 return "❌ <b>Usage:</b> <code>!bookmark archive &lt;id&gt;</code>".to_string();
             };
 
-            match BookmarksRepository::toggle_archived(pool, id, &ctx.owner_id).await {
+            match services.bookmarks.toggle_archived(&ctx.owner_id, id).await {
                 Ok(b) => {
-                    if let Some(bc) = broadcaster {
-                        bc.send(SystemEvent::BookmarkUpdated(b.clone()));
-                    }
                     let state = if b.is_archived {
                         "Archived 📦"
                     } else {
@@ -204,21 +257,13 @@ pub async fn handle_bookmark_subcommands(
                 return "❌ <b>Usage:</b> <code>!bookmark rm &lt;id&gt;</code>".to_string();
             };
 
-            match BookmarksRepository::delete(pool, id, &ctx.owner_id).await {
-                Ok(true) => {
-                    if let Some(bc) = broadcaster {
-                        bc.send(SystemEvent::BookmarkDeleted {
-                            id,
-                            owner_id: ctx.owner_id.to_string(),
-                        });
-                    }
-                    format!("🗑️ Deleted bookmark <b>#{}</b>", id)
-                }
-                _ => format!("❌ Bookmark #{} not found.", id),
+            match services.bookmarks.delete(&ctx.owner_id, id).await {
+                Ok(()) => format!("🗑️ Deleted bookmark <b>#{}</b>", id),
+                Err(_) => format!("❌ Bookmark #{} not found.", id),
             }
         }
         url if url.starts_with("http://") || url.starts_with("https://") => {
-            handle_save_command(ctx, pool, http_client, broadcaster).await
+            handle_save_command(ctx, services, http_client).await
         }
         _ => format_help(),
     }
@@ -238,19 +283,20 @@ pub fn format_help() -> String {
 mod tests {
     use super::*;
 
-    async fn setup_db() -> (DbPool, crate::domain::accounts::AccountId) {
+    async fn setup_db() -> (AppServices, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
                 .await
                 .unwrap();
-        (pool, crate::domain::accounts::AccountId::new(owner))
+        let services = AppServices::new(&pool);
+        (services, crate::domain::accounts::AccountId::new(owner))
     }
 
     #[tokio::test]
     async fn test_handle_save_and_list_flow() {
-        let (pool, owner) = setup_db().await;
+        let (services, owner) = setup_db().await;
 
         let ctx = CommandContext {
             room_id: "!room:test".to_string(),
@@ -266,7 +312,7 @@ mod tests {
             stage_reporter: None,
         };
 
-        let reply = handle_save_command(&ctx, &pool, None, None).await;
+        let reply = handle_save_command(&ctx, &services, None).await;
         assert!(reply.contains("Saved Bookmark #1"));
         assert!(reply.contains("example.com"));
 
@@ -284,7 +330,7 @@ mod tests {
             stage_reporter: None,
         };
 
-        let list_reply = handle_list_command(&list_ctx, &pool).await;
+        let list_reply = handle_list_command(&list_ctx, &services).await;
         assert!(list_reply.contains("Your Reading List"));
         assert!(list_reply.contains("example.com"));
 
@@ -302,7 +348,7 @@ mod tests {
             quoted: None,
             stage_reporter: None,
         };
-        let fav_reply = handle_bookmark_subcommands(&fav_ctx, &pool, None, None).await;
+        let fav_reply = handle_bookmark_subcommands(&fav_ctx, &services, None).await;
         assert!(fav_reply.contains("Starred ⭐"));
 
         // Toggle archive
@@ -319,7 +365,7 @@ mod tests {
             quoted: None,
             stage_reporter: None,
         };
-        let arch_reply = handle_bookmark_subcommands(&arch_ctx, &pool, None, None).await;
+        let arch_reply = handle_bookmark_subcommands(&arch_ctx, &services, None).await;
         assert!(arch_reply.contains("Archived 📦"));
     }
 }

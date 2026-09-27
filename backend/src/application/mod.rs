@@ -5,12 +5,14 @@
 //! (`tests/architecture.rs`).
 
 pub mod accounts;
+pub mod bookmarks;
 pub mod rooms;
 pub mod settings;
 
 use sqlx::PgPool;
 
 use self::accounts::AccountService;
+use self::bookmarks::BookmarkService;
 use self::rooms::RoomService;
 use self::settings::SettingsService;
 use crate::events::EventBroadcaster;
@@ -57,6 +59,7 @@ pub enum AppError {
 #[derive(Clone)]
 pub struct AppServices {
     pub accounts: AccountService,
+    pub bookmarks: BookmarkService,
     pub rooms: RoomService,
     pub settings: SettingsService,
 }
@@ -78,10 +81,12 @@ impl AppServices {
     /// same channel HTTP and chat subscribe to.
     pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone(), events.clone());
+        let bookmarks = BookmarkService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         Self {
             accounts,
+            bookmarks,
             rooms,
             settings,
         }

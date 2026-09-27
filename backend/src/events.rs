@@ -145,8 +145,8 @@ pub enum SystemEvent {
         owner_id: String,
         date: String,
     },
-    BookmarkCreated(crate::modules::bookmarks::models::Bookmark),
-    BookmarkUpdated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkCreated(crate::domain::bookmarks::Bookmark),
+    BookmarkUpdated(crate::domain::bookmarks::Bookmark),
     BookmarkDeleted {
         id: i64,
         owner_id: String,

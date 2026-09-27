@@ -99,7 +99,7 @@ impl MatrixBot {
         registry.register(HabitsModule::new());
         registry.register(LifeModule::new());
         registry.register(crate::modules::journal::JournalModule::new());
-        registry.register(crate::modules::bookmarks::BookmarksModule::new());
+        registry.register(crate::interface::chat::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
         registry.register(crate::modules::briefing::BriefingModule::new());

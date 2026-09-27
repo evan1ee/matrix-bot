@@ -5,5 +5,6 @@
 //! `modules/<feature>/models.rs` as the per-feature plan reaches them.
 
 pub mod accounts;
+pub mod bookmarks;
 pub mod rooms;
 pub mod settings;

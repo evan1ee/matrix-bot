@@ -109,7 +109,7 @@ backend/src/
 | 2 | settings | ✅ `227c95c`, fix `ecef800` |
 | 3 | accounts core + `AccountId` newtype | ✅ |
 | 4 | accounts merge (dynamic SQL behind an allow-list, D-A) | ✅ |
-| 5 | bookmarks | ☐ |
+| 5 | bookmarks | ✅ |
 | 6 | footprints + habits | ☐ |
 | 7 | webhook | ☐ |
 | 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ☐ |
@@ -125,7 +125,7 @@ Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALL
 - `interface/channels/matrix/{invite,reaction,reaction_targets}.rs`
 - `interface/http/{life_activity,mcp,mod,reminders,webhooks}.rs`
 
-The last full test run: **819 passed / 0 failed / 11 ignored**.
+The last full test run: **825 passed / 0 failed / 11 ignored**.
 
 ## 5. How to work
 

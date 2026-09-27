@@ -3,5 +3,6 @@
 //! mapped into domain types before they leave the file.
 
 pub mod accounts;
+pub mod bookmarks;
 pub mod rooms;
 pub mod settings;

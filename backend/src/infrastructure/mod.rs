@@ -3,3 +3,4 @@
 
 pub mod inference;
 pub mod postgres;
+pub mod web;
