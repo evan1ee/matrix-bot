@@ -4,6 +4,8 @@
 
 `matrix-bot` is a Matrix chat bot with an embedded web UI: a Rust Cargo workspace holds the bot itself (`backend/`) plus a local-inference server for OCR, speech-to-text and text-to-speech (`inference/`), and a React SPA (`frontend/`) builds into the bot's static assets. Data lives in PostgreSQL 18+ (the only application database); matrix-sdk keeps its own SQLite crypto store under `data/`. This file states every hard rule and convention; `docs/ARCHITECTURE.md` is the long-form companion explaining the *why* behind the parts of the design that aren't obvious from the code alone.
 
+> **Refactor in progress.** This branch is mid-way through the layer-first PostgreSQL refactor. Before any change, read [`docs/HANDOFF.md`](docs/HANDOFF.md) — status, next actions, settled decisions and hard safety rules for agents taking over.
+
 ## Commands
 
 ```bash
