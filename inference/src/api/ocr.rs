@@ -28,8 +28,8 @@ pub struct OcrScanBlock {
 ///
 /// Matched exhaustively on purpose: a new `OcrError` variant must be given a
 /// status here explicitly, rather than silently falling back to `500`.
-fn status_for(err: &crate::paddle::OcrError) -> StatusCode {
-    use crate::paddle::OcrError;
+fn status_for(err: &crate::ocr::OcrError) -> StatusCode {
+    use crate::ocr::OcrError;
 
     match err {
         OcrError::ImageDecode(_) => StatusCode::BAD_REQUEST,
@@ -55,14 +55,14 @@ pub async fn scan(
         ));
     }
 
-    if !crate::paddle::models_present(&state.config.ocr_model_dir) {
+    if !crate::ocr::models_present(&state.config.ocr_model_dir) {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "OCR models are not installed on this inference server".to_string(),
         ));
     }
 
-    let result = crate::paddle::run_ocr(body.to_vec(), state.config.ocr_model_dir.clone())
+    let result = crate::ocr::run_ocr(body.to_vec(), state.config.ocr_model_dir.clone())
         .await
         .map_err(|e| {
             warn!("PaddleOCR inference failed: {:?}", e);
@@ -147,31 +147,31 @@ mod tests {
 
     #[test]
     fn test_status_for_image_decode_is_bad_request() {
-        let err = crate::paddle::OcrError::ImageDecode("bad bytes".to_string());
+        let err = crate::ocr::OcrError::ImageDecode("bad bytes".to_string());
         assert_eq!(status_for(&err), StatusCode::BAD_REQUEST);
     }
 
     #[test]
     fn test_status_for_missing_model_is_service_unavailable() {
-        let err = crate::paddle::OcrError::MissingModel("det model".to_string());
+        let err = crate::ocr::OcrError::MissingModel("det model".to_string());
         assert_eq!(status_for(&err), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]
     fn test_status_for_model_download_is_service_unavailable() {
-        let err = crate::paddle::OcrError::ModelDownload("network error".to_string());
+        let err = crate::ocr::OcrError::ModelDownload("network error".to_string());
         assert_eq!(status_for(&err), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]
     fn test_status_for_inference_is_internal_server_error() {
-        let err = crate::paddle::OcrError::Inference("onnx runtime error".to_string());
+        let err = crate::ocr::OcrError::Inference("onnx runtime error".to_string());
         assert_eq!(status_for(&err), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
     fn test_status_for_join_is_internal_server_error() {
-        let err = crate::paddle::OcrError::Join("worker panicked".to_string());
+        let err = crate::ocr::OcrError::Join("worker panicked".to_string());
         assert_eq!(status_for(&err), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -181,7 +181,7 @@ mod tests {
         use axum::http::Request;
         use tower::ServiceExt;
 
-        let router = crate::routes::build_router(state_with_missing_models());
+        let router = crate::api::build_router(state_with_missing_models());
 
         let response = router
             .oneshot(

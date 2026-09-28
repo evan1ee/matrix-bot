@@ -1,17 +1,15 @@
 use std::sync::Arc;
 use tracing::info;
 
-mod audio;
+mod api;
 mod config;
 mod download;
-mod kokoro;
-mod opus;
-mod paddle;
+mod ocr;
 mod provision;
-mod routes;
-mod sherpa;
+mod stt;
 #[cfg(test)]
 mod test_support;
+mod tts;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let config = config::InferenceConfig::from_env();
     let port = config.port;
 
-    let state = routes::AppState {
+    let state = api::AppState {
         config: Arc::new(config),
     };
 
@@ -36,6 +34,6 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
     info!("Inference server listening on 0.0.0.0:{}", port);
 
-    axum::serve(listener, routes::build_router(state)).await?;
+    axum::serve(listener, api::build_router(state)).await?;
     Ok(())
 }

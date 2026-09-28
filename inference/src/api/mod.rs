@@ -1,7 +1,25 @@
-use axum::{extract::State, Json};
+use axum::{
+    extract::{DefaultBodyLimit, State},
+    routing::{get, post},
+    Json, Router,
+};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-use super::AppState;
+use crate::config::InferenceConfig;
+
+pub mod ocr;
+pub mod stt;
+pub mod tts;
+
+/// Images and audio clips are the payloads here; 32 MB comfortably exceeds a
+/// Matrix attachment while still refusing an unbounded upload.
+const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<InferenceConfig>,
+}
 
 /// Per-capability model presence. A capability reports `false` when its model
 /// files are absent, which is how an operator tells "not installed" from
@@ -17,10 +35,20 @@ pub struct HealthResponse {
 /// presence check (`stt`/`ocr`: `models_present`; `tts`: `model_present`).
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
-        stt: crate::sherpa::models_present(&state.config.voice_model_dir),
-        tts: crate::kokoro::model_present(&state.config.tts_model_dir),
-        ocr: crate::paddle::models_present(&state.config.ocr_model_dir),
+        stt: crate::stt::models_present(&state.config.voice_model_dir),
+        tts: crate::tts::model_present(&state.config.tts_model_dir),
+        ocr: crate::ocr::models_present(&state.config.ocr_model_dir),
     })
+}
+
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/ocr", post(ocr::scan))
+        .route("/v1/audio/transcriptions", post(stt::transcribe))
+        .route("/v1/audio/speech", post(tts::speak))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .with_state(state)
 }
 
 #[cfg(test)]
@@ -68,7 +96,7 @@ mod tests {
         let state = AppState {
             config: Arc::new(config),
         };
-        let router = crate::routes::build_router(state);
+        let router = build_router(state);
 
         let response = router
             .oneshot(

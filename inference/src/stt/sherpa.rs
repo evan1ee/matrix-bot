@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use tracing::info;
 
-use crate::audio::TARGET_SAMPLE_RATE;
+use super::audio::TARGET_SAMPLE_RATE;
 
 pub const SENSEVOICE_MODEL_FILE: &str = "model.int8.onnx";
 pub const SENSEVOICE_TOKENS_FILE: &str = "tokens.txt";
@@ -40,11 +40,45 @@ impl From<std::io::Error> for VoiceError {
     }
 }
 
+/// Resolves model directory, checking inference subfolder or parent directory.
+pub fn resolve_model_dir(dir: &Path) -> PathBuf {
+    if dir.exists() {
+        dir.to_path_buf()
+    } else if let Ok(current) = std::env::current_dir() {
+        let candidate_inf = current.join("inference").join(dir);
+        if candidate_inf.exists() {
+            return candidate_inf;
+        }
+        if let Some(parent) = current.parent() {
+            let candidate = parent.join(dir);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        dir.to_path_buf()
+    } else {
+        dir.to_path_buf()
+    }
+}
+
 /// Whether both files SenseVoice needs are on disk. The route gates on this
 /// and answers 503 until provisioning has finished.
 pub fn models_present(model_dir: &Path) -> bool {
-    model_dir.join(SENSEVOICE_MODEL_FILE).is_file()
-        && model_dir.join(SENSEVOICE_TOKENS_FILE).is_file()
+    let resolved = resolve_model_dir(model_dir);
+    if resolved.join(SENSEVOICE_MODEL_FILE).is_file()
+        && resolved.join(SENSEVOICE_TOKENS_FILE).is_file()
+    {
+        return true;
+    }
+    if model_dir == Path::new("models/stt") || model_dir.ends_with("models/stt") {
+        let legacy = resolve_model_dir(Path::new("data/voice_models"));
+        if legacy.join(SENSEVOICE_MODEL_FILE).is_file()
+            && legacy.join(SENSEVOICE_TOKENS_FILE).is_file()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 const MODEL_DOWNLOAD_URL: &str =
@@ -55,10 +89,11 @@ const TOKENS_DOWNLOAD_URL: &str =
 /// Ensures SenseVoiceSmall ONNX model and tokens are present in `model_dir`,
 /// downloading them automatically from Hugging Face if needed.
 pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError> {
-    tokio::fs::create_dir_all(model_dir).await.map_err(|e| {
+    let resolved = resolve_model_dir(model_dir);
+    tokio::fs::create_dir_all(&resolved).await.map_err(|e| {
         VoiceError::Io(format!(
             "Failed to create voice model dir {:?}: {}",
-            model_dir, e
+            resolved, e
         ))
     })?;
 
@@ -68,7 +103,7 @@ pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError
     ];
 
     for (name, url) in files {
-        let dest = model_dir.join(name);
+        let dest = resolved.join(name);
         if !dest.exists() {
             info!(
                 "SenseVoice model asset {} missing; downloading from {}",
@@ -102,13 +137,24 @@ pub fn run_transcription_sync(
         });
     }
 
-    let model_path = model_dir.join(SENSEVOICE_MODEL_FILE);
-    let tokens_path = model_dir.join(SENSEVOICE_TOKENS_FILE);
+    let resolved_dir = if models_present(model_dir) {
+        let r = resolve_model_dir(model_dir);
+        if r.join(SENSEVOICE_MODEL_FILE).is_file() && r.join(SENSEVOICE_TOKENS_FILE).is_file() {
+            r
+        } else {
+            resolve_model_dir(Path::new("data/voice_models"))
+        }
+    } else {
+        resolve_model_dir(model_dir)
+    };
+
+    let model_path = resolved_dir.join(SENSEVOICE_MODEL_FILE);
+    let tokens_path = resolved_dir.join(SENSEVOICE_TOKENS_FILE);
 
     if !model_path.exists() || !tokens_path.exists() {
         return Err(VoiceError::MissingModel(format!(
             "Required SenseVoice files missing in {:?}. Need {} and {}",
-            model_dir, SENSEVOICE_MODEL_FILE, SENSEVOICE_TOKENS_FILE
+            resolved_dir, SENSEVOICE_MODEL_FILE, SENSEVOICE_TOKENS_FILE
         )));
     }
 
@@ -224,24 +270,22 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Loads the real SenseVoice model, so it is `#[ignore]`d for the reason
-    /// `backend/src/modules/tts/engine.rs` gives: on Windows a mismatched
-    /// `onnxruntime.dll` kills the whole test process with an access violation.
-    /// Run by hand: `cargo test -p matrix-bot-inference real_sensevoice -- --ignored`.
-    ///
-    /// What it proves is that SenseVoice loads and decodes in the same process
-    /// as `ort`'s statically linked ONNX Runtime. The input is silence, so it
-    /// cannot assert any words.
     #[test]
     #[ignore = "loads the real SenseVoice model; see the doc comment"]
     fn test_real_sensevoice_transcribes_silence_without_error() {
-        let model_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/voice_models");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("models/stt");
+        let legacy_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/voice_models");
+        let model_dir = if dir.exists() && models_present(&dir) {
+            dir
+        } else {
+            legacy_dir
+        };
         if !models_present(&model_dir) {
             eprintln!("skipping: no SenseVoice model at {:?}", model_dir);
             return;
         }
-        let wav = crate::audio::test_audio::silent_wav_16k_mono(1.0);
-        let samples = crate::audio::decode_audio_to_16k_mono(&wav).expect("silent WAV decodes");
+        let wav = crate::stt::test_audio::silent_wav_16k_mono(1.0);
+        let samples = crate::stt::decode_audio_to_16k_mono(&wav).expect("silent WAV decodes");
 
         let result = run_transcription_sync(&samples, &model_dir, "auto")
             .expect("SenseVoice should run over silence");

@@ -1,7 +1,7 @@
 //! Ogg Opus encoding for synthesised speech.
 //!
 //! Kept separate from `kokoro.rs` (which only knows about sherpa-onnx) and
-//! from `routes/speech.rs` (which only knows HTTP) — this file's one job is
+//! from `api/tts.rs` (which only knows HTTP) — this file's one job is
 //! turning `f32` PCM samples into an Ogg-contained Opus bitstream, per
 //! RFC 7845. Matrix clients expect Ogg Opus for a voice bubble, and it is
 //! roughly forty times smaller on the wire than WAV.

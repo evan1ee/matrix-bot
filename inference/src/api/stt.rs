@@ -7,7 +7,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use super::AppState;
-use crate::sherpa::VoiceError;
+use crate::stt::VoiceError;
 
 /// The `response_format` values this server supports. OpenAI defines more
 /// (`text`, `srt`, `vtt`). The bot asks for `json` — OpenAI's default, and the
@@ -69,13 +69,13 @@ fn parse_language(raw: Option<String>) -> Result<Option<String>, String> {
     else {
         return Ok(None);
     };
-    if crate::sherpa::SENSEVOICE_LANGUAGES.contains(&language.as_str()) {
+    if crate::stt::SENSEVOICE_LANGUAGES.contains(&language.as_str()) {
         Ok(Some(language))
     } else {
         Err(format!(
             "Unsupported language '{}'; this server supports {}",
             language,
-            crate::sherpa::SENSEVOICE_LANGUAGES.join(", ")
+            crate::stt::SENSEVOICE_LANGUAGES.join(", ")
         ))
     }
 }
@@ -159,10 +159,10 @@ pub async fn transcribe(
 ) -> Result<Json<TranscriptionBody>, (StatusCode, String)> {
     let request = read_request(multipart).await?;
 
-    let samples = crate::audio::decode_audio_to_16k_mono(&request.file)
+    let samples = crate::stt::decode_audio_to_16k_mono(&request.file)
         .map_err(|e| (status_for(&e), e.to_string()))?;
 
-    if !crate::sherpa::models_present(&state.config.voice_model_dir) {
+    if !crate::stt::models_present(&state.config.voice_model_dir) {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "Speech-to-text models are not installed on this inference server".to_string(),
@@ -171,7 +171,7 @@ pub async fn transcribe(
 
     let language = request.language.unwrap_or_else(|| "auto".to_string());
     let result =
-        crate::sherpa::run_transcription(samples, state.config.voice_model_dir.clone(), language)
+        crate::stt::run_transcription(samples, state.config.voice_model_dir.clone(), language)
             .await
             .map_err(|e| {
                 warn!("SenseVoice transcription failed: {:?}", e);
@@ -250,7 +250,7 @@ mod tests {
             )
             .body(Body::from(multipart_body(parts)))
             .unwrap();
-        crate::routes::build_router(state_with_missing_models())
+        crate::api::build_router(state_with_missing_models())
             .oneshot(request)
             .await
             .unwrap()
@@ -265,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_decodable_audio_without_models_is_a_503() {
-        let wav = crate::audio::test_audio::silent_wav_16k_mono(1.0);
+        let wav = crate::stt::test_audio::silent_wav_16k_mono(1.0);
         let status =
             post_transcription(&[("file", Some("a.wav"), &wav), ("model", None, b"whisper-1")])
                 .await;
@@ -280,7 +280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_an_unsupported_response_format_is_a_400() {
-        let wav = crate::audio::test_audio::silent_wav_16k_mono(1.0);
+        let wav = crate::stt::test_audio::silent_wav_16k_mono(1.0);
         let status = post_transcription(&[
             ("file", Some("a.wav"), &wav),
             ("response_format", None, b"srt"),
@@ -310,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_an_unsupported_language_is_a_400_not_a_500() {
-        let wav = crate::audio::test_audio::silent_wav_16k_mono(1.0);
+        let wav = crate::stt::test_audio::silent_wav_16k_mono(1.0);
         let status =
             post_transcription(&[("file", Some("a.wav"), &wav), ("language", None, b"fr")]).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

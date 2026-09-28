@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing::warn;
 
 use super::AppState;
-use crate::kokoro::TtsError;
+use crate::tts::TtsError;
 
 /// OpenAI's own input ceiling for `/audio/speech`.
 pub const MAX_INPUT_CHARS: usize = 4096;
@@ -139,7 +139,7 @@ pub async fn speak(
 ) -> Result<Response, (StatusCode, String)> {
     let (input, speaker_id) = validate(&request).map_err(|m| (StatusCode::BAD_REQUEST, m))?;
 
-    if !crate::kokoro::model_present(&state.config.tts_model_dir) {
+    if !crate::tts::model_present(&state.config.tts_model_dir) {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "The text-to-speech model is not installed on this inference server".to_string(),
@@ -151,10 +151,10 @@ pub async fn speak(
         (status_for(&err), err.to_string())
     };
 
-    let speech = crate::kokoro::synthesize(state.config.tts_model_dir.clone(), input, speaker_id)
+    let speech = crate::tts::synthesize(state.config.tts_model_dir.clone(), input, speaker_id)
         .await
         .map_err(fail)?;
-    let ogg = crate::opus::encode_ogg_opus(&speech.samples, speech.sample_rate)
+    let ogg = crate::tts::encode_ogg_opus(&speech.samples, speech.sample_rate)
         .map_err(|e| fail(TtsError::Encode(e)))?;
 
     let headers = speech_headers(speech.duration(), &compute_waveform(&speech.samples));
@@ -198,7 +198,7 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap();
-        crate::routes::build_router(state_with_missing_models())
+        crate::api::build_router(state_with_missing_models())
             .oneshot(request)
             .await
             .unwrap()

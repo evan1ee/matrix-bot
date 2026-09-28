@@ -2,7 +2,7 @@
 //!
 //! `build_config` was proved against real audio output before this module
 //! existed (103 speakers, 24000 Hz, ~1.5x realtime on a debug build), and is
-//! kept narrowed to the one Kokoro family `routes/speech.rs` needs. Nothing
+//! kept narrowed to the one Kokoro family `api/tts.rs` needs. Nothing
 //! here is a new design.
 
 use std::path::{Path, PathBuf};
@@ -45,12 +45,62 @@ pub enum TtsError {
     Encode(String),
 }
 
+/// Resolves model directory, checking inference subfolder or parent directory.
+pub fn resolve_model_dir(dir: &Path) -> PathBuf {
+    if dir.exists() {
+        dir.to_path_buf()
+    } else if let Ok(current) = std::env::current_dir() {
+        let candidate_inf = current.join("inference").join(dir);
+        if candidate_inf.exists() {
+            return candidate_inf;
+        }
+        if let Some(parent) = current.parent() {
+            let candidate = parent.join(dir);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        dir.to_path_buf()
+    } else {
+        dir.to_path_buf()
+    }
+}
+
+/// Resolves the actual directory holding the Kokoro ONNX and voices files.
+pub fn resolve_kokoro_dir(dir: &Path) -> PathBuf {
+    let resolved = resolve_model_dir(dir);
+    if KOKORO_REQUIRED_FILES
+        .iter()
+        .all(|name| resolved.join(name).is_file())
+    {
+        return resolved;
+    }
+    let subdir = resolved.join(KOKORO_ARCHIVE_ROOT);
+    if KOKORO_REQUIRED_FILES
+        .iter()
+        .all(|name| subdir.join(name).is_file())
+    {
+        return subdir;
+    }
+    if dir == Path::new("models/tts") || dir.ends_with("models/tts") {
+        let legacy = resolve_model_dir(Path::new("data/tts_models/kokoro-multi-lang-v1_1"));
+        if KOKORO_REQUIRED_FILES
+            .iter()
+            .all(|name| legacy.join(name).is_file())
+        {
+            return legacy;
+        }
+    }
+    resolved
+}
+
 /// Whether every required model file is on disk. The route gates on this and
 /// answers 503 until provisioning has finished.
 pub fn model_present(dir: &Path) -> bool {
+    let kokoro_dir = resolve_kokoro_dir(dir);
     KOKORO_REQUIRED_FILES
         .iter()
-        .all(|name| dir.join(name).is_file())
+        .all(|name| kokoro_dir.join(name).is_file())
 }
 
 /// No streaming callback; only the finished audio is wanted.
@@ -63,43 +113,18 @@ type NoCallback = fn(&[f32], f32) -> bool;
 const RULE_FSTS: &[&str] = &["date-zh.fst", "number-zh.fst", "phone-zh.fst"];
 
 /// The loaded engine, built once and kept for the life of the process.
-///
-/// `sherpa.rs::run_transcription_sync` rebuilds its SenseVoice recogniser on
-/// every call, which is fine there because that model loads in milliseconds.
-/// This model is 311 MB and takes seconds to load, so it is built once.
-/// `OfflineTts` is `unsafe impl Send + Sync` in the sherpa-onnx crate, so one
-/// instance shared across the async runtime's worker threads compiles — but
-/// that alone does not make concurrent *use* sound. Sharing it is sound
-/// because every call into it is serialised by `SYNTH_LOCK`: espeak-ng, which
-/// Kokoro uses for grapheme-to-phoneme, keeps process-global state and is not
-/// documented as thread-safe, and sherpa's own SAFETY note for `OfflineTts`
-/// only promises "single-object usage", not concurrent calls on one object.
-/// The lock also bounds CPU usage — each synthesis already asks for
-/// `num_threads: 2`, so letting requests overlap would let their thread
-/// counts stack uncontrolled. Do not "fix" this back to rebuilding on every
-/// call — that was tried in `inference/src/sherpa.rs` for a much smaller
-/// model and is not the right trade-off here.
 static ENGINE: OnceLock<Option<OfflineTts>> = OnceLock::new();
 
-/// Serialises every call into the shared `ENGINE`. See `ENGINE`'s doc
-/// comment for why concurrent calls are unsound rather than merely slow.
-/// The guarded data is `()`, so a poisoned lock (a prior synthesis panicked
-/// while holding it) carries no broken invariant and is safe to recover from.
+/// Serialises every call into the shared `ENGINE`.
 static SYNTH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The path, but only if that file is actually present.
-///
-/// Every one of these fields is optional in sherpa-onnx, and handing it a
-/// path to something missing fails less helpfully than leaving it unset.
 fn opt(dir: &Path, name: &str) -> Option<String> {
     let path = dir.join(name);
     path.exists().then(|| path.to_string_lossy().into_owned())
 }
 
 fn build_config(dir: &Path) -> OfflineTtsConfig {
-    // One lexicon per language, comma-joined — sherpa-onnx picks per
-    // utterance. That is the whole of "per-language routing" for this engine:
-    // a path, not an abstraction.
     let lexicons = ["lexicon-us-en.txt", "lexicon-zh.txt"]
         .iter()
         .filter_map(|name| opt(dir, name))
@@ -118,7 +143,6 @@ fn build_config(dir: &Path) -> OfflineTtsConfig {
                 model: opt(dir, "model.onnx"),
                 voices: opt(dir, "voices.bin"),
                 tokens: opt(dir, "tokens.txt"),
-                // espeak-ng data: the grapheme-to-phoneme step, already solved.
                 data_dir: opt(dir, "espeak-ng-data"),
                 lexicon: (!lexicons.is_empty()).then_some(lexicons),
                 dict_dir: opt(dir, "dict"),
@@ -133,22 +157,13 @@ fn build_config(dir: &Path) -> OfflineTtsConfig {
 }
 
 /// Returns the process-wide engine, loading it on the first call.
-///
-/// `model_present` is checked on every call, before the `OnceLock` is
-/// touched, so a directory that is missing or incomplete always reports
-/// `ModelMissing` — never the stale result of an earlier attempt. Once the
-/// files are present, the load result (success or failure) is cached
-/// forever: a `create` that fails on present-but-corrupt files is an engine
-/// error, not "not installed", so it is reported as `TtsError::Engine` and
-/// logged once, at the moment the load fails, rather than retried on every
-/// request.
 fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
     if !model_present(model_dir) {
         return Err(TtsError::ModelMissing(model_dir.to_path_buf()));
     }
 
     let cell = ENGINE.get_or_init(|| {
-        let loaded = OfflineTts::create(&build_config(model_dir));
+        let loaded = OfflineTts::create(&build_config(&resolve_kokoro_dir(model_dir)));
         if loaded.is_none() {
             warn!(
                 "Kokoro model files are present in {:?} but failed to load; \
@@ -167,17 +182,6 @@ fn engine(model_dir: &Path) -> Result<&'static OfflineTts, TtsError> {
     })
 }
 
-/// Clamps a requested speaker id into the range a loaded model actually
-/// supports, returning the id to use for generation.
-///
-/// A request's voice can outlive the model that was loaded when it was
-/// chosen — an operator can swap in a Kokoro model with fewer voices without
-/// revalidating every caller's saved preference. Rather than fail the whole
-/// request, this degrades to the nearest valid voice: negative ids, which
-/// `routes/speech.rs::validate` does not reject (it only parses the voice as
-/// an `i64`), clamp to 0, and ids at or past `num_speakers` clamp to the last
-/// valid index. A model reporting zero speakers (unexpected, but the C API
-/// returns a plain `i32`) clamps to 0 rather than underflowing.
 fn clamp_speaker_id(requested: i64, num_speakers: i32) -> i32 {
     if num_speakers <= 0 {
         return 0;
@@ -229,8 +233,6 @@ pub struct Speech {
 }
 
 impl Speech {
-    /// The clip's length, derived from sample count and rate rather than
-    /// stored separately, so the two can never disagree.
     pub fn duration(&self) -> std::time::Duration {
         if self.sample_rate <= 0 {
             return std::time::Duration::ZERO;
@@ -239,12 +241,6 @@ impl Speech {
     }
 }
 
-/// Synthesises `text` with the Kokoro model in `model_dir` at `speaker_id`,
-/// clamped to the voices the loaded model has.
-///
-/// Runs on a blocking worker thread: inference is synchronous and CPU-bound
-/// for seconds at a time, and on a runtime thread it would stall every other
-/// request this server is handling.
 pub async fn synthesize(
     model_dir: PathBuf,
     text: String,
@@ -255,20 +251,10 @@ pub async fn synthesize(
         .map_err(|e| TtsError::Engine(format!("Worker thread panicked: {}", e)))?
 }
 
-/// Installs the Kokoro model into `model_dir` unless it is already there.
 pub async fn ensure_model_downloaded(model_dir: &Path) -> Result<(), TtsError> {
     ensure_model_from(KOKORO_ARCHIVE_URL, model_dir).await
 }
 
-/// Downloads the archive at `url` beside `model_dir`, unpacks it into a
-/// staging directory, and renames the archive's root into place, so the route
-/// sees either no model or a whole one. The archive and staging directory are
-/// removed whether or not installation succeeds.
-///
-/// A `model_dir` that exists and holds something other than the model is
-/// rejected before the download starts: `retry_until_ready` never gives up,
-/// so paying for the multi-hundred-megabyte download on every retry against
-/// a directory that can never succeed would waste bandwidth forever.
 async fn ensure_model_from(url: &str, model_dir: &Path) -> Result<(), TtsError> {
     if model_present(model_dir) {
         return Ok(());
@@ -315,11 +301,6 @@ async fn ensure_model_from(url: &str, model_dir: &Path) -> Result<(), TtsError> 
     installed
 }
 
-/// Unpacks `archive` into `staging` and moves its root to `model_dir`.
-///
-/// An existing `model_dir` is replaced only when it is empty. A non-empty
-/// one that lacks the model is someone's hand-placed directory, and deleting
-/// it to make room is not this function's call.
 fn install_from_archive(archive: &Path, staging: &Path, model_dir: &Path) -> Result<(), TtsError> {
     if staging.exists() {
         std::fs::remove_dir_all(staging)
@@ -342,9 +323,6 @@ fn install_from_archive(archive: &Path, staging: &Path, model_dir: &Path) -> Res
         )));
     }
 
-    // Backstop against a directory that appeared or changed while the
-    // download was in flight; `ensure_model_from` already checked this
-    // before paying for the download.
     reject_if_occupied(model_dir)?;
     if model_dir.exists() {
         std::fs::remove_dir(model_dir)
@@ -354,10 +332,6 @@ fn install_from_archive(archive: &Path, staging: &Path, model_dir: &Path) -> Res
     std::fs::rename(&root, model_dir).map_err(|e| install_error("move the model into place", e))
 }
 
-/// Whether `model_dir` exists and holds something other than an empty
-/// directory. A missing directory and an empty one are both fine to install
-/// into; anything else was placed there by hand and is not this module's to
-/// delete.
 fn is_occupied(model_dir: &Path) -> Result<bool, TtsError> {
     if !model_dir.exists() {
         return Ok(false);
@@ -369,8 +343,6 @@ fn is_occupied(model_dir: &Path) -> Result<bool, TtsError> {
     Ok(!empty)
 }
 
-/// Rejects `model_dir` if it is occupied by something other than the model,
-/// with the message both callers of `is_occupied` report.
 fn reject_if_occupied(model_dir: &Path) -> Result<(), TtsError> {
     if is_occupied(model_dir)? {
         return Err(TtsError::ModelDownload(format!(
@@ -398,8 +370,6 @@ mod tests {
         dir
     }
 
-    /// A `.tar.bz2` shaped like the sherpa-onnx release: every entry under
-    /// `KOKORO_ARCHIVE_ROOT/`.
     fn archive_with(files: &[&str]) -> Vec<u8> {
         let mut tar_bytes = Vec::new();
         {
@@ -458,7 +428,6 @@ mod tests {
         for name in KOKORO_REQUIRED_FILES {
             std::fs::write(model_dir.join(name), b"x").unwrap();
         }
-        // Port 1 refuses connections: reaching the network would fail the test.
         ensure_model_from("http://127.0.0.1:1/never", &model_dir)
             .await
             .expect("a present model must short-circuit");
@@ -513,10 +482,6 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// A directory someone put there by hand is never deleted to make room,
-    /// and is rejected before the archive is even downloaded: `retry_until_ready`
-    /// never gives up, so a misconfigured directory must not re-download the
-    /// archive on every retry forever.
     #[tokio::test]
     async fn test_an_incomplete_non_empty_model_dir_is_left_alone() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -561,12 +526,6 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Present-but-corrupt model files must report an engine error, not
-    /// `ModelMissing` — the files ARE there, the load just failed. This is
-    /// separate from the process-crashing case documented on
-    /// `test_synthesize_produces_audio_for_english_and_chinese`: if
-    /// `OfflineTts::create` instead segfaults on garbage input, sherpa never
-    /// gets a chance to return `None` and this test cannot run at all.
     #[tokio::test]
     async fn test_present_but_corrupt_model_files_report_an_engine_error_not_missing() {
         let dir = scratch("corrupt");
@@ -606,8 +565,6 @@ mod tests {
         assert_eq!(clamp_speaker_id(9999, 103), 102);
     }
 
-    /// A model reporting zero (or, defensively, a negative) speaker count
-    /// must not underflow `num_speakers - 1`.
     #[test]
     fn test_clamp_speaker_id_handles_a_model_with_no_reported_speakers() {
         assert_eq!(clamp_speaker_id(5, 0), 0);
@@ -633,43 +590,33 @@ mod tests {
         assert_eq!(speech.duration(), std::time::Duration::ZERO);
     }
 
-    /// Requires a real Kokoro model on disk.
-    ///
-    /// On a Windows development machine it also needs the right
-    /// `onnxruntime.dll` beside the test binary. sherpa-onnx's build script
-    /// copies it to `target/debug/` and `target/debug/examples/`, but not to
-    /// `target/debug/deps/`, where test binaries actually run. Windows then
-    /// falls back to whatever `C:\Windows\System32\onnxruntime.dll` some other
-    /// installer left behind, and a version mismatch there does not fail
-    /// cleanly: the process dies with an access violation partway through model
-    /// loading. If that happens:
-    ///
-    /// ```text
-    /// cp target/debug/onnxruntime.dll target/debug/deps/
-    /// ```
-    ///
-    /// This is why `inference/src/sherpa.rs`'s SenseVoice test is `#[ignore]`d too.
-    ///
-    /// Deployment is unaffected: `Dockerfile.inference` copies
-    /// `libsherpa-onnx-c-api.so` and `libonnxruntime.so` into `/usr/local/lib`
-    /// explicitly, so there is no system copy to be shadowed by.
     #[tokio::test]
-    #[ignore = "needs a real Kokoro model under data/tts_models/, and on Windows the sherpa onnxruntime.dll copied into target/debug/deps/"]
+    #[ignore = "needs a real Kokoro model under models/tts/, and on Windows the sherpa onnxruntime.dll copied into target/debug/deps/"]
     async fn test_synthesize_produces_audio_for_english_and_chinese() {
-        let dir =
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("models/tts");
+        let legacy_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/tts_models/kokoro-multi-lang-v1_1");
-        if !model_present(&dir) {
-            eprintln!("Skipping: no Kokoro model present at {:?}", dir);
+        let model_dir = if dir.exists() && model_present(&dir) {
+            dir
+        } else {
+            legacy_dir
+        };
+        if !model_present(&model_dir) {
+            eprintln!("Skipping: no Kokoro model present at {:?}", model_dir);
             return;
         }
 
-        let english = synthesize(dir.clone(), "Good morning, this is a test.".to_string(), 0)
-            .await
-            .expect("english synthesis should succeed with a real model present");
+        let english = synthesize(
+            model_dir.clone(),
+            "Good morning, this is a test.".to_string(),
+            0,
+        )
+        .await
+        .expect("english synthesis should succeed with a real model present");
         assert!(!english.samples.is_empty());
         assert_eq!(english.sample_rate, 24000);
 
-        let chinese = synthesize(dir.clone(), "早安，这是一个测试。".to_string(), 0)
+        let chinese = synthesize(model_dir.clone(), "早安，这是一个测试。".to_string(), 0)
             .await
             .expect("chinese synthesis should succeed with a real model present");
         assert!(!chinese.samples.is_empty());

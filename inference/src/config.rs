@@ -13,9 +13,9 @@ impl Default for InferenceConfig {
     fn default() -> Self {
         Self {
             port: 8090,
-            ocr_model_dir: PathBuf::from("data/ocr_models"),
-            voice_model_dir: PathBuf::from("data/voice_models"),
-            tts_model_dir: PathBuf::from("data/tts_models/kokoro-multi-lang-v1_1"),
+            ocr_model_dir: PathBuf::from("models/ocr"),
+            voice_model_dir: PathBuf::from("models/stt"),
+            tts_model_dir: PathBuf::from("models/tts"),
         }
     }
 }

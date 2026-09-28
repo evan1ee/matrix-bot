@@ -65,11 +65,15 @@ const CLS_MODEL_URL: &str =
 const REC_MODEL_URL: &str =
     "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx";
 
-/// Resolves model directory, checking parent directory if running from backend subfolder.
+/// Resolves model directory, checking inference subfolder or parent directory.
 pub fn resolve_model_dir(dir: &Path) -> PathBuf {
     if dir.exists() {
         dir.to_path_buf()
     } else if let Ok(current) = std::env::current_dir() {
+        let candidate_inf = current.join("inference").join(dir);
+        if candidate_inf.exists() {
+            return candidate_inf;
+        }
         if let Some(parent) = current.parent() {
             let candidate = parent.join(dir);
             if candidate.exists() {
@@ -88,9 +92,22 @@ pub fn resolve_model_dir(dir: &Path) -> PathBuf {
 /// recognition in sequence, so a partial download is not a usable install.
 pub fn models_present(dir: &Path) -> bool {
     let resolved = resolve_model_dir(dir);
-    [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
+    if [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
         .iter()
         .all(|name| resolved.join(name).is_file())
+    {
+        return true;
+    }
+    if dir == Path::new("models/ocr") || dir.ends_with("models/ocr") {
+        let legacy = resolve_model_dir(Path::new("data/ocr_models"));
+        if [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
+            .iter()
+            .all(|name| legacy.join(name).is_file())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Checks that all required ONNX models exist locally; downloads any missing models.
@@ -161,7 +178,20 @@ pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, O
         image::load_from_memory(image_bytes).map_err(|e| OcrError::ImageDecode(e.to_string()))?;
     let rgb_img = dynamic_img.to_rgb8();
 
-    let resolved_dir = resolve_model_dir(model_dir);
+    let resolved_dir = if models_present(model_dir) {
+        let r = resolve_model_dir(model_dir);
+        if [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
+            .iter()
+            .all(|name| r.join(name).is_file())
+        {
+            r
+        } else {
+            resolve_model_dir(Path::new("data/ocr_models"))
+        }
+    } else {
+        resolve_model_dir(model_dir)
+    };
+
     let det_path = resolved_dir.join(DET_MODEL_NAME);
     let cls_path = resolved_dir.join(CLS_MODEL_NAME);
     let rec_path = resolved_dir.join(REC_MODEL_NAME);
@@ -220,7 +250,7 @@ mod tests {
     #[test]
     fn test_corrupt_image_returns_decode_error() {
         let bad_bytes = b"not an image file at all";
-        let res = run_ocr_sync(bad_bytes, Path::new("data/ocr_models"));
+        let res = run_ocr_sync(bad_bytes, Path::new("models/ocr"));
         assert!(matches!(res, Err(OcrError::ImageDecode(_))));
     }
 
@@ -244,7 +274,7 @@ mod tests {
         let fixture_path = fixture_candidates.into_iter().find(|p| p.exists());
         if let Some(path) = fixture_path {
             let bytes = std::fs::read(path).expect("Failed to read fixture image");
-            let model_dir = Path::new("data/ocr_models");
+            let model_dir = Path::new("models/ocr");
             let res = run_ocr_sync(&bytes, model_dir);
             match res {
                 Ok(ocr_result) => {
@@ -285,13 +315,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// `ensure_models` must not attempt a network download when every model
-    /// file is already on disk -- otherwise a healthy, fully-provisioned
-    /// deployment would still touch the network (and potentially fail) on
-    /// every boot. This is the one path through `ensure_models` that a test
-    /// can exercise without network access: every other path needs a real or
-    /// mocked download, which this crate has neither the fixtures nor a mock
-    /// HTTP dependency for today.
     #[tokio::test]
     async fn test_ensure_models_is_a_no_op_when_everything_is_already_present() {
         let dir = std::env::temp_dir().join(format!("ocr-ensure-noop-{}", std::process::id()));

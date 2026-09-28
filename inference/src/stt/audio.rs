@@ -10,7 +10,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use tracing::{debug, warn};
 
-use crate::sherpa::VoiceError;
+use super::sherpa::VoiceError;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_a_silent_wav_decodes_to_a_second_of_zeroes() {
-        let wav = super::test_audio::silent_wav_16k_mono(1.0);
+        let wav = test_audio::silent_wav_16k_mono(1.0);
 
         let samples = decode_audio_to_16k_mono(&wav).expect("a PCM WAV should decode");
 
@@ -280,10 +280,10 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) mod test_audio {
+pub mod test_audio {
     /// A mono 16-bit PCM WAV of silence at 16 kHz: enough for the decoder to
     /// accept and for SenseVoice to run over, with no audio fixture on disk.
-    pub(crate) fn silent_wav_16k_mono(seconds: f32) -> Vec<u8> {
+    pub fn silent_wav_16k_mono(seconds: f32) -> Vec<u8> {
         let sample_rate: u32 = 16_000;
         let data_len = (sample_rate as f32 * seconds) as u32 * 2;
         let mut wav = Vec::with_capacity(44 + data_len as usize);
