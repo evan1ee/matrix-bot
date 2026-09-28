@@ -298,7 +298,7 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
         let from = AccountId::new("acct_from");
         let into = AccountId::new("acct_into");
-        let moved = move_rows(&mut *tx, "finance_categories", "owner_id", &from, &into)
+        let moved = move_rows(&mut tx, "finance_categories", "owner_id", &from, &into)
             .await
             .expect("a collision must not fail the move");
         tx.commit().await.unwrap();

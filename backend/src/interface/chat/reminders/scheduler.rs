@@ -55,13 +55,9 @@ async fn deliver_to_matrix(
                     "Delivered reminder #{} to Matrix room {}",
                     reminder.id, reminder.room_id
                 );
-                let (entity_type, entity_id) = if reminder.source_kind.map(|s| s.as_str())
-                    == Some("todo")
-                    && reminder.source_id.is_some()
-                {
-                    ("todo", reminder.source_id.unwrap())
-                } else {
-                    ("reminder", reminder.id)
+                let (entity_type, entity_id) = match (reminder.source_kind, reminder.source_id) {
+                    (Some(k), Some(id)) if k.as_str() == "todo" => ("todo", id),
+                    _ => ("reminder", reminder.id),
                 };
                 let _ = crate::interface::channels::matrix::reaction_targets::record_target(
                     &ctx.db.pool,
@@ -93,13 +89,9 @@ async fn deliver_to_matrix(
         Ok(joined) => match joined.send(content).await {
             Ok(resp) => {
                 info!("Delivered reminder #{} after joining room", reminder.id);
-                let (entity_type, entity_id) = if reminder.source_kind.map(|s| s.as_str())
-                    == Some("todo")
-                    && reminder.source_id.is_some()
-                {
-                    ("todo", reminder.source_id.unwrap())
-                } else {
-                    ("reminder", reminder.id)
+                let (entity_type, entity_id) = match (reminder.source_kind, reminder.source_id) {
+                    (Some(k), Some(id)) if k.as_str() == "todo" => ("todo", id),
+                    _ => ("reminder", reminder.id),
                 };
                 let _ = crate::interface::channels::matrix::reaction_targets::record_target(
                     &ctx.db.pool,

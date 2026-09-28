@@ -25,7 +25,7 @@ pub async fn handle_todo_command(
 
     // Bare "todo" or "!todo" without a space still claims the message.
     let bare = clean_lower == "todo" || clean_lower == "!todo";
-    if !bare && !(clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
+    if !(bare || clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
         return None;
     }
 

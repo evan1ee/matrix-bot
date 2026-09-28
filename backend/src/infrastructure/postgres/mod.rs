@@ -1,9 +1,6 @@
 //! PostgreSQL adapters shared across interface boundaries.
 //!
-//! Deliberately tiny today: it exists so `interface/http/health.rs` can leave
-//! `INTERFACE_SQL_ALLOW_LIST` (see `backend/tests/architecture.rs`) instead of
-//! running its readiness ping directly. More repositories move here as
-//! `modules/` features migrate to the target layer-first layout.
+//! Provides repositories, read models, and dynamic table-level merge operations.
 
 pub mod merge;
 pub mod read_models;

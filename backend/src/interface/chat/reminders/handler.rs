@@ -213,8 +213,10 @@ pub async fn handle_reminder_command(
         };
 
         if let Some((dur, mut msg)) = parse_reminder_args(args_to_parse) {
-            if (msg == "Reminder!" || msg.is_empty()) && quoted.is_some() {
-                msg = quoted.unwrap().body.clone();
+            if msg == "Reminder!" || msg.is_empty() {
+                if let Some(q) = quoted {
+                    msg = q.body.clone();
+                }
             }
 
             // Quota check: max 100 pending reminders per user

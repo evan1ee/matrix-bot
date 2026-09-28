@@ -239,7 +239,7 @@ pub async fn generate_weekly_retrospective(
             upcoming_bills_count += 1;
             let entry = bills_by_currency
                 .entry(b.currency.to_uppercase())
-                .or_insert((0, b.currency_exponent as i64));
+                .or_insert((0, b.currency_exponent));
             entry.0 += b.amount_minor;
         }
     }

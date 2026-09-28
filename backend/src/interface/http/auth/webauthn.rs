@@ -342,7 +342,7 @@ pub async fn login_finish(
             ApiError::unauthorized("Sign-in failed")
         })?;
 
-    let cred_id_str = crate::accounts::credentials::credential_id_string(&cred_id);
+    let cred_id_str = crate::accounts::credentials::credential_id_string(cred_id);
     let account_id = match CredentialRepository::find(&state.db.pool, &cred_id_str).await {
         Ok(Some(cred)) => cred.account_id,
         _ => handle_to_account_id(&handle),

@@ -97,22 +97,22 @@ impl BotModule for HabitsModule {
                     .trim_start_matches("done")
                     .trim_start_matches("check")
                     .trim();
-                Some(handle_toggle(services, &owner, target, &today_str, true).await)
+                Some(handle_toggle(services, owner, target, &today_str, true).await)
             }
             "undo" => {
                 let target = args.trim_start_matches("undo").trim();
-                Some(handle_toggle(services, &owner, target, &today_str, false).await)
+                Some(handle_toggle(services, owner, target, &today_str, false).await)
             }
             "add" => {
                 let habit_name = args.trim_start_matches("add").trim();
-                Some(handle_add(services, &owner, habit_name).await)
+                Some(handle_add(services, owner, habit_name).await)
             }
-            "streak" | "streaks" => Some(handle_streaks(services, &owner, &today_str).await),
+            "streak" | "streaks" => Some(handle_streaks(services, owner, &today_str).await),
             "delete" | "rm" => {
                 let id_str = parts.next().unwrap_or("");
-                Some(handle_delete(services, &owner, id_str).await)
+                Some(handle_delete(services, owner, id_str).await)
             }
-            _ => Some(handle_toggle(services, &owner, args, &today_str, true).await),
+            _ => Some(handle_toggle(services, owner, args, &today_str, true).await),
         }
     }
 }

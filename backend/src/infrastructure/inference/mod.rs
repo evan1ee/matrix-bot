@@ -1,7 +1,7 @@
 //! Adapters for capabilities provided outside this process.
 //!
-//! `modules/` is what the application does; `services/` is how external
-//! capabilities are reached. Nothing in here may import from `modules/`.
+//! `interface/` and `application/` define what the application does; `infrastructure/` is how external
+//! capabilities are reached. Nothing in here may import from `interface/` or `application/`.
 
 pub mod llm;
 pub mod ocr;

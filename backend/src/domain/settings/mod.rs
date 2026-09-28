@@ -22,7 +22,7 @@
 //! caller passed in. A value read back from storage is accepted as-is (an
 //! unparseable stored timezone degrades to UTC in `tz()`, rather than being
 //! rejected). AI tools read the caller's settings and build a modified copy
-//! through `SettingsService::modify` (`modules/ai/tools/settings.rs`) — never
+//! through `SettingsService::modify` (`llm/tools/settings.rs`) — never
 //! straight from unvalidated model output.
 
 use chrono_tz::Tz;
@@ -87,7 +87,7 @@ pub struct UserSettings {
     /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     pub briefing_time: String,
     /// The voice `!say` speaks in, in whatever the configured provider calls
-    /// it. `None` means no preference, and `modules::tts` falls back to the
+    /// it. `None` means no preference, and `interface::chat::tts` falls back to the
     /// operator's `TTS_VOICE`: the same "no row until you change something"
     /// convention `dev_room_id` uses. `Some("0")` is a real Kokoro voice, not
     /// a stand-in for "unset". Shape-checked by `parse_tts_voice` on write.

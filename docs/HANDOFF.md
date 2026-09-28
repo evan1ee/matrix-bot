@@ -95,7 +95,7 @@ backend/src/
 | 3 | Versioned migrations | ✅ | `051444b` `68dfc56` `b803bef` |
 | 4 | Compile-checked query pipeline, hardening, documentation | ✅ | `0bd18c0` `9c2865f` `e9fe149` `a52b984` `1af27e8` `4975039` `b502e2a` `e85d89b` `71ec65e` `1d139eb` `c6d304b` |
 | 5 | Layer skeleton (+ fix wave) | ✅ | `e208254` `fbd5252` `3b53386` `85c2dbc` `e4f1aab` `778585e` `45020fe` `ac816e5` `be24444` |
-| 6 | Feature layering (Tasks 1–14 below) | ⏳ | — |
+| 6 | Feature layering (Tasks 1–14 below) | ✅ | Tasks 1–14 + review & fix wave |
 | 7 | Account UUID (`0002_account_uuid`) | ☐ needs a plan | — |
 | 8 | Job queue (`0003_jobs`), then move the reminder, briefing, portfolio and bills loops onto it | ☐ needs a plan | — |
 | 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`) | ☐ needs a plan | — |
@@ -119,7 +119,7 @@ backend/src/
 | 12 | ocr + voice + tts + core + account command module | ✅ |
 | 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ✅ |
 | 14 | delete the `db_*!`/`tx_*!` macros and `modules/`; harden the architecture test | ✅ |
-| — | whole-branch review + one fix wave | ☐ |
+| — | whole-branch review + one fix wave | ✅ |
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 

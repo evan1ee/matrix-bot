@@ -256,7 +256,7 @@ mod tests {
         if config
             .api_key
             .as_deref()
-            .map_or(true, |k| k.trim().is_empty())
+            .is_none_or(|k| k.trim().is_empty())
         {
             panic!("live test run without an AI API key: set AI_API_KEY in the repo-root .env");
         }
