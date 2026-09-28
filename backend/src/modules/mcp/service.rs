@@ -14,6 +14,7 @@ use crate::events::EventBroadcaster;
 
 /// Core service engine dispatching MCP JSON-RPC protocol requests.
 pub struct McpService<'a> {
+    pub services: &'a crate::application::AppServices,
     pub pool: &'a DbPool,
     pub broadcaster: Option<&'a EventBroadcaster>,
     pub owner_id: &'a str,
@@ -21,11 +22,13 @@ pub struct McpService<'a> {
 
 impl<'a> McpService<'a> {
     pub fn new(
+        services: &'a crate::application::AppServices,
         pool: &'a DbPool,
         broadcaster: Option<&'a EventBroadcaster>,
         owner_id: &'a str,
     ) -> Self {
         Self {
+            services,
             pool,
             broadcaster,
             owner_id,
@@ -93,9 +96,14 @@ impl<'a> McpService<'a> {
                     }
                 };
 
-                let res =
-                    adapter::call_mcp_tool(self.pool, self.broadcaster, self.owner_id, params)
-                        .await;
+                let res = adapter::call_mcp_tool(
+                    self.services,
+                    self.pool,
+                    self.broadcaster,
+                    self.owner_id,
+                    params,
+                )
+                .await;
                 Some(JsonRpcResponse::success(id, json!(res)))
             }
 
@@ -192,13 +200,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_initialize() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
-        let service = McpService::new(&pool, None, "test_owner");
+        let pool = crate::db::pool::test_pool().await;
+        let services = crate::application::AppServices::new(&pool);
+        let service = McpService::new(&services, &pool, None, "test_owner");
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -216,13 +220,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_tools_list() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
-        let service = McpService::new(&pool, None, "test_owner");
+        let pool = crate::db::pool::test_pool().await;
+        let services = crate::application::AppServices::new(&pool);
+        let service = McpService::new(&services, &pool, None, "test_owner");
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -241,13 +241,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_service_resources_and_prompts() {
-        let pool = crate::db::DbPool::Sqlite(
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect("sqlite::memory:")
-                .await
-                .unwrap(),
-        );
-        let service = McpService::new(&pool, None, "test_owner");
+        let pool = crate::db::pool::test_pool().await;
+        let services = crate::application::AppServices::new(&pool);
+        let service = McpService::new(&services, &pool, None, "test_owner");
 
         let req_res = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),

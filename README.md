@@ -25,14 +25,14 @@ Every feature is reachable through multiple surfaces — as Matrix chat commands
 - 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
 - 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus). By default this is synthesized by the bundled inference server's Kokoro (English + Mandarin, 103 voices, Chinese text normalization), or by OpenAI or ElevenLabs with one env change. Every user picks their own voice.
 - ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
-- 🗄️ **SQLite or PostgreSQL** — one `DATABASE_URL` picks the database; no application code is dialect-specific. SQLite is the default and needs no server, which is what keeps the standalone single binary a single binary. Point it at PostgreSQL for a shared or managed deployment and the schema is created there on boot. The **entire test suite passes on both**, and CI runs both on every pull request. See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
+- 🗄️ **PostgreSQL** — `DATABASE_URL` is required and must be a `postgres://` URL; versioned migrations in [`backend/migrations/`](backend/migrations) apply automatically at boot via `sqlx::migrate!`. CI runs the full suite against a real PostgreSQL 18 on every pull request. matrix-sdk keeps its own SQLite crypto store under `data/`, unaffected by this setting. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#postgresql-only).
 - 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
 
 ---
 
 ## 🏛️ System Architecture
 
-The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent SQLite **or PostgreSQL** storage:
+The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent PostgreSQL storage:
 
 ```
                                       Matrix
@@ -56,8 +56,8 @@ The system unifies two distinct interaction models — fast, deterministic chat 
                                         │
                       ┌─────────────────┴─────────────────┐
                       ▼                                   ▼
-             SQLite Persistence                    SSE Broadcaster
-             (SQLx WAL Engine)                   (Real-Time Web/iOS)
+            PostgreSQL Persistence                 SSE Broadcaster
+              (SQLx Query Layer)                 (Real-Time Web/iOS)
 ```
 
 ### Core Architecture Highlights
@@ -67,14 +67,14 @@ The system unifies two distinct interaction models — fast, deterministic chat 
    - **REST API & SSE**: An embedded Axum web server provides REST endpoints (`/api/v1/*`) and real-time SSE event streaming (`/api/v1/events`) for the React Web UI and native iOS client (Element X).
 
 2. **Deterministic Commands vs. Natural Language**:
-   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/bot/dispatcher.rs`](backend/src/bot/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
+   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/interface/channels/matrix/dispatcher.rs`](backend/src/interface/channels/matrix/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
    - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool schemas are colocated directly within their domain tool files.
 
 3. **Unified Domain Layer**:
    - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
 
 4. **Persistence & Real-Time Sync**:
-   - All state modifications persist through runtime SQLx query binding to **either SQLite or PostgreSQL**, chosen at boot from `DATABASE_URL`. SQLite is the default and uses write-ahead logging (WAL); no code is dialect-specific, because every query goes through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schemas are modularized into domain DDL files in [`backend/src/db/schema_*.rs`](backend/src/db/schema.rs).
+   - All state modifications persist through compile-checked and runtime-bound SQLx queries to **PostgreSQL**, the only application database (`DATABASE_URL`, required, `postgres://`), through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schema changes are forward-only SQL files in [`backend/migrations/`](backend/migrations), applied at boot by `sqlx::migrate!`.
    - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
 
 ---
@@ -138,7 +138,7 @@ The backend is built to power native iOS apps, specifically designed to plug dir
            ▼                 ▼                   ▼
 ┌────────────────────────────────────┐   ┌────────────────────┐
 │      Matrix Homeserver             │   │ matrix-bot Backend │
-│   (Synapse / Conduit / Dendrite)   │◄──┤ (Axum + SQLite)    │
+│   (Synapse / Conduit / Dendrite)   │◄──┤ (Axum + PostgreSQL)│
 └────────────────────────────────────┘   └────────────────────┘
 ```
 
@@ -210,7 +210,7 @@ All API endpoints are mounted under `/api/v1`. Authentication is accepted via ei
 
 | Category | Endpoint(s) | Description |
 |---|---|---|
-| **Health** | `GET /health` | Liveness probe and uptime check |
+| **Health** | `GET /health/live`<br>`GET /health/ready` | Liveness (process alive, no dependency checks — drives container restarts) and readiness (database + Matrix sync freshness — drives traffic routing) probes. Infrastructure surface: mounted at the router root, **not** under `/api/v1`, and need no auth. |
 | **Auth** | `POST /auth/passkey/{register,login}/{start,finish}`<br>`POST /auth/matrix/login`<br>`POST /auth/logout`<br>`GET /auth/me`<br>`GET /auth/media`<br>`POST /auth/recovery/redeem` | WebAuthn passkey ceremonies, 1-step Matrix session token exchange for iOS, logout, profile info, authenticated media proxy, and single-use recovery code redemption |
 | **Account** | `GET/PUT/DELETE /account/passkeys[/:id]`<br>`GET /account/matrix`<br>`POST /account/matrix/{link,unlink,confirm-merge}`<br>`GET /account/matrix/pending-merge`<br>`GET /account/sessions`<br>`POST /account/sessions/revoke-others`<br>`DELETE /account/sessions/:id`<br>`POST /account/recovery-codes`<br>`GET /account/recovery-status`<br>`POST /account/recovery/cancel`<br>`GET /account/security-events` | Manage passkeys, link/unlink Matrix MXIDs, review pending merges, inspect and revoke active sessions, generate 10 recovery codes, delayed recovery controls, and immutable security audit logs |
 | **AI Config** | `GET/PUT /account/ai-config` | Per-user LLM provider API keys and model parameters |
@@ -260,9 +260,9 @@ MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
 MATRIX_RECOVERY_KEY=optional_e2ee_recovery_key
 
-# Database — SQLite (default, no server) or PostgreSQL; the scheme decides
-DATABASE_URL=sqlite://data/bot_data.db?mode=rwc
-# DATABASE_URL=postgres://bot:bot@localhost:5432/matrix_bot
+# Database — PostgreSQL only; required, must be a postgres:// URL.
+# matrix-sdk keeps its own SQLite crypto store under data/, unaffected by this.
+DATABASE_URL=postgres://bot:bot@localhost:5432/matrix_bot
 
 # Web & API Server
 API_HOST=0.0.0.0
@@ -357,10 +357,10 @@ sudo systemctl status matrix-bot
 ### Option 2: Docker Compose (Recommended for Containers)
 
 Docker Compose manages persistent data volumes and restarts automatically.
-`docker compose up` now starts **two** containers: `matrix-bot` and
-`inference` (the local ONNX model server behind `POST /ocr`). The inference
-service is not published to the host — the bot reaches it over the compose
-network only.
+`docker compose up` starts **three** containers: `matrix-bot`, `postgres`
+(the only application database), and `inference` (the local ONNX model
+server behind `POST /ocr`). Neither `postgres` nor `inference` is published
+to the host — the bot reaches both over the compose network only.
 
 ```bash
 # 1. Clone repo & setup .env
@@ -377,7 +377,7 @@ docker compose logs -f
 docker compose down
 ```
 
-Data is safely persisted in the named Docker volume `matrix-bot-data` across container restarts. The inference server's downloaded OCR and speech-to-text models persist in `matrix-bot-inference-data`.
+Data is safely persisted in the named Docker volumes `matrix-bot-data` (Matrix crypto store) and `matrix-bot-postgres-data` (the PostgreSQL database) across container restarts. The inference server's downloaded OCR and speech-to-text models persist in `matrix-bot-inference-data`. The schema is created on first boot; there is no separate migration step.
 
 Voice transcription defaults to the bundled `inference` service. To use a
 hosted provider instead, set `STT_BASE_URL`, `STT_API_KEY` and `STT_MODEL` in
@@ -385,44 +385,29 @@ hosted provider instead, set `STT_BASE_URL`, `STT_API_KEY` and `STT_MODEL` in
 
 ---
 
-#### Running against PostgreSQL
-
-SQLite is the default and needs nothing extra. To run against PostgreSQL
-instead, the Compose file ships a `postgres` profile:
-
-```bash
-DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot docker compose --profile postgres up -d
-```
-
-The profile keeps the database container out of the default `docker compose up`,
-so the SQLite path stays a single service. The schema is created on first boot;
-there is no separate migration step.
-
-> [!NOTE]
-> This is a *new* database, not a migration of an existing one. Nothing here
-> copies rows from a SQLite file into PostgreSQL — if you have existing data,
-> move it yourself before switching.
-
----
-
 ### Option 3: Docker Run
 
-Run directly as a single container without compose. There is no inference
-server here, so `OCR_BASE_URL` stays unset: the bot still boots and every
-other feature works, and an image message just gets a reply saying OCR is
-unavailable. Voice transcription is likewise unavailable unless `STT_BASE_URL`
-points somewhere; pointing it at a hosted provider instead (with
-`STT_API_KEY` and `STT_MODEL` set) gives voice transcription with no
-inference server at all.
+Run directly as a single container without compose. There is no database or
+inference server here, so `.env`'s `DATABASE_URL` must point at a PostgreSQL
+server you run or manage yourself, and `OCR_BASE_URL` stays unset: the bot
+still boots and every other feature works, and an image message just gets a
+reply saying OCR is unavailable. Voice transcription is likewise unavailable
+unless `STT_BASE_URL` points somewhere; pointing it at a hosted provider
+instead (with `STT_API_KEY` and `STT_MODEL` set) gives voice transcription
+with no inference server at all.
 
 ```bash
-# 1. Create a persistent named volume for SQLite and Matrix crypto store
+# 1. Create a persistent named volume for the Matrix crypto store
 docker volume create matrix-bot-data
 
 # 2. Run the container
+# --stop-timeout 20: Docker sends SIGTERM, then SIGKILL after this many
+# seconds. Must exceed app::SHUTDOWN_GRACE (15 s) or the process is killed
+# mid-drain before its own graceful-shutdown bound gets to finish.
 docker run -d \
   --name matrix-bot \
   --restart unless-stopped \
+  --stop-timeout 20 \
   -p 8080:8080 \
   --env-file .env \
   -v matrix-bot-data:/app/data \
@@ -497,29 +482,31 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │   ├── merge.rs          #   absorbing one account into another
     │   ├── recovery.rs       #   recovery codes and delayed Matrix recovery
     │   └── security_events.rs#   per-account audit log
-    ├── api/                  # axum REST layer
-    │   ├── auth/             #   passkey ceremonies, 1-step Matrix login, cookie/bearer extractor
-    │   ├── account.rs        #   passkeys, links, sessions, recovery, audit
-    │   └── …                 #   todos, reminders, finance, portfolio, bills, bookmarks, habits, life, ai, sse
-    ├── bot/                  # Matrix client, dispatcher, verification
-    │   ├── linking.rs        #   !link, handled before the sender is resolved
-    │   └── notify.rs         #   security DMs to linked identities
+    ├── interface/            # everything that talks to the outside world
+    │   ├── http/             #   axum REST layer
+    │   │   ├── auth/         #     passkey ceremonies, 1-step Matrix login, cookie/bearer extractor
+    │   │   ├── account.rs    #     passkeys, links, sessions, recovery, audit
+    │   │   └── …             #     todos, reminders, finance, portfolio, bills, bookmarks, habits, life, ai, sse
+    │   └── channels/matrix/  #   Matrix client, dispatcher, verification
+    │       ├── linking.rs    #     !link, handled before the sender is resolved
+    │       └── notify.rs     #     security DMs to linked identities
     ├── db/                   # pool + the single migration path
     ├── modules/              # BotModule plugins: core, todo, reminder, finance, portfolio,
     │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
     │                         # webhook, ai, settings, account, briefing, mcp, rooms,
     │                         # ocr (image text), voice (speech→text), tts (text→speech)
-    ├── services/             # external capabilities, never importing from modules/
-    │   ├── llm/              #   LlmClient: OpenAI-compatible chat-completions transport
-    │   ├── ocr/              #   client to the inference crate's POST /ocr
-    │   ├── stt/              #   OpenAI-compatible client to POST /v1/audio/transcriptions
-    │   └── tts/              #   OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
+    ├── infrastructure/       # adapters to external systems
+    │   └── inference/        #   never importing from modules/, interface/ or application/
+    │       ├── llm/          #     LlmClient: OpenAI-compatible chat-completions transport
+    │       ├── ocr/          #     client to the inference crate's POST /ocr
+    │       ├── stt/          #     OpenAI-compatible client to POST /v1/audio/transcriptions
+    │       └── tts/          #     OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image
 contracts/                    # JSON fixtures each crate asserts for the wire formats it speaks
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
-data/                         # runtime SQLite + Matrix crypto store (gitignored)
+data/                         # runtime Matrix crypto store (SQLite, gitignored)
 docs/                         # documentation, roadmap, architecture reviews, guides
 ```
 
@@ -531,9 +518,10 @@ before changing auth, ownership or migrations.
 
 ## 🚀 Roadmap
 
-- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is the switch, and the whole
-  suite passes on both databases; see
-  [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
+- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is required and must be
+  `postgres://`; PostgreSQL 18 is the only application database (matrix-sdk
+  keeps its own SQLite crypto store under `data/`). See
+  [`docs/ARCHITECTURE.md#postgresql-only`](docs/ARCHITECTURE.md#postgresql-only).
 - **Conditional-UI sign-in** — passkey autofill on page load, rather than a
   button.
 - **Offline Sync for Native iOS** — local SwiftData caching in Element X iOS for offline task and log creation.

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM reminders WHERE id = $1 AND owner_id = $2 AND status != 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db903b885139286d7e5652a1093503a2cf37c97d0e0065e57b338206493839cb"
+}

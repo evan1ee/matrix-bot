@@ -3,11 +3,9 @@ use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use std::time::Duration as StdDuration;
 use tracing::{error, info, warn};
 
-use crate::db::rooms::RoomRepository;
+use crate::domain::settings::parse_briefing_time;
 use crate::events::SystemEvent;
 use crate::modules::briefing::generator::generate_briefing;
-use crate::modules::settings::models::parse_briefing_time;
-use crate::modules::settings::SettingsRepository;
 use crate::modules::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
@@ -29,8 +27,9 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
     let now_utc = Utc::now();
 
-    for owner_id in accounts {
-        let settings = SettingsRepository::get_or_default(&ctx.db.pool, &owner_id).await;
+    for owner_str in accounts {
+        let owner_id = crate::domain::accounts::AccountId::from(owner_str);
+        let settings = ctx.services.settings.get_or_default(&owner_id).await;
         if !settings.briefing_enabled {
             continue;
         }
@@ -45,8 +44,11 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let today_local_str = now_local.format("%Y-%m-%d").to_string();
 
         // 1. Check if already delivered today
-        if let Some(last_date) =
-            SettingsRepository::get_last_briefing_date(&ctx.db.pool, &owner_id).await
+        if let Some(last_date) = ctx
+            .services
+            .settings
+            .get_last_briefing_date(&owner_id)
+            .await
         {
             if last_date == today_local_str {
                 continue;
@@ -70,7 +72,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
             now_local.minute()
         );
 
-        let payload = match generate_briefing(&ctx.db.pool, &owner_id, &settings).await {
+        let payload = match generate_briefing(&ctx.db.pool, owner_id.as_str(), &settings).await {
             Ok(p) => p,
             Err(err) => {
                 error!(
@@ -84,9 +86,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let mut delivered = false;
 
         // 3. Deliver to user's direct or default Matrix room
-        if let Some(target_room) =
-            RoomRepository::resolve_user_default_room(&ctx.db.pool, &owner_id).await
-        {
+        if let Some(target_room) = ctx.services.rooms.default_room(&owner_id).await {
             if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
                 let content =
                     RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);
@@ -111,17 +111,16 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         }
 
         // 4. Update last briefing date so it cannot re-trigger today
-        let _ = SettingsRepository::update_last_briefing_date(
-            &ctx.db.pool,
-            &owner_id,
-            &today_local_str,
-        )
-        .await;
+        let _ = ctx
+            .services
+            .settings
+            .update_last_briefing_date(&owner_id, &today_local_str)
+            .await;
 
         // 5. Broadcast SSE event
         if let Some(ref broadcaster) = ctx.broadcaster {
             broadcaster.send(SystemEvent::MorningBriefingSent {
-                owner_id: owner_id.clone(),
+                owner_id: owner_id.to_string(),
                 delivered_at: today_local_str.clone(),
                 summary: format!(
                     "{} tasks, {} habits, {} bills, {} holdings",

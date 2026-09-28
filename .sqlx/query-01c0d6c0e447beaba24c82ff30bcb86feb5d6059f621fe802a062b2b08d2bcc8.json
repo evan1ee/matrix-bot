@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT log_date AS \"date!\", COUNT(*) AS \"count!\"\n        FROM habit_logs\n        WHERE owner_id = $1 AND completed = TRUE\n        GROUP BY log_date\n        ORDER BY log_date ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "date!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habit_logs",
+            "name": "log_date"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "01c0d6c0e447beaba24c82ff30bcb86feb5d6059f621fe802a062b2b08d2bcc8"
+}

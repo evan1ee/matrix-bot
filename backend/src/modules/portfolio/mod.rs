@@ -123,11 +123,18 @@ impl BotModule for PortfolioModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_portfolio_command(&db.pool, &ctx.owner_id, &ctx.full_body, broadcaster)
-            .await
+        handler::handle_portfolio_command(
+            &db.pool,
+            &services.settings,
+            &ctx.owner_id,
+            &ctx.full_body,
+            broadcaster,
+        )
+        .await
     }
 
     async fn spawn_background_workers(
@@ -147,7 +154,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()
@@ -165,7 +172,9 @@ mod tests {
     }
 
     async fn db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        Database { pool }
     }
 
     /// Buying now requires cash on hand; this deposits comfortably more than
@@ -175,6 +184,7 @@ mod tests {
         module
             .handle_command(
                 &ctx(&format!("!portfolio cash deposit 100000 {currency}")),
+                &crate::application::AppServices::new(&db.pool),
                 db,
                 None,
             )
@@ -204,32 +214,67 @@ mod tests {
         fund(&module, &db, "USD").await;
 
         assert!(module
-            .handle_command(&ctx("!portfolio"), &db, None)
+            .handle_command(
+                &ctx("!portfolio"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo add milk"), &db, None)
+            .handle_command(
+                &ctx("!todo add milk"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!expense add 1 EUR x"), &db, None)
+            .handle_command(
+                &ctx("!expense add 1 EUR x"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!settings"), &db, None)
+            .handle_command(
+                &ctx("!settings"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &db, None)
+            .handle_command(
+                &ctx("hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -242,7 +287,12 @@ mod tests {
         fund(&module, &db, "USD").await;
 
         let reply = module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer");
         assert!(reply.contains("AAPL"));
@@ -252,7 +302,12 @@ mod tests {
         );
 
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &db, None)
+            .handle_command(
+                &ctx("!portfolio list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -269,7 +324,12 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -280,7 +340,12 @@ mod tests {
         // The empty-state message's own usage example mentions "AAPL", so
         // assert the positive (still empty), not a naive "does not contain".
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &db, None)
+            .handle_command(
+                &ctx("!portfolio list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -293,26 +358,32 @@ mod tests {
     /// like the finance module's `!expense add`.
     #[tokio::test]
     async fn test_buy_without_a_currency_uses_the_senders_default() {
-        use crate::modules::settings::{SettingsRepository, UserSettings};
+        use crate::domain::settings::UserSettings;
 
         let module = PortfolioModule::new();
         let db = db().await;
 
-        SettingsRepository::upsert(
-            &db.pool,
-            "@alice:a",
-            &UserSettings {
-                timezone: "UTC".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        crate::application::AppServices::new(&db.pool)
+            .settings
+            .save(
+                &crate::domain::accounts::AccountId::new("@alice:a"),
+                UserSettings {
+                    timezone: "UTC".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
         fund(&module, &db, "CNY").await;
 
         let reply = module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -335,6 +406,7 @@ mod tests {
         module
             .handle_command(
                 &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 Some(&broadcaster),
             )
@@ -368,11 +440,21 @@ mod tests {
         let mut rx = broadcaster.subscribe();
 
         module
-            .handle_command(&ctx("!portfolio list"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!portfolio list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .unwrap();
         module
-            .handle_command(&ctx("!portfolio cash"), &db, Some(&broadcaster))
+            .handle_command(
+                &ctx("!portfolio cash"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                Some(&broadcaster),
+            )
             .await
             .unwrap();
 
@@ -389,13 +471,19 @@ mod tests {
         fund(&module, &db, "USD").await;
 
         module
-            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
         let note_reply = module
             .handle_command(
                 &ctx("!portfolio note AAPL <script>alert(1)</script>"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 None,
             )
@@ -408,7 +496,12 @@ mod tests {
         assert!(note_reply.contains("&lt;script&gt;"));
 
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &db, None)
+            .handle_command(
+                &ctx("!portfolio list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -426,35 +519,65 @@ mod tests {
         let db = db().await;
 
         let deposited = module
-            .handle_command(&ctx("!portfolio cash deposit 1000 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash deposit 1000 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(deposited.contains("1000.00"), "{deposited}");
 
         module
-            .handle_command(&ctx("!portfolio buy AAPL 5 @ 150.00 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio buy AAPL 5 @ 150.00 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         // 1000.00 - 750.00 (5 @ 150.00) = 250.00 remaining.
         let after_buy = module
-            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(after_buy.contains("250.00"), "{after_buy}");
 
         module
-            .handle_command(&ctx("!portfolio sell AAPL 5 @ 180.00"), &db, None)
+            .handle_command(
+                &ctx("!portfolio sell AAPL 5 @ 180.00"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         // 250.00 + 900.00 (5 @ 180.00 proceeds) = 1150.00.
         let after_sell = module
-            .handle_command(&ctx("!portfolio cash"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(after_sell.contains("1150.00"), "{after_sell}");
 
         let withdrawn = module
-            .handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash withdraw 1150 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
@@ -480,12 +603,22 @@ mod tests {
         let module = PortfolioModule::new();
         let db = db().await;
         module
-            .handle_command(&ctx("!portfolio cash deposit 100 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash deposit 100 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 
         let reply = module
-            .handle_command(&ctx("!portfolio cash withdraw 101 USD"), &db, None)
+            .handle_command(
+                &ctx("!portfolio cash withdraw 101 USD"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(

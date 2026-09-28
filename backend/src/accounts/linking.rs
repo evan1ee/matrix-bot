@@ -177,7 +177,8 @@ impl LinkRepository {
 
                 if let Some(prev) = previous_account {
                     if prev != challenge.account_id {
-                        let preview = super::MergeRepository::preview(pool, &prev)
+                        let prev_id = crate::domain::accounts::AccountId::new(&prev);
+                        let preview = super::MergeRepository::preview(pool, &prev_id)
                             .await
                             .unwrap_or_default();
                         if preview.total() > 0 {
@@ -233,11 +234,10 @@ fn normalise_code(code: &str) -> String {
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
-    use crate::db::schema::run_migrations;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

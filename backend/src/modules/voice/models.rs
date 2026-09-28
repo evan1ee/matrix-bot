@@ -44,8 +44,8 @@ impl VoiceTranscriptionResult {
     }
 }
 
-impl From<crate::services::stt::SttTranscription> for VoiceTranscriptionResult {
-    fn from(t: crate::services::stt::SttTranscription) -> Self {
+impl From<crate::infrastructure::inference::stt::SttTranscription> for VoiceTranscriptionResult {
+    fn from(t: crate::infrastructure::inference::stt::SttTranscription) -> Self {
         Self {
             text: t.text,
             language: t.language,
@@ -91,12 +91,13 @@ mod tests {
 
     #[test]
     fn test_a_transcription_without_a_duration_maps_to_zero() {
-        let result: VoiceTranscriptionResult = crate::services::stt::SttTranscription {
-            text: "hi".to_string(),
-            language: None,
-            duration: None,
-        }
-        .into();
+        let result: VoiceTranscriptionResult =
+            crate::infrastructure::inference::stt::SttTranscription {
+                text: "hi".to_string(),
+                language: None,
+                duration: None,
+            }
+            .into();
         assert_eq!(result.text, "hi");
         assert_eq!(result.duration_secs, 0.0);
     }

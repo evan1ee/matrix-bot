@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_user_configs (owner_id, model_name) VALUES ($1, 'gemini')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45850a52a67d7fcae691ca0114caca0927162a6199f4604e8ef522c34997dc67"
+}

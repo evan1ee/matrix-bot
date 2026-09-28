@@ -1,4 +1,3 @@
-use crate::db::DbPool;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk::Client;
@@ -7,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::modules::settings::SettingsRepository;
+use crate::application::settings::SettingsService;
 use crate::utils::html::html_escape;
 
 static AI_ERROR_ALERTED: AtomicBool = AtomicBool::new(false);
@@ -24,7 +23,7 @@ pub fn is_ai_error_alerted() -> bool {
 
 /// Sends an outage notification to the DEV room, sending strictly once per incident.
 pub async fn notify_dev_room_ai_error(
-    pool: &DbPool,
+    settings: &SettingsService,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     owner_id: &str,
     error_msg: &str,
@@ -52,8 +51,8 @@ pub async fn notify_dev_room_ai_error(
 
     // Determine target DEV room:
     // 1. Check user's settings.dev_room_id
-    // 2. Fallback: Search joined rooms for a room named "DEV" (case-insensitive)
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
     let target_room_id = if let Some(ref room_id) = settings.dev_room_id {
         Some(room_id.clone())
     } else {

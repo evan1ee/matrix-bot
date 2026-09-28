@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use matrix_bot::api::openapi::ApiDoc;
+use matrix_bot::interface::http::openapi::ApiDoc;
 use utoipa::OpenApi;
 
 fn main() -> std::io::Result<()> {

@@ -1,14 +1,14 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::domain::recurring_bills::RecurringBill;
+use crate::domain::reminders::Reminder;
+use crate::domain::settings::UserSettings;
+use crate::domain::todos::TodoItem;
+use crate::domain::webhooks::Webhook;
 use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::portfolio::audit::PortfolioAuditEntry;
 use crate::modules::portfolio::models::Holding;
-use crate::modules::recurring_bills::models::RecurringBill;
-use crate::modules::reminder::models::Reminder;
-use crate::modules::settings::UserSettings;
-use crate::modules::todo::models::TodoItem;
-use crate::modules::webhook::models::Webhook;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -118,14 +118,14 @@ pub enum SystemEvent {
     AiConfigUpdated {
         owner_id: String,
     },
-    FootprintCreated(crate::modules::footprints::models::Footprint),
-    FootprintUpdated(crate::modules::footprints::models::Footprint),
+    FootprintCreated(crate::domain::footprints::Footprint),
+    FootprintUpdated(crate::domain::footprints::Footprint),
     FootprintDeleted {
         id: i64,
         owner_id: String,
     },
-    HabitCreated(crate::modules::habits::models::Habit),
-    HabitUpdated(crate::modules::habits::models::Habit),
+    HabitCreated(crate::domain::habits::Habit),
+    HabitUpdated(crate::domain::habits::Habit),
     HabitDeleted {
         id: i64,
         owner_id: String,
@@ -145,8 +145,8 @@ pub enum SystemEvent {
         owner_id: String,
         date: String,
     },
-    BookmarkCreated(crate::modules::bookmarks::models::Bookmark),
-    BookmarkUpdated(crate::modules::bookmarks::models::Bookmark),
+    BookmarkCreated(crate::domain::bookmarks::Bookmark),
+    BookmarkUpdated(crate::domain::bookmarks::Bookmark),
     BookmarkDeleted {
         id: i64,
         owner_id: String,
@@ -167,10 +167,12 @@ impl SystemEvent {
     /// be delivered.
     pub fn owner_id(&self) -> &str {
         match self {
-            SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => &item.owner_id,
+            SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => {
+                item.owner_id.as_str()
+            }
             SystemEvent::ReminderCreated(rem)
             | SystemEvent::ReminderUpdated(rem)
-            | SystemEvent::ReminderTriggered(rem) => &rem.owner_id,
+            | SystemEvent::ReminderTriggered(rem) => rem.owner_id.as_str(),
             SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
             SystemEvent::ReminderCancelled { owner_id, .. }
             | SystemEvent::ReminderDeleted { owner_id, .. }
@@ -193,7 +195,7 @@ impl SystemEvent {
             }
             SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id,
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
-                &b.owner_id
+                b.owner_id.as_str()
             }
             SystemEvent::RecurringBillDeleted { owner_id, .. }
             | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
@@ -270,10 +272,10 @@ mod tests {
         TodoItem {
             id: 1,
             room_id: "!room:1".to_string(),
-            owner_id: owner.to_string(),
+            owner_id: crate::domain::accounts::AccountId::new(owner),
             sender_name: "shared-display-name".to_string(),
             text: "task".to_string(),
-            priority: "medium".to_string(),
+            priority: crate::domain::todos::TodoPriority::Medium,
             due_at: None,
             remind_before_minutes: None,
             completed: false,

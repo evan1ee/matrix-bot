@@ -4,14 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
 
+use crate::application::settings::SettingsService;
+use crate::domain::accounts::AccountId;
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
+use crate::infrastructure::postgres::repositories::reminders as reminders_repo;
+use crate::infrastructure::postgres::repositories::todos as todos_repo;
 use crate::modules::finance::money::format_amount;
 use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
-use crate::modules::recurring_bills::repository::RecurringBillRepository;
-use crate::modules::reminder::repository::ReminderRepository;
-use crate::modules::settings::repository::SettingsRepository;
-use crate::modules::todo::repository::TodoRepository;
 use crate::utils::html::html_escape;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -59,9 +60,11 @@ pub struct WeeklyRetrospective {
 
 pub async fn generate_weekly_retrospective(
     pool: &DbPool,
+    settings: &SettingsService,
     owner_id: &str,
 ) -> anyhow::Result<WeeklyRetrospective> {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = settings.get_or_default(&acct).await;
     let tz = settings.tz();
     let default_currency = settings.currency.clone();
 
@@ -200,14 +203,15 @@ pub async fn generate_weekly_retrospective(
         })
     };
 
+    let acct = AccountId::new(owner_id);
+
     // 2. Tasks
-    let all_tasks = TodoRepository::list_all_user(pool, owner_id, None, 200, 0).await?;
+    let all_tasks = todos_repo::list_all_user(pool, &acct, None, 200, 0).await?;
     let completed_tasks_count = all_tasks.iter().filter(|t| t.completed).count();
     let active_tasks_count = all_tasks.iter().filter(|t| !t.completed).count();
 
     // 3. Habits
-    let habits_with_status =
-        HabitsRepository::find_all_with_status(pool, owner_id, &period_end).await?;
+    let habits_with_status = habits_repo::find_all_with_status(pool, &acct, &period_end).await?;
     let active_habits_count = habits_with_status.len();
     let mut total_possible_habit_days = 0;
     let mut total_completed_habit_days = 0;
@@ -226,7 +230,7 @@ pub async fn generate_weekly_retrospective(
     };
 
     // 4. Upcoming Bills (next 7 days) — Group by currency, never sum across currencies.
-    let bills = RecurringBillRepository::list_by_owner(pool, owner_id).await?;
+    let bills = bills_repo::list_by_owner(pool, &acct).await?;
     let mut upcoming_bills_count = 0;
     let mut bills_by_currency: HashMap<String, (i64, i64)> = HashMap::new();
 
@@ -275,7 +279,8 @@ pub async fn generate_weekly_retrospective(
     };
 
     // 5. Upcoming Reminders (next 7 days)
-    let reminders = ReminderRepository::list_user_pending(pool, owner_id, 50, 0).await?;
+    let reminders =
+        reminders_repo::list_user_reminders(pool, &acct, Some("pending"), None, 50, 0).await?;
     let upcoming_reminders_count = reminders
         .iter()
         .filter(|r| r.trigger_at.to_rfc3339().as_str() <= next_period_end.as_str())
@@ -349,8 +354,12 @@ pub async fn generate_weekly_retrospective(
     })
 }
 
-pub async fn handle_retrospective_command(pool: &DbPool, owner_id: &str) -> String {
-    match generate_weekly_retrospective(pool, owner_id).await {
+pub async fn handle_retrospective_command(
+    pool: &DbPool,
+    settings: &SettingsService,
+    owner_id: &str,
+) -> String {
+    match generate_weekly_retrospective(pool, settings, owner_id).await {
         Ok(retro) => {
             let top_cat = html_escape(retro.top_expense_category.as_deref().unwrap_or("None"));
             let mood = html_escape(retro.dominant_mood.as_deref().unwrap_or("Unrecorded"));
@@ -415,15 +424,14 @@ pub async fn handle_retrospective_command(pool: &DbPool, owner_id: &str) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::recurring_bills::NewRecurringBill;
+    use crate::domain::settings::UserSettings;
+    use crate::events::EventBroadcaster;
     use crate::modules::finance::repository::FinanceRepository;
-    use crate::modules::recurring_bills::models::CreateBillPayload;
-    use crate::modules::recurring_bills::repository::RecurringBillRepository;
-    use crate::modules::settings::models::UserSettings;
-    use crate::modules::settings::repository::SettingsRepository;
 
     async fn test_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
@@ -431,19 +439,20 @@ mod tests {
     async fn test_retrospective_keeps_currencies_strictly_apart() {
         let pool = test_db().await;
         let owner = "@user:example.com";
+        let settings = SettingsService::new(pool.clone(), EventBroadcaster::default());
 
         // User sets default currency to CNY
-        SettingsRepository::upsert(
-            &pool,
-            owner,
-            &UserSettings {
-                timezone: "Asia/Shanghai".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        settings
+            .save(
+                &crate::domain::accounts::AccountId::new(owner),
+                UserSettings {
+                    timezone: "Asia/Shanghai".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
 
         // Add expense: Shake Shack lunch: 16.50 USD (1650 minor)
         let cat_food = FinanceRepository::create_category(&pool, owner, "Food")
@@ -495,22 +504,22 @@ mod tests {
         let tomorrow = (Utc::now() + Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
-        RecurringBillRepository::create(
+        bills_repo::create(
             &pool,
-            "room1",
-            owner,
-            "User",
-            CreateBillPayload {
+            &AccountId::new(owner),
+            &NewRecurringBill {
+                room_id: "room1".to_string(),
+                sender_name: "User".to_string(),
                 name: "US Service".to_string(),
                 category: "subscription".to_string(),
                 amount_minor: 1000,
                 currency: "USD".to_string(),
-                currency_exponent: Some(2),
-                frequency: Some("monthly".to_string()),
+                currency_exponent: 2,
+                frequency: "monthly".to_string(),
                 due_day: Some(1),
                 next_due_at: tomorrow.clone(),
                 total_installments: None,
-                auto_pay: Some(false),
+                auto_pay: false,
                 notes: None,
                 remind_before_minutes: Some(60),
                 remind_room_id: None,
@@ -519,22 +528,22 @@ mod tests {
         .await
         .unwrap();
 
-        RecurringBillRepository::create(
+        bills_repo::create(
             &pool,
-            "room1",
-            owner,
-            "User",
-            CreateBillPayload {
+            &AccountId::new(owner),
+            &NewRecurringBill {
+                room_id: "room1".to_string(),
+                sender_name: "User".to_string(),
                 name: "CN Service".to_string(),
                 category: "subscription".to_string(),
                 amount_minor: 3000,
                 currency: "CNY".to_string(),
-                currency_exponent: Some(2),
-                frequency: Some("monthly".to_string()),
+                currency_exponent: 2,
+                frequency: "monthly".to_string(),
                 due_day: Some(1),
                 next_due_at: tomorrow,
                 total_installments: None,
-                auto_pay: Some(false),
+                auto_pay: false,
                 notes: None,
                 remind_before_minutes: Some(60),
                 remind_room_id: None,
@@ -543,7 +552,9 @@ mod tests {
         .await
         .unwrap();
 
-        let retro = generate_weekly_retrospective(&pool, owner).await.unwrap();
+        let retro = generate_weekly_retrospective(&pool, &settings, owner)
+            .await
+            .unwrap();
 
         // Primary currency is CNY, total_spent_minor must ONLY reflect CNY (4500), NEVER 6150 (1650 + 4500)
         assert_eq!(retro.currency, "CNY");

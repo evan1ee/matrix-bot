@@ -371,7 +371,9 @@ mod tests {
     use crate::modules::finance::repository::FinanceRepository;
 
     async fn setup_db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        Database { pool }
     }
 
     #[tokio::test]

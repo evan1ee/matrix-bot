@@ -2,30 +2,53 @@
 
 ## Overview
 
-`matrix-bot` is a Matrix chat bot with an embedded web UI: a Rust Cargo workspace holds the bot itself (`backend/`) plus a local-inference server for OCR, speech-to-text and text-to-speech (`inference/`), and a React SPA (`frontend/`) builds into the bot's static assets. Data lives in SQLite by default, with PostgreSQL as a supported second target picked at boot from `DATABASE_URL`. This file states every hard rule and convention; `docs/ARCHITECTURE.md` is the long-form companion explaining the *why* behind the parts of the design that aren't obvious from the code alone.
+`matrix-bot` is a Matrix chat bot with an embedded web UI: a Rust Cargo workspace holds the bot itself (`backend/`) plus a local-inference server for OCR, speech-to-text and text-to-speech (`inference/`), and a React SPA (`frontend/`) builds into the bot's static assets. Data lives in PostgreSQL 18+ (the only application database); matrix-sdk keeps its own SQLite crypto store under `data/`. This file states every hard rule and convention; `docs/ARCHITECTURE.md` is the long-form companion explaining the *why* behind the parts of the design that aren't obvious from the code alone.
+
+> **Refactor in progress.** This branch is mid-way through the layer-first PostgreSQL refactor. Before any change, read [`docs/HANDOFF.md`](docs/HANDOFF.md) — status, next actions, settled decisions and hard safety rules for agents taking over. Environment setup and every test suite: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Remotes, PRs and CI: [`docs/GITEA.md`](docs/GITEA.md).
 
 ## Commands
 
 ```bash
 cargo check                              # must be warning-free
 cargo fmt --all -- --check               # CI blocks on this; `cargo fmt --all` to fix
+
+# Local PostgreSQL for all tests. `DATABASE_URL` is required and must be
+# `postgres://`; there is no SQLite fallback for the application database.
+# --shm-size=1g: test_pool() creates a fresh schema per test (see db/pool.rs)
+# and never drops it, so a long-running local server's default 64MB of shared
+# memory has filled up before now.
+docker run --rm -d --name bot-pg -p 5432:5432 -e POSTGRES_PASSWORD=bot --shm-size=1g postgres:18
+export TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres
+export PG_TEST_URL=$TEST_DATABASE_URL
 cargo test -p matrix-bot --all-targets   # backend suite (CI's own invocation)
+
+# test_pool() leaves its per-test schemas (named t<pid>_<n>) behind; drop them
+# periodically on a long-running local server:
+psql "$TEST_DATABASE_URL" -Atc "SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace WHERE nspname ~ '^t[0-9]+_[0-9]+$'" | psql "$TEST_DATABASE_URL"
 cargo test -p matrix-bot-inference --all-targets   # inference crate; not covered by bare `cargo test`
 cargo test --package matrix-bot self_verify -- --ignored   # live check: is the running bot verified?
 cargo test test_parse_message_exclamation_command   # single test by name
 cargo test --package matrix-bot modules::todo::     # one module's tests
+cargo test -p matrix-bot --test architecture       # enforces dependency rules (domain/application/infrastructure/interface); interface/ may run SQL only from files in the shrinking INTERFACE_SQL_ALLOW_LIST
 cargo run                                # starts bot + API server
 
-# Migrate a COPY of a real database and assert nothing was stranded — run
-# before shipping any migration that touches ownership.
-cp data/bot_data.db /tmp/copy.db
-MIGRATE_TEST_DB=/tmp/copy.db cargo test migrates_a_real_database -- --ignored
+# After changing a sqlx::query!/query_as!/query_scalar! call or a migration,
+# regenerate the offline cache against a migrated database and commit .sqlx/;
+# CI fails on drift (`cargo sqlx prepare --workspace --check`). Prerequisite:
+# create a scratch database and run the migrations against it first.
+createdb -h localhost -U postgres sqlx_prepare
+sqlx migrate run --source backend/migrations --database-url postgres://postgres:bot@localhost:5432/sqlx_prepare
+DATABASE_URL=postgres://postgres:bot@localhost:5432/sqlx_prepare cargo sqlx prepare --workspace -- -p matrix-bot --all-targets
 
-# Run the suite against PostgreSQL instead of in-memory SQLite. CI's
-# backend-postgres job does this against a service container; locally, start
-# a matching one first:
-docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=bot postgres:18
-TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/postgres cargo test -p matrix-bot
+# Rehearse a migration against a restored COPY of production and assert
+# nothing was stranded — run before shipping any migration, never against
+# production itself.
+pg_dump -Fc "$PROD_URL" > prod.dump
+createdb -h localhost -U postgres rehearsal
+pg_restore -h localhost -U postgres -d rehearsal --no-owner prod.dump
+MIGRATE_TEST_DATABASE_URL=postgres://postgres:bot@localhost:5432/rehearsal \
+PG_TEST_URL=postgres://postgres:bot@localhost:5432/postgres \
+  cargo test -p matrix-bot migrates_a_real_database -- --ignored --nocapture
 
 # After any #[utoipa::path] or ToSchema change, regenerate both, and commit
 # backend/openapi.json if it changed — CI's drift check fails on any diff.
@@ -43,7 +66,7 @@ npm --prefix frontend run test:e2e   # Playwright; `npx --prefix ... playwright`
 # http://localhost:8080; only override it if your .env sets a different value
 # (e.g. the Vite :5173 origin). Add REGISTRATION_OPEN=true to open sign-up —
 # compose always passes the variable, and an empty value means closed.
-DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose --profile postgres up -d
+ENVIRONMENT=development WEBAUTHN_ORIGIN=http://localhost:8080 docker compose up -d
 ```
 
 ## Repository Layout
@@ -52,55 +75,53 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 - `inference/` — Rust crate `matrix-bot-inference`: Axum server hosting local ONNX models (OCR, STT, Kokoro TTS).
 - `contracts/` — JSON fixtures each crate asserts its wire formats against.
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
-- `data/` — runtime SQLite DB + Matrix crypto store (gitignored).
+- `data/` — Matrix crypto store (gitignored); the application database lives in PostgreSQL, not here.
 - `docs/` — `ARCHITECTURE.md` (design rationale); `testing-auth-locally.md` covers running passkeys against `localhost` (virtual authenticator, the `!link` DM flow, SQL to skip the step-up and recovery delays); roadmap, reviews.
 
-## Working Principles
+## Engineering Principles
 
-- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-- Keep components modular and concerns clearly separated.
-- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+Design the boundaries carefully, keep the domain deterministic, use Rust's type system to enforce invariants, make concurrency and failure explicit, and keep implementation complexity proportional to the actual problem.
+
+- **Architecture and domain first** — plan business goals and use cases, domain boundaries, crate/module responsibilities, dependency direction, data ownership, request/event flows, and persistence/external-service boundaries before writing code; the architecture should be complete even where the implementation stays restrained. Keep business rules in the domain/application layer, never in Axum handlers, Matrix event handlers, SQL, or UI code. Don't add an abstraction for a single use case — wait for a second genuine one to justify it.
+- **Rust-first design** — write idiomatic Rust, not patterns translated from another language. Make invalid states unrepresentable: enums over stringly-typed state, newtypes for identifiers, `Result`/`Option` for fallibility, immutable data by default, exhaustive `match`. Avoid unneeded `Arc<Mutex<_>>`, excess `clone()`, `unwrap()`/`expect()` on runtime paths, global mutable state, and `Box<dyn Trait>` where a concrete type or generic is clearer. A trait earns its place at a real architectural boundary, not for mocking alone.
+- **Crate and module boundaries** — see the target layer-first layout under Architecture below for where this is headed. Regardless of layout: domain code never depends on Axum, Matrix SDK, SQLx, or an HTTP client; API and database models never leak into the domain; Matrix events and other external responses are validated and translated into application/domain commands at the boundary; module/crate dependencies stay acyclic; public module APIs stay small.
+- **Data boundaries** — keep transport models, validated input, application commands, domain models, and persistence models distinct; never pass a database row or an HTTP DTO through the whole application unchanged. Every boundary crossing validates, normalizes, authorizes, converts, and maps errors. Avoid sharing mutable state across architectural boundaries.
+- **Domain and business logic** — keep domain logic deterministic and independent of transport/persistence, expressed as explicit domain commands and results, and reused rather than re-derived in each adapter. Never put business logic in Axum handlers, Matrix handlers, SQL, serialization impls, or background-task closures. Don't mark a domain operation `async` unless it actually does I/O.
+- **Error handling** — structure errors by boundary (validation, not-found, unauthorized, forbidden, conflict, database, external-service). Never silently swallow an error, retry unboundedly, or collapse everything into a generic "internal error"; preserve diagnostic context internally and map infrastructure errors to application errors at the boundary, but never leak implementation details to a client. `thiserror` for library/application error types, `anyhow` for application-level propagation.
+- **Async and concurrency** — before spawning a task, decide its ownership, cancellation, lifetime, backpressure, ordering, and cleanup. Prefer message passing over shared mutable state; never hold a lock across `.await`; never block a Tokio worker thread directly — use `spawn_blocking`. Bound every queue/channel/worker/concurrent-request count, give every background task a shutdown strategy, every external call a timeout, and every retry a bound that respects idempotency. Don't assume concurrent operations execute in a particular order unless it's explicitly guaranteed.
+- **Idempotency and transactions** — before writing a mutation that can be retried, duplicated, or run concurrently (Matrix events, webhooks, background jobs, reminders, AI tool calls, database writes, external requests), decide what happens on double-execution, partial success, a mid-operation crash, and concurrent writers. Size a transaction to the smallest atomic business operation, not to however many statements happen to run together.
+- **Security by default** (beyond Security Rules below) — design for multi-tenant isolation even at small scale; every externally supplied value is untrusted. Apply least privilege. Never let a client-supplied id imply ownership — every query enforces the caller's own scope. Guard against resource exhaustion and apply rate limiting on new endpoints. Treat SSRF as a general risk for any outbound request built from user input, not only the AI transport's. Logs must never leak a secret alongside the payloads they already exclude.
+- **External services and adapters** — isolate Matrix, LLM providers, MCP, STT/TTS/OCR, web search, and any future external system behind an adapter; the domain describes what it needs, the adapter describes how the external system provides it. Assume they are slow, unavailable, or wrong: explicit timeouts, response validation, rate-limit and cancellation handling, bounded retries, and enough recorded diagnostic context to troubleshoot a failure. Don't leak a provider's own types into the domain, and don't make an external service mandatory for functionality that doesn't need it.
+- **AI/agent boundaries** — the LLM is an untrusted orchestration component, not a source of truth; its output reaches application state only through a validated, independently authorized tool call into a deterministic application service, never a direct mutation. Agent retries and tool loops need explicit limits, timeouts, and cancellation; keep agent orchestration out of domain services, and prefer a deterministic tool over letting an agent manipulate infrastructure directly. A destructive operation needs explicit confirmation semantics where appropriate, and well-formed AI-generated data is still not authoritative merely for being well-formed.
+- **Observability** — every important operation should be diagnosable via structured logging/tracing carrying a request/task id, user id (when safe), operation name, duration, outcome, retry count, external dependency, and database transaction outcome — never a token, password, API key, session secret, or full sensitive payload. An error should be traceable from the public boundary down to the underlying failure.
+- **Testing strategy** — match the test level to what's being verified (unit → domain/application → repository/database → API/integration → end-to-end), and prioritize business invariants, authorization, data isolation, state transitions, transactions, idempotency, concurrency-sensitive paths, error handling, and public contracts over chasing a coverage number. For a bug fix: reproduce it, add a regression test, confirm it fails before the fix, fix it, then run the relevant broader suite.
+- **Dependencies** — before adding a crate, check the workspace's existing dependencies first, verify the candidate's current API, documentation, maintenance status, and Rust-version compatibility, weigh compile time/binary size/transitive impact, and add the smallest one necessary. Don't hand-roll what the standard library or an existing workspace dependency already does, and don't add a second dependency for a capability one already in the workspace provides.
+- **Focused files and functions** — see File organization below for the line-count rule; functions should have one responsibility, never parsing input, authorizing, executing business logic, running SQL, formatting a response, and calling an external service all at once. Extract responsibilities at architectural boundaries, not into arbitrary helper functions.
+- **Comments and ADRs** — comments explain *why*, not what the code already says: non-obvious design decisions, invariants, compatibility constraints, concurrency assumptions, external-service limitations, workarounds, known defects, security considerations. A TODO names an issue and a removal condition — bad: `// TODO: fix this later`; good: `// TODO(#123): Replace polling with Matrix sync notifications once upstream supports it.` Record real architectural decisions as ADRs.
+- **Deletion over compatibility** — delete obsolete implementations, dead code, unused dependencies, and obsolete config/database paths rather than keeping deprecated shims, dual-write logic, or dead fallback paths. Public contracts are the one place compatibility is a deliberate, evaluated decision rather than a default.
+- **Change discipline** — understand the existing architecture and affected boundaries before changing them, make the smallest correct change, remove what it obsoletes, add or update tests, run the relevant quality gates, and review the final diff for anything unintended. Don't mix unrelated refactoring into a feature or bugfix change.
+- Grow the system in layers: start from the smallest version that works end to end, and add each new capability on top of a product that already works — never trade a working product for unfinished complexity.
+- Make architectural decisions for the long term; do not accept a stopgap that only works for now and is meant to be replaced later.
 
 ## Conventions and Rules
 
-**`BotModule` plugin system** — features are independent modules implementing `BotModule` (`backend/src/modules/mod.rs`), registered in `backend/src/bot/mod.rs`. Never add command handling to `main.rs` or `bot/handler.rs`.
+**`BotModule` plugin system** — features are independent modules implementing `BotModule` (`backend/src/modules/mod.rs`), registered in `backend/src/interface/channels/matrix/mod.rs`. Never add command handling to `main.rs` or `interface/channels/matrix/handler.rs`.
 
-**Embedded Axum REST API** — endpoints live in `backend/src/api/`, aggregated via `api_routes()` in `api/routes.rs`. Use `ApiError` (`backend/src/error.rs`) for every response (`{ "error": "...", "code": 400 }`). Every mutation must `broadcaster.send(SystemEvent::…)`, and **every `SystemEvent` variant must return a meaningful `owner_id()`** — the broadcast channel is process-wide and per-owner SSE delivery depends on it; a variant with no owner leaks across users or is never delivered. Cap API payload strings at 500 chars.
+**Embedded Axum REST API** — endpoints live in `backend/src/interface/http/`, aggregated via `api_routes()` in `interface/http/routes.rs`. Use `ApiError` (`backend/src/error.rs`) for every response (`{ "error": "...", "code": 400 }`). Every mutation must `broadcaster.send(SystemEvent::…)`, and **every `SystemEvent` variant must return a meaningful `owner_id()`** — the broadcast channel is process-wide and per-owner SSE delivery depends on it; a variant with no owner leaks across users or is never delivered. Cap API payload strings at 500 chars.
 
-**File organization** — no file in `backend/src/` or `inference/src/` exceeds 500 lines of production code (target < 300; `#[cfg(test)]` modules don't count). Split along a real seam, never by line count alone. Feature module shape: `mod.rs`, `models.rs`, `repository.rs`, `handler.rs`, optional `scheduler.rs`.
+**File organization** — no file in `backend/src/` or `inference/src/` exceeds 500 lines of production code (target < 300; `#[cfg(test)]` modules don't count). Split along a real seam, never by line count alone. Feature shape: see the Module Implementation Checklist.
 
-**`services/` boundary** — `services/` never imports from `modules/`. `modules/` is what the app does; `services/` is how it reaches external capabilities. A wire type and a domain type that share fields stay separate, with a `From` impl in the module.
+**`infrastructure/` boundary** — `infrastructure/` never imports from `modules/`, `interface/` or `application/`. `modules/` is what the app does; `infrastructure/` is how it reaches external capabilities. A wire type and a domain type that share fields stay separate, with a `From` impl in the module.
 
 **`contracts/`** — every HTTP wire contract between the two crates lives here as a JSON fixture both sides assert against (or the server side alone, for a server-only format) — a renamed field fails a test, not production.
 
+**Public contracts** — REST endpoints, OpenAPI, Matrix commands/events, MCP interfaces, the database schema, auth behavior, and externally consumed config are explicit contracts. Before changing one: identify its consumers, decide whether the change is breaking, update the schema/source of truth, regenerate derived artifacts (OpenAPI, `contracts/` fixtures, frontend API types), update tests, update documentation, and verify migration/rollback behavior. Never add a compatibility shim for a purely internal refactor — for a public contract, compatibility is an intentional decision, not a side effect.
+
 **Database & SQLx**:
-- **Never call `sqlx::query*` directly.** Use the dual-dialect macros in `backend/src/db/executor.rs`, which holds `DbPool` (an enum over both drivers) — `db_fetch_all!`, `db_fetch_one!`, `db_fetch_optional!`, `db_scalar_*!`, `db_execute!`, `db_fetch_all_dyn!` for dynamic filters, and the `tx_*` family inside a transaction. Write SQL once in SQLite's `?` style; `dialect::render_placeholders` rewrites it to `$1..$n` for Postgres. Compile-time `query!` macros stay banned — they need a DB URL at build time, which would defeat both the dual-dialect layer and an offline build.
+- Treat the database as an infrastructure boundary: convert rows into domain types at the repository edge rather than letting a SQLx row type escape it, keep SQL close to the repository implementation that issues it, prefer compile-time checked queries where practical, and make indexes, constraints, foreign keys, uniqueness, and transaction semantics explicit — a constraint that matters must not depend solely on application code. Never hand-edit the schema outside a migration; review a migration's ordering and rollback implications before applying it; keep a data-rewriting migration separate from plain DDL; never silently change the meaning of historical data.
+- New and converted code uses compile-checked `sqlx::query!` / `query_as!` / `query_scalar!`. Builds read the committed `.sqlx/` cache (`SQLX_OFFLINE=true` via `.cargo/config.toml`). After changing a query or a migration, regenerate with `cargo sqlx prepare --workspace -- -p matrix-bot --all-targets` against a migrated database and commit `.sqlx/`; CI fails on drift — create a scratch database and run `sqlx migrate run --source backend/migrations` against it first, or `prepare` has nothing to check queries against. The `db_*!`/`tx_*!` macros remain only in code not yet converted — do not add new uses. Those interim macros wrap the runtime-built SQL in `sqlx::AssertSqlSafe`, which is sound only because every value is bound and every dynamic fragment is a compile-time constant or an allow-listed identifier (e.g. `OWNED_TABLES`), never user input; new code uses `query!`.
 - **Never put a value into SQL text; always bind it**, even when assembling SQL dynamically — `db_fetch_all_dyn!` (e.g. `modules/bookmarks/repository.rs`) builds the clause with `push_str` but still binds every value as a parameter.
-- Keep SQL portable — every row below was a real defect SQLite accepted and PostgreSQL rejected; `backend-postgres` in CI is blocking.
-
-  | Do not write | Write instead | Why |
-  |---|---|---|
-  | `last_insert_rowid()` | `RETURNING id` with `db_scalar_one!` | SQLite-only |
-  | `randomblob(n)` | `utils::random` | SQLite-only, and a token's entropy should not depend on the database |
-  | `datetime('now')`, `strftime(...)` | `CAST(CURRENT_TIMESTAMP AS TEXT)`, or compute it in Rust | SQLite-only |
-  | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` | SQLite-only |
-  | `UPDATE OR IGNORE` | `accounts::merge::move_rows` | PostgreSQL has no equivalent |
-  | `x IS NOT ?` | `x IS DISTINCT FROM ?` | `IS NOT` expects `NULL`/`TRUE` on PostgreSQL |
-  | `COLLATE NOCASE` | `LOWER(...)` | SQLite-only collation |
-  | `PRAGMA`, `sqlite_master` | `information_schema`, or gate with `pool::skip_on_postgres` | SQLite-only |
-  | `SUM(bigint_col)` | `CAST(SUM(...) AS BIGINT)` | PostgreSQL returns `NUMERIC` |
-  | `SELECT 1` read as `i64` | `SELECT CAST(1 AS BIGINT)` | an integer literal is `INT4` |
-  | `date(x)` compared or unioned with text | `CAST(date(x) AS TEXT)` | PostgreSQL returns a `date` |
-  | `substr(timestamp_col, ...)` | `substr(CAST(col AS TEXT), ...)` | `substr` needs text |
-  | `ON CONFLICT DO UPDATE SET c = c + excluded.c` | qualify: `tbl.c + excluded.c` | ambiguous on PostgreSQL |
-  | a timestamp column compared to a `String` | bind a `DateTime<Utc>` | no implicit cast |
-  | `0`/`1` for a boolean, in comparisons **and** `VALUES` | `TRUE`/`FALSE` | PostgreSQL has a real boolean |
-
-- **Match the column type to the Rust type it is read as**, and check both directions when changing either. PostgreSQL is strict where SQLite is not, so a mismatch is invisible locally:
+- **Match the column type to the Rust type it is read as**, and check both directions when changing either:
 
   | Rust | Column |
   |---|---|
@@ -109,16 +130,15 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
   | `f64` | `DOUBLE PRECISION` (`REAL` is `float4`) |
   | `bool` | `BOOLEAN` |
   | `DateTime<Utc>` | `TIMESTAMPTZ` (bare `TIMESTAMP` carries no zone) |
-  | `String` holding a timestamp | `TEXT` with the `{{NOW_TEXT}}` default |
+  | `String` holding a timestamp | `TEXT` with a `DEFAULT (NOW()::text)` |
 
   **Change column types one at a time, against the field that reads them** — three rounds of defects came from blanket `INTEGER`→`BIGINT` / `TIMESTAMP`→`TIMESTAMPTZ` sweeps.
 - `TIMESTAMPTZ` holds microseconds, `DateTime<Utc>` holds nanoseconds — build test values with `utils::time::now_at_storage_precision`, not `Utc::now()`.
-- Migrate via `CREATE TABLE IF NOT EXISTS` + best-effort `ALTER TABLE` in `db/schema_*.rs`, orchestrated by `db/schema.rs`. No `sqlx migrate` directory.
-- Room caching/resolution lives only in `db/rooms.rs` — never couple domain repositories or bot modules to API modules.
-- SQLite pools: `WAL`, `busy_timeout=5000`, `DATABASE_MAX_CONNECTIONS`. Postgres pools take only the connection limit.
+- Schema changes are forward-only SQL files in `backend/migrations/NNNN_description.sql`, applied at boot by `sqlx::migrate!`. Never edit a committed migration. A data- or type-rewriting migration starts with a guard that names offending rows, and is rehearsed on a production copy (`migrates_a_real_database`) before release.
+- Room caching and target-room resolution live in `application/rooms` (rules in `domain/rooms`, Matrix-side discovery in `interface/chat/rooms.rs`); other features resolve a room through `AppServices::rooms`, never by querying `account_rooms` themselves, and never by importing an HTTP interface module.
 - **Any new owner-keyed table must be added to `OWNED_TABLES`** (`accounts/merge.rs`) — a merge rewrites every table that constant lists; one missing from it isn't a compile error, it's a silent data leak on the next account merge.
 
-**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `bot/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
+**Matrix response & formatting** — always reply with `text_html(&plain, &html)`. Use `html_escape()` (`backend/src/utils/html.rs`) for all user-supplied input embedded in HTML — it escapes `<`, `>`, `&`, `"`, `'`; use `strip_html()` for the plain-text fallback, so push notifications don't render raw HTML tags. Quoted-message context (`CommandContext.quoted`): Matrix replies (rich `<mx-reply>` HTML and plain `> quote` fallbacks) are parsed in `interface/channels/matrix/quote.rs` into `QuotedMessage` — AI injects it into prompts via `QuotedMessage::to_context_prompt()`; Todo/Reminder use it as the task/reminder body when none is supplied.
 
 **AI tools & web search** — define tools with the standard OpenAI `type: "function"` schema (`modules/ai/search.rs`); never a provider-specific tool variant. Each domain tool file exports `pub fn tool_definitions() -> Vec<ToolDefinition>`; `definitions.rs` just aggregates them, and tool executors call domain SQLx repositories directly rather than through pass-through layers. Gate web search by intent (`should_enable_web_search()`) — skip it for routine productivity commands. Search backend: Tavily (`TAVILY_API_KEY`) first, falling back to keyless DuckDuckGo scraping if no key is set or on API errors. Execute concurrent tool calls with `futures_util::future::join_all`, not a sequential loop. Long research requests need a generous router timeout (`TimeoutLayer` >= 180s); dedupe immediate retries by checking the conversation's tail message before inserting.
 
@@ -130,37 +150,40 @@ DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot ENVIRONMENT=development
 
 ## Module Implementation Checklist
 
-When creating or enhancing a feature module:
+Features are moving out of `modules/` into layers, one per task of `docs/superpowers/plans/2026-09-25-feature-layering.md` ("Feature Migration Contract"). Rooms moved first and is the pattern to copy: read `domain/rooms`, `application/rooms`, `infrastructure/postgres/repositories/rooms.rs`, `interface/http/rooms.rs` and `interface/chat/rooms.rs` before starting. When creating a feature `<f>`, or moving one out of `modules/`:
 
-1. **Backend directory**: `backend/src/modules/<feature_name>/` with `mod.rs`, `models.rs`, `repository.rs`, `handler.rs`.
-2. **Database migration**: table schema in `backend/src/db/schema.rs` (or a modular `schema_<feature>.rs`); if the table is owner-keyed, add it to `OWNED_TABLES` in `accounts/merge.rs` or a merge silently drops it.
-3. **Repository**: SQLx query binding CRUD methods in `repository.rs`.
-4. **Command handler**: parse Matrix commands, enforce length limits (max 500 chars), format HTML output.
-5. **REST API**: handlers in `backend/src/api/<feature_name>.rs` returning `Result<_, ApiError>`, registered in `backend/src/api/routes.rs::api_routes()`. If a route is sensitive, add `VerifiedUser` to the handler **and** add it to the `SENSITIVE` list in `backend/src/api/mod.rs::step_up_tests` — that test only checks routes already listed, so it won't catch a new one on its own.
-6. **SystemEvents**: variants in `backend/src/events.rs` with `owner_id()`, broadcast on every state change.
-7. **BotModule registration**: implement `BotModule` in `mod.rs`, register in `backend/src/bot/mod.rs`.
-8. **OpenAPI & types**: update `ApiDoc` in `backend/src/api/openapi.rs`, then run the OpenAPI regeneration commands above.
-9. **Frontend**: `frontend/src/modules/<feature_name>/` exporting `<feature>Module: FrontendModule`; register in `frontend/src/App.tsx`; nav item in `Sidebar.tsx`; label in `AppShell.tsx`.
-10. **Tests**: backend unit tests in `repository.rs`/`handler.rs`/`api/<feature_name>.rs` using `sqlite::memory:`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<feature_name>.spec.ts`.
+1. **Domain** — `backend/src/domain/<f>/mod.rs`: entities, value objects, validated commands and business rules as plain synchronous functions (no I/O, no `async`), unit-tested with `#[test]` in the same file. Imports only std/chrono/uuid/serde/thiserror; derives neither `sqlx::FromRow` nor `utoipa::ToSchema`. Types keep private fields behind a constructor that enforces the invariant, plus accessors (`JoinedRoom`, `CachedRoom`). Timestamps enter the domain as `DateTime<Utc>` (rooms' TEXT `updated_at` is legacy — don't copy it). A rule the old code expressed as SQL (`ORDER BY … LIMIT 1` priorities, name matching) becomes a pure function over rows the service fetched — for small, bounded inputs only (one account's rooms, not a table scan); keep the old tie-break exactly (the first in the query's order wins, so reduce with a strict `>`, never `max_by`, which keeps the last of equal maxima). Validation errors are a feature error enum (`thiserror`) with a `From<…> for AppError` (→ `AppError::Validation`) in `application/<f>`.
+2. **Migration** — a new `backend/migrations/NNNN_<f>.sql` if the schema changes; an owner-keyed table goes into `OWNED_TABLES` (`accounts/merge.rs`) or a merge silently drops it.
+3. **Repository** — `backend/src/infrastructure/postgres/repositories/<f>.rs`: plain `pub async fn`s taking `conn: impl sqlx::PgExecutor<'_>` (so the service can pass the pool or `&mut *tx`), compile-checked `sqlx::query!`/`query_as!`/`query_scalar!` only — never `sqlx::query(`, never a new `db_*!`/`tx_*!`. Rows land in private `…Row` structs and leave as domain types: `TryFrom<Row>` (error mapped to `sqlx::Error::Decode`) whenever a row can violate an invariant or a column needs parsing (a timestamp into `DateTime<Utc>`, an enum), `From<Row>` only when every row is valid. Round-trip and owner-isolation tests in the same file (`crate::db::pool::test_pool()` + `run_migrations_unlocked`). Regenerate `.sqlx/` (see Database & SQLx) and commit it.
+4. **Service** — `backend/src/application/<f>/mod.rs`: `<F>Service { pool: PgPool }` (plus `events: EventBroadcaster` once it publishes), `Clone`, returning `Result<_, AppError>`. A service method is the unit of transaction: it opens `self.pool.begin()` only where an invariant needs atomicity, and publishes its `SystemEvent` (with a meaningful `owner_id()`) after commit. It gathers the data and the domain decides. Never imports axum, matrix-sdk, reqwest, utoipa or `interface`. Service tests cover transactions (a failure mid-way leaves the previous state) and events.
+5. **Wiring** — add `pub <f>: <F>Service` to `AppServices` (`application/mod.rs`) and build it in `AppServices::new`. `AppServices` is built once per process by a composition root — `app.rs` for the server, `main.rs` for the stdio MCP server — and reaches every adapter as a parameter: `ApiState.services` for HTTP handlers; `ModuleContext.services` for background workers; the `services: &AppServices` argument of `BotModule::handle_command` (passed by `ModuleRegistry::dispatch`) for chat commands; and the `services` argument threaded through the AI turn (`run_ai_turn*`, `handle_ai_command*`, `build_system_prompt`, `ToolRegistry::execute_tool`, `tools::executor::execute`, MCP's `McpService`). No adapter or `modules/` code ever constructs a service itself.
+6. **HTTP** — `backend/src/interface/http/<f>.rs`: handlers returning `Result<_, ApiError>` that call the service and DTOs with `From<&domain type>` impls. `?` maps `AppError` via `interface/http/app_error.rs` (Validation 400, NotFound 404, Forbidden 403, Conflict 409, Database/External an opaque 500 with the detail logged); `.api_context("Failed to …")?` keeps a handler's old log context. Cap every API payload string at 500 chars. Moving a feature must not change `backend/openapi.json`: keep DTO names, fields, optionality and enums, keep each handler's status codes and error strings, and never put a `///` doc comment on a DTO that had none (utoipa copies it into the schema). Registered in `interface/http/routes.rs::api_routes()`; a sensitive route needs `VerifiedUser` **and** an entry in `SENSITIVE` in `interface/http/mod.rs::step_up_tests`.
+7. **Chat** — `backend/src/interface/chat/<f>.rs`: the feature's `BotModule` (parse the Matrix command, cap inputs at 500 chars, call `services.<f>`, reply with `text_html`; turn a failed use case into a reply only with `interface::chat::error_reply`, which never shows a database or provider error) and any Matrix-only lookups; registered in `interface/channels/matrix/mod.rs`. LLM tools (`modules/ai/tools/<f>.rs`) and MCP tools touching `<f>` call `services.<f>` in the same change.
+8. **Interface SQL** — no file under `interface/` runs SQL; remove the feature's files from `INTERFACE_SQL_ALLOW_LIST` in `backend/tests/architecture.rs` (the test fails on a stale entry, so the list only shrinks).
+9. **Clean up** — delete `modules/<f>/` once empty, and every re-export or helper the move obsoleted; no file over 500 lines of production code.
+10. **Verify** — `cargo fmt --all -- --check`; `cargo check -p matrix-bot --all-targets` warning-free; `cargo test -p matrix-bot --all-targets` (includes `--test architecture`); `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1`; `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets` against a migrated scratch database; `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`; clippy adds no warnings in touched files.
+11. **Frontend** (new features only) — `frontend/src/modules/<f>/` exporting `<f>Module: FrontendModule`; register in `frontend/src/App.tsx`; nav item in `Sidebar.tsx`; label in `AppShell.tsx`; mock routes in `frontend/e2e/fake-api.ts`; Playwright spec in `frontend/e2e/<f>.spec.ts`.
 
 ## Architecture
 
 One- to three-sentence summaries; full rationale is in `docs/ARCHITECTURE.md`.
 
-- **Single process, two front doors** — `main.rs` boots one `Config`/`Database`/`EventBroadcaster` and spawns the Axum API server and the Matrix sync loop, coupled through shared handles (bot token, Matrix client, pending merges). [Details](docs/ARCHITECTURE.md#single-process-two-front-doors).
+- **Single process, two front doors** — `app.rs` is the composition root: `app::run` builds one `Database`/`EventBroadcaster`/`BotHandles` and starts the Axum API server and the Matrix sync loop, coupled through shared handles (bot token, Matrix client, pending merges, sync health); `main.rs` keeps only `.env`, tracing, the `mcp` stdio mode and signal handling. Shutdown is one `CancellationToken` tree (root in `main.rs`, a child per front door) bounded at 15 s (`app::SHUTDOWN_GRACE`) including the pool close; a laggard is logged and aborted. Anything long-lived you add gets a child token and joins `app::run`'s shutdown, never a detached task. [Details](docs/ARCHITECTURE.md#single-process-two-front-doors).
 - **Backend module plugin system** — features are `BotModule`s dispatched in registration order by `ModuleRegistry`; background work runs through `spawn_background_workers`. [Details](docs/ARCHITECTURE.md#backend-module-plugin-system).
 - **Event flow (SSE)** — every mutation broadcasts a `SystemEvent`, delivered per-owner via `owner_id()`. [Details](docs/ARCHITECTURE.md#event-flow-sse).
 - **Matrix session and crypto store** — never keep the crypto store across a fresh login, and never pin a device ID on one, or peers see broken encryption or a silent key rotation. [Details](docs/ARCHITECTURE.md#matrix-session-and-crypto-store).
 - **Verification** — `ensure_self_verified` must run on every boot; never treat `Recovery::recover()`'s `Ok` as "verified". [Details](docs/ARCHITECTURE.md#verification-self-and-peer).
 - **Accounts and ownership** — `owner_id` on every table is an `accounts.id`, resolved from a Matrix link or a web session, never derived any other way. A merge rewrites every table in `OWNED_TABLES`, and sessions never follow a merge — a session belongs to the credential that opened it. [Details](docs/ARCHITECTURE.md#accounts-one-owner-several-ways-in).
-- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; a sensitive route needs `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list (`api/mod.rs`) — the test checks only routes already listed, so both are required. An MCP token never satisfies step-up. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
+- **Auth: passkeys and sessions** — passkeys are the only way to start a browser session; a sensitive route needs `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list (`interface/http/mod.rs`) — the test checks only routes already listed, so both are required. An MCP token never satisfies step-up. [Details](docs/ARCHITECTURE.md#auth-passkeys-and-cookie-sessions).
 - **Linking and recovery** — `!link` must be handled before the sender is resolved (never move it into a `BotModule`), or the claim provisions an empty account first. `!recover` is time-fenced; cancelling it deliberately takes `AuthUser`, not `VerifiedUser`. `WEB_ONLY` refuses `!export`/`!sessions`/`!recoverycodes`/`!unlink`; `!passkey add` enrolls only an account's first passkey. [Details](docs/ARCHITECTURE.md#linking-recovery-and-the-matrix-ceiling).
 - **Per-user settings** — timezone/currency, read by every other module; a missing row means defaults, never an error. [Details](docs/ARCHITECTURE.md#per-user-settings-timezone-default-currency).
-- **Voice replies** — `!say` synthesises through `services/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
-- **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `services/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
+- **Voice replies** — `!say` synthesises through `infrastructure/inference/tts`; the reply is Ogg Opus (not WAV) so clients draw a voice bubble. [Details](docs/ARCHITECTURE.md#voice-replies-say).
+- **Two crates, services and inference** — `backend/` and `inference/` are separate crates joined by `backend/src/infrastructure/inference/` and `contracts/`; `default-members = ["backend"]` keeps `cargo run`/bare `cargo test` scoped to the bot. [Details](docs/ARCHITECTURE.md#two-crates-services-and-inference).
 - **Portfolio** — cash is a hard precondition for buying, never for selling; the holding write and the cash write happen in one transaction. [Details](docs/ARCHITECTURE.md#portfolio-investment-holdings).
-- **Persistence and migrations** — `db/schema.rs::run_migrations` is the only mechanism: idempotent `CREATE TABLE IF NOT EXISTS` plus best-effort `ALTER TABLE`, no `sqlx migrate` directory. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
-- **Two databases** — `DATABASE_URL` picks SQLite (default) or PostgreSQL at boot; `sqlx::Any` can't do this job (no chrono in 0.7), which is why the macro layer exists. [Details](docs/ARCHITECTURE.md#two-databases-one-set-of-queries).
+- **Persistence and migrations** — `db/migrate.rs::run_migrations` runs `sqlx::migrate!` over versioned SQL files in `backend/migrations/`; `0001_baseline.sql` is an idempotent adoption of the live database's shape, and every migration after it is forward-only. [Details](docs/ARCHITECTURE.md#persistence-and-migrations).
+- **PostgreSQL only** — `DATABASE_URL` is required and must be `postgres://`; matrix-sdk keeps its own SQLite crypto store under `data/`. [Details](docs/ARCHITECTURE.md#postgresql-only).
+- **Liveness and readiness probes** — `/health/live` (always 200, no dependency checks) and `/health/ready` (database + Matrix sync freshness within `MATRIX_SYNC_MAX_AGE`) are mounted at the router root, not under `/api/v1` and not behind auth; the retired `/api/v1/health` is not kept alongside them. [Details](docs/ARCHITECTURE.md#liveness-and-readiness-probes).
+- **Target layer-first layout (in progress)** — the design target is `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`, with `interface/` playing the role a generic `api/` + `adapters/` split would; `domain` depends on nothing but std/chrono/uuid/serde/thiserror; dependency rules enforced by `backend/tests/architecture.rs`. The former `api/`, `bot/` and `services/` directories are now `interface/http/`, `interface/channels/matrix/` and `infrastructure/inference/`; `domain/` and `application/` roots now exist (empty, awaiting feature moves). The move off today's `modules/` layout happens feature by feature, so the `BotModule` plugin rules above remain the real rules for every feature that hasn't moved yet. [Details](docs/ARCHITECTURE.md#target-layer-first-layout).
 - **Frontend module mirror** — the SPA mirrors the backend's module shape; `core/session.ts` is the single source of "who's signed in" since the cookie is unreadable by the page. [Details](docs/ARCHITECTURE.md#frontend-module-mirror).
 
 ## Testing and Verification
@@ -174,13 +197,21 @@ npm --prefix frontend run build                    # CI: frontend job
 npm --prefix frontend run test:e2e                 # not CI-gated yet; still required before shipping a UI change
 ```
 
-CI (`.github/workflows/ci.yml`) runs four jobs: `backend` (format, tests, OpenAPI drift), `backend-postgres` (the same suite plus `live_postgres --ignored` tests against a real PostgreSQL — blocking), `inference` (format + tests), `frontend` (build only). See "Commands" above to run the Postgres suite locally.
+CI (`.github/workflows/ci.yml`) runs three jobs: `backend` (format, tests, `live_postgres --ignored` tests against a real PostgreSQL 18, OpenAPI drift — all blocking), `inference` (format + tests), `frontend` (build only). See "Commands" above to run the Postgres suite locally.
 
 Never commit code that fails compilation, formatting, or tests.
 
+**Quality gates for changed code** — `cargo fmt --all -- --check` and the test commands above (which also compile every target, so there's no separate CI `cargo check` step) are required, and CI-enforced except for `npm --prefix frontend run test:e2e`, which is required before shipping a UI change but not yet run in CI. `cargo clippy -p matrix-bot --all-targets -- -D warnings` (and `-p matrix-bot-inference`) is a required gate for any Rust you touch but is **not yet enforced in CI** — a backlog of 102 warnings (101 `matrix-bot`, 1 `matrix-bot-inference`) predates this rule and is tracked as follow-up; don't add new ones in files you change, and don't silence one with `#[allow]` without documenting why it exists, why it's safe, its scope, and when it can be removed. For a release-sensitive change, also run `cargo build -p matrix-bot --release`.
+
+**Checklist by change type** — beyond the standard fmt/check/test/clippy pass:
+- *Schema change*: add `backend/migrations/NNNN_description.sql`, run the backend suite, and if it rewrites or retypes existing data, rehearse it against a restored production copy with `migrates_a_real_database` (see Commands) before shipping.
+- *API/OpenAPI change*: update the handler/model, regenerate `backend/openapi.json` and the frontend client (`npm --prefix frontend run generate-api`), update `contracts/` fixtures and tests, and re-check auth/step-up behavior on the route.
+- *AI/agent change*: validate tool arguments, verify authorization independently of the model, and test malformed model output, tool failure, timeouts, cancellation, retry limits, and duplicate tool calls; verify destructive operations and confirm domain invariants cannot be bypassed.
+- *Before submitting*: `git diff --check`, review `git status`/`git diff` for unrelated changes, generated artifacts, debug code, or secrets.
+
 ## Security Rules
 
-- Sensitive API routes require `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list in `api/mod.rs` — the test only checks routes already listed there, so adding `VerifiedUser` alone isn't enough to be caught by CI (see Architecture: Auth). An MCP token never satisfies step-up.
+- Sensitive API routes require `VerifiedUser` **and** an entry in `step_up_tests`'s `SENSITIVE` list in `interface/http/mod.rs` — the test only checks routes already listed there, so adding `VerifiedUser` alone isn't enough to be caught by CI (see Architecture: Auth). An MCP token never satisfies step-up.
 - Never put a value into SQL text — always bind it, even in dynamically assembled queries (see Conventions: Database & SQLx).
 - Escape all user input embedded in HTML with `html_escape()`.
 - Every `SystemEvent` variant must return a meaningful `owner_id()`, or it leaks across users or is never delivered.
@@ -194,14 +225,30 @@ Never commit code that fails compilation, formatting, or tests.
 
 ## Gotchas
 
-- `DATABASE_URL` defaults to `sqlite://data/bot_data.db?mode=rwc`; `api/mod.rs` probes `web/dist` then `backend/web/dist`. Both assume `cargo run` from the repo root.
+- Cutting over an existing production deployment to this branch (PostgreSQL-only, versioned migrations, matrix-sdk 0.18) follows `docs/runbooks/postgres-foundation-cutover.md` — production rehearsal, pre-boot steps, first-boot watch list, and rollback.
+- `DATABASE_URL` has no default and must be `postgres://`; `interface/http/mod.rs` probes `web/dist` then `backend/web/dist`. The latter assumes `cargo run` from the repo root.
 - Bare `cargo run` resolves to the bot only via `default-members = ["backend"]` + `default-run = "matrix-bot"` in `backend/Cargo.toml` — keep both if you add a workspace member or a third binary.
-- `frontend/vite.config.ts` proxies `/api` to `:8080`, matching `API_PORT`'s default. Change one, change the other.
+- `frontend/vite.config.ts` proxies both `/api` and `/health` to `:8080`, matching `API_PORT`'s default. Change one, change the others.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` first (e.g. Strawberry or scoop `perl`) — Git for Windows' bundled Perl lacks `Locale::Maketext::Simple`.
 - Windows: loading the real Kokoro TTS model in a test needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
+- `.env` is read from the current working directory only (`main.rs` loads `./.env` via `dotenvy::from_path`, never dotenvy's own upward parent-directory search) — always run the bot binary from the repo root, and note that a git worktree checkout has its own `.env`, distinct from the main checkout's.
+
+## Definition of Done
+
+A change is not complete merely because it compiles. Before considering it complete:
+
+- [ ] Architecture and dependency direction remain correct; domain logic stays transport/infrastructure-independent.
+- [ ] Input validation, authorization, and data isolation are enforced.
+- [ ] Errors are handled explicitly; concurrency and cancellation behavior are understood.
+- [ ] Database transactions and invariants are correct.
+- [ ] Public contracts remain intentional and documented.
+- [ ] Tests cover the important behavior; no obsolete implementation remains.
+- [ ] Logs carry sufficient diagnostic context without sensitive data.
+- [ ] `cargo fmt`, `cargo check`, and `cargo test` pass; `cargo clippy` passes on the code you touched.
+- [ ] Documentation, ADRs, and technical-debt references are updated where necessary.
 
 ## Commits and PRs
 
 Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `ci:`; `!` for a breaking change, e.g. `refactor!:`).
 
-Two remotes: `gitea` (`git.mbm.one`) is the primary forge — push and open pull requests there; `origin` (GitHub) is a mirror.
+Two remotes: `gitea` (`git.mbm.one`) is the primary forge — push and open pull requests there; `origin` (GitHub) is a mirror. See [`docs/GITEA.md`](docs/GITEA.md).

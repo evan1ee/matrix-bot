@@ -11,7 +11,6 @@ use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::portfolio::service::{self, PortfolioError, TradeRequest};
 use crate::modules::portfolio::view::{format_quantity, signed_amount};
-use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 /// Parses `<symbol> <qty> @ <price> [CUR] [note...]`. Currency is optional and
@@ -67,13 +66,13 @@ pub fn parse_buy(args: &str, default_currency: &str) -> Result<ParsedBuy, String
 
 pub async fn handle_buy(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
 
     let parsed = match parse_buy(args, &default_currency) {
         Ok(p) => p,
@@ -150,13 +149,13 @@ pub async fn handle_buy(
 
 pub async fn handle_record(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let parsed = match parse_buy(args, &default_currency) {
         Ok(p) => p,
         Err(err) => return format!("⚠️ {}.", html_escape(&err)),
@@ -405,12 +404,16 @@ mod tests {
     #[tokio::test]
     async fn test_a_matrix_buy_enforces_the_note_limit() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
         let args = format!("AAPL 10 @ 150.00 USD {}", over_limit_note);
 
-        let reply = handle_buy(&pool, "@alice:a", &args, None).await;
+        let reply = handle_buy(&pool, &settings, "@alice:a", &args, None).await;
         assert!(
             reply.contains(&service::MAX_NOTE_LEN.to_string()),
             "the reply must report the character limit: {reply}"

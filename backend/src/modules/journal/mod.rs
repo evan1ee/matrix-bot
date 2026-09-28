@@ -59,9 +59,10 @@ impl BotModule for JournalModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_journal_command(&db.pool, broadcaster, ctx).await
+        handler::handle_journal_command(&db.pool, &services.settings, broadcaster, ctx).await
     }
 }

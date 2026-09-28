@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES ($1, 'AAPL', 20000, 'USD', 'ABOVE')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "220e27835758349659cfc684260774ec8f16b87e7d0a16f731faefb5737562b7"
+}

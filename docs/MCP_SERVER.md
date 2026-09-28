@@ -96,7 +96,7 @@ Add the server to your Claude Desktop configuration file:
       "command": "/usr/local/bin/matrix-bot",
       "args": ["mcp", "--owner", "@your_user:matrix.org"],
       "env": {
-        "DATABASE_URL": "sqlite:///path/to/data/matrix-bot.db"
+        "DATABASE_URL": "postgres://user:pass@localhost:5432/matrix_bot"
       }
     }
   }
@@ -111,7 +111,7 @@ Add the server to your Claude Desktop configuration file:
       "command": "cargo",
       "args": ["run", "--manifest-path", "/path/to/matrix-bot/backend/Cargo.toml", "--", "mcp", "--owner", "@your_user:matrix.org"],
       "env": {
-        "DATABASE_URL": "sqlite:///path/to/data/matrix-bot.db"
+        "DATABASE_URL": "postgres://user:pass@localhost:5432/matrix_bot"
       }
     }
   }

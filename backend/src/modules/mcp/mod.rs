@@ -47,6 +47,7 @@ impl BotModule for McpModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {

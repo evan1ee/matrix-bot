@@ -738,6 +738,22 @@ export class FakeApi {
   }
 
   async install(page: Page) {
+    // Liveness/readiness are infrastructure surface, not application API: they
+    // are mounted outside `/api/v1`, so they need their own route rather than
+    // falling under the `/api/v1/**` interception below.
+    await page.route('**/health/live', async (route) => {
+      return json(route, 200, { status: 'live' });
+    });
+    await page.route('**/health/ready', async (route) => {
+      return json(route, 200, {
+        status: 'ready',
+        checks: {
+          database: { ok: true },
+          matrix_sync: { ok: true, last_sync_at: new Date().toISOString() },
+        },
+      });
+    });
+
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -912,9 +928,8 @@ export class FakeApi {
     }
 
     // --- infrastructure ---
-    if (path === '/health') {
-      return json(route, 200, { status: 'ok', database: 'connected', version: '0.1.0' });
-    }
+    // `/health/live` and `/health/ready` are mocked separately below: they live
+    // outside `/api/v1`, unlike everything else this block handles.
     if (path === '/events') {
       // Frames queued by `pushEvent` before the stream opened are delivered,
       // then the response ends. `EventSource` reconnects with backoff, so a

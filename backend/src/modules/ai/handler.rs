@@ -15,7 +15,7 @@ use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
 use crate::events::EventBroadcaster;
 use crate::events::SystemEvent;
-use crate::services::llm::{ChatCompletionMessage, ChatCompletionRequest};
+use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
 
 pub const MAX_HISTORY_TURNS: i64 = 10;
 pub const SESSION_TTL_SECONDS: i64 = 1800; // 30 minutes
@@ -31,6 +31,7 @@ pub struct AiTurnResult {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -43,9 +44,10 @@ pub async fn handle_ai_command(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -66,6 +68,7 @@ pub async fn handle_ai_command(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_ai_command_with_stage(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -78,8 +81,8 @@ pub async fn handle_ai_command_with_stage(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::bot::quote::QuotedMessage>,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
@@ -87,8 +90,16 @@ pub async fn handle_ai_command_with_stage(
         if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
-        if let Some(sub_reply) =
-            handle_ai_subcommand(pool, ai, broadcaster, owner_id, room_id, trimmed).await
+        if let Some(sub_reply) = handle_ai_subcommand(
+            pool,
+            &services.settings,
+            ai,
+            broadcaster,
+            owner_id,
+            room_id,
+            trimmed,
+        )
+        .await
         {
             return Some(sub_reply);
         }
@@ -122,6 +133,7 @@ pub async fn handle_ai_command_with_stage(
     }
 
     match run_ai_turn_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -144,13 +156,23 @@ pub async fn handle_ai_command_with_stage(
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
-            notify_dev_room_ai_error(pool, client_handle, owner_id, &err.to_string()).await;
+            notify_dev_room_ai_error(
+                &services.settings,
+                client_handle,
+                owner_id,
+                &err.to_string(),
+            )
+            .await;
             None
         }
     }
 }
 
+// Allowed like its siblings: the AI turn takes its inputs one by one until
+// the ai+mcp task (feature-layering Task 13) gathers them into one context.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -160,6 +182,7 @@ pub async fn run_ai_turn(
     prompt: &str,
 ) -> Result<AiTurnResult, AiError> {
     run_ai_turn_with_stage(
+        services,
         pool,
         ai,
         broadcaster,
@@ -174,6 +197,7 @@ pub async fn run_ai_turn(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_ai_turn_with_stage(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
@@ -181,7 +205,7 @@ pub async fn run_ai_turn_with_stage(
     room_id: &str,
     conversation_id_override: Option<&str>,
     prompt: &str,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> Result<AiTurnResult, AiError> {
     let prompt_trimmed = prompt.trim();
     if prompt_trimmed.is_empty() {
@@ -217,7 +241,7 @@ pub async fn run_ai_turn_with_stage(
             .map_err(|e| AiError::Db(e.to_string()))?
     };
 
-    // Record user message in SQLite if not an exact immediate retry of the latest message
+    // Record user message if not an exact immediate retry of the latest message
     let is_immediate_duplicate =
         match AiRepository::get_recent_messages(pool, &conversation.id, 1).await {
             Ok(msgs) => msgs
@@ -236,9 +260,8 @@ pub async fn run_ai_turn_with_stage(
         }
     }
 
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = services.settings.get_or_default(&acct).await;
     let max_history = settings.max_history_turns.clamp(1, 100);
 
     // Load recent messages for context
@@ -249,7 +272,7 @@ pub async fn run_ai_turn_with_stage(
     let mut chat_messages = Vec::new();
 
     let sys_prompt =
-        super::prompt::build_system_prompt(pool, &resolved_config, owner_id, room_id).await;
+        super::prompt::build_system_prompt(services, &resolved_config, owner_id, room_id).await;
 
     chat_messages.push(ChatCompletionMessage {
         role: "system".to_string(),
@@ -276,7 +299,7 @@ pub async fn run_ai_turn_with_stage(
         });
     }
 
-    let client = crate::services::llm::shared_client(ai.proxy.as_deref());
+    let client = crate::infrastructure::inference::llm::shared_client(ai.proxy.as_deref());
     let mut tool_values: Vec<serde_json::Value> = ToolRegistry::get_tool_definitions()
         .into_iter()
         .filter_map(|t| serde_json::to_value(t).ok())
@@ -355,6 +378,7 @@ pub async fn run_ai_turn_with_stage(
                                 iteration, max_iterations, func_name, owner_id
                             );
                             let result_str = match ToolRegistry::execute_tool(
+                                services,
                                 pool,
                                 broadcaster,
                                 owner_id,
@@ -383,7 +407,7 @@ pub async fn run_ai_turn_with_stage(
                         let eid = stage_reporter
                             .and_then(|r| r.event_id())
                             .map(|e| e.as_str());
-                        crate::bot::reaction_targets::record_ai_tool_target(
+                        crate::interface::channels::matrix::reaction_targets::record_ai_tool_target(
                             pool,
                             eid,
                             room_id,
@@ -393,7 +417,7 @@ pub async fn run_ai_turn_with_stage(
                         )
                         .await;
 
-                        // Persist tool result message in SQLite
+                        // Persist tool result message
                         let _ = AiRepository::add_message(
                             pool,
                             &conversation.id,
@@ -542,8 +566,9 @@ mod tests {
     use crate::db::Database;
 
     async fn setup_test() -> (Database, String) {
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let db = Database { pool };
         let owner =
             crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
                 .await
@@ -556,6 +581,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let help = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -575,6 +601,7 @@ mod tests {
         assert!(help.contains("AI Assistant Commands"));
 
         let config = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -600,6 +627,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         let res = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -619,6 +647,7 @@ mod tests {
         assert!(res.contains("AI model updated to: <code>gpt-4o-mini</code>"));
 
         let hist = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -638,6 +667,7 @@ mod tests {
         assert!(hist.contains("AI max history turns updated to: <code>20</code>"));
 
         let config2 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -657,6 +687,7 @@ mod tests {
         assert!(config2.contains("Max History Turns:</b> <code>20</code>"));
 
         let reset = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -694,6 +725,7 @@ mod tests {
             .unwrap();
 
         let result1 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -719,6 +751,7 @@ mod tests {
 
         // Second failure during same outage
         let result2 = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -820,7 +853,7 @@ mod tests {
     async fn test_live_xai_grok_tool_calling() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -830,34 +863,42 @@ mod tests {
 
         let (db, owner) = setup_test().await;
 
-        crate::modules::todo::repository::TodoRepository::add(
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
+        crate::infrastructure::postgres::repositories::todos::create(
             &db.pool,
-            "!room:mbm.one",
-            &owner,
-            "Tester",
-            "Deploy Matrix Bot to staging",
-            crate::modules::todo::models::TodoPriority::High,
-            None,
-            None,
+            &owner_acct,
+            &crate::domain::todos::NewTodo {
+                room_id: "!room:mbm.one".to_string(),
+                sender_name: "Tester".to_string(),
+                text: "Deploy Matrix Bot to staging".to_string(),
+                priority: crate::domain::todos::TodoPriority::High,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
         )
         .await
         .unwrap();
 
-        crate::modules::todo::repository::TodoRepository::add(
+        crate::infrastructure::postgres::repositories::todos::create(
             &db.pool,
-            "!room:mbm.one",
-            &owner,
-            "Tester",
-            "Audit cryptographic recovery keys",
-            crate::modules::todo::models::TodoPriority::Medium,
-            None,
-            None,
+            &owner_acct,
+            &crate::domain::todos::NewTodo {
+                room_id: "!room:mbm.one".to_string(),
+                sender_name: "Tester".to_string(),
+                text: "Audit cryptographic recovery keys".to_string(),
+                priority: crate::domain::todos::TodoPriority::Medium,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
         )
         .await
         .unwrap();
 
         // Test with pure environment config (no user DB override)
         let result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -893,7 +934,7 @@ mod tests {
     async fn test_live_xai_grok_mutation_tools() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -902,9 +943,11 @@ mod tests {
         }
 
         let (db, owner) = setup_test().await;
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
 
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -924,18 +967,23 @@ mod tests {
             .tool_calls_executed
             .contains(&"add_todo".to_string()));
 
-        // Verify task in SQLite DB
-        let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(
-            &db.pool, &owner, None, 10, 0,
+        // Verify task was persisted
+        let tasks = crate::infrastructure::postgres::repositories::todos::list_all_user(
+            &db.pool,
+            &owner_acct,
+            None,
+            10,
+            0,
         )
         .await
         .unwrap();
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].text.contains("Prepare slide deck"));
-        assert_eq!(tasks[0].priority, "high");
+        assert_eq!(tasks[0].priority, crate::domain::todos::TodoPriority::High);
 
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -955,7 +1003,7 @@ mod tests {
             .tool_calls_executed
             .contains(&"record_finance_entry".to_string()));
 
-        // Verify transaction in SQLite DB
+        // Verify transaction was persisted
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
         let summary = crate::modules::finance::repository::FinanceRepository::summary(
@@ -972,7 +1020,7 @@ mod tests {
     async fn test_live_xai_grok_multi_turn_and_context() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -983,7 +1031,7 @@ mod tests {
         let (db, owner) = setup_test().await;
 
         // Turn 1: Add a task
-        let turn1 = run_ai_turn(
+        let turn1 = run_ai_turn( &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1002,6 +1050,7 @@ mod tests {
 
         // Turn 2: Follow-up referencing Turn 1 in the same room
         let turn2 = run_ai_turn(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1028,7 +1077,7 @@ mod tests {
     async fn test_live_xai_grok_currency_rules_and_multi_action() {
         let root_env = format!("{}/../.env", env!("CARGO_MANIFEST_DIR"));
         let _ = dotenvy::from_path(&root_env);
-        let _ = dotenvy::dotenv();
+        let _ = dotenvy::from_path(".env"); // current-directory only; never dotenvy's own parent-directory-searching dotenv() call
 
         let ai_env = crate::config::AiEnvConfig::from_env();
         let config = ResolvedAiConfig::from_user_config(&ai_env, None);
@@ -1037,8 +1086,9 @@ mod tests {
         }
 
         let (db, owner) = setup_test().await;
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
 
-        let result = run_ai_turn(
+        let result = run_ai_turn( &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &ai_env,
             None,
@@ -1082,8 +1132,13 @@ mod tests {
 
         // Verify reminder in DB
         let reminders =
-            crate::modules::reminder::repository::ReminderRepository::list_user_pending(
-                &db.pool, &owner, 10, 0,
+            crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
+                &db.pool,
+                &owner_acct,
+                Some("pending"),
+                None,
+                10,
+                0,
             )
             .await
             .unwrap();
@@ -1106,6 +1161,7 @@ mod tests {
 
         // When neither mentioned nor direct, unrecognized command returns None immediately
         let unhandled = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -1137,6 +1193,7 @@ mod tests {
 
         // When mentioned in a room, prompt is routed to AI
         let _ = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
@@ -1175,7 +1232,7 @@ mod tests {
             .await
             .unwrap();
 
-        let quote = crate::bot::quote::QuotedMessage {
+        let quote = crate::interface::channels::matrix::quote::QuotedMessage {
             author: Some("@bob:mbm.one".to_string()),
             body: "The earth is flat and gravity is an illusion.".to_string(),
             event_id: None,
@@ -1183,6 +1240,7 @@ mod tests {
 
         // When quoted and mentioned with "fact check this", routes to AI with error trigger on unreachable host
         let _ = handle_ai_command(
+            &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,

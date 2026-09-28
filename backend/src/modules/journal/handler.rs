@@ -2,16 +2,17 @@ use crate::db::DbPool;
 use chrono::NaiveDate;
 use tracing::error;
 
+use crate::application::settings::SettingsService;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::life::activity::collect_day_activity;
 use crate::modules::life::models::normalize_mood;
 use crate::modules::life::repository::LifeRepository;
-use crate::modules::settings::SettingsRepository;
 use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
 
 pub async fn handle_journal_command(
     pool: &DbPool,
+    settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
     ctx: &CommandContext,
 ) -> Option<String> {
@@ -20,9 +21,7 @@ pub async fn handle_journal_command(
         return None;
     }
 
-    let tz = SettingsRepository::get_or_default(pool, &ctx.owner_id)
-        .await
-        .tz();
+    let tz = settings.get_or_default(&ctx.owner_id).await.tz();
     let today_str = chrono::Utc::now()
         .with_timezone(&tz)
         .date_naive()
@@ -306,23 +305,26 @@ async fn handle_clear(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema_life::run_life_schema;
 
     async fn setup_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_life_schema(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
     #[tokio::test]
     async fn test_journal_flow() {
         let pool = setup_db().await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
         let owner = "user_journal_test";
 
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@user:1".to_string(),
-            owner_id: owner.to_string(),
+            owner_id: crate::domain::accounts::AccountId::new(owner),
             sender_name: "Tester".to_string(),
             command: "journal".to_string(),
             raw_args: "help".to_string(),
@@ -333,20 +335,24 @@ mod tests {
             stage_reporter: None,
         };
 
-        let help = handle_journal_command(&pool, None, &ctx).await.unwrap();
+        let help = handle_journal_command(&pool, &settings, None, &ctx)
+            .await
+            .unwrap();
         assert!(help.contains("Daily Log (Journal) Commands"));
 
         // Log today
         let mut log_ctx = ctx.clone();
         log_ctx.raw_args = "log amazing | sunny | High productivity day".to_string();
-        let log_res = handle_journal_command(&pool, None, &log_ctx).await.unwrap();
+        let log_res = handle_journal_command(&pool, &settings, None, &log_ctx)
+            .await
+            .unwrap();
         assert!(log_res.contains("Daily Log Saved"));
         assert!(log_res.contains("amazing"));
 
         // View today
         let mut view_ctx = ctx.clone();
         view_ctx.raw_args = "".to_string();
-        let view_res = handle_journal_command(&pool, None, &view_ctx)
+        let view_res = handle_journal_command(&pool, &settings, None, &view_ctx)
             .await
             .unwrap();
         assert!(view_res.contains("amazing"));
@@ -355,14 +361,16 @@ mod tests {
         // Activities
         let mut act_ctx = ctx.clone();
         act_ctx.raw_args = "activities".to_string();
-        let act_res = handle_journal_command(&pool, None, &act_ctx).await.unwrap();
+        let act_res = handle_journal_command(&pool, &settings, None, &act_ctx)
+            .await
+            .unwrap();
         assert!(act_res.contains("Activities for") || act_res.contains("No activity"));
 
         // Clear
         let mut clear_ctx = ctx.clone();
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
         clear_ctx.raw_args = format!("clear {}", today);
-        let clear_res = handle_journal_command(&pool, None, &clear_ctx)
+        let clear_res = handle_journal_command(&pool, &settings, None, &clear_ctx)
             .await
             .unwrap();
         assert!(clear_res.contains("Cleared daily log"));

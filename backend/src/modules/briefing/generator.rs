@@ -2,18 +2,19 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
+use crate::domain::accounts::AccountId;
+use crate::domain::habits::HabitWithStatus;
+use crate::domain::recurring_bills::RecurringBill;
+use crate::domain::settings::UserSettings;
+use crate::domain::todos::{TodoItem, TodoPriority};
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
+use crate::infrastructure::postgres::repositories::todos as todos_repo;
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use crate::modules::briefing::ticker::{
     fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
 };
-use crate::modules::habits::models::HabitWithStatus;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::portfolio::repository::PortfolioRepository;
-use crate::modules::recurring_bills::models::RecurringBill;
-use crate::modules::recurring_bills::repository::RecurringBillRepository;
-use crate::modules::settings::UserSettings;
-use crate::modules::todo::models::TodoItem;
-use crate::modules::todo::repository::TodoRepository;
 use crate::utils::html_escape;
 
 /// Formats the local header date line (e.g. "2026-09-18 07:00 (Asia/Shanghai)").
@@ -40,19 +41,20 @@ pub async fn generate_briefing(
         .unwrap_or_default();
     let tickers: Vec<TickerPerformance> = fetch_all_tickers_performance(&holdings).await;
 
+    let acct = AccountId::new(owner_id);
+
     // 2. Pending tasks
-    let todos = TodoRepository::list_all_user(pool, owner_id, Some(false), 50, 0)
+    let todos = todos_repo::list_all_user(pool, &acct, Some(false), 50, 0)
         .await
         .unwrap_or_default();
 
     // 3. Today's habits
-    let habits: Vec<HabitWithStatus> =
-        HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
-            .await
-            .unwrap_or_default();
+    let habits: Vec<HabitWithStatus> = habits_repo::find_all_with_status(pool, &acct, &today_str)
+        .await
+        .unwrap_or_default();
 
     // 4. Upcoming bills due in the next 3 days
-    let bills = RecurringBillRepository::list_by_owner(pool, owner_id)
+    let bills = bills_repo::list_by_owner(pool, &acct)
         .await
         .unwrap_or_default();
 
@@ -161,8 +163,7 @@ fn format_briefing_content(
 
         // Display up to 6 prioritized tasks
         for item in todos.iter().take(6) {
-            let is_high = item.priority.eq_ignore_ascii_case("high")
-                || item.priority.eq_ignore_ascii_case("h");
+            let is_high = item.priority == TodoPriority::High;
             let pri_badge = if is_high {
                 "<font color=\"#ef4444\">[高优]</font> "
             } else {

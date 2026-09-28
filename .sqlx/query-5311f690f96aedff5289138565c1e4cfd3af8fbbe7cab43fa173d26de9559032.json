@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, $2, 'USD')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5311f690f96aedff5289138565c1e4cfd3af8fbbe7cab43fa173d26de9559032"
+}

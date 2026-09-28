@@ -1,17 +1,16 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
+use crate::domain::accounts::AccountId;
+use crate::domain::reminders::{NewReminder, RecurrencePattern};
 use crate::events::EventBroadcaster;
-use crate::modules::reminder::models::RecurrencePattern;
-use crate::modules::reminder::repository::ReminderRepository;
-use crate::modules::reminder::service::{self, NewReminder};
-use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
+use crate::infrastructure::inference::llm::ToolDefinition;
 use serde_json::json;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
     name: &str,
@@ -20,7 +19,10 @@ pub async fn execute_tool(
     match name {
         "get_my_reminders" => Some(
             async {
-                let items = ReminderRepository::list_user_pending(pool, owner_id, 50, 0)
+                let acct = AccountId::from(owner_id);
+                let items = services
+                    .reminders
+                    .list(&acct, Some("pending"), None, 50, 0)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&items).map_err(|e| e.to_string())
@@ -40,8 +42,8 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or("none");
                 let recurrence = RecurrencePattern::from_str_or_default(rec_str);
-
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 let tz = settings.tz();
 
                 let trigger_at = if let Some(mins) = args.get("in_minutes").and_then(|v| {
@@ -106,10 +108,12 @@ pub async fn execute_tool(
                     );
                 };
 
+                let rooms = &services.rooms;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
+                    rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -144,20 +148,21 @@ pub async fn execute_tool(
                     "You".to_string()
                 };
 
-                let rem = service::create(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    NewReminder {
-                        message,
-                        trigger_at,
-                        room_id: &target_room,
-                        owner_name: &sender_name,
-                        recurrence,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let rem = services
+                    .reminders
+                    .create(
+                        &acct,
+                        NewReminder {
+                            message: message.to_string(),
+                            trigger_at,
+                            room_id: target_room,
+                            owner_name: sender_name,
+                            recurrence,
+                            source: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 let local_time = rem
                     .trigger_at
@@ -182,7 +187,10 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
 
-                service::cancel(pool, broadcaster, owner_id, id)
+                let acct = AccountId::from(owner_id);
+                services
+                    .reminders
+                    .cancel(&acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -272,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_reminder_with_local_time() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // Dated relative to the run: the service rejects a trigger time that has
 
@@ -283,6 +291,7 @@ mod tests {
             .to_string();
 
         let res = execute_tool(
+            &crate::application::AppServices::new(&pool),
             &pool,
             None,
             "test_user",
@@ -308,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_reminder_with_z_suffix() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // When an LLM sends a local time formatted as ISO-8601 with Z
         // Dated relative to the run: the service rejects a trigger time that has
@@ -317,6 +326,7 @@ mod tests {
             .format("%Y-%m-%d")
             .to_string();
         let res = execute_tool(
+            &crate::application::AppServices::new(&pool),
             &pool,
             None,
             "test_user",
@@ -340,7 +350,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_reminder_resolves_account_display_name() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let acct_id = crate::accounts::AccountRepository::create(
             &pool,
@@ -351,6 +361,7 @@ mod tests {
         .unwrap();
 
         let res = execute_tool(
+            &crate::application::AppServices::new(&pool),
             &pool,
             None,
             &acct_id,
@@ -368,10 +379,16 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&res).unwrap();
         assert_eq!(parsed["message"], "Have my hair cut");
 
-        let items =
-            ReminderRepository::list_user_reminders(&pool, &acct_id, Some("all"), None, 10, 0)
-                .await
-                .unwrap();
+        let items = crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
+            &pool,
+            &AccountId::new(&acct_id),
+            Some("all"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].sender_name, "evan");
     }

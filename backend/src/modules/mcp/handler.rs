@@ -156,7 +156,7 @@ mod tests {
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: "acct_test".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("acct_test"),
             sender_mxid: "@user:test".to_string(),
             sender_name: "Test User".to_string(),
             command: cmd.to_string(),
@@ -183,8 +183,7 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_generates_in_direct_room() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema_auth::create_tables(&pool).await.unwrap();
-        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         crate::db_execute!(
             &pool,

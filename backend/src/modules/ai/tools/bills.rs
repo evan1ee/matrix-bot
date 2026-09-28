@@ -2,15 +2,15 @@ use crate::db::DbPool;
 use chrono::Utc;
 use serde_json::json;
 
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::recurring_bills::models::CreateBillPayload;
-use crate::modules::recurring_bills::repository::RecurringBillRepository;
-use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
+use crate::domain::accounts::AccountId;
+use crate::domain::recurring_bills::NewRecurringBill;
+use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &crate::application::AppServices,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
     name: &str,
@@ -19,7 +19,10 @@ pub async fn execute_tool(
     match name {
         "get_my_recurring_bills" => Some(
             async {
-                let items = RecurringBillRepository::list_by_owner(pool, owner_id)
+                let acct = AccountId::from(owner_id);
+                let items = services
+                    .recurring_bills
+                    .list_by_owner(&acct)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&items).map_err(|e| e.to_string())
@@ -70,40 +73,37 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let acct = AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 let today = Utc::now()
                     .with_timezone(&settings.tz())
                     .format("%Y-%m-%d")
                     .to_string();
-                let payload = CreateBillPayload {
-                    name: name_val.to_string(),
-                    category: category.to_string(),
-                    amount_minor,
-                    currency,
-                    currency_exponent: Some(2),
-                    frequency: Some(frequency.to_string()),
-                    due_day: Some(due_day),
-                    next_due_at: today,
-                    total_installments: None,
-                    auto_pay: Some(auto_pay),
-                    notes,
-                    remind_before_minutes: None,
-                    remind_room_id: None,
-                };
 
-                let bill = RecurringBillRepository::create(
-                    pool,
-                    room_id,
-                    owner_id,
-                    "AI Assistant",
-                    payload,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::RecurringBillCreated(bill.clone()));
-                }
+                let (bill, _) = services
+                    .recurring_bills
+                    .create(
+                        &acct,
+                        NewRecurringBill {
+                            room_id: room_id.to_string(),
+                            sender_name: "AI Assistant".to_string(),
+                            name: name_val.to_string(),
+                            category: category.to_string(),
+                            amount_minor,
+                            currency,
+                            currency_exponent: 2,
+                            frequency: frequency.to_string(),
+                            due_day: Some(due_day),
+                            next_due_at: today,
+                            total_installments: None,
+                            auto_pay,
+                            notes,
+                            remind_before_minutes: None,
+                            remind_room_id: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&bill).map_err(|e| e.to_string())
             }
@@ -116,23 +116,12 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let ok = RecurringBillRepository::delete(pool, id, owner_id)
+                let acct = AccountId::from(owner_id);
+                services
+                    .recurring_bills
+                    .delete(&acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!(
-                        "Recurring bill #{} not found or not owned by user",
-                        id
-                    ));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::RecurringBillDeleted {
-                        id,
-                        owner_id: owner_id.to_string(),
-                    });
-                }
 
                 serde_json::to_string(&json!({
                     "id": id,
@@ -145,6 +134,7 @@ pub async fn execute_tool(
 
         "pay_recurring_bill" => Some(
             async {
+                let acct = AccountId::from(owner_id);
                 let bill_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
                 } else if let Some(search) = args
@@ -152,7 +142,9 @@ pub async fn execute_tool(
                     .or_else(|| args.get("name"))
                     .and_then(|v| v.as_str())
                 {
-                    let bills = RecurringBillRepository::list_by_owner(pool, owner_id)
+                    let bills = services
+                        .recurring_bills
+                        .list_by_owner(&acct)
                         .await
                         .map_err(|e| e.to_string())?;
                     let matched = bills
@@ -174,14 +166,11 @@ pub async fn execute_tool(
                     );
                 };
 
-                let (updated_bill, tx) =
-                    RecurringBillRepository::mark_paid(pool, bill_id, owner_id, broadcaster)
-                        .await
-                        .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::RecurringBillUpdated(updated_bill.clone()));
-                }
+                let (updated_bill, tx, _) = services
+                    .recurring_bills
+                    .mark_paid(&acct, bill_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&json!({
                     "bill": updated_bill,

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45fb57a7009094b1d8bec9b2d6bce8bd600e178769f989948be7ae680d66cd5f"
+}

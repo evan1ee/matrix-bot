@@ -17,10 +17,15 @@ name = "generate-openapi"
 path = "src/bin/generate_openapi.rs"
 
 [dependencies]
-matrix-sdk = { version = "0.7", features = ["e2e-encryption"] }
+matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"] }
+# matrix-sdk 0.16 dropped its `crypto` re-export; `bot/media.rs` decrypts
+# attachments with `AttachmentDecryptor` directly. Keep in lockstep with matrix-sdk.
+matrix-sdk-crypto = "0.18"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+# CancellationToken: the one shutdown tree `app.rs` owns.
+tokio-util = "0.7"
 futures-util = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -33,10 +38,10 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "migrate"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "chrono", "uuid", "json", "migrate", "macros"] }
 axum = { version = "0.7", features = ["macros", "multipart"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "timeout", "limit"] }
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart", "stream"] }
 utoipa = { version = "4.2", features = ["axum_extras", "chrono"] }
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui"] }
 uuid = "1.24.0"
@@ -48,6 +53,8 @@ mime_guess = "2.0"
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
+# `test-util` for `tokio::time::pause()` in the shutdown-bound tests.
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [target.'cfg(windows)'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

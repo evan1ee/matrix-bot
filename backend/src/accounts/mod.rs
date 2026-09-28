@@ -26,16 +26,20 @@
 
 pub mod credentials;
 pub mod linking;
-pub mod merge;
 pub mod principal;
 pub mod recovery;
 pub mod repository;
 pub mod security_events;
 pub mod session;
 
+pub use crate::application::accounts::merge::MergeService as MergeRepository;
+pub use crate::domain::accounts::{
+    AccountId, MergeOutcome, MergePreview, ACCOUNT_ID_DISCARDED, ACCOUNT_ID_FOLLOWS,
+    ACCOUNT_ID_UNTOUCHED, OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY, STATUS_ACTIVE,
+    STATUS_UNCLAIMED,
+};
 pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
-pub use merge::{MergePreview, MergeRepository};
 pub use principal::{resolve as resolve_credential, Credential};
 pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;
@@ -44,90 +48,6 @@ pub use session::{Session, SessionRepository};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-/// An account that has a credential of its own.
-pub const STATUS_ACTIVE: &str = "active";
-
-/// An account auto-provisioned for an MXID, reachable only through that MXID
-/// until someone claims it by registering a credential.
-pub const STATUS_UNCLAIMED: &str = "unclaimed";
-
-/// Every table that carries an `owner_id` and whose rows follow a merge.
-///
-/// Two separate operations need this exact list — the Phase 1 backfill and the
-/// Phase 3 account merge — and a table missing from it is a silent data leak
-/// rather than a compile error. It drifted three tables behind the schema
-/// before `test_owned_tables_and_exceptions_match_the_schema` existed; that
-/// test now derives the truth from `PRAGMA table_info` and fails on any new
-/// `owner_id` table that nobody classified.
-pub const OWNED_TABLES: &[&str] = &[
-    "todos",
-    "reminders",
-    "transactions",
-    "recurring_bills",
-    "portfolio_holdings",
-    "portfolio_cash_balances",
-    "portfolio_daily_snapshots",
-    "portfolio_price_alerts",
-    "finance_categories",
-    "finance_shares",
-    "user_settings",
-    "bookmarks",
-    "habits",
-    "habit_logs",
-    "life_day_logs",
-    "life_profiles",
-    "footprints",
-    "ai_conversations",
-    "ai_user_configs",
-    "webhooks",
-    "webhook_outbox",
-    "bot_message_targets",
-];
-
-/// Tables carrying `owner_id` that a merge moves through a dedicated routine
-/// rather than the generic loop.
-///
-/// `portfolio_audit_log` is immutable at the database engine level and its
-/// `entry_hash` folds `owner_id` into the digest, so it can be neither
-/// re-pointed by a plain `UPDATE` nor left valid by one. It is moved by
-/// `modules::portfolio::audit::absorb_ledger`, which drops the trigger for the
-/// length of the transaction and rebuilds the chain. Listed separately so the
-/// schema-derived test still accounts for it, and so nobody adds it to
-/// `OWNED_TABLES` and discovers at runtime that every merge now aborts.
-pub const OWNER_ID_MERGED_SEPARATELY: &[&str] = &["portfolio_audit_log"];
-
-/// Tables keyed by `account_id` whose rows follow the absorbed account.
-pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
-    "matrix_links",
-    "webauthn_credentials",
-    "security_events",
-    "account_rooms",
-];
-
-/// Tables keyed by `account_id` whose rows are destroyed rather than moved.
-///
-/// Every one is a credential or a ceremony in flight. A credential belongs to
-/// the identity that minted it: carrying one across a merge would hand whoever
-/// held the absorbed account a live way in to the survivor. `sessions` is
-/// revoked rather than deleted so the row survives as an audit trail; the rest
-/// are deleted outright.
-pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
-    "sessions",
-    "recovery_codes",
-    "recovery_requests",
-    "mcp_tokens",
-    "passkey_enrollment_tokens",
-    "matrix_link_challenges",
-];
-
-/// Tables carrying `account_id` that a merge deliberately leaves alone.
-///
-/// `web_users` is the dead password table. Nothing authenticates against it —
-/// only `db::backfill` reads it, once, to decide whether a legacy owner had a
-/// credential. Deleting from it would destroy the only record that a legacy
-/// local account ever existed, and gain nothing.
-pub const ACCOUNT_ID_UNTOUCHED: &[&str] = &["web_users"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Account {
@@ -188,9 +108,7 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
     use crate::db::DbPool;
-    use sqlx::Row;
     use std::collections::BTreeSet;
 
     #[test]
@@ -238,28 +156,16 @@ mod tests {
 
     /// Every table in the schema that has `column`.
     async fn tables_with_column(pool: &DbPool, column: &str) -> BTreeSet<String> {
-        let tables: Vec<String> = crate::db_scalar_all!(
+        crate::db_scalar_all!(
             pool,
-            _,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            String,
+            "SELECT table_name FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND column_name = ?",
+            column
         )
-        .unwrap();
-
-        let mut found = BTreeSet::new();
-        for table in tables {
-            // `PRAGMA table_info` is SQLite-only introspection; this guard test
-            // runs on SQLite by construction.
-            let has_column = sqlx::query(&format!("PRAGMA table_info({table})"))
-                .fetch_all(pool.sqlite_or_err().unwrap())
-                .await
-                .unwrap()
-                .iter()
-                .any(|row| row.get::<String, _>("name") == column);
-            if has_column {
-                found.insert(table);
-            }
-        }
-        found
+        .unwrap()
+        .into_iter()
+        .collect()
     }
 
     fn declared(lists: &[&[&str]]) -> BTreeSet<String> {
@@ -272,7 +178,7 @@ mod tests {
 
     async fn migrated_pool() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
@@ -284,9 +190,6 @@ mod tests {
     /// classified as following a merge or explicitly not, or this fails.
     #[tokio::test]
     async fn test_owned_tables_and_exceptions_match_the_schema() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
-            return;
-        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "owner_id").await;
         let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
@@ -315,9 +218,6 @@ mod tests {
     /// a row pointing at an account id that the merge is about to delete.
     #[tokio::test]
     async fn test_account_id_tables_are_all_classified() {
-        if crate::db::pool::skip_on_postgres("reads sqlite_master and PRAGMA") {
-            return;
-        }
         let pool = migrated_pool().await;
         let in_schema = tables_with_column(&pool, "account_id").await;
         let classified = declared(&[

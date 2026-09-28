@@ -27,6 +27,7 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
 #[allow(clippy::too_many_arguments)]
 pub async fn process_audio_event(
     db: &Database,
+    services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
@@ -35,8 +36,8 @@ pub async fn process_audio_event(
     mime_type: Option<&str>,
     audio_duration: Option<std::time::Duration>,
     config: &VoiceConfig,
-    stt: &crate::services::stt::SttClient,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    stt: &crate::infrastructure::inference::stt::SttClient,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> String {
     if audio_bytes.is_empty() {
         return "⚠️ <b>语音处理失败</b><br/>\
@@ -98,6 +99,7 @@ pub async fn process_audio_event(
 
     // 3. Run AI turn with full domain tool capabilities
     match crate::modules::ai::handler::run_ai_turn_with_stage(
+        services,
         &db.pool,
         ai,
         broadcaster,
@@ -128,8 +130,8 @@ pub async fn process_audio_event(
 /// that carries the service's response body, and on a connection failure the
 /// request URL, neither of which belongs in a chat room. Full detail is in the
 /// `warn!` at the call site.
-fn voice_error_message(err: &crate::services::stt::SttServiceError) -> String {
-    use crate::services::stt::SttServiceError;
+fn voice_error_message(err: &crate::infrastructure::inference::stt::SttServiceError) -> String {
+    use crate::infrastructure::inference::stt::SttServiceError;
 
     match err {
         SttServiceError::NotConfigured => "⚠️ <b>语音处理不可用</b><br/>\
@@ -190,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_no_voice_error_reply_carries_upstream_detail() {
-        use crate::services::stt::SttServiceError;
+        use crate::infrastructure::inference::stt::SttServiceError;
         let leaky = "http://inference:8090/v1/audio/transcriptions symphonia-detail";
         let cases = [
             (SttServiceError::NotConfigured, "语音处理不可用"),

@@ -1,11 +1,12 @@
 use crate::db::DbPool;
 use serde_json::json;
 
+use crate::domain::accounts::AccountId;
+use crate::domain::bookmarks::{BookmarkQuery, CreateBookmark};
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::bookmarks::metadata::fetch_and_extract_metadata;
-use crate::modules::bookmarks::models::BookmarkQuery;
-use crate::modules::bookmarks::repository::BookmarksRepository;
-use crate::services::llm::ToolDefinition;
+use crate::infrastructure::inference::llm::ToolDefinition;
+use crate::infrastructure::postgres::repositories::bookmarks as repo;
+use crate::infrastructure::web::fetch_and_extract_metadata;
 
 pub async fn execute_tool(
     pool: &DbPool,
@@ -22,34 +23,20 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .ok_or("Field 'url' is required")?;
                 let custom_title = args.get("title").and_then(|v| v.as_str());
-                let tags = args
-                    .get("tags")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    })
-                    .unwrap_or_default();
+                let tags = args.get("tags").and_then(|v| v.as_array()).map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                });
 
                 let meta = fetch_and_extract_metadata(None, url, custom_title).await;
+                let input = CreateBookmark::new(url, meta, custom_title, tags.as_deref())
+                    .map_err(|e| e.to_string())?;
 
-                let b = BookmarksRepository::create(
-                    pool,
-                    owner_id,
-                    url,
-                    &meta.title,
-                    meta.description.as_deref(),
-                    meta.author.as_deref(),
-                    meta.image_url.as_deref(),
-                    &meta.domain,
-                    meta.reader_content.as_deref(),
-                    meta.reading_time_minutes,
-                    &tags,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let owner = AccountId::new(owner_id);
+                let b = repo::create(pool, &owner, &input)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 if let Some(bc) = broadcaster {
                     bc.send(SystemEvent::BookmarkCreated(b.clone()));
@@ -77,7 +64,8 @@ pub async fn execute_tool(
                     ..Default::default()
                 };
 
-                let list = BookmarksRepository::list(pool, owner_id, &query)
+                let owner = AccountId::new(owner_id);
+                let list = repo::list(pool, &owner, &query)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -92,9 +80,11 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let updated = BookmarksRepository::toggle_favorite(pool, id, owner_id)
+                let owner = AccountId::new(owner_id);
+                let updated = repo::toggle_favorite(pool, id, &owner)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("Bookmark #{id} not found"))?;
 
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::BookmarkUpdated(updated.clone()));
@@ -111,9 +101,11 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let updated = BookmarksRepository::toggle_archived(pool, id, owner_id)
+                let owner = AccountId::new(owner_id);
+                let updated = repo::toggle_archived(pool, id, &owner)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("Bookmark #{id} not found"))?;
 
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::BookmarkUpdated(updated.clone()));
@@ -130,7 +122,8 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let ok = BookmarksRepository::delete(pool, id, owner_id)
+                let owner = AccountId::new(owner_id);
+                let ok = repo::delete(pool, id, &owner)
                     .await
                     .map_err(|e| e.to_string())?;
 

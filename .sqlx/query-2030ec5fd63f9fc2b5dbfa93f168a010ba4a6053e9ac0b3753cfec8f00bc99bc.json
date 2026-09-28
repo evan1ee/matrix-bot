@@ -1,0 +1,144 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE todos\n        SET\n            text = COALESCE($1, text),\n            priority = COALESCE($2, priority),\n            completed = COALESCE($3, completed),\n            due_at = CASE WHEN $4 THEN $5 ELSE due_at END,\n            remind_before_minutes = CASE WHEN $6 THEN $7 ELSE remind_before_minutes END\n        WHERE id = $8 AND owner_id = $9\n        RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "priority",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "due_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "due_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "remind_before_minutes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "remind_before_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "completed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "completed"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Timestamptz",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "2030ec5fd63f9fc2b5dbfa93f168a010ba4a6053e9ac0b3753cfec8f00bc99bc"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) VALUES ('!r:x', $1, 'someone', $2, 'medium', FALSE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6c5f5cefa2e9d6e473057dca63b508ad6a04b59690ff637ba7d63a6dd009448d"
+}

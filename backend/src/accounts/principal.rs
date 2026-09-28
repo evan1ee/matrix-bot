@@ -10,8 +10,8 @@
 
 use crate::accounts::session::COOKIE_NAME;
 use crate::accounts::{AccountRepository, SessionRepository};
-use crate::api::auth::types::AuthUser;
 use crate::db::DbPool;
+use crate::interface::http::auth::types::AuthUser;
 
 /// A credential presented by a request.
 pub enum Credential<'a> {
@@ -120,7 +120,7 @@ pub async fn resolve(
             };
 
             Ok(Some(AuthUser {
-                account_id: mcp_token.account_id,
+                account_id: crate::domain::accounts::AccountId::new(mcp_token.account_id),
                 display_name,
                 session_id_hash: mcp_token.token_hash,
                 // Never eligible for step-up. A personal access token is a machine
@@ -154,7 +154,7 @@ pub async fn resolve(
             };
 
             Ok(Some(AuthUser {
-                account_id: session.account_id,
+                account_id: crate::domain::accounts::AccountId::new(session.account_id),
                 display_name,
                 session_id_hash: session.id_hash,
                 last_verified_at: session.last_verified_at,

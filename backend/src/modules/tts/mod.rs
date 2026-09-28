@@ -16,9 +16,10 @@ use tracing::{error, warn};
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::settings::SettingsRepository;
+use crate::infrastructure::inference::tts::{
+    SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
+};
 use crate::modules::{BotModule, CommandContext, CommandHelp};
-use crate::services::tts::{SynthesizedSpeech, TtsClient, TtsServiceError};
 use crate::utils::html::html_escape;
 
 pub mod text;
@@ -73,7 +74,11 @@ impl TtsModule {
         }
     }
 
-    async fn handle_say(&self, ctx: &CommandContext, db: &Database) -> String {
+    async fn handle_say(
+        &self,
+        ctx: &CommandContext,
+        services: &crate::application::AppServices,
+    ) -> String {
         let text = text::speakable(ctx.raw_args.trim());
         if text.is_empty() {
             return "⚠️ <b>没有可朗读的文字</b><br/>\
@@ -88,7 +93,7 @@ impl TtsModule {
             );
         }
 
-        let settings = SettingsRepository::get_or_default(&db.pool, &ctx.owner_id).await;
+        let settings = services.settings.get_or_default(&ctx.owner_id).await;
         let voice = resolve_voice(&self.default_voice, settings.tts_voice.as_deref());
 
         let speech = match self.tts.synthesize(&text, &voice).await {
@@ -134,13 +139,11 @@ impl TtsModule {
             .parse::<mime_guess::mime::Mime>()
             .map_err(|e| format!("Invalid MIME type: {}", e))?;
 
-        let info = AttachmentInfo::Voice {
-            audio_info: BaseAudioInfo {
-                duration: speech.duration,
-                size: UInt::new(speech.audio.len() as u64),
-            },
-            waveform: speech.waveform,
-        };
+        let info = AttachmentInfo::Voice(BaseAudioInfo {
+            duration: speech.duration,
+            size: UInt::new(speech.audio.len() as u64),
+            waveform: speech.waveform.map(normalise_waveform),
+        });
 
         room.send_attachment(
             "voice-message.ogg",
@@ -153,6 +156,16 @@ impl TtsModule {
 
         Ok(())
     }
+}
+
+/// matrix-sdk takes the waveform as fractions of full scale and rescales it to
+/// MSC3246's 0..=1024 buckets itself. Dividing by a power of two is exact in
+/// `f32`, so every bucket reaches the event unchanged.
+fn normalise_waveform(buckets: Vec<u16>) -> Vec<f32> {
+    buckets
+        .into_iter()
+        .map(|b| f32::from(b) / f32::from(WAVEFORM_MAX))
+        .collect()
 }
 
 #[async_trait]
@@ -172,22 +185,35 @@ impl BotModule for TtsModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        db: &Database,
+        services: &crate::application::AppServices,
+        _db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         if ctx.command != "say" {
             return None;
         }
 
-        Some(self.handle_say(ctx, db).await)
+        Some(self.handle_say(ctx, services).await)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::tts::TtsDialect;
+    use crate::infrastructure::inference::tts::TtsDialect;
     use std::sync::Mutex;
+
+    /// matrix-sdk turns each fraction back into a bucket with
+    /// `(v.clamp(0.0, 1.0) * 1024.0) as u16`; every bucket must survive that.
+    #[test]
+    fn test_normalised_waveform_round_trips_through_the_sdk_rescale() {
+        let buckets: Vec<u16> = (0..=WAVEFORM_MAX).collect();
+        let rescaled: Vec<u16> = normalise_waveform(buckets.clone())
+            .into_iter()
+            .map(|v| (v.clamp(0.0, 1.0) * f32::from(WAVEFORM_MAX)) as u16)
+            .collect();
+        assert_eq!(rescaled, buckets);
+    }
 
     fn module_with(tts: TtsClient, default_voice: &str) -> TtsModule {
         TtsModule::new(Arc::new(RwLock::new(None)), tts, default_voice.to_string())
@@ -200,7 +226,7 @@ mod tests {
     fn ctx_for(command: &str, raw_args: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_mxid: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: command.to_string(),
@@ -214,7 +240,9 @@ mod tests {
     }
 
     async fn memory_db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        Database { pool }
     }
 
     #[test]
@@ -231,7 +259,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         assert!(module
-            .handle_command(&ctx_for("todo", "list"), &db, None)
+            .handle_command(
+                &ctx_for("todo", "list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -241,7 +274,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         let reply = module
-            .handle_command(&ctx_for("say", "hello there"), &db, None)
+            .handle_command(
+                &ctx_for("say", "hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("语音合成不可用"), "{}", reply);
@@ -252,7 +290,12 @@ mod tests {
         let module = module_with(unconfigured(), "0");
         let db = memory_db().await;
         let reply = module
-            .handle_command(&ctx_for("say", "✅🎉"), &db, None)
+            .handle_command(
+                &ctx_for("say", "✅🎉"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("没有可朗读的文字"), "{}", reply);
@@ -264,7 +307,12 @@ mod tests {
         let db = memory_db().await;
         let long = "字".repeat(MAX_SPEAK_CHARS + 1);
         let reply = module
-            .handle_command(&ctx_for("say", &long), &db, None)
+            .handle_command(
+                &ctx_for("say", &long),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(reply.contains("文字过长"), "{}", reply);
@@ -290,14 +338,19 @@ mod tests {
         );
         let base = format!(
             "{}/v1",
-            crate::services::test_support::spawn_server(app).await
+            crate::infrastructure::inference::test_support::spawn_server(app).await
         );
         let tts = TtsClient::new(Some(base), None, "kokoro".to_string(), TtsDialect::OpenAi);
         let module = module_with(tts, "7");
         let db = memory_db().await;
 
         let reply = module
-            .handle_command(&ctx_for("say", "hello"), &db, None)
+            .handle_command(
+                &ctx_for("say", "hello"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
 

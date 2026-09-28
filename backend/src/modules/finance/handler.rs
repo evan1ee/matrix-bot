@@ -2,6 +2,7 @@ use crate::db::DbPool;
 use chrono::{Datelike, TimeZone, Utc};
 use tracing::error;
 
+use crate::application::settings::SettingsService;
 use crate::events::EventBroadcaster;
 use crate::modules::finance::models::{Direction, Transaction};
 use crate::modules::finance::money::{
@@ -9,7 +10,6 @@ use crate::modules::finance::money::{
 };
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::finance::service::{self, FinanceError};
-use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 // `MAX_NOTE_LEN` and `MAX_CATEGORY_LEN` live in `service` now — this module
@@ -27,6 +27,7 @@ struct ParsedEntry {
 
 pub async fn handle_finance_command(
     pool: &DbPool,
+    settings: &SettingsService,
     broadcaster: Option<&EventBroadcaster>,
     room_id: &str,
     owner_id: &str,
@@ -81,9 +82,8 @@ pub async fn handle_finance_command(
         let args = rest[3..].trim();
         // The user's saved currency, so `!expense add 9.99 coffee` books in the
         // currency they actually spend in rather than a hardcoded USD.
-        let default_currency = SettingsRepository::get_or_default(pool, owner_id)
-            .await
-            .currency;
+        let acct = crate::domain::accounts::AccountId::from(owner_id);
+        let default_currency = settings.get_or_default(&acct).await.currency;
         return handle_add(
             pool,
             broadcaster,
@@ -535,11 +535,16 @@ mod tests {
     #[tokio::test]
     async fn test_finance_alias_and_rm() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         // Add expense via !expense add
         let add_res = handle_finance_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",
@@ -551,17 +556,25 @@ mod tests {
         assert!(add_res.contains("Logged"));
 
         // Query via !finance
-        let fin_res =
-            handle_finance_command(&pool, None, "!room:1", "@alice:1", "alice", "!finance")
-                .await
-                .unwrap();
+        let fin_res = handle_finance_command(
+            &pool, &settings, None, "!room:1", "@alice:1", "alice", "!finance",
+        )
+        .await
+        .unwrap();
         assert!(fin_res.contains("lunch"));
 
         // Delete via !expense rm 1
-        let del_res =
-            handle_finance_command(&pool, None, "!room:1", "@alice:1", "alice", "!expense rm 1")
-                .await
-                .unwrap();
+        let del_res = handle_finance_command(
+            &pool,
+            &settings,
+            None,
+            "!room:1",
+            "@alice:1",
+            "alice",
+            "!expense rm 1",
+        )
+        .await
+        .unwrap();
         assert!(del_res.contains("Removed entry"));
     }
 
@@ -570,12 +583,17 @@ mod tests {
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
         let broadcaster = crate::events::EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
 
         let reply = handle_finance_command(
             &pool,
+            &settings,
             Some(&broadcaster),
             "!room:1",
             "@alice:1",
@@ -602,10 +620,15 @@ mod tests {
     #[tokio::test]
     async fn test_expense_add_refuses_an_unknown_category() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let settings = crate::application::settings::SettingsService::new(
+            pool.clone(),
+            crate::events::EventBroadcaster::default(),
+        );
 
         let reply = handle_finance_command(
             &pool,
+            &settings,
             None,
             "!room:1",
             "@alice:1",

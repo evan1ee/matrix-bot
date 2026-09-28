@@ -2,12 +2,10 @@ use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
 
+use crate::domain::accounts::AccountId;
+use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
 use crate::events::EventBroadcaster;
-use crate::modules::settings::repository::SettingsRepository;
-use crate::modules::todo::models::TodoPriority;
-use crate::modules::todo::repository::TodoRepository;
-use crate::modules::todo::service::{self, NewTodo, TodoPatch};
-use crate::services::llm::ToolDefinition;
+use crate::infrastructure::inference::llm::ToolDefinition;
 use serde_json::json;
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
@@ -30,8 +28,9 @@ fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
 }
 
 pub async fn execute_tool(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &crate::application::AppServices,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
     name: &str,
@@ -40,8 +39,11 @@ pub async fn execute_tool(
     match name {
         "get_my_tasks" => Some(
             async {
+                let acct = AccountId::from(owner_id);
                 let completed = args.get("completed").and_then(|v| v.as_bool());
-                let items = TodoRepository::list_all_user(pool, owner_id, completed, 50, 0)
+                let items = services
+                    .todos
+                    .list(&acct, None, completed, 50, 0)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&items).map_err(|e| e.to_string())
@@ -69,37 +71,41 @@ pub async fn execute_tool(
                     .or_else(|| args.get("due"))
                     .and_then(|v| v.as_str())
                 {
-                    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let settings = services.settings.get_or_default(&acct).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
                     None
                 };
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
+                let rooms = &services.rooms;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
+                    rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()
                 };
 
-                let item = service::create(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    NewTodo {
-                        text,
-                        priority,
-                        room_id: &target_room,
-                        sender_name: "AI Assistant",
-                        due_at,
-                        remind_before_minutes: remind_before,
-                        remind_room_id: None,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let acct = AccountId::from(owner_id);
+                let (item, _) = services
+                    .todos
+                    .create(
+                        &acct,
+                        NewTodo {
+                            room_id: target_room,
+                            sender_name: "AI Assistant".to_string(),
+                            text: text.to_string(),
+                            priority,
+                            due_at,
+                            remind_before_minutes: remind_before,
+                            remind_room_id: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&item).map_err(|e| e.to_string())
             }
@@ -108,6 +114,7 @@ pub async fn execute_tool(
 
         "complete_todo" => Some(
             async {
+                let acct = AccountId::from(owner_id);
                 let target_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
                 } else if let Some(search) = args
@@ -116,10 +123,11 @@ pub async fn execute_tool(
                     .or_else(|| args.get("name"))
                     .and_then(|v| v.as_str())
                 {
-                    let active_tasks =
-                        TodoRepository::list_all_user(pool, owner_id, Some(false), 50, 0)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                    let active_tasks = services
+                        .todos
+                        .list(&acct, None, Some(false), 50, 0)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     let matched = active_tasks
                         .into_iter()
                         .find(|t| t.text.to_lowercase().contains(&search.to_lowercase()));
@@ -135,18 +143,11 @@ pub async fn execute_tool(
                     );
                 };
 
-                let updated = service::update(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    target_id,
-                    TodoPatch {
-                        completed: Some(true),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let updated = services
+                    .todos
+                    .set_completed(&acct, target_id, true)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
@@ -172,7 +173,8 @@ pub async fn execute_tool(
                         if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                             Some(Utc::now() + Duration::minutes(mins))
                         } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                            let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                            let acct = crate::domain::accounts::AccountId::from(owner_id);
+                            let settings = services.settings.get_or_default(&acct).await;
                             parse_due_at(due_str, &settings.tz())
                         } else {
                             None
@@ -182,20 +184,21 @@ pub async fn execute_tool(
                     None
                 };
 
-                let updated = service::update(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    id,
-                    TodoPatch {
-                        text,
-                        priority,
-                        due_at,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let acct = AccountId::from(owner_id);
+                let (updated, _) = services
+                    .todos
+                    .update(
+                        &acct,
+                        id,
+                        TodoPatch {
+                            text: text.map(ToString::to_string),
+                            priority,
+                            due_at,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
@@ -209,7 +212,10 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
 
-                service::delete(pool, broadcaster, owner_id, id)
+                let acct = AccountId::from(owner_id);
+                services
+                    .todos
+                    .delete(&acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -344,12 +350,14 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::modules::reminder::models::ReminderSource;
-    use crate::modules::reminder::repository::ReminderRepository;
+    use crate::domain::reminders::ReminderSource;
+    use crate::domain::todos::MAX_TEXT_LEN;
+    use crate::infrastructure::postgres::repositories::reminders as reminders_repo;
 
     async fn setup_db() -> (Database, String) {
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let db = Database { pool };
         let account_id =
             crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
                 .await
@@ -362,10 +370,19 @@ mod tests {
     #[tokio::test]
     async fn test_the_ai_tool_enforces_the_text_limit() {
         let (db, owner) = setup_db().await;
-        let over_limit = "x".repeat(service::MAX_TASK_TEXT_LEN + 1);
+        let over_limit = "x".repeat(MAX_TEXT_LEN + 1);
         let args = json!({ "text": over_limit });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args).await;
+        let result = execute_tool(
+            &crate::application::AppServices::new(&db.pool),
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "add_todo",
+            &args,
+        )
+        .await;
         assert!(matches!(result, Some(Err(_))));
     }
 
@@ -382,15 +399,23 @@ mod tests {
             "remind_before_minutes": 60,
         });
 
-        let result = execute_tool(&db.pool, None, &owner, "!room:a", "add_todo", &args)
-            .await
-            .unwrap()
-            .unwrap();
+        let result = execute_tool(
+            &crate::application::AppServices::new(&db.pool),
+            &db.pool,
+            None,
+            &owner,
+            "!room:a",
+            "add_todo",
+            &args,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let todo: serde_json::Value = serde_json::from_str(&result).unwrap();
         let todo_id = todo["id"].as_i64().unwrap();
 
         let pending =
-            ReminderRepository::find_pending_for_source(&db.pool, ReminderSource::Todo, todo_id)
+            reminders_repo::find_pending_for_source(&db.pool, ReminderSource::Todo, todo_id)
                 .await
                 .unwrap();
         assert!(pending.is_some(), "a due reminder must be scheduled");

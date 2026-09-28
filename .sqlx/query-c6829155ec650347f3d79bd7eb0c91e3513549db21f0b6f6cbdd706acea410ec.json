@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES ($1, 'tok1', TRUE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6829155ec650347f3d79bd7eb0c91e3513549db21f0b6f6cbdd706acea410ec"
+}

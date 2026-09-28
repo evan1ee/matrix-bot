@@ -19,7 +19,6 @@ use crate::modules::finance::service as finance_service;
 use crate::modules::portfolio::models::CashBalance;
 use crate::modules::portfolio::repository::WithdrawOutcome;
 use crate::modules::portfolio::service;
-use crate::modules::settings::SettingsRepository;
 use crate::utils::html_escape;
 
 pub fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
@@ -100,6 +99,7 @@ fn parse_cash_amount(args: &str, default_currency: &str) -> Result<(i64, String,
 
 pub async fn handle_cash(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
@@ -110,8 +110,8 @@ pub async fn handle_cash(
 
     match sub.as_str() {
         "" => show_cash(pool, owner_id).await,
-        "deposit" => handle_cash_deposit(pool, owner_id, rest, broadcaster).await,
-        "withdraw" => handle_cash_withdraw(pool, owner_id, rest, broadcaster).await,
+        "deposit" => handle_cash_deposit(pool, settings, owner_id, rest, broadcaster).await,
+        "withdraw" => handle_cash_withdraw(pool, settings, owner_id, rest, broadcaster).await,
         _ => "⚠️ Usage: <code>!portfolio cash</code>, \
               <code>!portfolio cash deposit &lt;amount&gt; [CUR]</code>, or \
               <code>!portfolio cash withdraw &lt;amount&gt; [CUR]</code>."
@@ -145,13 +145,13 @@ async fn show_cash(pool: &DbPool, owner_id: &str) -> String {
 
 async fn handle_cash_deposit(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -199,13 +199,13 @@ async fn handle_cash_deposit(
 
 async fn handle_cash_withdraw(
     pool: &DbPool,
+    settings: &crate::application::settings::SettingsService,
     owner_id: &str,
     args: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let default_currency = SettingsRepository::get_or_default(pool, owner_id)
-        .await
-        .currency;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let default_currency = settings.get_or_default(&acct).await.currency;
     let (amount_minor, currency, exponent) = match parse_cash_amount(args, &default_currency) {
         Ok(v) => v,
         Err(err) => {
@@ -287,11 +287,20 @@ mod tests {
     #[tokio::test]
     async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
+        let settings =
+            crate::application::settings::SettingsService::new(pool.clone(), broadcaster.clone());
 
-        let reply = handle_cash(&pool, "@alice:a", "deposit 1000 USD", Some(&broadcaster)).await;
+        let reply = handle_cash(
+            &pool,
+            &settings,
+            "@alice:a",
+            "deposit 1000 USD",
+            Some(&broadcaster),
+        )
+        .await;
         assert!(reply.contains("Deposited"), "unexpected reply: {reply}");
 
         let mut saw_transaction_created = false;

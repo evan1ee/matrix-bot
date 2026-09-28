@@ -2,19 +2,19 @@ use crate::db::DbPool;
 use chrono::Utc;
 use serde_json::json;
 
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::habits::repository::HabitsRepository;
-use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
+use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &crate::application::AppServices,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = services.settings.get_or_default(&acct).await;
     let today_str = Utc::now()
         .with_timezone(&settings.tz())
         .format("%Y-%m-%d")
@@ -23,7 +23,9 @@ pub async fn execute_tool(
     match name {
         "get_my_habits" => Some(
             async {
-                let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+                let habits = services
+                    .habits
+                    .list_with_status(&acct, &today_str)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&habits).map_err(|e| e.to_string())
@@ -36,7 +38,9 @@ pub async fn execute_tool(
                 let (habit_id, habit_name) = if let Some(id) =
                     args.get("id").and_then(|v| v.as_i64())
                 {
-                    let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+                    let habits = services
+                        .habits
+                        .list_with_status(&acct, &today_str)
                         .await
                         .map_err(|e| e.to_string())?;
                     let name = habits
@@ -50,7 +54,9 @@ pub async fn execute_tool(
                     .or_else(|| args.get("name"))
                     .and_then(|v| v.as_str())
                 {
-                    let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+                    let habits = services
+                        .habits
+                        .list_with_status(&acct, &today_str)
                         .await
                         .map_err(|e| e.to_string())?;
                     let matched = habits
@@ -67,19 +73,11 @@ pub async fn execute_tool(
                     );
                 };
 
-                let completed =
-                    HabitsRepository::toggle_log(pool, habit_id, owner_id, &today_str, None)
-                        .await
-                        .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::HabitLogToggled {
-                        habit_id,
-                        owner_id: owner_id.to_string(),
-                        log_date: today_str.clone(),
-                        completed,
-                    });
-                }
+                let completed = services
+                    .habits
+                    .toggle_log(&acct, habit_id, &today_str, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&json!({
                     "habit_id": habit_id,
@@ -113,21 +111,18 @@ pub async fn execute_tool(
                     .unwrap_or(7)
                     .clamp(1, 7);
 
-                let habit = HabitsRepository::create_habit(
-                    pool,
-                    owner_id,
-                    name_val,
-                    None,
-                    frequency,
-                    category,
-                    target_days,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::HabitCreated(habit.clone()));
-                }
+                let habit = services
+                    .habits
+                    .create_habit(
+                        &acct,
+                        name_val,
+                        None,
+                        Some(frequency),
+                        Some(category),
+                        Some(target_days),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&habit).map_err(|e| e.to_string())
             }
@@ -140,20 +135,11 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let ok = HabitsRepository::delete_habit(pool, id, owner_id)
+                services
+                    .habits
+                    .delete_habit(&acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!("Habit #{} not found or not owned by user", id));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::HabitDeleted {
-                        id,
-                        owner_id: owner_id.to_string(),
-                    });
-                }
 
                 serde_json::to_string(&json!({
                     "id": id,

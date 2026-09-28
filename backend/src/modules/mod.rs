@@ -7,28 +7,17 @@ use tracing::info;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
-pub mod account;
 pub mod ai;
-pub mod bookmarks;
 pub mod briefing;
 pub mod core;
-pub mod due_reminder;
 pub mod finance;
-pub mod footprints;
-pub mod habits;
 pub mod journal;
 pub mod life;
 pub mod mcp;
 pub mod ocr;
 pub mod portfolio;
-pub mod recurring_bills;
-pub mod reminder;
-pub mod rooms;
-pub mod settings;
-pub mod todo;
 pub mod tts;
 pub mod voice;
-pub mod webhook;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.
@@ -54,14 +43,14 @@ pub struct ParsedCommand {
     /// Whether the bot was explicitly mentioned (@bot or pill).
     pub is_mentioned: bool,
     /// Optional quoted message context if the message is a reply or quote.
-    pub quoted: Option<crate::bot::quote::QuotedMessage>,
+    pub quoted: Option<crate::interface::channels::matrix::quote::QuotedMessage>,
 }
 
 impl ParsedCommand {
     /// Binds this command to the account that will own anything it creates.
     pub fn for_owner(
         self,
-        owner_id: impl Into<String>,
+        owner_id: impl Into<crate::domain::accounts::AccountId>,
         sender_mxid: impl Into<String>,
         is_direct: bool,
     ) -> CommandContext {
@@ -92,7 +81,7 @@ pub struct CommandContext {
     /// — never the MXID itself. Two MXIDs linked to the same account produce
     /// the same value here, which is what makes a user's data follow them
     /// across Matrix identities and the web UI alike.
-    pub owner_id: String,
+    pub owner_id: crate::domain::accounts::AccountId,
     /// The Matrix identity that sent this, for provenance and for the two
     /// commands that act on a Matrix account rather than on data.
     ///
@@ -116,9 +105,9 @@ pub struct CommandContext {
     /// Whether the bot was explicitly mentioned in the room.
     pub is_mentioned: bool,
     /// Optional quoted message context if the message is a reply or quote.
-    pub quoted: Option<crate::bot::quote::QuotedMessage>,
+    pub quoted: Option<crate::interface::channels::matrix::quote::QuotedMessage>,
     /// Optional in-place stage reporter for tracking multi-phase progress in Matrix.
-    pub stage_reporter: Option<crate::bot::stage::StageReporter>,
+    pub stage_reporter: Option<crate::interface::channels::matrix::stage::StageReporter>,
 }
 
 /// Shared runtime context available to modules for background workers.
@@ -128,6 +117,8 @@ pub struct ModuleContext {
     pub client: Client,
     /// The shared database connection pool.
     pub db: Database,
+    /// Application services, built once in `app.rs`.
+    pub services: crate::application::AppServices,
     /// Optional event broadcaster for real-time SSE streaming.
     pub broadcaster: Option<crate::events::EventBroadcaster>,
 }
@@ -159,9 +150,14 @@ pub trait BotModule: Send + Sync {
     /// that mutates state must send its `SystemEvent` through it, exactly as the
     /// REST handlers do — otherwise a change made over Matrix leaves every open
     /// web client showing stale data.
+    ///
+    /// `services` is the application layer built once in `app.rs`; a moved
+    /// feature's command handler calls its service through it. Modules not
+    /// yet moved ignore it.
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String>;
@@ -200,11 +196,12 @@ impl ModuleRegistry {
     pub async fn dispatch(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         for module in &self.modules {
-            if let Some(reply) = module.handle_command(ctx, db, broadcaster).await {
+            if let Some(reply) = module.handle_command(ctx, services, db, broadcaster).await {
                 return Some(reply);
             }
         }
@@ -308,14 +305,14 @@ mod tests {
         // Built at runtime rather than written as one literal: the literal
         // itself would appear in this very source file and this test would
         // then fail on itself the moment it started passing.
-        let needle = ["crate", "api"].join("::");
+        let needle = ["crate", "interface", "http"].join("::");
         let modules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/modules");
         let mut offenders = Vec::new();
         walk(&modules, &needle, &mut offenders);
 
         assert!(
             offenders.is_empty(),
-            "modules/ must not depend on api/; found: {offenders:#?}"
+            "modules/ must not depend on interface::http; found: {offenders:#?}"
         );
     }
 
@@ -369,15 +366,17 @@ mod tests {
     /// `bot/mod.rs` and asserts each entry point actually comes back.
     #[tokio::test]
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
+        use crate::interface::chat::reminders::ReminderModule;
+        use crate::interface::chat::settings::SettingsModule;
+        use crate::interface::chat::todos::TodoModule;
         use crate::modules::core::CoreModule;
         use crate::modules::finance::FinanceModule;
         use crate::modules::portfolio::PortfolioModule;
-        use crate::modules::reminder::ReminderModule;
-        use crate::modules::settings::SettingsModule;
-        use crate::modules::todo::TodoModule;
         use crate::modules::tts::TtsModule;
 
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let db = Database { pool };
 
         let registry_ref = Arc::new(tokio::sync::RwLock::new(None));
         let mut registry = ModuleRegistry::new();
@@ -391,11 +390,11 @@ mod tests {
         // (AiModule) — see `test_tts_must_be_registered_before_a_direct_message_catch_all`.
         registry.register(TtsModule::new(
             Arc::new(tokio::sync::RwLock::new(None)),
-            crate::services::tts::TtsClient::new(
+            crate::infrastructure::inference::tts::TtsClient::new(
                 None,
                 None,
                 "kokoro".to_string(),
-                crate::services::tts::TtsDialect::OpenAi,
+                crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             ),
             "0".to_string(),
         ));
@@ -415,7 +414,7 @@ mod tests {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
                 sender_mxid: "@tester:x".to_string(),
-                owner_id: "@alice:a".to_string(),
+                owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
                 sender_name: "alice".to_string(),
                 command: body
                     .split_whitespace()
@@ -431,7 +430,15 @@ mod tests {
                 stage_reporter: None,
             };
             assert!(
-                registry.dispatch(&ctx, &db, None).await.is_some(),
+                registry
+                    .dispatch(
+                        &ctx,
+                        &crate::application::AppServices::new(&db.pool),
+                        &db,
+                        None
+                    )
+                    .await
+                    .is_some(),
                 "`{body}` reached no module"
             );
         }
@@ -467,6 +474,7 @@ mod tests {
             async fn handle_command(
                 &self,
                 ctx: &CommandContext,
+                _services: &crate::application::AppServices,
                 _db: &Database,
                 _broadcaster: Option<&EventBroadcaster>,
             ) -> Option<String> {
@@ -479,11 +487,11 @@ mod tests {
         let tts_module = || {
             TtsModule::new(
                 Arc::new(tokio::sync::RwLock::new(None)),
-                crate::services::tts::TtsClient::new(
+                crate::infrastructure::inference::tts::TtsClient::new(
                     None,
                     None,
                     "kokoro".to_string(),
-                    crate::services::tts::TtsDialect::OpenAi,
+                    crate::infrastructure::inference::tts::TtsDialect::OpenAi,
                 ),
                 "0".to_string(),
             )
@@ -494,7 +502,12 @@ mod tests {
         correct.register(tts_module());
         correct.register(DirectMessageCatchAll);
         let reply = correct
-            .dispatch(&ctx_for("say"), &db, None)
+            .dispatch(
+                &ctx_for("say"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("TTS claims `say`");
         assert!(
@@ -507,7 +520,12 @@ mod tests {
         swapped.register(DirectMessageCatchAll);
         swapped.register(tts_module());
         let reply = swapped
-            .dispatch(&ctx_for("say"), &db, None)
+            .dispatch(
+                &ctx_for("say"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the catch-all claims every direct message");
         assert!(
@@ -541,6 +559,7 @@ mod tests {
         async fn handle_command(
             &self,
             ctx: &CommandContext,
+            _services: &crate::application::AppServices,
             _db: &Database,
             _broadcaster: Option<&EventBroadcaster>,
         ) -> Option<String> {
@@ -552,7 +571,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: command.to_string(),
             raw_args: String::new(),
@@ -565,7 +584,9 @@ mod tests {
     }
 
     async fn memory_db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        Database { pool }
     }
 
     /// Dispatch returns the *first* module that claims the command. Registration
@@ -583,7 +604,14 @@ mod tests {
             claims: "shared",
         });
 
-        let reply = registry.dispatch(&ctx_for("shared"), &db, None).await;
+        let reply = registry
+            .dispatch(
+                &ctx_for("shared"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await;
         assert_eq!(reply.as_deref(), Some("handled by first"));
     }
 
@@ -599,7 +627,12 @@ mod tests {
         });
 
         assert!(registry
-            .dispatch(&ctx_for("nonsense"), &db, None)
+            .dispatch(
+                &ctx_for("nonsense"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -617,7 +650,14 @@ mod tests {
             claims: "expense",
         });
 
-        let reply = registry.dispatch(&ctx_for("expense"), &db, None).await;
+        let reply = registry
+            .dispatch(
+                &ctx_for("expense"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
+            .await;
         assert_eq!(reply.as_deref(), Some("handled by finance"));
     }
 

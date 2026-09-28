@@ -1,15 +1,21 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchApi } from '../../core/apiClient';
 import { useSession } from '../../core/session';
+import { useSettings, formatDateTimeInZone } from '../../core/settings';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import { Activity, Radio, Database, Server } from 'lucide-react';
+import type { components } from '../../types/api';
 
-interface HealthResponse {
-  status: string;
-  service: string;
-  version: string;
-  db_status: string;
+type ReadyResponse = components['schemas']['ReadyResponse'];
+
+/**
+ * `/health/ready` lives outside `/api/v1` (see AGENTS.md: liveness/readiness
+ * are infrastructure surface, not application API), so it is fetched directly
+ * rather than through `fetchApi`, which always prefixes `/api/v1`.
+ */
+async function fetchReadiness(): Promise<ReadyResponse> {
+  const response = await fetch('/health/ready', { credentials: 'include' });
+  return response.json();
 }
 
 export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: boolean }> = ({
@@ -17,12 +23,15 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
   isConnected = false,
 }) => {
   const { isSignedIn: hasToken } = useSession();
+  const settings = useSettings();
 
-  const { data: health } = useQuery<HealthResponse>({
-    queryKey: ['health'],
-    queryFn: () => fetchApi<HealthResponse>('/health'),
+  const { data: health } = useQuery<ReadyResponse>({
+    queryKey: ['health-ready'],
+    queryFn: fetchReadiness,
     refetchInterval: 10000,
   });
+
+  const lastSyncAt = health?.checks.matrix_sync.last_sync_at;
 
   return (
     <div className="space-y-6">
@@ -30,27 +39,28 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
-            <span>REST API service</span>
-            <Server className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+            <span>Matrix sync</span>
+            <Server className={`w-4 h-4 ${health?.checks.matrix_sync.ok ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'}`} />
           </div>
-          <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
-            {health?.service || 'matrix-bot-api'}
+          <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100 capitalize">
+            {health ? (health.checks.matrix_sync.ok ? 'synced' : 'stale') : 'checking...'}
           </div>
-          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Version {health?.version || '0.1.0'}</span>
+          <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
+            {lastSyncAt ? formatDateTimeInZone(lastSyncAt, settings.timezone) : 'never synced'}
           </div>
         </div>
 
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
-            <span>SQLite database</span>
-            <Database className="w-4 h-4 text-neutral-500" />
+            <span>PostgreSQL database</span>
+            <Database className={`w-4 h-4 ${health?.checks.database.ok ? 'text-emerald-500 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'}`} />
           </div>
           <div className="text-xl font-medium tracking-tight text-neutral-900 dark:text-neutral-100 capitalize">
-            {health?.db_status || 'checking...'}
+            {health ? (health.checks.database.ok ? 'connected' : 'disconnected') : 'checking...'}
           </div>
-          <div className="text-xs text-neutral-500">WAL journal mode · SQLite3</div>
+          <div className="text-xs text-neutral-500">
+            {health?.status === 'ready' ? 'Ready to serve traffic' : 'Not ready'}
+          </div>
         </div>
 
         <div className="p-4 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
@@ -111,7 +121,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
 export const coreModule: FrontendModule = {
   id: 'core',
   name: 'System Core',
-  description: 'System health, SQLite status, and real-time SSE stream',
+  description: 'System readiness, PostgreSQL status, and real-time SSE stream',
   navTab: { label: 'System Overview' },
   MainView: CoreMainView,
 };

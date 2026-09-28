@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES ($1, '2026-09-06', 'USD', 100, 100, 200)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d60ec9038d8e567e395722e4927cebee1e65b9d4115d9bd97388e4cf0982c57"
+}

@@ -3,14 +3,14 @@ use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 
 use crate::events::EventBroadcaster;
+use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::finance::models::Direction;
 use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::finance::service::{self, NewTransaction};
-use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
 
 pub async fn execute_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -94,9 +94,8 @@ pub async fn execute_tool(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let default_cur = SettingsRepository::get_or_default(pool, owner_id)
-                    .await
-                    .currency;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let target_cur = args
                     .get("currency")
                     .and_then(|v| v.as_str())
@@ -178,7 +177,8 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or(category_name);
 
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 let tz = settings.tz();
                 let raw_currency = args
                     .get("currency")
@@ -211,10 +211,11 @@ pub async fn execute_tool(
                     Utc::now()
                 };
 
+                let rooms = &services.rooms;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, Some(r)).await
+                    rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
-                    crate::db::rooms::resolve_target_room(pool, owner_id, None).await
+                    rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()
                 };
@@ -400,7 +401,7 @@ mod tests {
 
     async fn setup() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema::run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
@@ -413,6 +414,7 @@ mod tests {
         let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
 
         let result = execute_tool(
+            &crate::application::AppServices::new(&pool),
             &pool,
             None,
             "@alice:a",

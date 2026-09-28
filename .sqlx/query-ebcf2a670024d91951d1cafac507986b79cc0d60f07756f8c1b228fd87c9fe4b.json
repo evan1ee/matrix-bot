@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES ($1, 'Paris', 48.8566, 2.3522, '2026-09-06')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebcf2a670024d91951d1cafac507986b79cc0d60f07756f8c1b228fd87c9fe4b"
+}

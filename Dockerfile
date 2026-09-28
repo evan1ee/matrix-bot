@@ -23,8 +23,15 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
+# Compile-checked sqlx queries read the committed offline cache instead of a
+# live database at build time (see .cargo/config.toml) -- the builder has no
+# DATABASE_URL and must not need one.
+ENV SQLX_OFFLINE=true
+
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+COPY .cargo ./.cargo
+COPY .sqlx ./.sqlx
 COPY backend/Cargo.toml ./backend/Cargo.toml
 COPY inference/Cargo.toml ./inference/Cargo.toml
 
@@ -77,14 +84,20 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /app/data && chown -R app:app /app
 
 ENV API_HOST=0.0.0.0 \
-    API_PORT=8080 \
-    DATABASE_URL="sqlite:///app/data/bot_data.db?mode=rwc"
+    API_PORT=8080
 
+# DATABASE_URL has no default here -- it must be supplied at runtime (e.g. by
+# compose) and must be a postgres:// URL; PostgreSQL is the only application
+# database. /app/data holds only matrix-sdk's own SQLite crypto store.
 EXPOSE 8080
 VOLUME ["/app/data"]
 
+# Liveness, not readiness: a container restart cannot fix a homeserver outage
+# or a lost database connection, so only "is the process alive" should drive a
+# restart. `/health/ready` (database + Matrix sync freshness) is for a load
+# balancer/orchestrator to route traffic on.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://127.0.0.1:8080/api/v1/health || exit 1
+  CMD curl -f http://127.0.0.1:8080/health/live || exit 1
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["matrix-bot"]

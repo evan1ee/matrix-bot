@@ -3,8 +3,8 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::accounts::AccountRepository;
-use crate::bot::notify::send_dm_html;
 use crate::events::SystemEvent;
+use crate::interface::channels::matrix::notify::send_dm_html;
 use crate::modules::portfolio::alerts::{
     format_alert_notification, AlertCondition, AlertsRepository,
 };

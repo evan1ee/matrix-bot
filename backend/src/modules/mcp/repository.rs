@@ -8,7 +8,7 @@ use crate::modules::mcp::models::McpToken;
 pub struct McpTokenRepository;
 
 impl McpTokenRepository {
-    /// Mints a new MCP personal access token and stores its hash in SQLite.
+    /// Mints a new MCP personal access token and stores its hash in the database.
     /// Returns the plaintext token (only returned at creation time) and the model row.
     pub async fn create(
         pool: &DbPool,
@@ -124,8 +124,7 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_lifecycle() {
         let pool = crate::db::pool::test_pool().await;
-        crate::db::schema_auth::create_tables(&pool).await.unwrap();
-        crate::db::schema_mcp::create_tables(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         // Create a test account
         crate::db_execute!(

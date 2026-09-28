@@ -76,11 +76,13 @@ impl BotModule for FinanceModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        services: &crate::application::AppServices,
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_finance_command(
             &db.pool,
+            &services.settings,
             broadcaster,
             &ctx.room_id,
             &ctx.owner_id,
@@ -101,7 +103,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@alice:a".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()
@@ -119,7 +121,9 @@ mod tests {
     }
 
     async fn db() -> Database {
-        Database::connect("sqlite::memory:", 1).await.unwrap()
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        Database { pool }
     }
 
     #[test]
@@ -146,28 +150,58 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!income list"), &db, None)
+            .handle_command(
+                &ctx("!income list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!category list"), &db, None)
+            .handle_command(
+                &ctx("!category list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo add milk"), &db, None)
+            .handle_command(
+                &ctx("!todo add milk"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &db, None)
+            .handle_command(
+                &ctx("!remind me later"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &db, None)
+            .handle_command(
+                &ctx("hello there"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None
+            )
             .await
             .is_none());
     }
@@ -179,7 +213,12 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &db, None)
+            .handle_command(
+                &ctx("!expense add 15.50 EUR lunch"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer");
         assert!(
@@ -189,7 +228,12 @@ mod tests {
         assert!(reply.contains("EUR"));
 
         let listed = module
-            .handle_command(&ctx("!expense list"), &db, None)
+            .handle_command(
+                &ctx("!expense list"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -206,7 +250,12 @@ mod tests {
         let db = db().await;
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
+            .handle_command(
+                &ctx("!expense add 15.50 lunch"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -225,25 +274,27 @@ mod tests {
     /// currency the user actually spends in rather than the hardcoded USD.
     #[tokio::test]
     async fn test_add_without_a_currency_uses_the_senders_default() {
-        use crate::modules::settings::{SettingsRepository, UserSettings};
+        use crate::domain::settings::UserSettings;
 
         let module = FinanceModule::new();
         let db = db().await;
+        let services = crate::application::AppServices::new(&db.pool);
 
-        SettingsRepository::upsert(
-            &db.pool,
-            "@alice:a",
-            &UserSettings {
-                timezone: "UTC".to_string(),
-                currency: "CNY".to_string(),
-                ..UserSettings::default()
-            },
-        )
-        .await
-        .unwrap();
+        services
+            .settings
+            .save(
+                &crate::domain::accounts::AccountId::new("@alice:a"),
+                UserSettings {
+                    timezone: "UTC".to_string(),
+                    currency: "CNY".to_string(),
+                    ..UserSettings::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &db, None)
+            .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db, None)
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -258,7 +309,12 @@ mod tests {
 
         // An explicit code still wins over the preference.
         let explicit = module
-            .handle_command(&ctx("!expense add 9.99 EUR coffee"), &db, None)
+            .handle_command(
+                &ctx("!expense add 9.99 EUR coffee"),
+                &crate::application::AppServices::new(&db.pool),
+                &db,
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -284,6 +340,7 @@ mod tests {
         let reply = FinanceModule::new()
             .handle_command(
                 &ctx("!expense add 15.50 EUR lunch"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 Some(&broadcaster),
             )
@@ -309,6 +366,7 @@ mod tests {
         let reply = module
             .handle_command(
                 &ctx("!expense add 1.00 EUR <script>alert(1)</script>"),
+                &crate::application::AppServices::new(&db.pool),
                 &db,
                 None,
             )

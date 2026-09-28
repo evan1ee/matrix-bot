@@ -102,9 +102,9 @@ impl SessionRepository {
         ip: Option<&str>,
         restricted_until: Option<DateTime<Utc>>,
     ) -> Result<String, sqlx::Error> {
-        // Minted by SQLite for the same reason account ids are: no RNG crate is
-        // a direct dependency, and 32 random bytes from its CSPRNG is more
-        // entropy than a session token needs.
+        // Minted from the OS CSPRNG for the same reason account ids are (see
+        // utils/random.rs): 32 random bytes is more entropy than a session
+        // token needs.
         let token = crate::utils::random::random_hex(32);
 
         let now = Utc::now();
@@ -232,11 +232,10 @@ impl SessionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

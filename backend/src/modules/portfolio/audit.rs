@@ -3,7 +3,7 @@
 //!
 //! Each entry stores both its own deterministic SHA-256 digest (`entry_hash`) and the
 //! hash of the preceding entry (`prev_hash`), forming a tamper-evident blockchain-style
-//! ledger. SQLite triggers additionally enforce immutability at the database engine level.
+//! ledger. PostgreSQL triggers additionally enforce immutability at the database engine level.
 
 use crate::db::DbPool;
 use anyhow::Result;
@@ -175,9 +175,9 @@ pub async fn record_audit_entry(
 /// Returns how many rows moved. Zero means `from` had no ledger, in which case
 /// nothing is dropped, appended or rebuilt.
 ///
-/// The caller must already be inside a transaction. If it rolls back, SQLite
-/// undoes the `DROP TRIGGER` with everything else, so the trigger cannot be
-/// left off.
+/// The caller must already be inside a transaction. If it rolls back,
+/// PostgreSQL undoes the `DROP TRIGGER` with everything else, so the trigger
+/// cannot be left off.
 pub async fn absorb_ledger(
     conn: &mut crate::db::DbTx<'_>,
     from: &str,
@@ -194,14 +194,12 @@ pub async fn absorb_ledger(
         return Ok(0);
     }
 
-    // `crate::db::ddl` is the single source for these statements so the schema
-    // and this drop/restore pair cannot drift apart. The dialect comes from the
-    // transaction itself, so the guard is dropped and restored in whichever
-    // form the live database understands.
-    crate::tx_execute!(
-        &mut *conn,
-        &crate::db::ddl::drop_audit_update_trigger(conn.dialect())
-    )?;
+    // Matches the trigger definition in `backend/migrations/0001_baseline.sql`
+    // exactly, so the drop/restore pair here cannot drift from what a fresh
+    // deployment creates.
+    const DROP_AUDIT_UPDATE_TRIGGER: &str =
+        "DROP TRIGGER IF EXISTS prevent_portfolio_audit_update ON portfolio_audit_log;";
+    crate::tx_execute!(&mut *conn, DROP_AUDIT_UPDATE_TRIGGER)?;
 
     crate::tx_execute!(
         &mut *conn,
@@ -266,8 +264,20 @@ pub async fn absorb_ledger(
         prev = entry_hash;
     }
 
-    for statement in crate::db::ddl::audit_update_trigger(conn.dialect()) {
-        crate::tx_execute!(&mut *conn, &statement)?;
+    // Restores the guard `absorb_ledger` dropped above. Same three statements
+    // as `backend/migrations/0001_baseline.sql`: PostgreSQL has no
+    // `CREATE TRIGGER IF NOT EXISTS`, so the trigger is dropped before being
+    // recreated.
+    const RESTORE_AUDIT_UPDATE_TRIGGER: [&str; 3] = [
+        "CREATE OR REPLACE FUNCTION prevent_portfolio_audit_update() RETURNS trigger AS $fn$ \
+         BEGIN RAISE EXCEPTION 'Audit log entries are immutable and cannot be updated'; END; \
+         $fn$ LANGUAGE plpgsql;",
+        "DROP TRIGGER IF EXISTS prevent_portfolio_audit_update ON portfolio_audit_log;",
+        "CREATE TRIGGER prevent_portfolio_audit_update BEFORE UPDATE ON portfolio_audit_log \
+         FOR EACH ROW EXECUTE FUNCTION prevent_portfolio_audit_update();",
+    ];
+    for statement in RESTORE_AUDIT_UPDATE_TRIGGER {
+        crate::tx_execute!(&mut *conn, statement)?;
     }
 
     Ok(moved)
@@ -398,11 +408,10 @@ pub async fn verify_audit_chain(pool: &DbPool, owner_id: &str) -> Result<AuditVe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::run_migrations;
 
     async fn pool() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 
@@ -487,7 +496,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sqlite_triggers_prevent_update_and_delete() {
+    async fn test_triggers_prevent_update_and_delete() {
         let pool = pool().await;
         let owner = "acct_charlie";
 

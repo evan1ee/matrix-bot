@@ -18,8 +18,8 @@ impl OcrResult {
     }
 }
 
-impl From<crate::services::ocr::OcrScan> for OcrResult {
-    fn from(scan: crate::services::ocr::OcrScan) -> Self {
+impl From<crate::infrastructure::inference::ocr::OcrScan> for OcrResult {
+    fn from(scan: crate::infrastructure::inference::ocr::OcrScan) -> Self {
         Self {
             combined_text: scan.text,
             blocks: scan

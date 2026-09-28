@@ -1,9 +1,8 @@
 use super::resolved_config::ResolvedAiConfig;
-use crate::db::DbPool;
 use crate::utils::html::html_escape;
 
 pub async fn build_system_prompt(
-    pool: &DbPool,
+    services: &crate::application::AppServices,
     resolved_config: &ResolvedAiConfig,
     owner_id: &str,
     room_id: &str,
@@ -12,9 +11,8 @@ pub async fn build_system_prompt(
         return prompt.clone();
     }
 
-    let settings =
-        crate::modules::settings::repository::SettingsRepository::get_or_default(pool, owner_id)
-            .await;
+    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let settings = services.settings.get_or_default(&acct).await;
     let tz = settings.tz();
     let now_utc = chrono::Utc::now();
     let now_local = now_utc.with_timezone(&tz);
@@ -22,17 +20,24 @@ pub async fn build_system_prompt(
     let now_local_str = now_local.format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let now_utc_str = now_utc.to_rfc3339();
 
-    let default_room_id = crate::db::rooms::resolve_user_default_room(pool, owner_id).await;
-    let cached_rooms = crate::db::rooms::get_cached_rooms(pool, owner_id)
-        .await
-        .unwrap_or_default();
+    let rooms = &services.rooms;
+    let default_room_id = rooms.default_room(&acct).await;
+    let cached_rooms = rooms.cached_rooms(&acct).await.unwrap_or_else(|err| {
+        tracing::warn!(owner_id, error = %err, "Prompting without the room list");
+        Vec::new()
+    });
     let room_desc: Vec<_> = cached_rooms
         .iter()
-        .map(|r| {
-            if r.is_direct {
-                format!("'{}' (user direct chat room, id: {})", r.name, r.room_id)
+        .map(|cached| {
+            let r = cached.room();
+            if r.is_direct() {
+                format!(
+                    "'{}' (user direct chat room, id: {})",
+                    r.name(),
+                    r.room_id()
+                )
             } else {
-                format!("'{}' (id: {})", r.name, r.room_id)
+                format!("'{}' (id: {})", r.name(), r.room_id())
             }
         })
         .collect();
@@ -110,7 +115,7 @@ pub fn format_response(
     } else {
         markdown_text
     };
-    let html = crate::modules::webhook::renderer::markdown_to_html(text);
+    let html = crate::domain::webhooks::renderer::markdown_to_html(text);
     let footer = render_bot_footer(model_name, pipeline_feature, tools_executed);
     format!("{}{}", html, footer)
 }

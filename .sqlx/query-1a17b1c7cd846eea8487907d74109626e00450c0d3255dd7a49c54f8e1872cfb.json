@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', $1, 'hook', 'thash', 'pref', '!r:x')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a17b1c7cd846eea8487907d74109626e00450c0d3255dd7a49c54f8e1872cfb"
+}

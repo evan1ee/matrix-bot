@@ -77,11 +77,21 @@ impl AiRepository {
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
-        // The cutoff is computed here rather than in SQL. `strftime` is
-        // SQLite-only, and `updated_at` is a TEXT column in the
-        // `YYYY-MM-DD HH:MM:SS` shape `CAST(CURRENT_TIMESTAMP AS TEXT)`
-        // produces, so a lexicographic comparison against the same shape means
-        // the same thing on both databases.
+        // The cutoff is computed here rather than in SQL, formatted as the
+        // `YYYY-MM-DD HH:MM:SS` prefix of what `updated_at` (a TEXT column
+        // defaulting to `NOW()::text`) actually stores on PostgreSQL --
+        // `YYYY-MM-DD HH:MM:SS.ffffff+TZ` in the session's TimeZone -- so a
+        // lexicographic `>=` comparison against this shorter prefix still
+        // means the same thing as a chronological one. This assumes the
+        // session TimeZone is UTC, matching `chrono::Utc::now()` above; it is
+        // never set explicitly here.
+        //
+        // TODO(postgres-foundation): move this column to `TIMESTAMPTZ` and a
+        // compile-checked `query!` comparison instead of a string-prefix
+        // comparison against a session-TimeZone-dependent text rendering,
+        // once the `ai` feature moves to `query!` (see AGENTS.md's Database &
+        // SQLx conventions for the `query!` migration this repo is mid-way
+        // through).
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
@@ -260,8 +270,9 @@ mod tests {
     use crate::db::Database;
 
     async fn setup_db() -> (Database, String) {
-        let db = Database::connect("sqlite::memory:", 1).await.unwrap();
-        crate::db::schema::run_migrations(&db.pool).await.unwrap();
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let db = Database { pool };
         let account_id =
             crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@tester:mbm.one")
                 .await

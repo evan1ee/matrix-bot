@@ -6,16 +6,19 @@ services:
     image: matrix-bot:latest
     container_name: matrix-bot
     restart: unless-stopped
+    # Compose sends SIGTERM, then SIGKILL after this many seconds. Must exceed
+    # app::SHUTDOWN_GRACE (15 s) or Compose kills the process mid-drain before
+    # the graceful-shutdown bound has a chance to finish on its own.
+    stop_grace_period: 20s
     ports:
       - "${API_PORT:-8080}:8080"
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8080
       - ENVIRONMENT=${ENVIRONMENT:-}
-      # SQLite by default: no second container, and the data lives in the
-      # bot-data volume below. Override to run against PostgreSQL:
-      #   DATABASE_URL=postgres://bot:bot@postgres:5432/matrix_bot docker compose --profile postgres up
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///app/data/bot_data.db?mode=rwc}
+      # PostgreSQL is the only application database. `data/` still holds
+      # matrix-sdk's crypto store.
+      - DATABASE_URL=${DATABASE_URL:-postgres://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD:-bot}@postgres:5432/${POSTGRES_DB:-matrix_bot}}
       - DATABASE_MAX_CONNECTIONS=10
       - RUST_LOG=info,matrix_bot=info
       - MATRIX_HOMESERVER=${MATRIX_HOMESERVER:-}
@@ -51,28 +54,25 @@ services:
       - TTS_DIALECT=${TTS_DIALECT:-openai}
     volumes:
       - bot-data:/app/data
-    # `required: false` so the default SQLite run does not pull in a database
-    # container it has no use for. Needs Compose 2.20+; on older versions the
-    # bot's `restart: unless-stopped` covers it, since a boot against an
-    # unreachable server exits and is retried.
     depends_on:
       postgres:
         condition: service_healthy
-        required: false
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/api/v1/health"]
+      # Liveness, not readiness: a container restart cannot fix a homeserver
+      # outage or a database that has gone away, so the thing that drives
+      # restarts must be "is the process alive" alone. Readiness
+      # (`/health/ready`, database + Matrix sync freshness) is for a load
+      # balancer or orchestrator to route traffic on, not to restart on.
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-  # Only started with `--profile postgres`. The bot defaults to SQLite, so this
-  # stays out of the way unless asked for.
   postgres:
     image: postgres:18
     container_name: matrix-bot-postgres
     restart: unless-stopped
-    profiles: [postgres]
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-bot}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bot}

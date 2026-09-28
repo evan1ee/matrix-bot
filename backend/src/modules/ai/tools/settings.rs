@@ -1,13 +1,11 @@
-use crate::db::DbPool;
 use serde_json::json;
 
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::settings::repository::SettingsRepository;
-use crate::services::llm::ToolDefinition;
+use crate::application::AppServices;
+use crate::domain::settings::{parse_currency, parse_timezone, SettingsError};
+use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &AppServices,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -15,32 +13,37 @@ pub async fn execute_tool(
     match name {
         "get_my_settings" => Some(
             async {
-                let settings = SettingsRepository::get_or_default(pool, owner_id).await;
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let settings = services.settings.get_or_default(&acct).await;
                 serde_json::to_string(&settings).map_err(|e| e.to_string())
             }
             .await,
         ),
 
+        // Validated the same way every other writer is: an LLM-supplied value
+        // is untrusted input, not a source of truth (AGENTS.md, AI/agent
+        // boundaries) — a bad timezone or currency is rejected here, in the
+        // domain, rather than persisted and left to render as UTC forever.
+        // `modify` reads-and-writes in one transaction, so a rejection never
+        // touches the saved row.
         "update_my_settings" => Some(
             async {
-                let mut settings = SettingsRepository::get_or_default(pool, owner_id).await;
-                if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
-                    settings.timezone = tz.to_string();
-                }
-                if let Some(curr) = args.get("currency").and_then(|v| v.as_str()) {
-                    settings.currency = curr.to_uppercase();
-                }
-
-                let saved = SettingsRepository::upsert(pool, owner_id, &settings)
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let saved = services
+                    .settings
+                    .modify(&acct, |settings| {
+                        if let Some(tz) = args.get("timezone").and_then(|v| v.as_str()) {
+                            let parsed =
+                                parse_timezone(tz).ok_or(SettingsError::InvalidTimezone)?;
+                            settings.timezone = parsed.name().to_string();
+                        }
+                        if let Some(curr) = args.get("currency").and_then(|v| v.as_str()) {
+                            settings.currency = parse_currency(curr)?;
+                        }
+                        Ok(())
+                    })
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::SettingsUpdated {
-                        owner_id: owner_id.to_string(),
-                        settings: saved.clone(),
-                    });
-                }
 
                 serde_json::to_string(&saved).map_err(|e| e.to_string())
             }

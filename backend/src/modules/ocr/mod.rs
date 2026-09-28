@@ -15,18 +15,19 @@ pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 ///    gets back detection and recognition results.
 /// 2. If text is extracted, synthesizes a structured semantic prompt with the text and user caption.
 /// 3. Executes an AI turn with all domain tools enabled (add_expense, add_todo, create_reminder).
-/// 4. Returns an HTML reply summarizing the actions taken and persisting to SQLite.
+/// 4. Returns an HTML reply summarizing the actions taken and persisted to the database.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_image_event(
     db: &Database,
+    services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
     owner_id: &str,
     caption: Option<&str>,
     image_bytes: &[u8],
-    ocr: &crate::services::ocr::OcrClient,
-    stage_reporter: Option<&crate::bot::stage::StageReporter>,
+    ocr: &crate::infrastructure::inference::ocr::OcrClient,
+    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
 ) -> String {
     if image_bytes.is_empty() {
         return "⚠️ <b>图片处理失败</b><br/>\
@@ -75,6 +76,7 @@ pub async fn process_image_event(
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
     match crate::modules::ai::handler::run_ai_turn_with_stage(
+        services,
         &db.pool,
         ai,
         broadcaster,
@@ -118,8 +120,8 @@ pub async fn process_image_event(
 /// image could not be decoded) is a genuine per-image failure, and it keeps
 /// its own distinct, actionable message: the user can reasonably retry with
 /// a different image.
-fn ocr_error_message(err: &crate::services::ocr::OcrServiceError) -> String {
-    use crate::services::ocr::OcrServiceError;
+fn ocr_error_message(err: &crate::infrastructure::inference::ocr::OcrServiceError) -> String {
+    use crate::infrastructure::inference::ocr::OcrServiceError;
 
     match err {
         OcrServiceError::NotConfigured => "⚠️ <b>图片处理不可用</b><br/>\
@@ -154,8 +156,8 @@ fn format_ocr_turn_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::inference::ocr::OcrServiceError;
     use crate::modules::ai::handler::AiTurnResult;
-    use crate::services::ocr::OcrServiceError;
 
     /// The regression this guards against: `Unreachable`'s `Display` embeds
     /// the request URL (host + port of the internal inference service), and

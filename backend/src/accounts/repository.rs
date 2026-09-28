@@ -4,13 +4,13 @@ use crate::db::DbPool;
 pub struct AccountRepository;
 
 impl AccountRepository {
-    /// Creates an account, letting SQLite mint the id.
+    /// Creates an account, minting the id from the OS CSPRNG.
     ///
-    /// `randomblob(16)` rather than a Rust-side UUID because no random-number
-    /// crate is a direct dependency of this project and none needs to be: the
-    /// id has to be unguessable, not sortable or parseable, and SQLite already
-    /// ships a CSPRNG. Prefixing with `acct_` keeps it obvious at a glance
-    /// which identity space a stray string in a log belongs to.
+    /// `utils::random::new_account_id()` rather than a database-generated id:
+    /// the id has to be unguessable, not sortable or parseable, and its
+    /// entropy should not depend on which database this is deployed against
+    /// (see `utils/random.rs`). Prefixing with `acct_` keeps it obvious at a
+    /// glance which identity space a stray string in a log belongs to.
     pub async fn create(
         pool: &DbPool,
         display_name: &str,
@@ -48,6 +48,14 @@ impl AccountRepository {
             status
         )?;
         Ok(())
+    }
+
+    pub async fn delete(pool: &DbPool, account_id: &str) -> Result<(), sqlx::Error> {
+        crate::infrastructure::postgres::repositories::accounts::core::delete(
+            pool,
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
     }
 
     pub async fn find(pool: &DbPool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
@@ -125,11 +133,10 @@ impl AccountRepository {
 mod tests {
     use super::*;
     use crate::accounts::STATUS_ACTIVE;
-    use crate::db::schema::run_migrations;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

@@ -2,12 +2,12 @@ use crate::db::DbPool;
 use chrono::{Duration, Utc};
 
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
+use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::todos as todos_repo;
 use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::habits::repository::HabitsRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::repository::PortfolioRepository;
-use crate::modules::todo::repository::TodoRepository;
 
 /// Returns the standard read-only resources exposed by MatrixBot to MCP clients.
 pub fn list_resources() -> Vec<McpResource> {
@@ -53,7 +53,8 @@ pub async fn read_resource(
 ) -> Result<ReadResourceResult, String> {
     match uri {
         "matrixbot://todos/pending" => {
-            let todos = TodoRepository::list_all_user(pool, owner_id, Some(false), 50, 0)
+            let acct = crate::domain::accounts::AccountId::new(owner_id);
+            let todos = todos_repo::list_all_user(pool, &acct, Some(false), 50, 0)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?;
@@ -108,8 +109,9 @@ pub async fn read_resource(
             })
         }
         "matrixbot://habits/today" => {
+            let acct = crate::domain::accounts::AccountId::new(owner_id);
             let today_str = Utc::now().format("%Y-%m-%d").to_string();
-            let habits = HabitsRepository::find_all_with_status(pool, owner_id, &today_str)
+            let habits = habits_repo::find_all_with_status(pool, &acct, &today_str)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&habits).map_err(|e| e.to_string())?;

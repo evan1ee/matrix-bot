@@ -14,83 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-/// What happened. Stored verbatim, so a new variant needs no migration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SecurityEventKind {
-    SignedIn,
-    PasskeyAdded,
-    PasskeyRemoved,
-    PasskeyRenamed,
-    MatrixLinked,
-    MatrixUnlinked,
-    AccountsMerged,
-    RecoveryCodesIssued,
-    RecoveryCodeUsed,
-    RecoveryRequested,
-    RecoveryCancelled,
-    RecoveryCompleted,
-    SessionsRevoked,
-    FinancialDataExported,
-}
-
-impl SecurityEventKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::SignedIn => "signed_in",
-            Self::PasskeyAdded => "passkey_added",
-            Self::PasskeyRemoved => "passkey_removed",
-            Self::PasskeyRenamed => "passkey_renamed",
-            Self::MatrixLinked => "matrix_linked",
-            Self::MatrixUnlinked => "matrix_unlinked",
-            Self::AccountsMerged => "accounts_merged",
-            Self::RecoveryCodesIssued => "recovery_codes_issued",
-            Self::RecoveryCodeUsed => "recovery_code_used",
-            Self::RecoveryRequested => "recovery_requested",
-            Self::RecoveryCancelled => "recovery_cancelled",
-            Self::RecoveryCompleted => "recovery_completed",
-            Self::SessionsRevoked => "sessions_revoked",
-            Self::FinancialDataExported => "financial_data_exported",
-        }
-    }
-
-    /// Whether this is worth interrupting someone's day over.
-    ///
-    /// Signing in happens constantly and DMing about it would train the user to
-    /// ignore the channel — which is exactly the channel a recovery warning has
-    /// to arrive on and be read. Everything that changes *how the account can
-    /// be reached* is notified.
-    pub fn warrants_a_dm(&self) -> bool {
-        !matches!(self, Self::SignedIn)
-    }
-
-    /// One line, addressed to the person whose account it is.
-    pub fn message(&self, detail: Option<&str>) -> String {
-        let suffix = detail.map(|d| format!(" ({d})")).unwrap_or_default();
-        match self {
-            Self::SignedIn => format!("Signed in{suffix}."),
-            Self::PasskeyAdded => format!("A passkey was added to your account{suffix}."),
-            Self::PasskeyRemoved => format!("A passkey was removed from your account{suffix}."),
-            Self::PasskeyRenamed => format!("A passkey was renamed{suffix}."),
-            Self::MatrixLinked => format!("A Matrix account was linked{suffix}."),
-            Self::MatrixUnlinked => format!("A Matrix account was unlinked{suffix}."),
-            Self::AccountsMerged => format!("Existing data was merged into your account{suffix}."),
-            Self::RecoveryCodesIssued => {
-                format!("New recovery codes were generated{suffix}. Your old codes no longer work.")
-            }
-            Self::RecoveryCodeUsed => {
-                format!("A recovery code was used to sign in{suffix}.")
-            }
-            Self::RecoveryRequested => format!(
-                "Account recovery was requested{suffix}. It will not take effect for 24 hours — \
-                 if this was not you, cancel it from any signed-in device now."
-            ),
-            Self::RecoveryCancelled => format!("Account recovery was cancelled{suffix}."),
-            Self::RecoveryCompleted => format!("Account recovery completed{suffix}."),
-            Self::SessionsRevoked => format!("Other sessions were signed out{suffix}."),
-            Self::FinancialDataExported => format!("Financial data was exported{suffix}."),
-        }
-    }
-}
+pub use crate::domain::accounts::SecurityEventKind;
 
 #[derive(Debug, Clone, Serialize, ToSchema, sqlx::FromRow)]
 pub struct SecurityEvent {
@@ -149,11 +73,10 @@ impl SecurityEventRepository {
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
-    use crate::db::schema::run_migrations;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
-        run_migrations(&pool).await.unwrap();
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
     }
 

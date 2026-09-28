@@ -47,6 +47,7 @@ impl BotModule for CoreModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
+        _services: &crate::application::AppServices,
         _db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
@@ -92,7 +93,7 @@ mod tests {
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: "@user:1".to_string(),
+            owner_id: crate::domain::accounts::AccountId::new("@user:1"),
             sender_name: "Alice".to_string(),
             command: "hello".to_string(),
             raw_args: "".to_string(),
@@ -107,7 +108,15 @@ mod tests {
             pool: crate::db::pool::test_pool().await,
         };
 
-        let res = core.handle_command(&ctx, &dummy_db, None).await.unwrap();
+        let res = core
+            .handle_command(
+                &ctx,
+                &crate::application::AppServices::new(&dummy_db.pool),
+                &dummy_db,
+                None,
+            )
+            .await
+            .unwrap();
         assert!(res.contains("Hello, Alice!"));
 
         let ctx_ping = CommandContext {
@@ -115,7 +124,12 @@ mod tests {
             ..ctx
         };
         let res_ping = core
-            .handle_command(&ctx_ping, &dummy_db, None)
+            .handle_command(
+                &ctx_ping,
+                &crate::application::AppServices::new(&dummy_db.pool),
+                &dummy_db,
+                None,
+            )
             .await
             .unwrap();
         assert!(res_ping.contains("Pong!"));

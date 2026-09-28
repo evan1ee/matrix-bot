@@ -15,6 +15,7 @@ use super::webhooks;
 use crate::events::EventBroadcaster;
 
 pub async fn execute(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -50,46 +51,82 @@ pub async fn execute(
 
     // 1. Try portfolio tools
     if let Some(res) =
-        portfolio::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
+        portfolio::execute_tool(services, pool, broadcaster, owner_id, name, &parsed_args).await
     {
         return res;
     }
 
     // 2. Try finance tools
-    if let Some(res) =
-        finance::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = finance::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 3. Try reminder tools
-    if let Some(res) =
-        reminder::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = reminder::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 4. Try todo tools
-    if let Some(res) =
-        todo::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = todo::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 5. Try recurring bills tools
-    if let Some(res) =
-        bills::execute_tool(pool, broadcaster, owner_id, room_id, name, &parsed_args).await
+    if let Some(res) = bills::execute_tool(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        room_id,
+        name,
+        &parsed_args,
+    )
+    .await
     {
         return res;
     }
 
     // 6. Try habits tools
-    if let Some(res) = habits::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+    if let Some(res) =
+        habits::execute_tool(services, pool, broadcaster, owner_id, name, &parsed_args).await
+    {
         return res;
     }
 
     // 7. Try life, daily log, retrospective, and footprint tools
-    if let Some(res) = life::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await {
+    if let Some(res) =
+        life::execute_tool(services, pool, broadcaster, owner_id, name, &parsed_args).await
+    {
         return res;
     }
 
@@ -101,13 +138,12 @@ pub async fn execute(
     }
 
     // 9. Try webhook tools
-    if let Some(res) = webhooks::execute_tool(pool, owner_id, name, &parsed_args).await {
+    if let Some(res) = webhooks::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 
     // 10. Try settings tools
-    if let Some(res) = settings::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
-    {
+    if let Some(res) = settings::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 

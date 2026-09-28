@@ -49,13 +49,29 @@ pub fn resolve_registration_policy(
     (secret, open)
 }
 
-/// The database URL, with the default every entry point shares.
+/// The application database is PostgreSQL only; refuse anything else at boot
+/// rather than failing on the first query.
+pub fn validate_database_url(url: &str) -> anyhow::Result<()> {
+    if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "DATABASE_URL must be a PostgreSQL URL (postgres://user:pass@host:5432/db); got {:?}",
+            url.split('@').next_back().unwrap_or(url)
+        )
+    }
+}
+
+/// The database URL, required and validated.
 ///
 /// MCP mode does not build a full `Config` — it needs no Matrix credentials —
-/// but it must not carry its own copy of this default either, or the two
+/// but it must not carry its own copy of this validation either, or the two
 /// silently diverge.
-pub fn database_url_from_env() -> String {
-    env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data/bot_data.db?mode=rwc".to_string())
+pub fn database_url_from_env() -> Result<String> {
+    let database_url = env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL is required (a postgres:// URL)"))?;
+    validate_database_url(&database_url)?;
+    Ok(database_url)
 }
 
 /// AI provider settings that come from the environment.
@@ -191,7 +207,7 @@ pub struct Config {
     /// for ElevenLabs.
     pub tts_voice: String,
     /// How requests are shaped for the provider at `tts_base_url`.
-    pub tts_dialect: crate::services::tts::TtsDialect,
+    pub tts_dialect: crate::infrastructure::inference::tts::TtsDialect,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -203,9 +219,16 @@ pub struct Config {
 }
 
 impl Config {
+    /// Builds the process configuration from already-loaded environment
+    /// variables.
+    ///
+    /// This never loads a `.env` file itself — `main.rs` is the only place
+    /// that does, and only from the current directory (`load_dotenv_from`),
+    /// never dotenvy's own upward parent-directory search. An earlier version
+    /// called dotenvy's parent-searching `dotenv()` function here too, which
+    /// could silently pick up a different checkout's `.env` (e.g. the main
+    /// checkout's production credentials, when run from a worktree under it).
     pub fn from_env() -> Result<Self> {
-        dotenvy::dotenv().ok();
-
         let homeserver =
             env::var("MATRIX_HOMESERVER").unwrap_or_else(|_| "https://matrix.org".to_string());
 
@@ -224,7 +247,7 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let database_url = database_url_from_env();
+        let database_url = database_url_from_env()?;
 
         let api_host = env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
@@ -318,9 +341,10 @@ impl Config {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string());
-        let tts_dialect =
-            crate::services::tts::TtsDialect::parse(&env::var("TTS_DIALECT").unwrap_or_default())
-                .map_err(|e| anyhow::anyhow!(e))?;
+        let tts_dialect = crate::infrastructure::inference::tts::TtsDialect::parse(
+            &env::var("TTS_DIALECT").unwrap_or_default(),
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
 
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -363,8 +387,8 @@ impl Config {
     }
 
     /// The text-to-speech client for this deployment.
-    pub fn tts_client(&self) -> crate::services::tts::TtsClient {
-        crate::services::tts::TtsClient::new(
+    pub fn tts_client(&self) -> crate::infrastructure::inference::tts::TtsClient {
+        crate::infrastructure::inference::tts::TtsClient::new(
             self.tts_base_url.clone(),
             self.tts_api_key.clone(),
             self.tts_model.clone(),
@@ -429,7 +453,7 @@ mod tests {
             password: "secretpassword".to_string(),
             recovery_key: None,
             verification_allowlist: Vec::new(),
-            database_url: "sqlite::memory:".to_string(),
+            database_url: "postgres://test@localhost/test".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
@@ -451,7 +475,7 @@ mod tests {
             tts_api_key: None,
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
-            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
+            tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };
@@ -475,7 +499,7 @@ mod tests {
             password: "secretpassword".to_string(),
             recovery_key: None,
             verification_allowlist: Vec::new(),
-            database_url: "sqlite::memory:".to_string(),
+            database_url: "postgres://test@localhost/test".to_string(),
             api_host: "127.0.0.1".to_string(),
             api_port: 8080,
             registration_secret: None,
@@ -497,7 +521,7 @@ mod tests {
             tts_api_key: None,
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
-            tts_dialect: crate::services::tts::TtsDialect::OpenAi,
+            tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         };
@@ -607,9 +631,10 @@ mod tests {
             "search.rs",
             // Read only inside #[ignore]d live tests.
             "self_verify.rs",
-            "backfill.rs",
             // PG_TEST_URL, in the #[ignore]d live PostgreSQL connection test.
             "pool.rs",
+            // MIGRATE_TEST_DATABASE_URL, in the #[ignore]d production rehearsal test.
+            "catalog.rs",
         ];
 
         fn walk(dir: &std::path::Path, offenders: &mut Vec<String>) {
@@ -650,5 +675,43 @@ mod tests {
             offenders.is_empty(),
             "only config.rs may read the environment; found: {offenders:#?}"
         );
+    }
+
+    /// `Config::from_env` must never load a `.env` file itself: `main.rs` is
+    /// the sole loader, and only from the current directory. Flipping the
+    /// process's current directory to prove `Config::from_env` ignores a
+    /// parent `.env` would be unsound here — the test suite runs in parallel
+    /// and a global CWD mutation would race every other test — so this
+    /// asserts the stronger, race-free property directly from the source:
+    /// `from_env` performs no `.env` loading at all by construction, which
+    /// makes "does it search parent directories" moot.
+    #[test]
+    fn test_config_from_env_never_loads_dotenv() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/config.rs");
+        let source = std::fs::read_to_string(&path).expect("config.rs must be readable");
+        // Built at runtime, not as one string literal: the literal would itself
+        // match a repo-wide `grep` for "the parent-searching dotenvy call",
+        // which this project uses as its own drift check for this fix.
+        let parent_searching_call = format!("{}::{}()", "dotenvy", "dotenv");
+        assert!(
+            !source.contains(&parent_searching_call),
+            "Config::from_env (or anything else in config.rs) must not call \
+             dotenvy's parent-searching dotenv function -- it walks up parent \
+             directories looking for a .env file; only main.rs may load one, \
+             and only from the current directory via load_dotenv_from"
+        );
+    }
+
+    #[test]
+    fn test_database_url_must_be_postgres() {
+        assert!(validate_database_url("postgres://bot:bot@localhost/matrix_bot").is_ok());
+        assert!(validate_database_url("postgresql://bot@db/matrix_bot").is_ok());
+
+        let err = validate_database_url("sqlite://data/bot_data.db?mode=rwc").unwrap_err();
+        assert!(
+            err.to_string().contains("DATABASE_URL"),
+            "error must name the variable: {err}"
+        );
+        assert!(validate_database_url("").is_err());
     }
 }

@@ -20,6 +20,7 @@ pub fn get_mcp_tools() -> Vec<McpTool> {
 
 /// Executes an MCP tool call by delegating to the unified AI tool executor.
 pub async fn call_mcp_tool(
+    services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
@@ -36,7 +37,17 @@ pub async fn call_mcp_tool(
         .unwrap_or_else(|| "{}".to_string());
 
     // Use "mcp" as the synthetic room identifier so actions are tagged with an MCP origin
-    match executor::execute(pool, broadcaster, owner_id, "mcp", &params.name, &args_str).await {
+    match executor::execute(
+        services,
+        pool,
+        broadcaster,
+        owner_id,
+        "mcp",
+        &params.name,
+        &args_str,
+    )
+    .await
+    {
         Ok(output) => CallToolResult {
             content: vec![ToolContent::Text { text: output }],
             is_error: Some(false),
