@@ -6,10 +6,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::models::{normalise_symbol, Holding, PortfolioCurrencySummary};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::portfolio::service::{self, PortfolioError, TradeRequest};
@@ -153,7 +153,7 @@ pub async fn buy_holding(
 /// rest of the API uses, without pulling `format_amount` into a public error
 /// path's happy-path imports.
 pub(crate) fn format_for_error(minor: i64, exponent: u32) -> String {
-    crate::modules::finance::money::format_amount(minor, exponent)
+    crate::domain::finance::money::format_amount(minor, exponent)
 }
 
 #[utoipa::path(
@@ -851,18 +851,21 @@ mod tests {
         assert_eq!(listed[0].balance_minor, 100000);
 
         // Verify deposit posted an expense transaction to the finance ledger
-        let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &state.db.pool,
-            &alice.owner_id(),
-            None,
-            10,
-            0,
-        )
-        .await
-        .unwrap();
+        let txs = state
+            .services
+            .finance
+            .list_transactions(
+                &alice.account_id,
+                &crate::domain::finance::ListTransactionsFilter {
+                    limit: Some(10),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].amount_minor, 100000);
-        assert_eq!(txs[0].direction, "expense");
+        assert_eq!(txs[0].direction, crate::domain::finance::Direction::Expense);
         assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
         assert_eq!(txs[0].category_name.as_deref(), Some("Investments"));
     }
@@ -889,18 +892,21 @@ mod tests {
         assert_eq!(cash.balance_minor, 60000);
 
         // Verify deposit (expense) and withdraw (income) transactions in the finance ledger
-        let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &state.db.pool,
-            &alice.owner_id(),
-            None,
-            10,
-            0,
-        )
-        .await
-        .unwrap();
+        let txs = state
+            .services
+            .finance
+            .list_transactions(
+                &alice.account_id,
+                &crate::domain::finance::ListTransactionsFilter {
+                    limit: Some(10),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(txs.len(), 2);
         assert_eq!(txs[0].amount_minor, 40000);
-        assert_eq!(txs[0].direction, "income");
+        assert_eq!(txs[0].direction, crate::domain::finance::Direction::Income);
         assert_eq!(txs[0].source_kind.as_deref(), Some("portfolio_cash"));
         assert_eq!(txs[0].category_name.as_deref(), Some("Investments"));
     }

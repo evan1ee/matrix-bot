@@ -2,8 +2,8 @@ use crate::application::settings::SettingsService;
 use crate::db::DbPool;
 use tracing::error;
 
+use crate::domain::finance::money::{format_amount, parse_amount};
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::finance::money::{format_amount, parse_amount};
 use crate::modules::portfolio::cash::handle_cash;
 use crate::modules::portfolio::models::normalise_symbol;
 use crate::modules::portfolio::repository::PortfolioRepository;

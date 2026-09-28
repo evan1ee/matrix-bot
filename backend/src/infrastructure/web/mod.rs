@@ -1,3 +1,4 @@
+pub mod fx;
 pub mod metadata;
 pub mod ssrf;
 

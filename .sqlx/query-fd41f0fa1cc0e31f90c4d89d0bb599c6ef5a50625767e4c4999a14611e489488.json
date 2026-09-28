@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT currency, currency_exponent, balance_minor\n        FROM portfolio_cash_balances\n        WHERE owner_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_cash_balances",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_cash_balances",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "balance_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_cash_balances",
+            "name": "balance_minor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd41f0fa1cc0e31f90c4d89d0bb599c6ef5a50625767e4c4999a14611e489488"
+}

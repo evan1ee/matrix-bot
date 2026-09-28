@@ -65,7 +65,7 @@ pub async fn execute_tool(
                 // Recomputed here only to word the insufficient-funds message
                 // below — by the time it is reached, `service::withdraw_cash`
                 // has already accepted this currency as well-formed.
-                let currency = crate::modules::finance::money::normalise_currency(raw_currency)
+                let currency = crate::domain::finance::money::normalise_currency(raw_currency)
                     .map_err(|e| e.to_string())?;
 
                 let outcome = service::withdraw_cash(

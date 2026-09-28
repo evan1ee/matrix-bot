@@ -48,7 +48,7 @@ impl ToolRegistry {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::modules::finance::repository::FinanceRepository;
+    use crate::infrastructure::postgres::repositories::finance as finance_repo;
 
     async fn setup_db() -> (Database, String) {
         let pool = crate::db::pool::test_pool().await;
@@ -424,9 +424,16 @@ mod tests {
         assert!(res.contains("CNY"));
 
         // Verify transaction was persisted
-        let txs = FinanceRepository::list(&db.pool, &owner, None, 10, 0)
-            .await
-            .unwrap();
+        let txs = finance_repo::list(
+            &db.pool,
+            &crate::domain::accounts::AccountId::new(&owner),
+            &crate::domain::finance::ListTransactionsFilter {
+                limit: Some(10),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].amount_minor, 8770);
         assert_eq!(txs[0].currency, "CNY");

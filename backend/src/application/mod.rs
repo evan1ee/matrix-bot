@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod recurring_bills;
@@ -19,6 +20,7 @@ use sqlx::PgPool;
 
 use self::accounts::AccountService;
 use self::bookmarks::BookmarkService;
+use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
 use self::recurring_bills::RecurringBillsService;
@@ -78,6 +80,7 @@ impl From<&'static str> for AppError {
 pub struct AppServices {
     pub accounts: AccountService,
     pub bookmarks: BookmarkService,
+    pub finance: FinanceService,
     pub footprints: FootprintService,
     pub habits: HabitService,
     pub recurring_bills: RecurringBillsService,
@@ -106,18 +109,24 @@ impl AppServices {
     pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone(), events.clone());
         let bookmarks = BookmarkService::new(pool.clone(), events.clone());
+        let finance = FinanceService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool.clone(), events.clone());
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         let reminders = ReminderService::new(pool.clone(), events.clone());
         let todos = TodoService::new(pool.clone(), events.clone(), reminders.clone());
-        let recurring_bills =
-            RecurringBillsService::new(pool.clone(), events.clone(), reminders.clone());
+        let recurring_bills = RecurringBillsService::new(
+            pool.clone(),
+            events.clone(),
+            reminders.clone(),
+            finance.clone(),
+        );
         let webhooks = WebhookService::new(pool.clone(), events.clone());
         Self {
             accounts,
             bookmarks,
+            finance,
             footprints,
             habits,
             recurring_bills,

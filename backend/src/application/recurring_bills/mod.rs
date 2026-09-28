@@ -3,9 +3,11 @@
 use chrono::Utc;
 use sqlx::PgPool;
 
+use crate::application::finance::FinanceService;
 use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::recurring_bills::{
     advance_due_date, reminder_room, wanted_trigger, NewRecurringBill, RecurringBill,
     RecurringBillPatch,
@@ -13,22 +15,27 @@ use crate::domain::recurring_bills::{
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::postgres::repositories;
-use crate::modules::finance::models::TransactionSource;
-use crate::modules::finance::service as finance_service;
 
 #[derive(Clone)]
 pub struct RecurringBillsService {
     pool: PgPool,
     events: EventBroadcaster,
     reminders: ReminderService,
+    finance: FinanceService,
 }
 
 impl RecurringBillsService {
-    pub fn new(pool: PgPool, events: EventBroadcaster, reminders: ReminderService) -> Self {
+    pub fn new(
+        pool: PgPool,
+        events: EventBroadcaster,
+        reminders: ReminderService,
+        finance: FinanceService,
+    ) -> Self {
         Self {
             pool,
             events,
             reminders,
+            finance,
         }
     }
 
@@ -113,14 +120,7 @@ impl RecurringBillsService {
         &self,
         owner_id: &AccountId,
         id: i64,
-    ) -> Result<
-        (
-            RecurringBill,
-            crate::modules::finance::models::Transaction,
-            SyncOutcome,
-        ),
-        AppError,
-    > {
+    ) -> Result<(RecurringBill, Transaction, SyncOutcome), AppError> {
         let bill = self.find_owned(owner_id, id).await?.ok_or_else(|| {
             AppError::NotFound("Recurring bill not found or access denied".to_string())
         })?;
@@ -153,31 +153,25 @@ impl RecurringBillsService {
         let sync_outcome = self.sync_reminder_for_bill(&updated).await?;
 
         let note = format!("Recurring bill: {}", bill.name);
-        let tx = finance_service::create_transaction(
-            &self.pool,
-            Some(&self.events),
-            bill.owner_id.as_str(),
-            finance_service::NewTransaction {
-                direction: "expense",
-                amount_minor: bill.amount_minor,
-                currency: &bill.currency,
-                currency_exponent: bill.currency_exponent,
-                category: Some(&bill.category),
-                note: Some(&note),
-                room_id: &bill.room_id,
-                sender_name: &bill.sender_name,
-                occurred_at: Utc::now(),
-                source: Some((TransactionSource::RecurringBill.as_str(), bill.id)),
-                create_missing_category: true,
-            },
-        )
-        .await
-        .map_err(|e| {
-            AppError::Database(sqlx::Error::Protocol(format!(
-                "Failed to record bill transaction: {}",
-                e
-            )))
-        })?;
+        let tx = self
+            .finance
+            .create_transaction(
+                &bill.owner_id,
+                NewTransaction {
+                    direction: Direction::Expense,
+                    amount_minor: bill.amount_minor,
+                    currency: &bill.currency,
+                    currency_exponent: bill.currency_exponent,
+                    category: Some(&bill.category),
+                    note: Some(&note),
+                    room_id: &bill.room_id,
+                    sender_name: &bill.sender_name,
+                    occurred_at: Utc::now(),
+                    source: Some((TransactionSource::RecurringBill.as_str(), bill.id)),
+                    create_missing_category: true,
+                },
+            )
+            .await?;
 
         self.broadcast_updated(&updated);
 

@@ -4,10 +4,10 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
-    footprints, habits, life, life_activity, mcp, ocr, openapi, portfolio, portfolio_alerts,
-    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, todos, voice, webhooks,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
+    finance_net_worth, footprints, habits, life, life_activity, mcp, ocr, openapi, portfolio,
+    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
+    reminders, rooms, settings, sse, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -195,9 +195,12 @@ fn routes_finance() -> Router<auth::ApiState> {
         )
         .route(
             "/finance/categories",
-            get(finance::list_categories).post(finance::create_category),
+            get(finance_categories::list_categories).post(finance_categories::create_category),
         )
-        .route("/finance/categories/:id", delete(finance::delete_category))
+        .route(
+            "/finance/categories/:id",
+            delete(finance_categories::delete_category),
+        )
         .route(
             "/recurring-bills",
             get(recurring_bills::list_bills).post(recurring_bills::create_bill),

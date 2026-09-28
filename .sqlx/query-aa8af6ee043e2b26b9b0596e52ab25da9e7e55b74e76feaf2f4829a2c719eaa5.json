@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE finance_shares\n        SET is_enabled = $2, updated_at = NOW()\n        WHERE owner_id = $1\n        RETURNING owner_id, token, is_enabled, title, created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "is_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "is_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "finance_shares",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "aa8af6ee043e2b26b9b0596e52ab25da9e7e55b74e76feaf2f4829a2c719eaa5"
+}

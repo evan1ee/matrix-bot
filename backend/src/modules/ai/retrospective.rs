@@ -6,12 +6,12 @@ use utoipa::ToSchema;
 
 use crate::application::settings::SettingsService;
 use crate::domain::accounts::AccountId;
+use crate::domain::finance::money::format_amount;
+use crate::infrastructure::postgres::repositories::finance as finance_repo;
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
 use crate::infrastructure::postgres::repositories::reminders as reminders_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
-use crate::modules::finance::money::format_amount;
-use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::utils::html::html_escape;
 
@@ -89,7 +89,7 @@ pub async fn generate_weekly_retrospective(
                 .and_utc()
         });
 
-    let summaries = FinanceRepository::summary(pool, owner_id, start_dt, now).await?;
+    let summaries = finance_repo::summary(pool, &AccountId::new(owner_id), start_dt, now).await?;
 
     let mut spends_by_currency: Vec<CurrencySpendSummary> = summaries
         .iter()
@@ -427,7 +427,6 @@ mod tests {
     use crate::domain::recurring_bills::NewRecurringBill;
     use crate::domain::settings::UserSettings;
     use crate::events::EventBroadcaster;
-    use crate::modules::finance::repository::FinanceRepository;
 
     async fn test_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -454,48 +453,55 @@ mod tests {
             .await
             .unwrap();
 
+        let owner_acct = AccountId::new(owner);
         // Add expense: Shake Shack lunch: 16.50 USD (1650 minor)
-        let cat_food = FinanceRepository::create_category(&pool, owner, "Food")
+        let cat_food = finance_repo::create_category(&pool, &owner_acct, "Food")
             .await
             .unwrap()
             .unwrap();
-        FinanceRepository::create_transaction(
+        finance_repo::create_transaction(
             &pool,
-            "room1",
-            owner,
-            "User",
-            "expense",
-            1650,
-            "USD",
-            2,
+            &owner_acct,
+            &crate::domain::finance::NewTransaction {
+                direction: crate::domain::finance::Direction::Expense,
+                amount_minor: 1650,
+                currency: "USD",
+                currency_exponent: 2,
+                category: Some("Food"),
+                note: Some("Lunch at Shake Shack"),
+                room_id: "room1",
+                sender_name: "User",
+                occurred_at: Utc::now(),
+                source: None,
+                create_missing_category: false,
+            },
             Some(cat_food.id),
-            Some("Lunch at Shake Shack"),
-            None,
-            None,
-            Utc::now(),
         )
         .await
         .unwrap();
 
         // Add expense: Groceries: 45.00 CNY (4500 minor)
-        let cat_groceries = FinanceRepository::create_category(&pool, owner, "Groceries")
+        let cat_groceries = finance_repo::create_category(&pool, &owner_acct, "Groceries")
             .await
             .unwrap()
             .unwrap();
-        FinanceRepository::create_transaction(
+        finance_repo::create_transaction(
             &pool,
-            "room1",
-            owner,
-            "User",
-            "expense",
-            4500,
-            "CNY",
-            2,
+            &owner_acct,
+            &crate::domain::finance::NewTransaction {
+                direction: crate::domain::finance::Direction::Expense,
+                amount_minor: 4500,
+                currency: "CNY",
+                currency_exponent: 2,
+                category: Some("Groceries"),
+                note: Some("groceries"),
+                room_id: "room1",
+                sender_name: "User",
+                occurred_at: Utc::now(),
+                source: None,
+                create_missing_category: false,
+            },
             Some(cat_groceries.id),
-            Some("groceries"),
-            None,
-            None,
-            Utc::now(),
         )
         .await
         .unwrap();

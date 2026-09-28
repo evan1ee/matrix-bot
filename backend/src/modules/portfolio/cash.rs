@@ -10,12 +10,11 @@ use crate::db::DbPool;
 use tracing::error;
 
 use super::cash_repo;
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::finance::models::{Transaction, TransactionSource};
-use crate::modules::finance::money::{
+use crate::domain::finance::money::{
     exponent_for, format_amount, normalise_currency, parse_amount,
 };
-use crate::modules::finance::service as finance_service;
+use crate::domain::finance::{Transaction, TransactionSource};
+use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::portfolio::models::CashBalance;
 use crate::modules::portfolio::repository::WithdrawOutcome;
 use crate::modules::portfolio::service;
@@ -47,36 +46,41 @@ pub async fn record_portfolio_cash_transaction(
     executed_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Option<Transaction> {
     let (direction, note) = match action {
-        "deposit" => ("expense", "Portfolio cash deposit"),
-        "withdraw" => ("income", "Portfolio cash withdrawal"),
+        "deposit" => (
+            crate::domain::finance::Direction::Expense,
+            "Portfolio cash deposit",
+        ),
+        "withdraw" => (
+            crate::domain::finance::Direction::Income,
+            "Portfolio cash withdrawal",
+        ),
         _ => return None,
     };
 
-    finance_service::create_transaction(
-        pool,
-        broadcaster,
-        owner_id,
-        finance_service::NewTransaction {
-            direction,
-            amount_minor,
-            currency,
-            currency_exponent: exponent,
-            // The category is inferred from the action, not typed by a user,
-            // so an unknown name is created rather than refused — matching
-            // what `find_or_create_category` did here before this call was
-            // routed through the shared service.
-            category: Some("Investments"),
-            note: Some(note),
-            room_id: "web",
-            sender_name: "Portfolio",
-            occurred_at: executed_at.unwrap_or_else(chrono::Utc::now),
-            source: Some((TransactionSource::PortfolioCash.as_str(), cash_id)),
-            create_missing_category: true,
-        },
-    )
-    .await
-    .map_err(|err| error!("Failed to record portfolio cash transaction: {:?}", err))
-    .ok()
+    let finance = crate::application::finance::FinanceService::new(
+        pool.clone(),
+        broadcaster.cloned().unwrap_or_default(),
+    );
+    finance
+        .create_transaction(
+            &crate::domain::accounts::AccountId::new(owner_id),
+            crate::domain::finance::NewTransaction {
+                direction,
+                amount_minor,
+                currency,
+                currency_exponent: exponent,
+                category: Some("Investments"),
+                note: Some(note),
+                room_id: "web",
+                sender_name: "Portfolio",
+                occurred_at: executed_at.unwrap_or_else(chrono::Utc::now),
+                source: Some((TransactionSource::PortfolioCash.as_str(), cash_id)),
+                create_missing_category: true,
+            },
+        )
+        .await
+        .map_err(|err| error!("Failed to record portfolio cash transaction: {:?}", err))
+        .ok()
 }
 
 /// Parses `<amount> [CUR]` for a deposit/withdraw — the same optional,

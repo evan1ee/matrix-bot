@@ -10,7 +10,6 @@ use crate::events::EventBroadcaster;
 pub mod ai;
 pub mod briefing;
 pub mod core;
-pub mod finance;
 pub mod journal;
 pub mod life;
 pub mod mcp;
@@ -366,11 +365,11 @@ mod tests {
     /// `bot/mod.rs` and asserts each entry point actually comes back.
     #[tokio::test]
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
+        use crate::interface::chat::finance::FinanceModule;
         use crate::interface::chat::reminders::ReminderModule;
         use crate::interface::chat::settings::SettingsModule;
         use crate::interface::chat::todos::TodoModule;
         use crate::modules::core::CoreModule;
-        use crate::modules::finance::FinanceModule;
         use crate::modules::portfolio::PortfolioModule;
         use crate::modules::tts::TtsModule;
 

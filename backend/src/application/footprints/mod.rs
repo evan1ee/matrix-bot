@@ -8,13 +8,13 @@ use sqlx::PgPool;
 use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount, MoneyError};
 use crate::domain::footprints::{
     calculate_stay_duration, CreateFootprint, Footprint, FootprintsSummary, UpdateFootprint,
     MAX_NOTE_LEN, MAX_TITLE_LEN,
 };
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::postgres::repositories;
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount, MoneyError};
 
 #[derive(Debug, Clone)]
 pub struct CreateFootprintInput {

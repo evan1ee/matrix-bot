@@ -619,18 +619,21 @@ mod tests {
         assert_eq!(paid.next_due_at, "2026-10-01 00:00:00");
 
         // Verify bill payment automatically posted an expense transaction to the finance ledger
-        let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &state.db.pool,
-            &alice.owner_id(),
-            None,
-            10,
-            0,
-        )
-        .await
-        .unwrap();
+        let txs = state
+            .services
+            .finance
+            .list_transactions(
+                &alice.account_id,
+                &crate::domain::finance::ListTransactionsFilter {
+                    limit: Some(10),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].amount_minor, 999);
-        assert_eq!(txs[0].direction, "expense");
+        assert_eq!(txs[0].direction, crate::domain::finance::Direction::Expense);
         assert_eq!(txs[0].source_kind.as_deref(), Some("recurring_bill"));
         assert_eq!(txs[0].source_id, Some(bill.id));
         assert_eq!(txs[0].category_name.as_deref(), Some("subscription"));

@@ -24,8 +24,8 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 
+use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::modules::portfolio::cash::cash_event;
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::models::{

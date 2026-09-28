@@ -3,10 +3,10 @@
 use crate::db::DbPool;
 use tracing::error;
 
-use crate::events::EventBroadcaster;
-use crate::modules::finance::money::{
+use crate::domain::finance::money::{
     exponent_for, format_amount, looks_like_currency, normalise_currency, parse_amount,
 };
+use crate::events::EventBroadcaster;
 use crate::modules::portfolio::models::{normalise_symbol, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
 use crate::modules::portfolio::service::{self, PortfolioError, TradeRequest};

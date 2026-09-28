@@ -3,6 +3,13 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::error::ApiErrorResponse;
+use crate::interface::http::finance::{CategoryTotal, CurrencySummary, Direction, Transaction};
+use crate::interface::http::finance_analytics::{
+    ExpenseCategorySlice, FinanceAnalyticsReport, FinanceShare, MonthlyCashflowBucket,
+    PublicFinanceReport, PublicTransaction,
+};
+use crate::interface::http::finance_categories::Category;
+use crate::interface::http::finance_net_worth::{CurrencyNetWorthBreakdown, NetWorthResponse};
 use crate::interface::http::footprints::{
     CreateFootprintRequest, Footprint, FootprintCurrencySpend, FootprintsSummary,
     UpdateFootprintRequest,
@@ -18,13 +25,10 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
-    footprints, habits, health, life, life_activity, mcp, ocr, portfolio, portfolio_alerts,
-    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, todos, voice, webhooks, webhooks_telegram,
-};
-use crate::modules::finance::models::{
-    Category, CategoryTotal, CurrencySummary, Direction, Transaction,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
+    finance_net_worth, footprints, habits, health, life, life_activity, mcp, ocr, portfolio,
+    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
+    reminders, rooms, settings, sse, todos, voice, webhooks, webhooks_telegram,
 };
 use crate::modules::life::activity::{ActivityEvent, ActivityStats, DayActivityResponse};
 use crate::modules::life::models::{
@@ -85,9 +89,9 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
         finance::delete_transaction,
         finance::summary,
         finance_net_worth::get_net_worth,
-        finance::list_categories,
-        finance::create_category,
-        finance::delete_category,
+        finance_categories::list_categories,
+        finance_categories::create_category,
+        finance_categories::delete_category,
         finance_analytics::get_analytics,
         finance_analytics::get_share,
         finance_analytics::upsert_share,
@@ -235,14 +239,14 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
-            crate::modules::finance::net_worth::NetWorthResponse,
-            crate::modules::finance::net_worth::CurrencyNetWorthBreakdown,
-            crate::modules::finance::analytics::MonthlyCashflowBucket,
-            crate::modules::finance::analytics::ExpenseCategorySlice,
-            crate::modules::finance::analytics::FinanceAnalyticsReport,
-            crate::modules::finance::analytics::FinanceShare,
-            crate::modules::finance::analytics::PublicTransaction,
-            crate::modules::finance::analytics::PublicFinanceReport,
+            NetWorthResponse,
+            CurrencyNetWorthBreakdown,
+            MonthlyCashflowBucket,
+            ExpenseCategorySlice,
+            FinanceAnalyticsReport,
+            FinanceShare,
+            PublicTransaction,
+            PublicFinanceReport,
             finance_analytics::AnalyticsQuery,
             finance_analytics::PublicQuery,
             finance_analytics::ShareRequest,

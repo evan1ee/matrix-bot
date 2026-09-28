@@ -1,12 +1,12 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::domain::finance::{Category, Transaction};
 use crate::domain::recurring_bills::RecurringBill;
 use crate::domain::reminders::Reminder;
 use crate::domain::settings::UserSettings;
 use crate::domain::todos::TodoItem;
 use crate::domain::webhooks::Webhook;
-use crate::modules::finance::models::{Category, Transaction};
 use crate::modules::portfolio::audit::PortfolioAuditEntry;
 use crate::modules::portfolio::models::Holding;
 
@@ -178,10 +178,10 @@ impl SystemEvent {
             | SystemEvent::ReminderDeleted { owner_id, .. }
             | SystemEvent::ReminderHistoryCleared { owner_id } => owner_id,
             SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
-                &tx.owner_id
+                tx.owner_id.as_str()
             }
             SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
-            SystemEvent::CategoryCreated(cat) => &cat.owner_id,
+            SystemEvent::CategoryCreated(cat) => cat.owner_id.as_str(),
             SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
             SystemEvent::SettingsUpdated { owner_id, .. } => owner_id,
             SystemEvent::PortfolioHoldingCreated(h) | SystemEvent::PortfolioHoldingUpdated(h) => {

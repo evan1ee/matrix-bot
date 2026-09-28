@@ -201,7 +201,7 @@ pub fn parse_timezone(raw: &str) -> Option<Tz> {
 
 /// Normalises a currency code, rejecting anything that is not three letters.
 ///
-/// Deliberately not a call into `modules::finance::money`: that module's
+/// Deliberately not a call into `domain::finance::money`: that module's
 /// `normalise_currency` shares this exact rule, but reaching into finance for
 /// three lines of validation would make settings depend on a feature that
 /// depends on settings for nothing in return — see the Task 2 report for the

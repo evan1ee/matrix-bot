@@ -2,9 +2,9 @@ use crate::db::DbPool;
 use chrono::{Duration, Utc};
 
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
+use crate::infrastructure::postgres::repositories::finance as finance_repo;
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
-use crate::modules::finance::repository::FinanceRepository;
 use crate::modules::life::repository::LifeRepository;
 use crate::modules::portfolio::cash_repo;
 use crate::modules::portfolio::repository::PortfolioRepository;
@@ -67,14 +67,17 @@ pub async fn read_resource(
             })
         }
         "matrixbot://finance/recent" => {
-            let transactions = FinanceRepository::list(pool, owner_id, None, 20, 0)
+            let acct = crate::domain::accounts::AccountId::new(owner_id);
+            let filter = crate::domain::finance::ListTransactionsFilter {
+                limit: Some(20),
+                ..Default::default()
+            };
+            let transactions = finance_repo::list(pool, &acct, &filter)
                 .await
                 .map_err(|e| e.to_string())?;
             let now = Utc::now();
             let from = now - Duration::days(30);
-            let summary = FinanceRepository::summary(pool, owner_id, from, now)
-                .await
-                .ok();
+            let summary = finance_repo::summary(pool, &acct, from, now).await.ok();
             let payload = serde_json::json!({
                 "monthly_summary": summary,
                 "recent_transactions": transactions,

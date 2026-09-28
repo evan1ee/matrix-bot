@@ -5,6 +5,7 @@
 
 pub mod account;
 pub mod bookmarks;
+pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod recurring_bills;

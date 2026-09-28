@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE transactions\n        SET direction = $1, amount_minor = $2, currency = $3, currency_exponent = $4,\n            category_id = $5, note = $6, occurred_at = $7\n        WHERE id = $8 AND owner_id = $9\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a5b1dbe4804ca352f4300979edaea09a109b66a14630df7e94ea1ced0bd81ef1"
+}

@@ -1,0 +1,203 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1\n          AND ($2::text IS NULL OR t.direction = $2)\n          AND ($3::bigint IS NULL OR t.category_id = $3)\n          AND ($4::timestamptz IS NULL OR t.occurred_at >= $4)\n          AND ($5::timestamptz IS NULL OR t.occurred_at <= $5)\n          AND ($6::text IS NULL OR t.currency = $6)\n        ORDER BY t.occurred_at DESC, t.id DESC\n        LIMIT $7 OFFSET $8\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "direction",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "direction"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "amount_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "amount_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "source_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "source_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "source_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "occurred_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "occurred_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "82f7a4e91f00091403dde133ac0f0269e4011b8b67f675a45320cc8501a48822"
+}

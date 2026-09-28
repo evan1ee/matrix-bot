@@ -2,7 +2,7 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::finance::net_worth::NetWorthService;
+use crate::infrastructure::postgres::read_models::net_worth::compute_net_worth;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
@@ -17,10 +17,9 @@ pub async fn execute_tool(
                 let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let settings = services.settings.get_or_default(&acct).await;
                 let client = reqwest::Client::new();
-                let report =
-                    NetWorthService::compute_net_worth(pool, &client, owner_id, &settings.currency)
-                        .await
-                        .map_err(|e| format!("Failed to compute net worth: {}", e))?;
+                let report = compute_net_worth(pool, &client, &acct, &settings.currency)
+                    .await
+                    .map_err(|e| format!("Failed to compute net worth: {}", e))?;
                 serde_json::to_string(&report).map_err(|e| e.to_string())
             }
             .await,

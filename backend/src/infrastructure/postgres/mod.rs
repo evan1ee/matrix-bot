@@ -6,6 +6,7 @@
 //! `modules/` features migrate to the target layer-first layout.
 
 pub mod merge;
+pub mod read_models;
 pub mod repositories;
 
 use sqlx::PgPool;

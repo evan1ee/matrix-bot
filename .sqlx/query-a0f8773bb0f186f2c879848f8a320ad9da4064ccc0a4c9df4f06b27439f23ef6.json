@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT currency, currency_exponent, quantity_minor, current_price_minor\n        FROM portfolio_holdings\n        WHERE owner_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "quantity_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "quantity_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "current_price_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "current_price_minor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a0f8773bb0f186f2c879848f8a320ad9da4064ccc0a4c9df4f06b27439f23ef6"
+}

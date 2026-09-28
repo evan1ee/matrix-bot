@@ -2,28 +2,30 @@ use crate::db::DbPool;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use serde_json::json;
 
+use crate::domain::accounts::AccountId;
+use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::domain::finance::{Direction, ListTransactionsFilter, NewTransaction};
 use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::finance::models::Direction;
-use crate::modules::finance::money::{exponent_for, normalise_currency, parse_amount};
-use crate::modules::finance::repository::FinanceRepository;
-use crate::modules::finance::service::{self, NewTransaction};
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
+    let owner_acct = AccountId::from(owner_id);
     match name {
         "get_my_financial_summary" => Some(
             async {
                 let from = Utc::now() - Duration::days(365);
                 let to = Utc::now() + Duration::days(1);
-                let summary = FinanceRepository::summary(pool, owner_id, from, to)
+                let summary = services
+                    .finance
+                    .summary(&owner_acct, from, to)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&summary).map_err(|e| e.to_string())
@@ -54,7 +56,14 @@ pub async fn execute_tool(
                     .max(1);
 
                 let cutoff = Utc::now() - Duration::days(days);
-                let items = FinanceRepository::list(pool, owner_id, dir, limit * 3, 0)
+                let filter = ListTransactionsFilter {
+                    direction: dir.and_then(Direction::parse),
+                    limit: Some(limit * 3),
+                    ..Default::default()
+                };
+                let items = services
+                    .finance
+                    .list_transactions(&owner_acct, &filter)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -90,11 +99,13 @@ pub async fn execute_tool(
                 let from = Utc::now() - Duration::days(days);
                 let to = Utc::now() + Duration::days(1);
 
-                let summaries = FinanceRepository::summary(pool, owner_id, from, to)
+                let summaries = services
+                    .finance
+                    .summary(&owner_acct, from, to)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = owner_acct.clone();
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let target_cur = args
                     .get("currency")
@@ -220,30 +231,26 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let tx = service::create_transaction(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    NewTransaction {
-                        direction: direction.as_str(),
-                        amount_minor,
-                        currency: &currency,
-                        currency_exponent: exp as i64,
-                        category: Some(category_name),
-                        note: Some(note),
-                        room_id: &target_room,
-                        sender_name: "AI Assistant",
-                        occurred_at,
-                        source: None,
-                        // The AI tool is filling in a category the user
-                        // described in prose rather than one they picked from
-                        // a list, so an unknown name is created rather than
-                        // refused — this transport always has, unlike Matrix.
-                        create_missing_category: true,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let tx = services
+                    .finance
+                    .create_transaction(
+                        &acct,
+                        NewTransaction {
+                            direction,
+                            amount_minor,
+                            currency: &currency,
+                            currency_exponent: exp as i64,
+                            category: Some(category_name),
+                            note: Some(note),
+                            room_id: &target_room,
+                            sender_name: "AI Assistant",
+                            occurred_at,
+                            source: None,
+                            create_missing_category: true,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&tx).map_err(|e| e.to_string())
             }
@@ -256,7 +263,9 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let tx = service::delete_transaction(pool, broadcaster, owner_id, id)
+                let tx = services
+                    .finance
+                    .delete_transaction(&owner_acct, id)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -398,6 +407,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::finance::MAX_NOTE_LEN;
 
     async fn setup() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -411,7 +421,7 @@ mod tests {
     #[tokio::test]
     async fn test_the_ai_tool_enforces_the_note_limit() {
         let pool = setup().await;
-        let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
+        let over_limit_note = "x".repeat(MAX_NOTE_LEN + 1);
 
         let result = execute_tool(
             &crate::application::AppServices::new(&pool),

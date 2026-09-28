@@ -1006,8 +1006,11 @@ mod tests {
         // Verify transaction was persisted
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
-        let summary = crate::modules::finance::repository::FinanceRepository::summary(
-            &db.pool, &owner, from, to,
+        let summary = crate::infrastructure::postgres::repositories::finance::summary(
+            &db.pool,
+            &crate::domain::accounts::AccountId::new(&owner),
+            from,
+            to,
         )
         .await
         .unwrap();
@@ -1115,8 +1118,11 @@ mod tests {
         // Verify DB transactions
         let from = chrono::Utc::now() - chrono::Duration::days(1);
         let to = chrono::Utc::now() + chrono::Duration::days(1);
-        let summary = crate::modules::finance::repository::FinanceRepository::summary(
-            &db.pool, &owner, from, to,
+        let summary = crate::infrastructure::postgres::repositories::finance::summary(
+            &db.pool,
+            &crate::domain::accounts::AccountId::new(&owner),
+            from,
+            to,
         )
         .await
         .unwrap();

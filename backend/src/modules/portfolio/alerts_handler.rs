@@ -1,8 +1,8 @@
 use crate::db::DbPool;
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::finance::money::{
+use crate::domain::finance::money::{
     exponent_for, looks_like_currency, normalise_currency, parse_amount,
 };
+use crate::events::{EventBroadcaster, SystemEvent};
 use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
 use crate::modules::portfolio::models::normalise_symbol;
 use crate::utils::html_escape;

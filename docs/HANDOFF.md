@@ -113,7 +113,7 @@ backend/src/
 | 6 | footprints + habits | ✅ |
 | 7 | webhook | ✅ |
 | 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ✅ |
-| 9 | finance | ☐ |
+| 9 | finance | ✅ |
 | 10 | portfolio | ☐ |
 | 11 | life + journal + briefing (read models) | ☐ |
 | 12 | ocr + voice + tts + core + account command module | ☐ |

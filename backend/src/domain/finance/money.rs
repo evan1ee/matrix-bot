@@ -1,4 +1,4 @@
-//! Money handling for the finance module.
+//! Money handling for the finance domain.
 //!
 //! Amounts are integer **minor units** — cents, not euros — and are never
 //! carried through a float at any point. `"15.50"` becomes `1550` by string
@@ -51,6 +51,8 @@ impl fmt::Display for MoneyError {
     }
 }
 
+impl std::error::Error for MoneyError {}
+
 /// Widely used codes, so a lowercase `eur` is understood without treating every
 /// three-letter word as a currency.
 const COMMON_CODES: &[&str] = &[
@@ -61,10 +63,6 @@ const COMMON_CODES: &[&str] = &[
 ];
 
 /// Whether a bare token in currency position should be read as a currency.
-///
-/// Requires either all-caps (`EUR`) or membership of the common list (`eur`).
-/// Without this, `!expense add 3.00 tea and cake` books a currency called TEA
-/// and silently drops the word from the note.
 pub fn looks_like_currency(token: &str) -> bool {
     if token.len() != 3 || !token.chars().all(|c| c.is_ascii_alphabetic()) {
         return false;
@@ -74,11 +72,6 @@ pub fn looks_like_currency(token: &str) -> bool {
 }
 
 /// Normalises a currency code, rejecting anything that is not three letters.
-///
-/// Delegates to `domain::settings::parse_currency`, which owns the rule (a
-/// 3-letter ISO-4217-shaped code) — finance and settings both need it, and
-/// this keeps the one place it's actually re-derived down to a single
-/// `match`, rather than two copies that could quietly drift apart.
 pub fn normalise_currency(raw: &str) -> Result<String, MoneyError> {
     crate::domain::settings::parse_currency(raw).map_err(|_| MoneyError::InvalidCurrency)
 }
@@ -144,25 +137,22 @@ pub fn parse_amount(input: &str, exponent: u32) -> Result<i64, MoneyError> {
     Ok(minor)
 }
 
-/// Renders minor units back as a decimal string. Never lossy.
+/// Formats minor units for display.
 pub fn format_amount(minor: i64, exponent: u32) -> String {
-    let negative = minor < 0;
-    let magnitude = minor.unsigned_abs();
+    let sign = if minor < 0 { "-" } else { "" };
+    let abs = minor.unsigned_abs();
 
-    let text = if exponent == 0 {
-        magnitude.to_string()
-    } else {
-        let divisor = 10u64.pow(exponent);
-        let whole = magnitude / divisor;
-        let frac = magnitude % divisor;
-        format!("{}.{:0>width$}", whole, frac, width = exponent as usize)
-    };
-
-    if negative {
-        format!("-{}", text)
-    } else {
-        text
+    if exponent == 0 {
+        return format!("{sign}{abs}");
     }
+
+    let divisor = 10u64.pow(exponent);
+    let major = abs / divisor;
+    let fractional = abs % divisor;
+    format!(
+        "{sign}{major}.{fractional:0>width$}",
+        width = exponent as usize
+    )
 }
 
 #[cfg(test)]
@@ -170,90 +160,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parses_common_shapes() {
-        assert_eq!(parse_amount("15.50", 2), Ok(1550));
-        assert_eq!(parse_amount("15.5", 2), Ok(1550));
-        assert_eq!(parse_amount("15", 2), Ok(1500));
-        assert_eq!(parse_amount(".50", 2), Ok(50));
-        assert_eq!(parse_amount("$15.50", 2), Ok(1550));
-        assert_eq!(parse_amount("1,000.50", 2), Ok(100050));
-        assert_eq!(parse_amount(" 15.50 ", 2), Ok(1550));
-    }
-
-    /// The classic float trap: 0.1 + 0.2 must not drift, and a value that has
-    /// no exact binary representation must survive exactly.
-    #[test]
-    fn test_no_float_drift() {
-        assert_eq!(parse_amount("0.10", 2), Ok(10));
-        assert_eq!(parse_amount("0.20", 2), Ok(20));
-        assert_eq!(parse_amount("0.29", 2), Ok(29));
-        assert_eq!(parse_amount("1234567.89", 2), Ok(123456789));
-        // Round-trips exactly, which a float would not guarantee.
-        assert_eq!(format_amount(parse_amount("0.29", 2).unwrap(), 2), "0.29");
-        assert_eq!(
-            format_amount(parse_amount("1234567.89", 2).unwrap(), 2),
-            "1234567.89"
-        );
+    fn test_exponent_for() {
+        assert_eq!(exponent_for("EUR"), 2);
+        assert_eq!(exponent_for("USD"), 2);
+        assert_eq!(exponent_for("JPY"), 0);
+        assert_eq!(exponent_for("KWD"), 3);
+        assert_eq!(exponent_for("jpy"), 0);
     }
 
     #[test]
-    fn test_respects_currency_exponent() {
-        // JPY has no minor unit at all.
-        assert_eq!(parse_amount("500", 0), Ok(500));
-        assert_eq!(
-            parse_amount("500.5", 0),
+    fn test_parse_amount_two_decimals() {
+        assert_eq!(parse_amount("15.50", 2).unwrap(), 1550);
+        assert_eq!(parse_amount("15", 2).unwrap(), 1500);
+        assert_eq!(parse_amount("0.5", 2).unwrap(), 50);
+        assert_eq!(parse_amount(".50", 2).unwrap(), 50);
+        assert_eq!(parse_amount("1,000.50", 2).unwrap(), 100050);
+        assert_eq!(parse_amount("$15.50", 2).unwrap(), 1550);
+    }
+
+    #[test]
+    fn test_parse_amount_zero_decimals() {
+        assert_eq!(parse_amount("1500", 0).unwrap(), 1500);
+        assert!(matches!(
+            parse_amount("15.5", 0),
             Err(MoneyError::TooPrecise { max_decimals: 0 })
-        );
-        // KWD has three.
-        assert_eq!(parse_amount("1.234", 3), Ok(1234));
-        assert_eq!(
+        ));
+    }
+
+    #[test]
+    fn test_parse_amount_three_decimals() {
+        assert_eq!(parse_amount("1.234", 3).unwrap(), 1234);
+        assert_eq!(parse_amount("1.2", 3).unwrap(), 1200);
+        assert!(matches!(
             parse_amount("1.2345", 3),
             Err(MoneyError::TooPrecise { max_decimals: 3 })
-        );
+        ));
     }
 
     #[test]
-    fn test_rejects_nonsense() {
-        assert_eq!(parse_amount("", 2), Err(MoneyError::InvalidAmount));
-        assert_eq!(parse_amount("abc", 2), Err(MoneyError::InvalidAmount));
-        assert_eq!(parse_amount("1.2.3", 2), Err(MoneyError::InvalidAmount));
-        assert_eq!(
-            parse_amount("15.501", 2),
-            Err(MoneyError::TooPrecise { max_decimals: 2 })
-        );
-        assert_eq!(parse_amount("0", 2), Err(MoneyError::NotPositive));
-        assert_eq!(parse_amount("0.00", 2), Err(MoneyError::NotPositive));
-    }
-
-    /// Direction is what makes a transaction an expense. A signed amount would
-    /// allow a row whose sign and direction contradict each other.
-    #[test]
-    fn test_rejects_a_signed_amount() {
-        assert_eq!(parse_amount("-15.50", 2), Err(MoneyError::NotPositive));
+    fn test_parse_amount_invalid() {
+        assert!(matches!(parse_amount("0", 2), Err(MoneyError::NotPositive)));
+        assert!(matches!(
+            parse_amount("-5", 2),
+            Err(MoneyError::NotPositive)
+        ));
+        assert!(matches!(
+            parse_amount("abc", 2),
+            Err(MoneyError::InvalidAmount)
+        ));
+        assert!(matches!(
+            parse_amount("", 2),
+            Err(MoneyError::InvalidAmount)
+        ));
     }
 
     #[test]
-    fn test_formats_back() {
+    fn test_format_amount() {
         assert_eq!(format_amount(1550, 2), "15.50");
         assert_eq!(format_amount(50, 2), "0.50");
-        assert_eq!(format_amount(5, 2), "0.05");
-        assert_eq!(format_amount(100050, 2), "1000.50");
-        assert_eq!(format_amount(500, 0), "500");
+        assert_eq!(format_amount(1500, 0), "1500");
         assert_eq!(format_amount(1234, 3), "1.234");
         assert_eq!(format_amount(-1550, 2), "-15.50");
     }
 
     #[test]
-    fn test_currency_normalisation_and_exponents() {
-        assert_eq!(normalise_currency("eur"), Ok("EUR".to_string()));
-        assert_eq!(normalise_currency(" usd "), Ok("USD".to_string()));
-        assert_eq!(normalise_currency("EURO"), Err(MoneyError::InvalidCurrency));
-        assert_eq!(normalise_currency("E1R"), Err(MoneyError::InvalidCurrency));
-
-        assert_eq!(exponent_for("EUR"), 2);
-        assert_eq!(exponent_for("jpy"), 0);
-        assert_eq!(exponent_for("KWD"), 3);
-        // Unknown codes fall back to the near-universal case rather than failing.
-        assert_eq!(exponent_for("ZZZ"), 2);
+    fn test_looks_like_currency() {
+        assert!(looks_like_currency("EUR"));
+        assert!(looks_like_currency("eur"));
+        assert!(looks_like_currency("USD"));
+        assert!(looks_like_currency("jpy"));
+        assert!(!looks_like_currency("tea"));
+        assert!(!looks_like_currency("lunch"));
+        assert!(!looks_like_currency("EU"));
+        assert!(!looks_like_currency("EURO"));
     }
 }

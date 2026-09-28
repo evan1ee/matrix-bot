@@ -12,7 +12,7 @@
 use crate::db::DbPool;
 use tracing::error;
 
-use crate::modules::finance::money::format_amount;
+use crate::domain::finance::money::format_amount;
 use crate::modules::portfolio::models::{Holding, QUANTITY_EXPONENT};
 use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::utils::html_escape;
