@@ -4,7 +4,7 @@ use tracing::error;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::life::normalize_mood;
-use crate::modules::CommandContext;
+use crate::interface::chat::CommandContext;
 use crate::utils::html::html_escape;
 
 pub async fn handle_journal_command(

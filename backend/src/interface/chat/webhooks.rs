@@ -15,7 +15,7 @@ use crate::domain::webhooks::{
     renderer::render_alert_message, retry_delay, WebhookOutboxItem, WebhookSeverity,
 };
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
 use crate::utils::html::html_escape;
 
 pub struct WebhookModule;

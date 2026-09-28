@@ -232,12 +232,12 @@ mod step_up_tests {
             .await
             .unwrap();
 
-        crate::db_execute!(
+        SessionRepository::update_last_verified_at(
             &pool,
-            "UPDATE sessions SET last_verified_at = ? WHERE account_id = ?",
+            &account,
             chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
-            &account
         )
+        .await
         .unwrap();
 
         let state = auth::ApiState::new(
@@ -415,9 +415,7 @@ mod server_shutdown_tests {
     async fn test_server_task_completes_promptly_after_cancel() {
         let config = local_config();
         // Lazy: nothing here touches the database, so the test needs no server.
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy(&config.database_url)
-            .unwrap();
+        let pool = crate::db::pool::lazy_pool(&config.database_url);
         let listener = bind(&config).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let shutdown = CancellationToken::new();

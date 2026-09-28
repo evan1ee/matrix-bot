@@ -10,12 +10,12 @@ use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::llm::alert::{clear_ai_error_state, notify_dev_room_ai_error};
 use crate::llm::context::LlmTurnContext;
 use crate::llm::prompt::format_response;
 use crate::llm::resolved_config::ResolvedAiConfig;
 use crate::llm::turn::{run_turn, MAX_PROMPT_LENGTH};
-use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct LlmModule {

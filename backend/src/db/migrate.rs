@@ -33,10 +33,16 @@ mod tests {
         run_migrations_unlocked(&pool).await;
 
         let applied: i64 =
-            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM _sqlx_migrations").unwrap();
+            sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM _sqlx_migrations"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(applied, migrator().iter().count() as i64);
 
-        let todos: i64 = crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM todos").unwrap();
+        let todos: i64 = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM todos"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(todos, 0);
     }
 
@@ -46,16 +52,20 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         run_migrations_unlocked(&pool).await;
 
-        crate::db_execute!(
-            &pool,
+        sqlx::query!(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
              VALUES ('web', '@a:x', 'a', 'keep me', 'medium', FALSE)"
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         run_migrations_unlocked(&pool).await;
 
-        let text: String = crate::db_scalar_one!(&pool, _, "SELECT text FROM todos").unwrap();
+        let text: String = sqlx::query_scalar!("SELECT text FROM todos")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(text, "keep me");
     }
 
@@ -66,27 +76,25 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         run_migrations_unlocked(&pool).await;
 
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')"
-        )
-        .unwrap();
+        sqlx::query!("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
+            .execute(&pool)
+            .await
+            .unwrap();
 
-        let duplicate = crate::db_execute!(
-            &pool,
-            "INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')"
-        );
+        let duplicate =
+            sqlx::query!("INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')")
+                .execute(&pool)
+                .await;
         assert!(
             duplicate.is_err(),
             "a duplicate name must be rejected by the index"
         );
 
         // A different owner may reuse the name.
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')"
-        )
-        .unwrap();
+        sqlx::query!("INSERT INTO finance_categories (owner_id, name) VALUES ('@b:x', 'food')")
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 
     /// The audit log must be append-only on PostgreSQL too, not merely have
@@ -99,24 +107,30 @@ mod tests {
         let pool = crate::db::pool::connect_pg_schema("trigger_check").await;
         run_migrations_unlocked(&pool).await;
 
-        crate::db_execute!(
-            &pool,
+        sqlx::query!(
             "INSERT INTO portfolio_audit_log (owner_id, action, amount_minor, currency) \
-             VALUES (?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4)",
             "acct_a",
             "buy",
             1_000_i64,
             "USD"
         )
+        .execute(&pool)
+        .await
         .expect("an audit row must be insertable");
 
         assert!(
-            crate::db_execute!(&pool, "UPDATE portfolio_audit_log SET owner_id = 'acct_b'")
+            sqlx::query!("UPDATE portfolio_audit_log SET owner_id = 'acct_b'")
+                .execute(&pool)
+                .await
                 .is_err(),
             "PostgreSQL must refuse to update an audit row"
         );
         assert!(
-            crate::db_execute!(&pool, "DELETE FROM portfolio_audit_log").is_err(),
+            sqlx::query!("DELETE FROM portfolio_audit_log")
+                .execute(&pool)
+                .await
+                .is_err(),
             "PostgreSQL must refuse to delete an audit row"
         );
 

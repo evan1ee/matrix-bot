@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
-use crate::db::executor::DbPool;
+pub type DbPool = sqlx::PgPool;
+pub type DbTx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
 
 #[derive(Clone, Debug)]
 pub struct Database {
@@ -19,6 +20,13 @@ pub async fn connect_pool(database_url: &str, max_connections: u32) -> Result<Db
         .connect(database_url)
         .await
         .context("Failed to connect to PostgreSQL")
+}
+
+#[cfg(test)]
+pub fn lazy_pool(database_url: &str) -> DbPool {
+    PgPoolOptions::new()
+        .connect_lazy(database_url)
+        .expect("lazy pool")
 }
 
 /// The PostgreSQL URL the `#[ignore]`d live tests connect to.
@@ -59,7 +67,12 @@ pub async fn test_pool() -> crate::db::DbPool {
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
-    crate::db_execute!(&admin, &format!("CREATE SCHEMA IF NOT EXISTS {schema}")).unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA IF NOT EXISTS ")
+        .push(&schema)
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
     admin.close().await;
 
     let separator = if base.contains('?') { "&" } else { "?" };
@@ -78,8 +91,19 @@ pub async fn test_pool() -> crate::db::DbPool {
 pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
     let base = pg_test_url();
     let admin = connect_pool(&base, 1).await.expect("admin pool");
-    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
-    crate::db_execute!(&admin, &format!("CREATE SCHEMA {schema}")).unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP SCHEMA IF EXISTS ")
+        .push(schema)
+        .push(" CASCADE")
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA ")
+        .push(schema)
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
 
     let separator = if base.contains('?') { "&" } else { "?" };
     let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
@@ -90,7 +114,13 @@ pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
 #[cfg(test)]
 pub async fn drop_pg_schema(schema: &str) {
     let admin = connect_pool(&pg_test_url(), 1).await.expect("admin pool");
-    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP SCHEMA IF EXISTS ")
+        .push(schema)
+        .push(" CASCADE")
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
 }
 
 impl Database {
@@ -166,7 +196,10 @@ mod tests {
 
         // `SELECT 1` is int4 on PostgreSQL and will not decode into i64 — the
         // same mismatch that made the schema use BIGINT everywhere.
-        let one: i64 = crate::db_scalar_one!(&pool, i64, "SELECT 1::bigint").unwrap();
+        let one: i64 = sqlx::query_scalar!(r#"SELECT 1::bigint AS "one!""#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(one, 1, "the pool must actually answer a query");
     }
 
@@ -183,8 +216,14 @@ mod tests {
         let scoped = {
             let base = pg_test_url();
             let admin = connect_pool(&base, 1).await.unwrap();
-            crate::db_execute!(&admin, "DROP SCHEMA IF EXISTS boot_check CASCADE").unwrap();
-            crate::db_execute!(&admin, "CREATE SCHEMA boot_check").unwrap();
+            sqlx::query("DROP SCHEMA IF EXISTS boot_check CASCADE")
+                .execute(&admin)
+                .await
+                .unwrap();
+            sqlx::query("CREATE SCHEMA boot_check")
+                .execute(&admin)
+                .await
+                .unwrap();
             let sep = if base.contains('?') { "&" } else { "?" };
             format!("{base}{sep}options=-c%20search_path%3Dboot_check")
         };
@@ -193,22 +232,21 @@ mod tests {
             .await
             .expect("Database::connect must run every migration on PostgreSQL");
 
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, $2, $3)",
             "acct_boot",
             "Evan",
             "unclaimed"
         )
+        .execute(&db.pool)
+        .await
         .expect("an ordinary write must work after boot");
 
-        let status: String = crate::db_scalar_one!(
-            &db.pool,
-            String,
-            "SELECT status FROM accounts WHERE id = ?",
-            "acct_boot"
-        )
-        .expect("an ordinary read must work after boot");
+        let status: String =
+            sqlx::query_scalar!("SELECT status FROM accounts WHERE id = $1", "acct_boot")
+                .fetch_one(&db.pool)
+                .await
+                .expect("an ordinary read must work after boot");
         assert_eq!(status, "unclaimed");
 
         crate::db::pool::drop_pg_schema("boot_check").await;

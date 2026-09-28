@@ -1,53 +1,36 @@
-use crate::accounts::{display_name_for_mxid, Account, STATUS_UNCLAIMED};
+use crate::accounts::Account;
 use crate::db::DbPool;
 
 pub struct AccountRepository;
 
 impl AccountRepository {
-    /// Creates an account, minting the id from the OS CSPRNG.
-    ///
-    /// `utils::random::new_account_id()` rather than a database-generated id:
-    /// the id has to be unguessable, not sortable or parseable, and its
-    /// entropy should not depend on which database this is deployed against
-    /// (see `utils/random.rs`). Prefixing with `acct_` keeps it obvious at a
-    /// glance which identity space a stray string in a log belongs to.
     pub async fn create(
         pool: &DbPool,
         display_name: &str,
         status: &str,
     ) -> Result<String, sqlx::Error> {
-        crate::db_scalar_one!(
+        crate::infrastructure::postgres::repositories::accounts::core::create(
             pool,
-            String,
-            "INSERT INTO accounts (id, display_name, status) \
-             VALUES (?, ?, ?) \
-             RETURNING id",
-            crate::utils::random::new_account_id(),
             display_name,
-            status
+            status,
         )
+        .await
+        .map(|id| id.into_inner())
     }
 
-    /// Creates an account under an id the caller already holds.
-    ///
-    /// Passkey registration needs this: the account id *is* the WebAuthn user
-    /// handle, so it has to exist before the challenge is issued — but the row
-    /// must not, or an abandoned registration would leave an account nobody can
-    /// ever sign in to.
     pub async fn create_with_id(
         pool: &DbPool,
         account_id: &str,
         display_name: &str,
         status: &str,
     ) -> Result<(), sqlx::Error> {
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::core::create_with_id(
             pool,
-            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
-            account_id,
+            &crate::domain::accounts::AccountId::new(account_id),
             display_name,
-            status
-        )?;
-        Ok(())
+            status,
+        )
+        .await
     }
 
     pub async fn delete(pool: &DbPool, account_id: &str) -> Result<(), sqlx::Error> {
@@ -59,73 +42,40 @@ impl AccountRepository {
     }
 
     pub async fn find(pool: &DbPool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
-        crate::db_fetch_optional!(
+        let domain_opt = crate::infrastructure::postgres::repositories::accounts::core::find(
             pool,
-            Account,
-            "SELECT id, display_name, status, created_at FROM accounts WHERE id = ?",
-            account_id
+            &crate::domain::accounts::AccountId::new(account_id),
         )
+        .await?;
+        Ok(domain_opt.map(|a| Account {
+            id: a.id.into_inner(),
+            display_name: a.display_name,
+            status: a.status,
+            created_at: a.created_at,
+        }))
     }
 
-    /// The account an MXID is linked to, or `None` if it has never been seen.
     pub async fn find_by_mxid(pool: &DbPool, mxid: &str) -> Result<Option<String>, sqlx::Error> {
-        crate::db_scalar_optional!(
-            pool,
-            String,
-            "SELECT account_id FROM matrix_links WHERE mxid = ?",
-            mxid
-        )
+        let opt =
+            crate::infrastructure::postgres::repositories::accounts::core::find_by_mxid(pool, mxid)
+                .await?;
+        Ok(opt.map(|id| id.into_inner()))
     }
 
-    /// Every MXID that can reach `account_id`.
-    ///
-    /// Phase 3 fans security notifications out over exactly this list.
     pub async fn linked_mxids(pool: &DbPool, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
-        crate::db_scalar_all!(
+        crate::infrastructure::postgres::repositories::accounts::core::linked_mxids(
             pool,
-            String,
-            "SELECT mxid FROM matrix_links WHERE account_id = ? ORDER BY linked_at",
-            account_id
+            &crate::domain::accounts::AccountId::new(account_id),
         )
+        .await
     }
 
-    /// The owner id for a Matrix sender, provisioning an unclaimed account the
-    /// first time that MXID is seen.
-    ///
-    /// This is the whole of decision D1: the bot stays usable with no web
-    /// signup, because a first-time sender gets a real account immediately
-    /// rather than an error telling them to go register.
-    ///
-    /// The insert is `OR IGNORE` and the loser cleans up after itself, because
-    /// two messages from the same new MXID can land in different tasks at the
-    /// same time — the sync loop does not serialise event handlers. Without
-    /// that, the two would provision two accounts, the second would overwrite
-    /// the link, and everything written against the first would be orphaned.
     pub async fn resolve_or_provision(pool: &DbPool, mxid: &str) -> Result<String, sqlx::Error> {
-        if let Some(existing) = Self::find_by_mxid(pool, mxid).await? {
-            return Ok(existing);
-        }
-
-        let candidate = Self::create(pool, &display_name_for_mxid(mxid), STATUS_UNCLAIMED).await?;
-
-        let claimed = crate::db_execute!(
-            pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-            mxid,
-            &candidate
-        )?;
-
-        if claimed == 1 {
-            return Ok(candidate);
-        }
-
-        // A concurrent call linked this MXID first. Drop the account we minted
-        // — nothing references it yet — and use the winner's.
-        crate::db_execute!(pool, "DELETE FROM accounts WHERE id = ?", &candidate)?;
-
-        Self::find_by_mxid(pool, mxid)
-            .await?
-            .ok_or(sqlx::Error::RowNotFound)
+        crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+            pool, mxid,
+        )
+        .await
+        .map(|id| id.into_inner())
     }
 }
 
@@ -170,7 +120,10 @@ mod tests {
 
         assert_eq!(first, second);
 
-        let count: i64 = crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count, 1, "a repeated sender must not accumulate accounts");
     }
 
@@ -228,8 +181,10 @@ mod tests {
             "resolved to different accounts: {ids:?}"
         );
 
-        let accounts: i64 =
-            crate::db_scalar_one!(&pool, _, "SELECT COUNT(*) FROM accounts").unwrap();
+        let accounts = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(accounts, 1, "the losing task left an orphan account behind");
     }
 
@@ -240,12 +195,13 @@ mod tests {
             .await
             .unwrap();
 
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+        sqlx::query!(
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
             "@evan:work.org",
             &account
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         let mxids = AccountRepository::linked_mxids(&pool, &account)
@@ -268,12 +224,13 @@ mod tests {
             .unwrap();
         assert_ne!(first, other);
 
-        let duplicate = crate::db_execute!(
-            &pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)",
+        let duplicate = sqlx::query!(
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
             "@evan:mbm.one",
             &other
-        );
+        )
+        .execute(&pool)
+        .await;
 
         assert!(
             duplicate.is_err(),

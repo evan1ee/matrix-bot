@@ -2,7 +2,7 @@
 
 use crate::application::settings::SettingsService;
 use crate::application::todos::TodoService;
-use crate::modules::CommandContext;
+use crate::interface::chat::CommandContext;
 use crate::utils::html_escape;
 
 use super::mutate::{

@@ -1,6 +1,6 @@
 use matrix_sdk::ruma::UserId;
 
-use crate::modules::ParsedCommand;
+use crate::interface::chat::ParsedCommand;
 
 pub struct CommandParser;
 

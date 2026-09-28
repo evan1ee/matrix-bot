@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleRegistry};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleRegistry};
 use crate::utils::html_escape;
 
 pub mod help;

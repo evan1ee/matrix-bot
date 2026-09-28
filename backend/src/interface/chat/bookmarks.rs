@@ -8,7 +8,7 @@ use crate::db::Database;
 use crate::domain::bookmarks::BookmarkQuery;
 use crate::events::EventBroadcaster;
 use crate::infrastructure::web::fetch_and_extract_metadata;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct BookmarksModule {

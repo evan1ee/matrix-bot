@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
 pub mod mutate;
@@ -89,7 +89,7 @@ impl BotModule for TodoModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::CommandContext;
+    use crate::interface::chat::CommandContext;
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {

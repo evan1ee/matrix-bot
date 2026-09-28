@@ -7,7 +7,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::infrastructure::web::portfolio_feed::{fetch_latest_price, price_to_minor};
 use crate::interface::channels::matrix::notify::send_dm_html;
-use crate::modules::ModuleContext;
+use crate::interface::chat::ModuleContext;
 use crate::utils::html::html_escape;
 
 /// Interval between automatic portfolio price refresh sweeps (1 hour).

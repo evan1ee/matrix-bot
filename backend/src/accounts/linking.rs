@@ -11,7 +11,7 @@
 //! to burn it.
 
 use crate::db::DbPool;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 
 /// How long a link code stays usable.
 ///
@@ -52,181 +52,65 @@ pub struct LinkRepository;
 
 impl LinkRepository {
     /// Issues a code for `account_id`.
-    ///
-    /// Formatted in two short groups because a human retypes this into a chat
-    /// window: `A3F9-K2QX`. Drawn from an alphabet with no `0/O` or `1/I/L`, so
-    /// a misread character cannot silently become a different valid code.
     pub async fn issue(pool: &DbPool, account_id: &str) -> Result<String, sqlx::Error> {
-        const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-        let bytes: Vec<u8> = crate::utils::random::random_bytes(8);
-
-        let raw: String = bytes
-            .iter()
-            .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
-            .collect();
-        let code = format!("{}-{}", &raw[..4], &raw[4..8]);
-
-        let now = Utc::now();
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::linking::issue(
             pool,
-            "INSERT INTO matrix_link_challenges (code, account_id, created_at, expires_at) \
-             VALUES (?, ?, ?, ?)",
-            &code,
-            account_id,
-            now,
-            now + Duration::minutes(LINK_CODE_TTL_MINUTES)
-        )?;
-
-        Ok(code)
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
     }
 
     /// Consumes a code, if it is live.
-    ///
-    /// Consumption is unconditional on success: single-use means a code that
-    /// has been *seen* is spent, whatever happens next.
     pub async fn consume(pool: &DbPool, code: &str) -> Result<Option<LinkChallenge>, sqlx::Error> {
-        let normalised = normalise_code(code);
-
-        let challenge = crate::db_fetch_optional!(
-            pool,
-            LinkChallenge,
-            "SELECT code, account_id, expires_at, consumed_at \
-             FROM matrix_link_challenges WHERE code = ?",
-            &normalised
-        )?;
-
-        let Some(challenge) = challenge else {
-            return Ok(None);
-        };
-
-        if challenge.consumed_at.is_some() || challenge.expires_at < Utc::now() {
-            return Ok(None);
-        }
-
-        crate::db_execute!(
-            pool,
-            "UPDATE matrix_link_challenges SET consumed_at = ? WHERE code = ?",
-            Utc::now(),
-            &normalised
-        )?;
-
-        Ok(Some(challenge))
+        let res =
+            crate::infrastructure::postgres::repositories::accounts::linking::consume(pool, code)
+                .await?;
+        Ok(res.map(|c| LinkChallenge {
+            code: c.code,
+            account_id: c.account_id.into_inner(),
+            expires_at: c.expires_at,
+            consumed_at: c.consumed_at,
+        }))
     }
 
     /// Handles `!link <code>` arriving from `mxid`.
-    ///
-    /// `is_direct` is passed in rather than inferred here so the Matrix-specific
-    /// room lookup stays in the bot layer and this stays testable without a
-    /// homeserver.
     pub async fn claim(
         pool: &DbPool,
         code: &str,
         mxid: &str,
         is_direct: bool,
     ) -> Result<LinkOutcome, sqlx::Error> {
-        if !is_direct {
-            // Burn the code anyway: it has been shown to a room.
-            let _ = Self::consume(pool, code).await;
-            return Ok(LinkOutcome::NotADirectMessage);
-        }
-
-        let Some(challenge) = Self::consume(pool, code).await? else {
-            return Ok(LinkOutcome::UnknownCode);
-        };
-
-        let existing = super::AccountRepository::find_by_mxid(pool, mxid).await?;
-
-        match existing {
-            // Already this account's — nothing to do.
-            Some(ref current) if *current == challenge.account_id => Ok(LinkOutcome::Linked {
-                account_id: challenge.account_id,
-            }),
-            Some(current) => {
-                let account = super::AccountRepository::find(pool, &current).await?;
-
-                // An MXID whose account someone has claimed belongs to that
-                // person. Only an *unclaimed* account — one auto-provisioned
-                // for this MXID and holding no credential — can be absorbed.
-                match account {
-                    Some(account) if account.is_unclaimed() => {
-                        Ok(LinkOutcome::NeedsMergeConfirmation {
-                            account_id: challenge.account_id,
-                            from_account: current,
-                        })
-                    }
-                    _ => Ok(LinkOutcome::AlreadyLinked),
-                }
+        let outcome = crate::infrastructure::postgres::repositories::accounts::linking::claim(
+            pool, code, mxid, is_direct,
+        )
+        .await?;
+        Ok(match outcome {
+            crate::domain::accounts::LinkOutcome::Linked { account_id } => LinkOutcome::Linked {
+                account_id: account_id.into_inner(),
+            },
+            crate::domain::accounts::LinkOutcome::NeedsMergeConfirmation {
+                account_id,
+                from_account,
+            } => LinkOutcome::NeedsMergeConfirmation {
+                account_id: account_id.into_inner(),
+                from_account: from_account.into_inner(),
+            },
+            crate::domain::accounts::LinkOutcome::UnknownCode => LinkOutcome::UnknownCode,
+            crate::domain::accounts::LinkOutcome::AlreadyLinked => LinkOutcome::AlreadyLinked,
+            crate::domain::accounts::LinkOutcome::NotADirectMessage => {
+                LinkOutcome::NotADirectMessage
             }
-            None => {
-                let previous_account = crate::db_scalar_optional!(
-                    pool,
-                    String,
-                    "SELECT account_id FROM security_events \
-                     WHERE kind = 'matrix_unlinked' AND detail = ? \
-                     ORDER BY id DESC LIMIT 1",
-                    mxid
-                )?;
-
-                crate::db_execute!(
-                    pool,
-                    "INSERT INTO matrix_links (mxid, account_id) VALUES (?, ?)",
-                    mxid,
-                    &challenge.account_id
-                )?;
-
-                if let Some(prev) = previous_account {
-                    if prev != challenge.account_id {
-                        let prev_id = crate::domain::accounts::AccountId::new(&prev);
-                        let preview = super::MergeRepository::preview(pool, &prev_id)
-                            .await
-                            .unwrap_or_default();
-                        if preview.total() > 0 {
-                            return Ok(LinkOutcome::NeedsMergeConfirmation {
-                                account_id: challenge.account_id,
-                                from_account: prev,
-                            });
-                        }
-                    }
-                }
-
-                Ok(LinkOutcome::Linked {
-                    account_id: challenge.account_id,
-                })
-            }
-        }
+        })
     }
 
     /// Removes a link, leaving every row it created exactly where it is.
-    ///
-    /// Data belongs to the account; unlinking revokes an access path and
-    /// nothing else. A later command from that MXID provisions a fresh empty
-    /// account, so the identity goes cold rather than inheriting anything.
     pub async fn unlink(pool: &DbPool, account_id: &str, mxid: &str) -> Result<bool, sqlx::Error> {
-        let removed = crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::linking::unlink(
             pool,
-            "DELETE FROM matrix_links WHERE mxid = ? AND account_id = ?",
+            &crate::domain::accounts::AccountId::new(account_id),
             mxid,
-            account_id
-        )?;
-
-        Ok(removed > 0)
-    }
-}
-
-/// Accepts the code however a human typed it — lower case, spaces, missing
-/// dash. Only the characters carry meaning.
-fn normalise_code(code: &str) -> String {
-    let cleaned: String = code
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-
-    if cleaned.len() == 8 {
-        format!("{}-{}", &cleaned[..4], &cleaned[4..])
-    } else {
-        cleaned
+        )
+        .await
     }
 }
 
@@ -234,6 +118,7 @@ fn normalise_code(code: &str) -> String {
 mod tests {
     use super::*;
     use crate::accounts::{AccountRepository, STATUS_ACTIVE};
+    use chrono::Duration;
 
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -367,12 +252,13 @@ mod tests {
             .unwrap();
         let code = LinkRepository::issue(&pool, &account).await.unwrap();
 
-        crate::db_execute!(
-            &pool,
-            "UPDATE matrix_link_challenges SET expires_at = ? WHERE code = ?",
+        sqlx::query!(
+            "UPDATE matrix_link_challenges SET expires_at = $1 WHERE code = $2",
             Utc::now() - Duration::minutes(1),
             &code
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert_eq!(
@@ -402,11 +288,12 @@ mod tests {
         let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE)
             .await
             .unwrap();
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', ?)",
+        sqlx::query!(
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', $1)",
             &theirs
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         let mine = AccountRepository::create(&pool, "mine", STATUS_ACTIVE)
@@ -463,12 +350,13 @@ mod tests {
             .await
             .unwrap();
 
-        crate::db_execute!(
-            &pool,
+        sqlx::query!(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
-             VALUES ('!r:x', ?, 'evan', 'keep me', 'medium', FALSE)",
+             VALUES ('!r:x', $1, 'evan', 'keep me', 'medium', FALSE)",
             &account
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert!(LinkRepository::unlink(&pool, &account, "@evan:mbm.one")
@@ -482,12 +370,11 @@ mod tests {
             .is_none());
 
         // The row is exactly where it was.
-        let owner: String = crate::db_scalar_one!(
-            &pool,
-            _,
-            "SELECT owner_id FROM todos WHERE text = 'keep me'"
-        )
-        .unwrap();
+        let owner: String =
+            sqlx::query_scalar!("SELECT owner_id FROM todos WHERE text = 'keep me'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(owner, account);
     }
 

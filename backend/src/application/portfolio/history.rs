@@ -5,6 +5,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::history::{PortfolioHistoryPoint, PortfolioHistoryResponse};
 use crate::domain::portfolio::models::{scale_product, Holding};
+use crate::infrastructure::postgres::repositories::portfolio::audit as audit_repo;
 use crate::infrastructure::postgres::repositories::portfolio::cash as cash_repo;
 use crate::infrastructure::postgres::repositories::portfolio::history as history_repo;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as holdings_repo;
@@ -180,31 +181,21 @@ impl PortfolioService {
                 .collect();
 
             if points.is_empty() {
-                let audit_entries = sqlx::query!(
-                    r#"
-                    SELECT created_at, amount_minor
-                    FROM portfolio_audit_log
-                    WHERE owner_id = $1 AND currency = $2
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                    "#,
+                if let Some((created, amount_minor)) = audit_repo::first_audit_entry_for_currency(
+                    &self.pool,
                     owner.as_str(),
-                    &norm_currency
+                    &norm_currency,
                 )
-                .fetch_optional(&self.pool)
-                .await?;
-
-                if let Some(entry) = audit_entries {
-                    if let Some(created) = entry.created_at {
-                        let first_date = created.format("%Y-%m-%d").to_string();
-                        if first_date != today_str {
-                            points.push(PortfolioHistoryPoint {
-                                date: first_date,
-                                holdings_value_minor: 0,
-                                cash_minor: entry.amount_minor,
-                                total_net_worth_minor: entry.amount_minor,
-                            });
-                        }
+                .await?
+                {
+                    let first_date = created.format("%Y-%m-%d").to_string();
+                    if first_date != today_str {
+                        points.push(PortfolioHistoryPoint {
+                            date: first_date,
+                            holdings_value_minor: 0,
+                            cash_minor: amount_minor,
+                            total_net_worth_minor: amount_minor,
+                        });
                     }
                 }
             }

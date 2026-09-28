@@ -19,7 +19,7 @@ use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::tts::{
     SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
 };
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub mod text;

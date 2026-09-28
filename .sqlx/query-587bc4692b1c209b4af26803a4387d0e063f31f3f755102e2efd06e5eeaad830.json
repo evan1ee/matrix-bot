@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE portfolio_audit_log SET owner_id = 'acct_b'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "587bc4692b1c209b4af26803a4387d0e063f31f3f755102e2efd06e5eeaad830"
+}

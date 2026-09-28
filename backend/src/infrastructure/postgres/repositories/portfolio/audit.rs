@@ -398,3 +398,25 @@ pub async fn absorb_ledger(
 
     Ok(moved)
 }
+
+pub async fn first_audit_entry_for_currency(
+    pool: &PgPool,
+    owner_id: &str,
+    currency: &str,
+) -> Result<Option<(DateTime<Utc>, i64)>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        SELECT created_at, amount_minor
+        FROM portfolio_audit_log
+        WHERE owner_id = $1 AND currency = $2
+        ORDER BY created_at ASC
+        LIMIT 1
+        "#,
+        owner_id,
+        currency
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.and_then(|r| r.created_at.map(|c| (c, r.amount_minor))))
+}

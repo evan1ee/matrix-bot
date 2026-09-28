@@ -1,4 +1,4 @@
-use crate::modules::CommandHelp;
+use crate::interface::chat::CommandHelp;
 use crate::utils::html_escape;
 
 pub fn generate_help_html(module_helps: &[(String, Vec<CommandHelp>)]) -> String {

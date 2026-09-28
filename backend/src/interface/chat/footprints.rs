@@ -11,7 +11,7 @@ use crate::db::Database;
 use crate::domain::accounts::AccountId;
 use crate::domain::footprints::FootprintsSummary;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct FootprintsModule;

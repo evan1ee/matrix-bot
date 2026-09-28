@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE matrix_link_challenges SET expires_at = $1 WHERE code = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b99a776571e6f902165916283338725ff5179a82de53270af68265eb8d5bccd"
+}

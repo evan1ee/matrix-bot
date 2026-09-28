@@ -34,22 +34,13 @@ impl SecurityEventRepository {
         kind: SecurityEventKind,
         detail: Option<&str>,
     ) {
-        let result = crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::security_events::record(
             pool,
-            "INSERT INTO security_events (account_id, kind, detail) VALUES (?, ?, ?)",
-            account_id,
-            kind.as_str(),
-            detail
-        );
-
-        if let Err(err) = result {
-            tracing::error!(
-                "Could not record security event {} for {}: {:?}",
-                kind.as_str(),
-                account_id,
-                err
-            );
-        }
+            &crate::domain::accounts::AccountId::new(account_id),
+            kind,
+            detail,
+        )
+        .await;
     }
 
     /// The account's recent history, newest first.
@@ -58,14 +49,22 @@ impl SecurityEventRepository {
         account_id: &str,
         limit: i64,
     ) -> Result<Vec<SecurityEvent>, sqlx::Error> {
-        crate::db_fetch_all!(
-            pool,
-            SecurityEvent,
-            "SELECT id, kind, detail, created_at FROM security_events \
-             WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-            account_id,
-            limit
-        )
+        let events =
+            crate::infrastructure::postgres::repositories::accounts::security_events::list(
+                pool,
+                &crate::domain::accounts::AccountId::new(account_id),
+                limit,
+            )
+            .await?;
+        Ok(events
+            .into_iter()
+            .map(|e| SecurityEvent {
+                id: e.id,
+                kind: e.kind,
+                detail: e.detail,
+                created_at: e.created_at,
+            })
+            .collect())
     }
 }
 

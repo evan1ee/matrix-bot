@@ -27,7 +27,7 @@ use crate::interface::chat::reminders::ReminderModule;
 use crate::interface::chat::settings::SettingsModule;
 use crate::interface::chat::todos::TodoModule;
 use crate::interface::chat::webhooks::WebhookModule;
-use crate::modules::{ModuleContext, ModuleRegistry};
+use crate::interface::chat::{ModuleContext, ModuleRegistry};
 
 pub mod attachments;
 pub mod client;

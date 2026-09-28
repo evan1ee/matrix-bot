@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
 pub mod handler;
 pub mod scheduler;

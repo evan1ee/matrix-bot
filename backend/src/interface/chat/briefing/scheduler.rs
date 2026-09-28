@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 
 use crate::domain::settings::parse_briefing_time;
 use crate::events::SystemEvent;
-use crate::modules::ModuleContext;
+use crate::interface::chat::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
 pub async fn run_briefing_tick(ctx: &ModuleContext) {

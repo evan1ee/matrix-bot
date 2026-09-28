@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> '_sqlx_migrations'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table_name",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "information_schema.tables",
+            "name": "table_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d7a5d77de723f21c8e7f45ded41f527a9265b59370142ea694a5483869a0d3db"
+}

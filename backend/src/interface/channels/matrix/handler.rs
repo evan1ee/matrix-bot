@@ -8,7 +8,7 @@ use tracing::error;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::modules::ModuleRegistry;
+use crate::interface::chat::ModuleRegistry;
 
 pub fn register_handlers(
     client: &Client,

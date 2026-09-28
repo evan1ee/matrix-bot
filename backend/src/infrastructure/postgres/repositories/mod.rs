@@ -11,6 +11,7 @@ pub mod life;
 pub mod llm;
 pub mod mcp;
 pub mod portfolio;
+pub mod reaction_targets;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;

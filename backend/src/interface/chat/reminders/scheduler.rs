@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 
 use crate::domain::reminders::Reminder;
 use crate::infrastructure::postgres::repositories::reminders::MAX_DELIVERY_ATTEMPTS;
-use crate::modules::ModuleContext;
+use crate::interface::chat::ModuleContext;
 use crate::utils::{html_escape, strip_html};
 
 /// How far out a failed delivery is pushed before the next attempt.

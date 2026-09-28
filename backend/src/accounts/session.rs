@@ -87,14 +87,27 @@ pub fn hash_token(token: &str) -> String {
         })
 }
 
+impl From<crate::domain::accounts::Session> for Session {
+    fn from(s: crate::domain::accounts::Session) -> Self {
+        Self {
+            id_hash: s.id_hash,
+            account_id: s.account_id.into_inner(),
+            created_at: s.created_at,
+            last_seen_at: s.last_seen_at,
+            last_verified_at: s.last_verified_at,
+            restricted_until: s.restricted_until,
+            user_agent: s.user_agent,
+            ip: s.ip,
+            revoked_at: s.revoked_at,
+        }
+    }
+}
+
 pub struct SessionRepository;
 
 impl SessionRepository {
     /// Opens a session and returns the cookie value, which is the only time it
     /// exists anywhere outside the browser.
-    ///
-    /// `restricted_until` is `Some` only for a session minted by account
-    /// recovery.
     pub async fn create(
         pool: &DbPool,
         account_id: &str,
@@ -102,91 +115,48 @@ impl SessionRepository {
         ip: Option<&str>,
         restricted_until: Option<DateTime<Utc>>,
     ) -> Result<String, sqlx::Error> {
-        // Minted from the OS CSPRNG for the same reason account ids are (see
-        // utils/random.rs): 32 random bytes is more entropy than a session
-        // token needs.
-        let token = crate::utils::random::random_hex(32);
-
-        let now = Utc::now();
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::sessions::create(
             pool,
-            "INSERT INTO sessions \
-             (id_hash, account_id, created_at, last_seen_at, last_verified_at, \
-              restricted_until, user_agent, ip) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            hash_token(&token),
-            account_id,
-            now,
-            now,
-            now,
-            restricted_until,
+            &crate::domain::accounts::AccountId::new(account_id),
             user_agent,
-            ip
-        )?;
-
-        Ok(token)
+            ip,
+            restricted_until,
+        )
+        .await
     }
 
     /// Resolves a cookie to a live session, refreshing its idle clock.
-    ///
-    /// Returns `None` for anything not currently usable — unknown, revoked, or
-    /// past either timeout — so a caller cannot accidentally treat an expired
-    /// session as merely stale.
     pub async fn resolve(pool: &DbPool, token: &str) -> Result<Option<Session>, sqlx::Error> {
-        let id_hash = hash_token(token);
-
-        let Some(session) = crate::db_fetch_optional!(
-            pool,
-            Session,
-            "SELECT id_hash, account_id, created_at, last_seen_at, last_verified_at, \
-                    restricted_until, user_agent, ip, revoked_at \
-             FROM sessions WHERE id_hash = ?",
-            &id_hash
-        )?
-        else {
-            return Ok(None);
-        };
-
-        let now = Utc::now();
-        if !session.is_live(now) {
-            return Ok(None);
-        }
-
-        crate::db_execute!(
-            pool,
-            "UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?",
-            now,
-            &id_hash
-        )?;
-
-        Ok(Some(Session {
-            last_seen_at: now,
-            ..session
-        }))
+        let res =
+            crate::infrastructure::postgres::repositories::accounts::sessions::resolve(pool, token)
+                .await?;
+        Ok(res.map(Into::into))
     }
 
     /// Records that the holder just proved possession of a passkey.
-    ///
-    /// This is what opens the step-up window, so it is called only from a
-    /// finished WebAuthn assertion — never from an ordinary request.
     pub async fn mark_verified(pool: &DbPool, id_hash: &str) -> Result<(), sqlx::Error> {
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::sessions::mark_verified(
+            pool, id_hash,
+        )
+        .await
+    }
+
+    pub async fn update_last_verified_at(
+        pool: &DbPool,
+        account_id: &str,
+        verified_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
+        crate::infrastructure::postgres::repositories::accounts::sessions::update_last_verified_at(
             pool,
-            "UPDATE sessions SET last_verified_at = ? WHERE id_hash = ?",
-            Utc::now(),
-            id_hash
-        )?;
-        Ok(())
+            &crate::domain::accounts::AccountId::new(account_id),
+            verified_at,
+        )
+        .await
     }
 
     pub async fn revoke(pool: &DbPool, id_hash: &str) -> Result<(), sqlx::Error> {
-        crate::db_execute!(
-            pool,
-            "UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL",
-            Utc::now(),
-            id_hash
-        )?;
-        Ok(())
+        crate::infrastructure::postgres::repositories::accounts::sessions::revoke(pool, id_hash)
+            .await
     }
 
     /// Signs out every session for an account except, optionally, the one
@@ -196,16 +166,12 @@ impl SessionRepository {
         account_id: &str,
         except: Option<&str>,
     ) -> Result<u64, sqlx::Error> {
-        let affected = crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::sessions::revoke_all_for_account(
             pool,
-            "UPDATE sessions SET revoked_at = ? \
-             WHERE account_id = ? AND revoked_at IS NULL AND id_hash IS DISTINCT FROM ?",
-            Utc::now(),
-            account_id,
-            except
-        )?;
-
-        Ok(affected)
+            &crate::domain::accounts::AccountId::new(account_id),
+            except,
+        )
+        .await
     }
 
     /// Live sessions for an account, newest first — the "where you're signed
@@ -214,18 +180,13 @@ impl SessionRepository {
         pool: &DbPool,
         account_id: &str,
     ) -> Result<Vec<Session>, sqlx::Error> {
-        let sessions = crate::db_fetch_all!(
-            pool,
-            Session,
-            "SELECT id_hash, account_id, created_at, last_seen_at, last_verified_at, \
-                    restricted_until, user_agent, ip, revoked_at \
-             FROM sessions WHERE account_id = ? AND revoked_at IS NULL \
-             ORDER BY last_seen_at DESC",
-            account_id
-        )?;
-
-        let now = Utc::now();
-        Ok(sessions.into_iter().filter(|s| s.is_live(now)).collect())
+        let sessions =
+            crate::infrastructure::postgres::repositories::accounts::sessions::list_for_account(
+                pool,
+                &crate::domain::accounts::AccountId::new(account_id),
+            )
+            .await?;
+        Ok(sessions.into_iter().map(Into::into).collect())
     }
 }
 
@@ -248,8 +209,10 @@ mod tests {
             .await
             .unwrap();
 
-        let stored: Vec<String> =
-            crate::db_scalar_all!(&pool, _, "SELECT id_hash FROM sessions").unwrap();
+        let stored: Vec<String> = sqlx::query_scalar!("SELECT id_hash FROM sessions")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(stored.len(), 1);
         assert_ne!(

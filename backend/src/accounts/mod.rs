@@ -156,15 +156,16 @@ mod tests {
 
     /// Every table in the schema that has `column`.
     async fn tables_with_column(pool: &DbPool, column: &str) -> BTreeSet<String> {
-        crate::db_scalar_all!(
-            pool,
-            String,
+        sqlx::query_scalar!(
             "SELECT table_name FROM information_schema.columns \
-             WHERE table_schema = current_schema() AND column_name = ?",
+             WHERE table_schema = current_schema() AND column_name = $1",
             column
         )
+        .fetch_all(pool)
+        .await
         .unwrap()
         .into_iter()
+        .flatten()
         .collect()
     }
 

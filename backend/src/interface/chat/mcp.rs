@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::interface::mcp::{adapter, models, prompts, resources};
-use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct McpModule;

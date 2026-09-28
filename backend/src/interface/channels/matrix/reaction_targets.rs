@@ -2,82 +2,10 @@
 //! that can be interacted with via reactions.
 
 use crate::db::DbPool;
-/// A tracked message target linked to a domain entity.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
-pub struct BotMessageTarget {
-    pub event_id: String,
-    pub room_id: String,
-    pub entity_type: String, // "todo" or "reminder"
-    pub entity_id: i64,
-    pub owner_id: String,
-    pub title: String,
-}
-
-/// Records or updates a Matrix message target associated with an entity.
-pub async fn record_target(
-    pool: &DbPool,
-    event_id: &str,
-    room_id: &str,
-    entity_type: &str,
-    entity_id: i64,
-    owner_id: &str,
-    title: &str,
-) -> Result<(), sqlx::Error> {
-    crate::db_execute!(
-        pool,
-        r#"
-        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(event_id) DO UPDATE SET
-            room_id = excluded.room_id,
-            entity_type = excluded.entity_type,
-            entity_id = excluded.entity_id,
-            owner_id = excluded.owner_id,
-            title = excluded.title
-        "#,
-        event_id,
-        room_id,
-        entity_type,
-        entity_id,
-        owner_id,
-        title
-    )?;
-
-    Ok(())
-}
-
-/// Retrieves a tracked message target by Matrix event ID.
-pub async fn get_target(
-    pool: &DbPool,
-    event_id: &str,
-) -> Result<Option<BotMessageTarget>, sqlx::Error> {
-    crate::db_fetch_optional!(
-        pool,
-        BotMessageTarget,
-        r#"
-        SELECT event_id, room_id, entity_type, entity_id, owner_id, title
-        FROM bot_message_targets
-        WHERE event_id = ?
-        "#,
-        event_id
-    )
-}
-
-/// Deletes tracked targets for a given entity type and ID.
-pub async fn delete_target_by_entity(
-    pool: &DbPool,
-    entity_type: &str,
-    entity_id: i64,
-) -> Result<u64, sqlx::Error> {
-    let res = crate::db_execute!(
-        pool,
-        "DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?",
-        entity_type,
-        entity_id
-    )?;
-
-    Ok(res)
-}
+pub use crate::domain::chat::BotMessageTarget;
+pub use crate::infrastructure::postgres::repositories::reaction_targets::{
+    copy_targets, delete_target_by_entity, get_target, record_target,
+};
 
 /// Parses entity type, ID, and title from a bot confirmation HTML reply.
 pub fn parse_entity_from_reply(reply_html: &str) -> Option<(&'static str, i64, String)> {
@@ -149,33 +77,6 @@ pub async fn record_ai_tool_target(
             }
         }
     }
-}
-
-/// Copies targets from one event ID to another.
-pub async fn copy_targets(
-    pool: &DbPool,
-    from_event_id: &str,
-    to_event_id: &str,
-) -> Result<u64, sqlx::Error> {
-    let res = crate::db_execute!(
-        pool,
-        r#"
-        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
-        SELECT ?, room_id, entity_type, entity_id, owner_id, title
-        FROM bot_message_targets
-        WHERE event_id = ?
-        ON CONFLICT(event_id) DO UPDATE SET
-            room_id = excluded.room_id,
-            entity_type = excluded.entity_type,
-            entity_id = excluded.entity_id,
-            owner_id = excluded.owner_id,
-            title = excluded.title
-        "#,
-        to_event_id,
-        from_event_id
-    )?;
-
-    Ok(res)
 }
 
 /// Links related events across a command turn (stage placeholder, final bot reply, user prompt event)

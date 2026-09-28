@@ -14,7 +14,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::dispatcher::CommandParser;
 use crate::interface::channels::matrix::linking::PendingMerges;
-use crate::modules::ModuleRegistry;
+use crate::interface::chat::ModuleRegistry;
 
 /// Parses a text message and either answers `!link`, dispatches it to a
 /// module, or hands it to the AI assistant as a direct-message prompt.

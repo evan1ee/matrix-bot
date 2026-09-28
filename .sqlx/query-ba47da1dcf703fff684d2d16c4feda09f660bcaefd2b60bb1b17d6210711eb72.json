@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO finance_categories (owner_id, name) VALUES ('@a:x', 'food')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ba47da1dcf703fff684d2d16c4feda09f660bcaefd2b60bb1b17d6210711eb72"
+}

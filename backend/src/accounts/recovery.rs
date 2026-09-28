@@ -20,7 +20,6 @@
 //! finances.
 
 use crate::db::DbPool;
-use bcrypt::{hash, verify};
 use chrono::{Duration, Utc};
 
 /// How many codes are issued at once.
@@ -43,10 +42,6 @@ pub const RECOVERY_RESTRICTION_HOURS: i64 = 72;
 /// so guessing is already out of reach and the work factor is not what stands
 /// between an attacker and the account. Hashing is here so a leaked backup
 /// hands over nothing usable, which any cost achieves.
-///
-/// It is not zero, either: `redeem` compares against every unused hash in the
-/// table, so the cost is paid once per candidate on a legitimate redemption.
-const RECOVERY_HASH_COST: u32 = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RecoveryOutcome {
@@ -70,140 +65,50 @@ pub struct RecoveryRepository;
 
 impl RecoveryRepository {
     /// Issues a fresh set of codes, invalidating any previous set.
-    ///
-    /// Returns the plaintext, which is the only time it exists — the caller
-    /// must show it once and never store it.
     pub async fn issue_codes(pool: &DbPool, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::recovery::issue_codes(
             pool,
-            "DELETE FROM recovery_codes WHERE account_id = ?",
-            account_id
-        )?;
-
-        let mut codes = Vec::with_capacity(RECOVERY_CODE_COUNT);
-        for _ in 0..RECOVERY_CODE_COUNT {
-            let code = random_code();
-            let hashed = hash(&code, RECOVERY_HASH_COST)
-                .map_err(|err| sqlx::Error::Protocol(format!("could not hash a code: {err}")))?;
-
-            crate::db_execute!(
-                pool,
-                "INSERT INTO recovery_codes (account_id, code_hash) VALUES (?, ?)",
-                account_id,
-                &hashed
-            )?;
-
-            codes.push(code);
-        }
-
-        Ok(codes)
-    }
-
-    /// How many codes are still unused. Shown in the UI so someone can tell
-    /// they are running low before they run out.
-    pub async fn remaining(pool: &DbPool, account_id: &str) -> Result<i64, sqlx::Error> {
-        crate::db_scalar_one!(
-            pool,
-            _,
-            "SELECT COUNT(*) FROM recovery_codes WHERE account_id = ? AND used_at IS NULL",
-            account_id
+            &crate::domain::accounts::AccountId::new(account_id),
         )
+        .await
     }
 
-    /// Checks a code against every account, since the user has no way to say
-    /// who they are — the code *is* the claim.
-    ///
-    /// Every unused hash is compared. There is no index to narrow this by, and
-    /// deliberately so: a lookup keyed on anything derivable from the code
-    /// would leak which codes exist.
-    pub async fn redeem(pool: &DbPool, code: &str) -> Result<Option<String>, sqlx::Error> {
-        let normalised = normalise(code);
-
-        let candidates = crate::db_fetch_all!(
+    /// How many codes are still unused.
+    pub async fn remaining(pool: &DbPool, account_id: &str) -> Result<i64, sqlx::Error> {
+        crate::infrastructure::postgres::repositories::accounts::recovery::remaining(
             pool,
-            (i64, String, String),
-            "SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL"
-        )?;
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
+    }
 
-        for (id, account_id, code_hash) in candidates {
-            if verify(&normalised, &code_hash).unwrap_or(false) {
-                let consumed = crate::db_execute!(
-                    pool,
-                    "UPDATE recovery_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
-                    Utc::now(),
-                    id
-                )?;
-
-                // Lost a race with a concurrent redemption of the same code.
-                if consumed == 0 {
-                    return Ok(None);
-                }
-
-                return Ok(Some(account_id));
-            }
-        }
-
-        Ok(None)
+    /// Checks a code against every account.
+    pub async fn redeem(pool: &DbPool, code: &str) -> Result<Option<String>, sqlx::Error> {
+        let res =
+            crate::infrastructure::postgres::repositories::accounts::recovery::redeem(pool, code)
+                .await?;
+        Ok(res.map(|a| a.into_inner()))
     }
 
     /// Starts a Matrix-initiated recovery.
-    ///
-    /// Returns the code to DM to the user *now* — but it does not work until
-    /// `valid_after`. Telling them the code immediately is deliberate: the
-    /// message is also the warning, and it should arrive the moment the request
-    /// is made rather than a day later.
     pub async fn request(
         pool: &DbPool,
         account_id: &str,
     ) -> Result<(String, chrono::DateTime<Utc>), sqlx::Error> {
-        // One live request at a time, so repeated `!recover` cannot be used to
-        // paper over the notification with noise.
-        crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::recovery::request(
             pool,
-            "UPDATE recovery_requests SET cancelled_at = ? \
-             WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL",
-            Utc::now(),
-            account_id
-        )?;
-
-        let code = random_code();
-        let hashed = hash(&code, RECOVERY_HASH_COST)
-            .map_err(|err| sqlx::Error::Protocol(format!("could not hash a code: {err}")))?;
-
-        let now = Utc::now();
-        let valid_after = now + Duration::hours(RECOVERY_DELAY_HOURS);
-
-        let id = crate::db_scalar_one!(
-            pool,
-            String,
-            "INSERT INTO recovery_requests \
-             (id, account_id, code_hash, requested_at, valid_after, expires_at) \
-             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-            crate::utils::random::random_hex(16),
-            account_id,
-            &hashed,
-            now,
-            valid_after,
-            valid_after + Duration::hours(RECOVERY_WINDOW_HOURS)
-        )?;
-
-        tracing::info!("Recovery requested for {account_id} (request {id})");
-
-        Ok((code, valid_after))
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
     }
 
     /// Cancels every live recovery request for an account.
-    ///
-    /// This is what makes the delay meaningful: the real owner, still holding a
-    /// working session, sees the notification and stops it.
     pub async fn cancel_all(pool: &DbPool, account_id: &str) -> Result<u64, sqlx::Error> {
-        Ok(crate::db_execute!(
+        crate::infrastructure::postgres::repositories::accounts::recovery::cancel_all(
             pool,
-            "UPDATE recovery_requests SET cancelled_at = ? \
-             WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL",
-            Utc::now(),
-            account_id
-        )?)
+            &crate::domain::accounts::AccountId::new(account_id),
+        )
+        .await
     }
 
     /// Whether an account has a recovery request currently counting down.
@@ -211,87 +116,34 @@ impl RecoveryRepository {
         pool: &DbPool,
         account_id: &str,
     ) -> Result<Option<chrono::DateTime<Utc>>, sqlx::Error> {
-        crate::db_scalar_optional!(
+        crate::infrastructure::postgres::repositories::accounts::recovery::pending(
             pool,
-            chrono::DateTime<Utc>,
-            "SELECT valid_after FROM recovery_requests \
-             WHERE account_id = ? AND cancelled_at IS NULL AND consumed_at IS NULL \
-               AND expires_at > ? ORDER BY requested_at DESC LIMIT 1",
-            account_id,
-            Utc::now()
+            &crate::domain::accounts::AccountId::new(account_id),
         )
+        .await
     }
 
     /// Redeems a matured recovery code.
     pub async fn redeem_request(pool: &DbPool, code: &str) -> Result<MaturedRecovery, sqlx::Error> {
-        let normalised = normalise(code);
-        let now = Utc::now();
-
-        let candidates = crate::db_fetch_all!(
-            pool,
-            (String, String, String, chrono::DateTime<Utc>),
-            "SELECT id, account_id, code_hash, valid_after FROM recovery_requests \
-             WHERE cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > ?",
-            now
-        )?;
-
-        for (id, account_id, code_hash, valid_after) in candidates {
-            if !verify(&normalised, &code_hash).unwrap_or(false) {
-                continue;
+        let res =
+            crate::infrastructure::postgres::repositories::accounts::recovery::redeem_request(
+                pool, code,
+            )
+            .await?;
+        Ok(match res {
+            crate::domain::accounts::MaturedRecovery::Ready { account_id } => {
+                MaturedRecovery::Ready {
+                    account_id: account_id.into_inner(),
+                }
             }
-
-            if now < valid_after {
-                return Ok(MaturedRecovery::TooEarly);
-            }
-
-            let consumed = crate::db_execute!(
-                pool,
-                "UPDATE recovery_requests SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
-                now,
-                &id
-            )?;
-
-            return Ok(if consumed == 1 {
-                MaturedRecovery::Ready { account_id }
-            } else {
-                MaturedRecovery::Unavailable
-            });
-        }
-
-        Ok(MaturedRecovery::Unavailable)
+            crate::domain::accounts::MaturedRecovery::TooEarly => MaturedRecovery::TooEarly,
+            crate::domain::accounts::MaturedRecovery::Unavailable => MaturedRecovery::Unavailable,
+        })
     }
 
     /// When a session opened by recovery stops being restricted.
     pub fn restriction_expiry() -> chrono::DateTime<Utc> {
         Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS)
-    }
-}
-
-/// A code a person can read off a screen and type into a chat window.
-fn random_code() -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-    let bytes: Vec<u8> = crate::utils::random::random_bytes(10);
-
-    let raw: String = bytes
-        .iter()
-        .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
-        .collect();
-
-    format!("{}-{}", &raw[..5], &raw[5..10])
-}
-
-fn normalise(code: &str) -> String {
-    let cleaned: String = code
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-
-    if cleaned.len() == 10 {
-        format!("{}-{}", &cleaned[..5], &cleaned[5..])
-    } else {
-        cleaned
     }
 }
 
@@ -324,8 +176,10 @@ mod tests {
         assert_eq!(unique.len(), RECOVERY_CODE_COUNT, "codes must not repeat");
 
         // Nothing recoverable is stored.
-        let stored: Vec<String> =
-            crate::db_scalar_all!(&pool, _, "SELECT code_hash FROM recovery_codes").unwrap();
+        let stored: Vec<String> = sqlx::query_scalar!("SELECT code_hash FROM recovery_codes")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
         for code in &codes {
             assert!(
                 !stored.iter().any(|h| h.contains(code)),
@@ -444,12 +298,13 @@ mod tests {
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
         // Wind the clock forward.
-        crate::db_execute!(
-            &pool,
-            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+        sqlx::query!(
+            "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
             &acct
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert_eq!(
@@ -488,12 +343,13 @@ mod tests {
             .is_none());
 
         // Even once it would have matured, it is dead.
-        crate::db_execute!(
-            &pool,
-            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+        sqlx::query!(
+            "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
             &acct
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert_eq!(
@@ -514,12 +370,13 @@ mod tests {
         let (first, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
         let (second, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        crate::db_execute!(
-            &pool,
-            "UPDATE recovery_requests SET valid_after = ? WHERE account_id = ?",
+        sqlx::query!(
+            "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
             &acct
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert_eq!(
@@ -544,13 +401,14 @@ mod tests {
         let acct = account(&pool, "evan").await;
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
-        crate::db_execute!(
-            &pool,
-            "UPDATE recovery_requests SET valid_after = ?, expires_at = ? WHERE account_id = ?",
+        sqlx::query!(
+            "UPDATE recovery_requests SET valid_after = $1, expires_at = $2 WHERE account_id = $3",
             Utc::now() - Duration::hours(2),
             Utc::now() - Duration::hours(1),
             &acct
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         assert_eq!(

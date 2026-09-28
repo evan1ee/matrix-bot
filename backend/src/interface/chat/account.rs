@@ -28,7 +28,7 @@ use crate::domain::accounts::{
 };
 use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::notify::notify_account;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
 
 /// Commands that exist on the web only, and what to say about each.

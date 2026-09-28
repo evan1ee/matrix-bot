@@ -20,15 +20,14 @@ pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<Str
             if ev.content.membership == MembershipState::Invite {
                 let sender = ev.sender.as_str();
                 let is_allowlisted = allowlist.iter().any(|a| a == sender);
-                let is_linked = crate::db_scalar_optional!(
-                    &db.pool,
-                    i64,
-                    "SELECT CAST(1 AS BIGINT) FROM matrix_links WHERE mxid = ?",
-                    sender
-                )
-                .ok()
-                .flatten()
-                .is_some();
+                let is_linked =
+                    crate::infrastructure::postgres::repositories::accounts::core::find_by_mxid(
+                        &db.pool, sender,
+                    )
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some();
 
                 if is_allowlisted || is_linked {
                     info!(

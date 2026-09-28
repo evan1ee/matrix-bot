@@ -7,7 +7,7 @@ use crate::application::reminders::ReminderService;
 use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::domain::reminders::{NewReminder, RecurrencePattern};
-use crate::modules::CommandContext;
+use crate::interface::chat::CommandContext;
 use crate::utils::{format_datetime, format_duration, html_escape, parse_reminder_args};
 
 pub async fn handle_reminder_command(

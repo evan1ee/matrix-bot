@@ -8,7 +8,7 @@ use crate::db::Database;
 use crate::domain::recurring_bills::{NewRecurringBill, RecurringBillPatch};
 use crate::domain::reminders::{SyncOutcome, MAX_LEAD_MINUTES};
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html_escape;
 
 pub struct RecurringBillsModule;

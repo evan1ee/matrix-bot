@@ -31,13 +31,42 @@ fn src(sub: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(sub)
 }
 
-/// `file`'s path relative to `src/`, using `/` regardless of platform, so
-/// entries in `INTERFACE_SQL_ALLOW_LIST` are portable.
+/// `file`'s path relative to `src/`, using `/` regardless of platform.
 fn relative_to_src(file: &Path) -> String {
     file.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
         .expect("file under src/")
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+/// Strips line comments (`//...`) while ignoring `//` inside string literals (`"..."`),
+/// and removes string literal content so string text does not trigger forbidden needles.
+fn strip_comments_and_strings(line: &str) -> String {
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_string = false;
+    let mut escape = false;
+
+    while let Some(c) = chars.next() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+                out.push('"');
+            }
+        } else if c == '"' {
+            in_string = true;
+            out.push('"');
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            break;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Every `(file, line)` in `dir` whose non-comment text contains a forbidden needle.
@@ -46,7 +75,7 @@ fn violations(dir: &str, forbidden: &[&str]) -> Vec<String> {
     for file in rust_files(&src(dir)) {
         let text = fs::read_to_string(&file).expect("readable source file");
         for (n, line) in text.lines().enumerate() {
-            let code = line.split("//").next().unwrap_or("");
+            let code = strip_comments_and_strings(line);
             if forbidden.iter().any(|needle| code.contains(needle)) {
                 found.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
             }
@@ -121,19 +150,8 @@ fn no_code_searches_parent_directories_for_env_files() {
     );
 }
 
-/// Files under `interface/` that still run SQL directly, pending the
-/// feature-by-feature move to the target layer-first layout (see
-/// docs/ARCHITECTURE.md's "Target layer-first layout"). This list may only
-/// shrink: `interface_runs_no_sql_outside_the_allow_list` fails if a listed
-/// file no longer offends, so a stale entry can't linger unnoticed.
-const INTERFACE_SQL_ALLOW_LIST: &[&str] = &[
-    "interface/channels/matrix/invite.rs",
-    "interface/channels/matrix/reaction_targets.rs",
-    "interface/http/mod.rs",
-];
-
 #[test]
-fn interface_runs_no_sql_outside_the_allow_list() {
+fn interface_runs_no_sql() {
     let dir = src("interface");
     assert!(
         dir.is_dir(),
@@ -143,6 +161,8 @@ fn interface_runs_no_sql_outside_the_allow_list() {
 
     let forbidden = [
         "sqlx::query",
+        "sqlx::query_as",
+        "sqlx::query_scalar",
         "db_fetch",
         "db_scalar",
         "db_execute",
@@ -156,7 +176,7 @@ fn interface_runs_no_sql_outside_the_allow_list() {
     for file in rust_files(&dir) {
         let text = fs::read_to_string(&file).expect("readable source file");
         let offends = text.lines().any(|line| {
-            let code = line.split("//").next().unwrap_or("");
+            let code = strip_comments_and_strings(line);
             forbidden.iter().any(|needle| code.contains(needle))
         });
         if offends {
@@ -164,33 +184,129 @@ fn interface_runs_no_sql_outside_the_allow_list() {
         }
     }
 
-    let allow_list: BTreeSet<&str> = INTERFACE_SQL_ALLOW_LIST.iter().copied().collect();
-
-    let unlisted: Vec<&String> = offending_files
-        .iter()
-        .filter(|f| !allow_list.contains(f.as_str()))
-        .collect();
     assert!(
-        unlisted.is_empty(),
-        "interface/ files run SQL directly but are not in INTERFACE_SQL_ALLOW_LIST \
-         (move the SQL into application/infrastructure, or add the file to the list \
-         if it is a known interim offender):\n{}",
-        unlisted
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
+        offending_files.is_empty(),
+        "interface/ files must not run SQL directly:\n{}",
+        offending_files.into_iter().collect::<Vec<_>>().join("\n")
     );
+}
 
-    let stale: Vec<&str> = allow_list
-        .iter()
-        .filter(|f| !offending_files.contains(**f))
-        .copied()
-        .collect();
+#[test]
+fn no_interim_query_macros_in_src() {
+    let forbidden = [
+        "db_execute!",
+        "db_fetch_one!",
+        "db_fetch_optional!",
+        "db_fetch_all!",
+        "db_fetch_all_dyn!",
+        "db_fetch!",
+        "db_scalar!",
+        "db_ddl!",
+        "tx_execute!",
+        "tx_fetch_one!",
+        "tx_fetch_optional!",
+        "tx_fetch_all!",
+        "tx_fetch!",
+        "tx_scalar!",
+    ];
+    let v = violations("", &forbidden);
     assert!(
-        stale.is_empty(),
-        "INTERFACE_SQL_ALLOW_LIST entries no longer run SQL directly — remove them \
-         (the list only shrinks):\n{}",
-        stale.join("\n")
+        v.is_empty(),
+        "interim db_*! / tx_*! query macros are removed and must not be used anywhere in src/:\n{}",
+        v.join("\n")
+    );
+}
+
+#[test]
+fn assert_sql_safe_only_in_merge() {
+    let mut offending_files = BTreeSet::new();
+    for file in rust_files(&src("")) {
+        let rel = relative_to_src(&file);
+        if rel == "infrastructure/postgres/merge.rs" {
+            continue;
+        }
+        let text = fs::read_to_string(&file).expect("readable source file");
+        let offends = text.lines().any(|line| {
+            let code = strip_comments_and_strings(line);
+            code.contains("AssertSqlSafe")
+        });
+        if offends {
+            offending_files.insert(rel);
+        }
+    }
+    assert!(
+        offending_files.is_empty(),
+        "AssertSqlSafe is strictly restricted to infrastructure/postgres/merge.rs:\n{}",
+        offending_files.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+#[test]
+fn no_sqlx_in_interface_or_application() {
+    let allowed_idents = ["PgPool", "Transaction", "Error", "Postgres"];
+    let mut violations = Vec::new();
+
+    for dir_name in ["interface", "application"] {
+        for file in rust_files(&src(dir_name)) {
+            let text = fs::read_to_string(&file).expect("readable source file");
+            let mut in_test_cfg = false;
+            let mut brace_depth = 0usize;
+            let mut test_start_depth = None;
+
+            for (n, line) in text.lines().enumerate() {
+                let code = strip_comments_and_strings(line);
+
+                let open_braces = code.chars().filter(|&c| c == '{').count();
+                let close_braces = code.chars().filter(|&c| c == '}').count();
+
+                if code.contains("#[cfg(test)]") {
+                    in_test_cfg = true;
+                }
+
+                if in_test_cfg && test_start_depth.is_none() && code.contains('{') {
+                    test_start_depth = Some(brace_depth);
+                }
+
+                brace_depth += open_braces;
+                if brace_depth >= close_braces {
+                    brace_depth -= close_braces;
+                } else {
+                    brace_depth = 0;
+                }
+
+                if let Some(start) = test_start_depth {
+                    if brace_depth <= start {
+                        in_test_cfg = false;
+                        test_start_depth = None;
+                    }
+                    continue;
+                } else if in_test_cfg {
+                    continue;
+                }
+
+                let mut remaining = code.as_str();
+                while let Some(idx) = remaining.find("sqlx::") {
+                    let after = &remaining[idx + "sqlx::".len()..];
+                    let ident: String = after
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if !allowed_idents.contains(&ident.as_str()) {
+                        violations.push(format!(
+                            "{}:{}: unapproved sqlx::{ident}",
+                            file.display(),
+                            n + 1
+                        ));
+                    }
+                    remaining = after;
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "interface/ and application/ must not reference sqlx outside tests, except PgPool, Transaction, Error:\n{}",
+        violations.join("\n")
     );
 }

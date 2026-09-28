@@ -11,7 +11,7 @@ use crate::domain::settings::{
     MAX_MAX_HISTORY_TURNS, MIN_MAX_HISTORY_TURNS,
 };
 use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::{format_datetime, html_escape};
 
 /// A few well-known zones, so `!settings timezone` is answerable without leaving

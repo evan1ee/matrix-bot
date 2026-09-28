@@ -14,8 +14,11 @@ pub struct SchemaSnapshot {
     pub functions: BTreeSet<String>,
 }
 
-async fn strings(pool: &DbPool, sql: &str, schema: &str) -> BTreeSet<String> {
-    crate::db_scalar_all!(pool, String, sql, schema)
+async fn strings(pool: &DbPool, sql: &'static str, schema: &str) -> BTreeSet<String> {
+    sqlx::query_scalar::<_, String>(sql)
+        .bind(schema)
+        .fetch_all(pool)
+        .await
         .expect("catalog query")
         .into_iter()
         // Index and constraint definitions embed the schema name; strip it so
@@ -30,14 +33,14 @@ pub async fn snapshot(pool: &DbPool, schema: &str) -> SchemaSnapshot {
             pool,
             "SELECT table_name || '.' || column_name || ' ' || data_type || \
                     ' null=' || is_nullable || ' default=' || COALESCE(column_default, '') \
-             FROM information_schema.columns WHERE table_schema = ? \
+             FROM information_schema.columns WHERE table_schema = $1 \
                AND table_name <> '_sqlx_migrations'",
             schema,
         )
         .await,
         indexes: strings(
             pool,
-            "SELECT indexdef FROM pg_indexes WHERE schemaname = ? \
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 \
                AND tablename <> '_sqlx_migrations'",
             schema,
         )
@@ -46,7 +49,7 @@ pub async fn snapshot(pool: &DbPool, schema: &str) -> SchemaSnapshot {
             pool,
             "SELECT c.conrelid::regclass::text || ' ' || pg_get_constraintdef(c.oid) \
              FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace \
-             WHERE n.nspname = ? AND c.conrelid::regclass::text NOT LIKE '%_sqlx_migrations'",
+             WHERE n.nspname = $1 AND c.conrelid::regclass::text NOT LIKE '%_sqlx_migrations'",
             schema,
         )
         .await,
@@ -54,14 +57,14 @@ pub async fn snapshot(pool: &DbPool, schema: &str) -> SchemaSnapshot {
             pool,
             "SELECT event_object_table || ' ' || trigger_name || ' ' || action_timing || ' ' || \
                     event_manipulation || ' ' || action_statement \
-             FROM information_schema.triggers WHERE trigger_schema = ?",
+             FROM information_schema.triggers WHERE trigger_schema = $1",
             schema,
         )
         .await,
         functions: strings(
             pool,
             "SELECT p.proname || ' ' || md5(p.prosrc) FROM pg_proc p \
-             JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = ?",
+             JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1",
             schema,
         )
         .await,
@@ -113,18 +116,22 @@ mod tests {
             .expect("set MIGRATE_TEST_DATABASE_URL to a restored copy of production");
         let copy = crate::db::pool::connect_pool(&url, 2).await.unwrap();
 
-        let tables: Vec<String> = crate::db_scalar_all!(
-            &copy,
-            String,
+        let tables: Vec<String> = sqlx::query_scalar!(
             "SELECT table_name FROM information_schema.tables \
              WHERE table_schema = 'public' AND table_type = 'BASE TABLE' \
                AND table_name <> '_sqlx_migrations'"
         )
-        .unwrap();
+        .fetch_all(&copy)
+        .await
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .collect();
         let mut before = std::collections::BTreeMap::new();
         for t in &tables {
-            let n: i64 =
-                crate::db_scalar_one!(&copy, _, &format!("SELECT COUNT(*) FROM {t}")).unwrap();
+            let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT COUNT(*) FROM ");
+            qb.push(t);
+            let n: i64 = qb.build_query_scalar().fetch_one(&copy).await.unwrap();
             before.insert(t.clone(), n);
         }
 
@@ -133,8 +140,9 @@ mod tests {
             .expect("migrations apply to production copy");
 
         for (t, n) in &before {
-            let after: i64 =
-                crate::db_scalar_one!(&copy, _, &format!("SELECT COUNT(*) FROM {t}")).unwrap();
+            let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT COUNT(*) FROM ");
+            qb.push(t);
+            let after: i64 = qb.build_query_scalar().fetch_one(&copy).await.unwrap();
             assert_eq!(*n, after, "row count changed in {t}");
         }
 
@@ -152,12 +160,11 @@ mod tests {
         crate::db::pool::drop_pg_schema("rehearsal_fresh").await;
 
         // Every audit chain still verifies.
-        let owners: Vec<String> = crate::db_scalar_all!(
-            &copy,
-            String,
-            "SELECT DISTINCT owner_id FROM portfolio_audit_log"
-        )
-        .unwrap();
+        let owners: Vec<String> =
+            sqlx::query_scalar!("SELECT DISTINCT owner_id FROM portfolio_audit_log")
+                .fetch_all(&copy)
+                .await
+                .unwrap();
         for owner in owners {
             let result =
                 crate::infrastructure::postgres::repositories::portfolio::audit::verify_audit_chain(

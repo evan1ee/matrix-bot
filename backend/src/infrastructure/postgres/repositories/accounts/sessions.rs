@@ -166,3 +166,18 @@ pub async fn list_for_account(
         .filter(|s| s.is_live(now))
         .collect())
 }
+
+pub async fn update_last_verified_at(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+    verified_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE sessions SET last_verified_at = $1 WHERE account_id = $2",
+        verified_at,
+        account_id.as_str(),
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
