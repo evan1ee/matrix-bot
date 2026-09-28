@@ -5,12 +5,10 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::domain::portfolio::WithdrawOutcome;
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::interface::http::portfolio::format_for_error;
-use crate::modules::portfolio::cash_repo;
-use crate::modules::portfolio::models::{CashBalance, WithdrawOutcome};
-use crate::modules::portfolio::service;
+use crate::interface::http::portfolio::{format_for_error, CashBalance};
 
 #[derive(Deserialize, ToSchema)]
 pub struct CashAmountRequest {
@@ -45,11 +43,9 @@ pub async fn list_cash(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<CashBalance>>, ApiError> {
-    let balances = cash_repo::list_cash(&state.db.pool, &user.owner_id())
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let balances = state.services.portfolio.list_cash(&user.account_id).await?;
 
-    Ok(Json(balances))
+    Ok(Json(balances.into_iter().map(CashBalance::from).collect()))
 }
 
 #[utoipa::path(
@@ -68,38 +64,21 @@ pub async fn deposit_cash(
     user: AuthUser,
     Json(payload): Json<CashAmountRequest>,
 ) -> Result<Json<CashBalance>, ApiError> {
-    let owner_id = user.owner_id();
-    // Recomputed here (the service validates its own copy) only to post the
-    // matching finance-ledger transaction below, which needs the resolved
-    // currency and minor-unit amount and which the portfolio service does
-    // not know about.
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    let cash = service::deposit_cash(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &owner_id,
-        &payload.currency,
-        &payload.amount,
-        payload.executed_at,
-    )
-    .await?;
+    let cash = state
+        .services
+        .portfolio
+        .deposit_cash(
+            &user.account_id,
+            &currency,
+            exponent,
+            amount_minor,
+            payload.executed_at,
+        )
+        .await?;
 
-    // The service broadcasts `PortfolioCashUpdated` itself; this handler only
-    // needs to post the finance-ledger transaction below.
-    crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &owner_id,
-        "deposit",
-        amount_minor,
-        &currency,
-        exponent,
-        cash.id,
-        payload.executed_at,
-    )
-    .await;
-    Ok(Json(cash))
+    Ok(Json(cash.into()))
 }
 
 #[utoipa::path(
@@ -118,40 +97,21 @@ pub async fn withdraw_cash(
     user: AuthUser,
     Json(payload): Json<CashAmountRequest>,
 ) -> Result<Json<CashBalance>, ApiError> {
-    let owner_id = user.owner_id();
-    // Recomputed here (the service validates its own copy) only to post the
-    // matching finance-ledger transaction below and to word the
-    // insufficient-funds message, neither of which the portfolio service
-    // knows about.
     let (amount_minor, currency, exponent) = prepare_cash_amount(&payload)?;
 
-    match service::withdraw_cash(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &owner_id,
-        &payload.currency,
-        &payload.amount,
-        payload.executed_at,
-    )
-    .await?
+    match state
+        .services
+        .portfolio
+        .withdraw_cash(
+            &user.account_id,
+            &currency,
+            exponent,
+            amount_minor,
+            payload.executed_at,
+        )
+        .await?
     {
-        WithdrawOutcome::Ok(cash) => {
-            // The service broadcasts `PortfolioCashUpdated` itself; this
-            // handler only needs to post the finance-ledger transaction below.
-            crate::modules::portfolio::cash::record_portfolio_cash_transaction(
-                &state.db.pool,
-                Some(&state.broadcaster),
-                &owner_id,
-                "withdraw",
-                amount_minor,
-                &currency,
-                exponent,
-                cash.id,
-                payload.executed_at,
-            )
-            .await;
-            Ok(Json(cash))
-        }
+        WithdrawOutcome::Ok(cash) => Ok(Json(cash.into())),
         WithdrawOutcome::InsufficientFunds { available_minor } => {
             Err(ApiError::bad_request(format!(
                 "Only {} {} available",

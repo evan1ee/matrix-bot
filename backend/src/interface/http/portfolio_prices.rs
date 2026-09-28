@@ -2,16 +2,124 @@ use axum::{
     extract::{Path, State},
     Json,
 };
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::portfolio::TradeRequest;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::portfolio::audit::AuditVerificationResult;
-use crate::modules::portfolio::models::Holding;
-use crate::modules::portfolio::price_feed::{
-    refresh_all_for_owner, refresh_holding_price, RefreshSummary,
-};
-use crate::modules::portfolio::repository::PortfolioRepository;
+use crate::interface::http::portfolio::{BuyHoldingRequest, Holding};
+
+#[derive(Debug, Default, Clone, Serialize, ToSchema)]
+pub struct RefreshSummary {
+    pub updated: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+impl From<crate::application::portfolio::RefreshSummary> for RefreshSummary {
+    fn from(s: crate::application::portfolio::RefreshSummary) -> Self {
+        Self {
+            updated: s.updated,
+            failed: s.failed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TickerSearchResult {
+    pub symbol: String,
+    pub name: String,
+    pub exchange: Option<String>,
+    pub quote_type: Option<String>,
+}
+
+impl From<crate::infrastructure::web::portfolio_feed::TickerSearchResult> for TickerSearchResult {
+    fn from(r: crate::infrastructure::web::portfolio_feed::TickerSearchResult) -> Self {
+        Self {
+            symbol: r.symbol,
+            name: r.name,
+            exchange: r.exchange,
+            quote_type: r.quote_type,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SymbolQuoteResponse {
+    pub symbol: String,
+    pub price: f64,
+    pub currency: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateSymbolRequest {
+    pub symbol: String,
+}
+
+/// An immutable, cryptographically signed record of a portfolio activity.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PortfolioAuditEntry {
+    pub id: i64,
+    pub owner_id: String,
+    /// Operation kind: "buy", "sell", "deposit", "withdraw", "record"
+    pub action: String,
+    pub symbol: Option<String>,
+    pub quantity_minor: Option<i64>,
+    pub price_minor: Option<i64>,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub realized_pl_minor: Option<i64>,
+    pub note: Option<String>,
+    pub prev_hash: String,
+    pub entry_hash: String,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl From<crate::domain::portfolio::audit::PortfolioAuditEntry> for PortfolioAuditEntry {
+    fn from(e: crate::domain::portfolio::audit::PortfolioAuditEntry) -> Self {
+        Self {
+            id: e.id,
+            owner_id: e.owner_id,
+            action: e.action,
+            symbol: e.symbol,
+            quantity_minor: e.quantity_minor,
+            price_minor: e.price_minor,
+            amount_minor: e.amount_minor,
+            currency: e.currency,
+            currency_exponent: e.currency_exponent,
+            realized_pl_minor: e.realized_pl_minor,
+            note: e.note,
+            prev_hash: e.prev_hash,
+            entry_hash: e.entry_hash,
+            created_at: e.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AuditVerificationResult {
+    pub is_valid: bool,
+    pub total_verified: usize,
+    pub broken_entry_id: Option<i64>,
+    pub head_hash: Option<String>,
+    pub genesis_hash: String,
+    pub message: String,
+}
+
+impl From<crate::domain::portfolio::audit::AuditVerificationResult> for AuditVerificationResult {
+    fn from(r: crate::domain::portfolio::audit::AuditVerificationResult) -> Self {
+        Self {
+            is_valid: r.is_valid,
+            total_verified: r.total_verified,
+            broken_entry_id: r.broken_entry_id,
+            head_hash: r.head_hash,
+            genesis_hash: r.genesis_hash,
+            message: r.message,
+        }
+    }
+}
 
 #[utoipa::path(
     post,
@@ -26,17 +134,19 @@ pub async fn refresh_all_prices(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<RefreshSummary>, ApiError> {
-    let owner_id = user.owner_id();
-    let summary = refresh_all_for_owner(&state.db.pool, Some(&state.broadcaster), &owner_id).await;
-
-    let _ =
-        crate::modules::portfolio::history::HistoryRepository::capture_current_snapshot_for_owner(
-            &state.db.pool,
-            &owner_id,
-        )
+    let summary = state
+        .services
+        .portfolio
+        .refresh_all_for_owner(&user.account_id)
         .await;
 
-    Ok(Json(summary))
+    let _ = state
+        .services
+        .portfolio
+        .capture_current_snapshot_for_owner(&user.account_id)
+        .await;
+
+    Ok(Json(summary.into()))
 }
 
 #[utoipa::path(
@@ -58,14 +168,20 @@ pub async fn refresh_single_holding_price(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<Json<Holding>, ApiError> {
-    let owner_id = user.owner_id();
-    let holding = PortfolioRepository::find_owned(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
+    let holding = state
+        .services
+        .portfolio
+        .get_holding_owned(&user.account_id, id)
+        .await?
         .ok_or_else(|| ApiError::not_found(format!("Holding with id {} not found", id)))?;
 
-    match refresh_holding_price(&state.db.pool, Some(&state.broadcaster), &holding).await {
-        Ok(updated) => Ok(Json(updated)),
+    match state
+        .services
+        .portfolio
+        .refresh_holding_price(&user.account_id, &holding)
+        .await
+    {
+        Ok(updated) => Ok(Json(updated.into())),
         Err(err) => Err(ApiError::bad_request(format!(
             "Failed to fetch market price for {}: {}",
             holding.symbol, err
@@ -87,34 +203,30 @@ pub async fn refresh_single_holding_price(
 pub async fn record_holding_position(
     State(state): State<ApiState>,
     user: AuthUser,
-    Json(payload): Json<crate::interface::http::portfolio::BuyHoldingRequest>,
+    Json(payload): Json<BuyHoldingRequest>,
 ) -> Result<Json<Holding>, ApiError> {
-    use crate::modules::portfolio::service::{self, TradeRequest};
-
-    let owner_id = user.owner_id();
-
-    let result = service::record(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &owner_id,
-        TradeRequest {
-            symbol: &payload.symbol,
-            quantity: &payload.quantity,
-            price: &payload.price,
-            currency: &payload.currency,
-            note: payload.note.as_deref(),
-            executed_at: payload.executed_at,
-        },
-    )
-    .await?;
-
-    match result {
-        Ok(holding) => Ok(Json(holding)),
+    match state
+        .services
+        .portfolio
+        .record(
+            &user.account_id,
+            TradeRequest {
+                symbol: &payload.symbol,
+                quantity: &payload.quantity,
+                price: &payload.price,
+                currency: &payload.currency,
+                note: payload.note.as_deref(),
+                executed_at: payload.executed_at,
+            },
+        )
+        .await?
+    {
+        Ok(holding) => Ok(Json(holding.into())),
         Err(err) => Err(ApiError::bad_request(err)),
     }
 }
 
-#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ActivityQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -134,23 +246,22 @@ pub async fn get_portfolio_activity(
     State(state): State<ApiState>,
     user: AuthUser,
     axum::extract::Query(params): axum::extract::Query<ActivityQuery>,
-) -> Result<Json<Vec<crate::modules::portfolio::audit::PortfolioAuditEntry>>, ApiError> {
+) -> Result<Json<Vec<PortfolioAuditEntry>>, ApiError> {
     let limit = params.limit.unwrap_or(50);
     let offset = params.offset.unwrap_or(0);
 
-    let entries = crate::modules::portfolio::audit::list_audit_entries(
-        &state.db.pool,
-        &user.owner_id(),
-        limit,
-        offset,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let entries = state
+        .services
+        .portfolio
+        .list_audit_entries(&user.account_id, limit, offset)
+        .await?;
 
-    Ok(Json(entries))
+    Ok(Json(
+        entries.into_iter().map(PortfolioAuditEntry::from).collect(),
+    ))
 }
 
-#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct SearchQuery {
     pub q: String,
 }
@@ -164,23 +275,28 @@ pub struct SearchQuery {
     )
 )]
 pub async fn search_ticker_symbols(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     axum::extract::Query(params): axum::extract::Query<SearchQuery>,
-) -> Result<Json<Vec<crate::modules::portfolio::price_feed::TickerSearchResult>>, ApiError> {
-    let results = crate::modules::portfolio::price_feed::search_symbols(&params.q)
+) -> Result<Json<Vec<TickerSearchResult>>, ApiError> {
+    let results = state
+        .services
+        .portfolio
+        .search_symbols(&params.q)
         .await
         .unwrap_or_default();
 
-    Ok(Json(results))
+    Ok(Json(
+        results.into_iter().map(TickerSearchResult::from).collect(),
+    ))
 }
 
-#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct QuoteQuery {
     pub symbol: String,
 }
 
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct SymbolQuoteResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SymbolQuoteResponseWrapper {
     pub symbol: String,
     pub price: f64,
     pub currency: String,
@@ -198,7 +314,7 @@ pub struct SymbolQuoteResponse {
 pub async fn get_symbol_quote(
     axum::extract::Query(params): axum::extract::Query<QuoteQuery>,
 ) -> Result<Json<SymbolQuoteResponse>, ApiError> {
-    let fetched = crate::modules::portfolio::price_feed::fetch_latest_price(&params.symbol)
+    let fetched = crate::infrastructure::web::portfolio_feed::fetch_latest_price(&params.symbol)
         .await
         .map_err(ApiError::bad_request)?;
 
@@ -207,11 +323,6 @@ pub async fn get_symbol_quote(
         price: fetched.price,
         currency: fetched.currency,
     }))
-}
-
-#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
-pub struct UpdateSymbolRequest {
-    pub symbol: String,
 }
 
 #[utoipa::path(
@@ -232,18 +343,13 @@ pub async fn update_holding_symbol(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateSymbolRequest>,
 ) -> Result<Json<Holding>, ApiError> {
-    let owner_id = user.owner_id();
-
-    match PortfolioRepository::update_symbol(&state.db.pool, &owner_id, id, &payload.symbol)
-        .await
-        .map_err(|e| ApiError::not_found(e.to_string()))?
+    match state
+        .services
+        .portfolio
+        .update_symbol(&user.account_id, id, &payload.symbol)
+        .await?
     {
-        Ok(holding) => {
-            state
-                .broadcaster
-                .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-            Ok(Json(holding))
-        }
+        Ok(holding) => Ok(Json(holding.into())),
         Err(err) => Err(ApiError::bad_request(err)),
     }
 }
@@ -263,12 +369,13 @@ pub async fn verify_portfolio_activity_chain(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<AuditVerificationResult>, ApiError> {
-    let owner_id = user.owner_id();
-    let report = crate::modules::portfolio::audit::verify_audit_chain(&state.db.pool, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let report = state
+        .services
+        .portfolio
+        .verify_audit_chain(&user.account_id)
+        .await?;
 
-    Ok(Json(report))
+    Ok(Json(report.into()))
 }
 
 #[cfg(test)]
@@ -280,7 +387,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -317,7 +424,7 @@ mod tests {
         let Json(recorded) = record_holding_position(
             State(state.clone()),
             alice.clone(),
-            Json(crate::interface::http::portfolio::BuyHoldingRequest {
+            Json(BuyHoldingRequest {
                 symbol: "AAPLL".to_string(),
                 quantity: "10".to_string(),
                 price: "150.00".to_string(),

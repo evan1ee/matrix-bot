@@ -1,0 +1,126 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, owner_id, snapshot_date, currency, currency_exponent,\n               holdings_value_minor, cash_minor, total_net_worth_minor, created_at\n        FROM portfolio_daily_snapshots\n        WHERE owner_id = $1 AND currency = $2 AND snapshot_date >= $3\n        ORDER BY snapshot_date ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "snapshot_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "snapshot_date"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "holdings_value_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "holdings_value_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "cash_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "cash_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "total_net_worth_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "total_net_worth_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_daily_snapshots",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "84c9ffd30a9eac54d0448acbea5b1c138dcca1e0243fb2b17109b6f60e1011ea"
+}

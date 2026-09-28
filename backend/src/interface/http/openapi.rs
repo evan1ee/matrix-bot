@@ -18,6 +18,7 @@ use crate::interface::http::habits::{
     CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
     ToggleHabitRequest, UpdateHabitRequest,
 };
+use crate::interface::http::portfolio::{CashBalance, Holding, PortfolioCurrencySummary};
 use crate::interface::http::recurring_bills::{
     CreateBillPayload, RecurringBill, UpdateBillPayload,
 };
@@ -35,7 +36,6 @@ use crate::modules::life::models::{
     LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
     UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
 };
-use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -260,17 +260,17 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             portfolio::SetNoteRequest,
             portfolio::SellResponse,
             portfolio_cash::CashAmountRequest,
-            crate::modules::portfolio::price_feed::RefreshSummary,
-            crate::modules::portfolio::price_feed::TickerSearchResult,
+            portfolio_prices::RefreshSummary,
+            portfolio_prices::TickerSearchResult,
             portfolio_prices::UpdateSymbolRequest,
             portfolio_prices::SymbolQuoteResponse,
             portfolio_alerts::CreateAlertRequest,
-            crate::modules::portfolio::alerts::PriceAlert,
-            crate::modules::portfolio::alerts::AlertCondition,
-            crate::modules::portfolio::history::PortfolioHistoryResponse,
-            crate::modules::portfolio::history::PortfolioHistoryPoint,
-            crate::modules::portfolio::audit::PortfolioAuditEntry,
-            crate::modules::portfolio::audit::AuditVerificationResult,
+            portfolio_alerts::PriceAlert,
+            portfolio_alerts::AlertCondition,
+            portfolio_history::PortfolioHistoryResponse,
+            portfolio_history::PortfolioHistoryPoint,
+            portfolio_prices::PortfolioAuditEntry,
+            portfolio_prices::AuditVerificationResult,
             RecurringBill,
             CreateBillPayload,
             UpdateBillPayload,

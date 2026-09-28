@@ -5,13 +5,14 @@ pub mod net_worth;
 
 use serde_json::json;
 
+use crate::domain::accounts::AccountId;
 use crate::domain::finance::money::{normalise_currency, parse_amount};
+use crate::domain::portfolio::models::{
+    cost_of, normalise_symbol, BuyOutcome, SellOutcome, QUANTITY_EXPONENT,
+};
+use crate::domain::portfolio::TradeRequest;
 use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::portfolio::history::HistoryRepository;
-use crate::modules::portfolio::models::{cost_of, normalise_symbol, QUANTITY_EXPONENT};
-use crate::modules::portfolio::repository::{BuyOutcome, PortfolioRepository, SellOutcome};
-use crate::modules::portfolio::service;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
@@ -37,11 +38,15 @@ pub async fn execute_tool(
         return Some(res);
     }
 
-    // 3. Trade and portfolio holding operations
+    let acct = AccountId::new(owner_id);
+
+    // 4. Trade and portfolio holding operations
     match name {
         "get_my_portfolio_summary" => Some(
             async {
-                let summary = PortfolioRepository::summary(pool, owner_id)
+                let summary = services
+                    .portfolio
+                    .summary(&acct)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&summary).map_err(|e| e.to_string())
@@ -56,7 +61,9 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .ok_or("Field 'symbol' is required")?;
                 let symbol = normalise_symbol(raw_symbol)?;
-                let holding = PortfolioRepository::find(pool, owner_id, &symbol)
+                let holding = services
+                    .portfolio
+                    .get_holding_by_symbol(&acct, &symbol)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -124,7 +131,6 @@ pub async fn execute_tool(
                 };
 
                 let note = args.get("note").and_then(|v| v.as_str());
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let default_cur = services.settings.get_or_default(&acct)
                     .await
                     .currency;
@@ -132,26 +138,23 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
-                // Recomputed here only to word the two failure branches below
-                // — by the time either is reached, `service::buy` has already
-                // accepted this as well-formed.
                 let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
 
-                let outcome = service::buy(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    service::TradeRequest {
-                        symbol: raw_symbol,
-                        quantity: &qty_str,
-                        price: &price_str,
-                        currency: raw_currency,
-                        note,
-                        executed_at: None,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let outcome = services
+                    .portfolio
+                    .buy(
+                        &acct,
+                        TradeRequest {
+                            symbol: raw_symbol,
+                            quantity: &qty_str,
+                            price: &price_str,
+                            currency: raw_currency,
+                            note,
+                            executed_at: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 match outcome {
                     BuyOutcome::Ok { holding, cash } => serde_json::to_string(&json!({
@@ -200,24 +203,24 @@ pub async fn execute_tool(
                     return Err("Field 'price' is required".to_string());
                 };
 
-                // Ownership check only, for this tool's own "not found" wording — the
-                // service re-fetches the holding itself for the write.
-                PortfolioRepository::find(pool, owner_id, &symbol)
+                services
+                    .portfolio
+                    .get_holding_by_symbol(&acct, &symbol)
                     .await
                     .map_err(|e| e.to_string())?
                     .ok_or_else(|| format!("Position '{}' not found in portfolio", symbol))?;
 
-                let outcome = service::sell(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    &symbol,
-                    &qty_str,
-                    &price_str,
-                    None,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let outcome = services
+                    .portfolio
+                    .sell(
+                        &acct,
+                        &symbol,
+                        &qty_str,
+                        &price_str,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 match outcome {
                     SellOutcome::Closed {
@@ -243,9 +246,6 @@ pub async fn execute_tool(
                     }).to_string()),
                     SellOutcome::NotFound => Err(format!("Position '{}' not found", symbol)),
                     SellOutcome::ExceedsHolding { held_minor } => {
-                        // The service has already parsed `qty_str` successfully
-                        // (that's how this outcome exists at all), so
-                        // re-parsing it here for the message cannot fail.
                         let attempted = parse_amount(&qty_str, QUANTITY_EXPONENT)
                             .expect("quantity already validated by the service");
                         Err(format!(
@@ -264,7 +264,6 @@ pub async fn execute_tool(
                     .get("timeframe")
                     .and_then(|v| v.as_str())
                     .unwrap_or("1m");
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let default_cur = services.settings.get_or_default(&acct)
                     .await
                     .currency;
@@ -274,10 +273,11 @@ pub async fn execute_tool(
                     .unwrap_or(&default_cur);
                 let currency = normalise_currency(raw_currency).map_err(|e| e.to_string())?;
 
-                let history =
-                    HistoryRepository::get_history(pool, owner_id, timeframe, &currency)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                let history = services
+                    .portfolio
+                    .get_history(&acct, timeframe, &currency)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&history).map_err(|e| e.to_string())
             }
@@ -399,6 +399,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::portfolio::MAX_NOTE_LEN;
 
     async fn setup() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -406,12 +407,10 @@ mod tests {
         pool
     }
 
-    /// The defect this migration fixes for the AI path: before routing
-    /// through `service::buy`, a note of any length reached the database.
     #[tokio::test]
     async fn test_the_ai_tool_enforces_the_note_limit() {
         let pool = setup().await;
-        let over_limit_note = "x".repeat(service::MAX_NOTE_LEN + 1);
+        let over_limit_note = "x".repeat(MAX_NOTE_LEN + 1);
 
         let args = json!({
             "symbol": "AAPL",
@@ -435,7 +434,7 @@ mod tests {
             .expect("the tool must handle this call")
             .expect_err("an over-long note must be rejected");
         assert!(
-            err.contains(&service::MAX_NOTE_LEN.to_string()),
+            err.contains(&MAX_NOTE_LEN.to_string()),
             "the error must report the character limit: {err}"
         );
     }

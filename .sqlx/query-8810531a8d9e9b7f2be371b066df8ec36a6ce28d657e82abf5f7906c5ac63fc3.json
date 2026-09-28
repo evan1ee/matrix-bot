@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, owner_id, symbol, quantity_minor, avg_cost_minor, currency,\n               currency_exponent, current_price_minor, price_updated_at, note,\n               created_at, updated_at\n        FROM portfolio_holdings\n        WHERE owner_id = $1\n        ORDER BY symbol ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "symbol",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "symbol"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "quantity_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "quantity_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "avg_cost_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "avg_cost_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "current_price_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "current_price_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "price_updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "price_updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "8810531a8d9e9b7f2be371b066df8ec36a6ce28d657e82abf5f7906c5ac63fc3"
+}

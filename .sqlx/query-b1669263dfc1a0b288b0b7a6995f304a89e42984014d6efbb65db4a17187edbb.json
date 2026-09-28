@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO portfolio_audit_log\n         (owner_id, action, symbol, quantity_minor, price_minor, amount_minor, currency,\n          currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at)\n        VALUES ($1, 'merge', NULL, NULL, NULL, 0, '', 2, NULL, $2, $3, '', $4)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b1669263dfc1a0b288b0b7a6995f304a89e42984014d6efbb65db4a17187edbb"
+}

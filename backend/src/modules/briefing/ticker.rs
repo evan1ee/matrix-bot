@@ -3,8 +3,8 @@ use futures_util::future::join_all;
 use std::collections::HashSet;
 use tracing::warn;
 
+use crate::domain::portfolio::models::Holding;
 use crate::modules::briefing::models::TickerPerformance;
-use crate::modules::portfolio::models::Holding;
 
 /// Computes multi-timeframe percentage changes from sorted historical daily points `[(date, price)]`.
 pub fn compute_ticker_performance(
@@ -107,7 +107,9 @@ pub async fn fetch_holding_ticker_performance(
     currency: &str,
     fallback_price: Option<f64>,
 ) -> TickerPerformance {
-    match crate::modules::portfolio::history_feed::fetch_historical_prices(symbol, "1m").await {
+    match crate::infrastructure::web::portfolio_history_feed::fetch_historical_prices(symbol, "1m")
+        .await
+    {
         Ok(points) if !points.is_empty() => {
             compute_ticker_performance(symbol, currency, fallback_price, &points)
         }

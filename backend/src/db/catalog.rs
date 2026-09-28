@@ -159,7 +159,10 @@ mod tests {
         )
         .unwrap();
         for owner in owners {
-            let result = crate::modules::portfolio::audit::verify_audit_chain(&copy, &owner)
+            let result =
+                crate::infrastructure::postgres::repositories::portfolio::audit::verify_audit_chain(
+                    &copy, &owner,
+                )
                 .await
                 .unwrap();
             assert!(

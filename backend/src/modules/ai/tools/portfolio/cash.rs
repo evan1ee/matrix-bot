@@ -1,15 +1,14 @@
 use crate::db::DbPool;
 use serde_json::json;
 
+use crate::domain::portfolio::models::WithdrawOutcome;
 use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::portfolio::models::WithdrawOutcome;
-use crate::modules::portfolio::service;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -30,17 +29,18 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
+                let currency = crate::domain::finance::money::normalise_currency(raw_currency)
+                    .map_err(|e| e.to_string())?;
+                let exponent = crate::domain::finance::money::exponent_for(&currency);
+                let amount_minor =
+                    crate::domain::finance::money::parse_amount(&amount_str, exponent)
+                        .map_err(|e| e.to_string())?;
 
-                let cash = service::deposit_cash(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    raw_currency,
-                    &amount_str,
-                    None,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let cash = services
+                    .portfolio
+                    .deposit_cash(&acct, &currency, exponent as i64, amount_minor, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&cash).map_err(|e| e.to_string())
             }
@@ -62,22 +62,18 @@ pub async fn execute_tool(
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_cur);
-                // Recomputed here only to word the insufficient-funds message
-                // below — by the time it is reached, `service::withdraw_cash`
-                // has already accepted this currency as well-formed.
                 let currency = crate::domain::finance::money::normalise_currency(raw_currency)
                     .map_err(|e| e.to_string())?;
+                let exponent = crate::domain::finance::money::exponent_for(&currency);
+                let amount_minor =
+                    crate::domain::finance::money::parse_amount(&amount_str, exponent)
+                        .map_err(|e| e.to_string())?;
 
-                let outcome = service::withdraw_cash(
-                    pool,
-                    broadcaster,
-                    owner_id,
-                    raw_currency,
-                    &amount_str,
-                    None,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let outcome = services
+                    .portfolio
+                    .withdraw_cash(&acct, &currency, exponent as i64, amount_minor, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 match outcome {
                     WithdrawOutcome::Ok(cash) => {
@@ -100,18 +96,12 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::function(
             "deposit_portfolio_cash",
-            "Deposit uninvested cash into the user's portfolio cash balance.",
+            "Deposit uninvested liquid cash into the portfolio ledger, allowing future stock or crypto purchases. If currency is omitted, uses user's default settings currency.",
             json!({
                 "type": "object",
                 "properties": {
-                    "amount": {
-                        "type": "number",
-                        "description": "Cash amount to deposit as a positive decimal (required)"
-                    },
-                    "currency": {
-                        "type": "string",
-                        "description": "3-letter currency code (e.g. USD, EUR, TWD)"
-                    }
+                    "amount": { "type": "string", "description": "Decimal cash amount to deposit (e.g. '1000' or '250.50')" },
+                    "currency": { "type": "string", "description": "Optional ISO-4217 currency code (e.g. 'USD', 'EUR'). Defaults to user default." }
                 },
                 "required": ["amount"],
                 "additionalProperties": false
@@ -119,18 +109,12 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         ToolDefinition::function(
             "withdraw_portfolio_cash",
-            "Withdraw cash from the user's available portfolio cash balance.",
+            "Withdraw uninvested liquid cash from the portfolio balance. Cannot withdraw more cash than available.",
             json!({
                 "type": "object",
                 "properties": {
-                    "amount": {
-                        "type": "number",
-                        "description": "Cash amount to withdraw as a positive decimal (required)"
-                    },
-                    "currency": {
-                        "type": "string",
-                        "description": "3-letter currency code"
-                    }
+                    "amount": { "type": "string", "description": "Decimal cash amount to withdraw (e.g. '500.00')" },
+                    "currency": { "type": "string", "description": "Optional ISO-4217 currency code (e.g. 'USD', 'EUR'). Defaults to user default." }
                 },
                 "required": ["amount"],
                 "additionalProperties": false

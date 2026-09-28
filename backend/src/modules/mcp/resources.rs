@@ -4,10 +4,10 @@ use chrono::{Duration, Utc};
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
 use crate::infrastructure::postgres::repositories::finance as finance_repo;
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::portfolio::cash as portfolio_cash_repo;
+use crate::infrastructure::postgres::repositories::portfolio::holdings as portfolio_holdings_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
 use crate::modules::life::repository::LifeRepository;
-use crate::modules::portfolio::cash_repo;
-use crate::modules::portfolio::repository::PortfolioRepository;
 
 /// Returns the standard read-only resources exposed by MatrixBot to MCP clients.
 pub fn list_resources() -> Vec<McpResource> {
@@ -92,10 +92,10 @@ pub async fn read_resource(
             })
         }
         "matrixbot://portfolio/summary" => {
-            let holdings = PortfolioRepository::list(pool, owner_id)
+            let holdings = portfolio_holdings_repo::list(pool, owner_id)
                 .await
                 .map_err(|e| e.to_string())?;
-            let cash = cash_repo::list_cash(pool, owner_id)
+            let cash = portfolio_cash_repo::list_cash(pool, owner_id)
                 .await
                 .map_err(|e| e.to_string())?;
             let payload = serde_json::json!({

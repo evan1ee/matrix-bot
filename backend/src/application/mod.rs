@@ -9,6 +9,7 @@ pub mod bookmarks;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
@@ -23,6 +24,7 @@ use self::bookmarks::BookmarkService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
+use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
 use self::reminders::ReminderService;
 use self::rooms::RoomService;
@@ -83,6 +85,7 @@ pub struct AppServices {
     pub finance: FinanceService,
     pub footprints: FootprintService,
     pub habits: HabitService,
+    pub portfolio: PortfolioService,
     pub recurring_bills: RecurringBillsService,
     pub reminders: ReminderService,
     pub rooms: RoomService,
@@ -123,12 +126,14 @@ impl AppServices {
             finance.clone(),
         );
         let webhooks = WebhookService::new(pool.clone(), events.clone());
+        let portfolio = PortfolioService::new(pool.clone(), events.clone());
         Self {
             accounts,
             bookmarks,
             finance,
             footprints,
             habits,
+            portfolio,
             recurring_bills,
             reminders,
             rooms,

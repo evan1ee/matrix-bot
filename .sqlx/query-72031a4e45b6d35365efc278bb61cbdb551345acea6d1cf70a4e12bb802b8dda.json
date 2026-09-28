@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT entry_hash\n        FROM portfolio_audit_log\n        WHERE owner_id = $1\n        ORDER BY id DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_audit_log",
+            "name": "entry_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "72031a4e45b6d35365efc278bb61cbdb551345acea6d1cf70a4e12bb802b8dda"
+}

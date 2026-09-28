@@ -14,7 +14,6 @@ pub mod journal;
 pub mod life;
 pub mod mcp;
 pub mod ocr;
-pub mod portfolio;
 pub mod tts;
 pub mod voice;
 
@@ -366,11 +365,11 @@ mod tests {
     #[tokio::test]
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
         use crate::interface::chat::finance::FinanceModule;
+        use crate::interface::chat::portfolio::PortfolioModule;
         use crate::interface::chat::reminders::ReminderModule;
         use crate::interface::chat::settings::SettingsModule;
         use crate::interface::chat::todos::TodoModule;
         use crate::modules::core::CoreModule;
-        use crate::modules::portfolio::PortfolioModule;
         use crate::modules::tts::TtsModule;
 
         let pool = crate::db::pool::test_pool().await;

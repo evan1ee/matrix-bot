@@ -114,7 +114,7 @@ backend/src/
 | 7 | webhook | ✅ |
 | 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ✅ |
 | 9 | finance | ✅ |
-| 10 | portfolio | ☐ |
+| 10 | portfolio | ✅ |
 | 11 | life + journal + briefing (read models) | ☐ |
 | 12 | ocr + voice + tts + core + account command module | ☐ |
 | 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ☐ |

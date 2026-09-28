@@ -63,8 +63,12 @@ impl MergeService {
         // trigger and every hash is bound to the owner, so it needs the routine
         // that knows how to rebuild it.
         let ledger_rows =
-            crate::modules::portfolio::audit::absorb_ledger(&mut *tx, from.as_str(), into.as_str())
-                .await?;
+            crate::infrastructure::postgres::repositories::portfolio::audit::absorb_ledger(
+                &mut **tx,
+                from.as_str(),
+                into.as_str(),
+            )
+            .await?;
         moved.set("portfolio_audit_log", ledger_rows);
 
         // Anything else pointing at the absorbed account follows it
@@ -443,7 +447,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_merge_absorbs_the_audit_ledger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -532,7 +536,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_absorbed_ledger_still_verifies() {
-        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+        use crate::infrastructure::postgres::repositories::portfolio::audit::{
+            record_audit_entry, verify_audit_chain,
+        };
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -600,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_merge_is_recorded_in_the_ledger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -669,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_immutability_trigger_survives_a_merge() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -712,7 +718,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_merge_with_no_ledger_leaves_no_marker() {
-        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+        use crate::infrastructure::postgres::repositories::portfolio::audit::{
+            record_audit_entry, verify_audit_chain,
+        };
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -770,7 +778,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_rolled_back_merge_restores_the_trigger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)

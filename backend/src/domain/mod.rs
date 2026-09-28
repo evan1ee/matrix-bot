@@ -10,6 +10,7 @@ pub mod chat;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;

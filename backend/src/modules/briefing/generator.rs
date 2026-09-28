@@ -8,13 +8,13 @@ use crate::domain::recurring_bills::RecurringBill;
 use crate::domain::settings::UserSettings;
 use crate::domain::todos::{TodoItem, TodoPriority};
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::portfolio::holdings as portfolio_holdings_repo;
 use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
 use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use crate::modules::briefing::ticker::{
     fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
 };
-use crate::modules::portfolio::repository::PortfolioRepository;
 use crate::utils::html_escape;
 
 /// Formats the local header date line (e.g. "2026-09-18 07:00 (Asia/Shanghai)").
@@ -36,7 +36,7 @@ pub async fn generate_briefing(
     let today_str = now_local.format("%Y-%m-%d").to_string();
 
     // 1. Portfolio holdings & multi-timeframe tickers
-    let holdings = PortfolioRepository::list(pool, owner_id)
+    let holdings = portfolio_holdings_repo::list(pool, owner_id)
         .await
         .unwrap_or_default();
     let tickers: Vec<TickerPerformance> = fetch_all_tickers_performance(&holdings).await;

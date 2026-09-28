@@ -2,16 +2,15 @@ use crate::db::DbPool;
 use serde_json::json;
 
 use crate::domain::finance::money::{exponent_for, parse_amount};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::domain::portfolio::alerts::AlertCondition;
+use crate::domain::portfolio::models::normalise_symbol;
+use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository};
-use crate::modules::portfolio::models::normalise_symbol;
-use crate::modules::portfolio::repository::PortfolioRepository;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    _pool: &DbPool,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -46,7 +45,9 @@ pub async fn execute_tool(
 
                 let acct = crate::domain::accounts::AccountId::from(owner_id);
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
-                let holding = PortfolioRepository::find(pool, owner_id, &symbol)
+                let holding = services
+                    .portfolio
+                    .get_holding_by_symbol(&acct, &symbol)
                     .await
                     .map_err(|e| e.to_string())?;
                 let currency = holding
@@ -57,21 +58,19 @@ pub async fn execute_tool(
                 let target_price_minor =
                     parse_amount(&price_str, exp as u32).map_err(|e| e.to_string())?;
 
-                let alert = AlertsRepository::create(
-                    pool,
-                    owner_id,
-                    &symbol,
-                    target_price_minor,
-                    &currency,
-                    exp,
-                    condition,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let alert = services
+                    .portfolio
+                    .create_alert(
+                        &acct,
+                        &symbol,
+                        target_price_minor,
+                        &currency,
+                        exp,
+                        condition,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::PortfolioAlertCreated(alert.clone()));
-                }
                 serde_json::to_string(&alert).map_err(|e| e.to_string())
             }
             .await,
@@ -83,7 +82,10 @@ pub async fn execute_tool(
                     .get("active_only")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let alerts = AlertsRepository::list_for_owner(pool, owner_id)
+                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let alerts = services
+                    .portfolio
+                    .list_alerts(&acct)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -99,24 +101,35 @@ pub async fn execute_tool(
 
         "cancel_portfolio_price_alert" => Some(
             async {
-                if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
-                    let deleted = AlertsRepository::delete(pool, id, owner_id)
+                let id_opt = args
+                    .get("id")
+                    .or_else(|| args.get("alert_id"))
+                    .and_then(|v| v.as_i64());
+
+                if let Some(id) = id_opt {
+                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let deleted = services
+                        .portfolio
+                        .delete_alert(&acct, id)
                         .await
                         .map_err(|e| e.to_string())?;
+
                     if deleted {
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioAlertDeleted {
-                                id,
-                                owner_id: owner_id.to_string(),
-                            });
-                        }
-                        Ok(json!({ "cancelled": true, "id": id }).to_string())
+                        Ok(json!({
+                            "cancelled": true,
+                            "id": id,
+                            "message": format!("Price alert #{} successfully cancelled", id)
+                        })
+                        .to_string())
                     } else {
-                        Err(format!("Alert #{} not found or not owned by user", id))
+                        Err(format!("Alert #{} not found or access denied", id))
                     }
                 } else if let Some(sym_str) = args.get("symbol").and_then(|v| v.as_str()) {
                     let symbol = normalise_symbol(sym_str)?;
-                    let alerts = AlertsRepository::list_for_owner(pool, owner_id)
+                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let alerts = services
+                        .portfolio
+                        .list_alerts(&acct)
                         .await
                         .map_err(|e| e.to_string())?;
                     let to_cancel: Vec<_> = alerts
@@ -125,17 +138,16 @@ pub async fn execute_tool(
                         .collect();
                     let count = to_cancel.len();
                     for a in to_cancel {
-                        let _ = AlertsRepository::delete(pool, a.id, owner_id).await;
-                        if let Some(b) = broadcaster {
-                            b.send(SystemEvent::PortfolioAlertDeleted {
-                                id: a.id,
-                                owner_id: owner_id.to_string(),
-                            });
-                        }
+                        let _ = services.portfolio.delete_alert(&acct, a.id).await;
                     }
-                    Ok(json!({ "cancelled": true, "symbol": symbol, "count": count }).to_string())
+                    Ok(json!({
+                        "cancelled": true,
+                        "symbol": symbol,
+                        "count": count
+                    })
+                    .to_string())
                 } else {
-                    Err("Either 'id' or 'symbol' must be provided to cancel an alert".to_string())
+                    Err("Either 'id'/'alert_id' or 'symbol' must be provided to cancel an alert".to_string())
                 }
             }
             .await,
@@ -149,44 +161,26 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::function(
             "create_portfolio_price_alert",
-            "Set a price alert trigger on an asset when it crosses above or below a target price.",
+            "Set a target price alert on an investment symbol or cryptocurrency (e.g. notify when BTC goes above 70000).",
             json!({
                 "type": "object",
                 "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Ticker symbol (required, e.g. AAPL, BTC)"
-                    },
-                    "target_price": {
-                        "type": "number",
-                        "description": "Target price trigger level (required)"
-                    },
-                    "condition": {
-                        "type": "string",
-                        "enum": ["above", "below"],
-                        "description": "Trigger condition: 'above' or 'below' (required)"
-                    },
-                    "currency": {
-                        "type": "string",
-                        "description": "3-letter currency code"
-                    }
+                    "symbol": { "type": "string", "description": "Ticker symbol or pair, e.g. 'AAPL', 'BTC-USD'" },
+                    "target_price": { "type": "string", "description": "Target trigger price as decimal string, e.g. '180.50' or '70000'" },
+                    "condition": { "type": "string", "enum": ["above", "below"], "description": "Condition: 'above' or 'below'" }
                 },
-                "required": ["symbol", "target_price", "condition"],
+                "required": ["symbol", "target_price"],
                 "additionalProperties": false
             }),
         ),
         ToolDefinition::function(
             "get_portfolio_price_alerts",
-            "List active price alerts configured for the user's portfolio.",
+            "List price alerts configured by the user, optionally filtering only active ones.",
             json!({
                 "type": "object",
                 "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Optional ticker symbol filter"
-                    }
+                    "active_only": { "type": "boolean", "description": "If true, only returns active un-triggered alerts. Defaults to false." }
                 },
-                "required": [],
                 "additionalProperties": false
             }),
         ),
@@ -196,14 +190,9 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             json!({
                 "type": "object",
                 "properties": {
-                    "id": {
-                        "type": "integer",
-                        "description": "Alert ID to cancel"
-                    },
-                    "symbol": {
-                        "type": "string",
-                        "description": "Cancel all alerts for this ticker symbol"
-                    }
+                    "id": { "type": "integer", "description": "Alert ID to cancel" },
+                    "alert_id": { "type": "integer", "description": "Alert ID to cancel (alias for id)" },
+                    "symbol": { "type": "string", "description": "Cancel all alerts for this ticker symbol" }
                 },
                 "required": [],
                 "additionalProperties": false

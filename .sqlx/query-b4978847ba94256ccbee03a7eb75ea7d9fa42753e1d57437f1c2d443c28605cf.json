@@ -1,0 +1,141 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO portfolio_price_alerts (\n            owner_id, symbol, target_price_minor, currency, currency_exponent, condition\n        ) VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, owner_id, symbol, target_price_minor, currency, currency_exponent,\n                  condition, is_triggered, triggered_at, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "symbol",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "symbol"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "target_price_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "target_price_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "condition",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "condition"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "is_triggered",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "is_triggered"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "triggered_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "triggered_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "portfolio_price_alerts",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b4978847ba94256ccbee03a7eb75ea7d9fa42753e1d57437f1c2d443c28605cf"
+}

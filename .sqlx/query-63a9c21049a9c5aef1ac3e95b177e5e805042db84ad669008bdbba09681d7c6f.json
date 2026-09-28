@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor, updated_at)\n        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)\n        ON CONFLICT(owner_id, currency) DO UPDATE SET\n            balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor,\n            updated_at = CURRENT_TIMESTAMP\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63a9c21049a9c5aef1ac3e95b177e5e805042db84ad669008bdbba09681d7c6f"
+}

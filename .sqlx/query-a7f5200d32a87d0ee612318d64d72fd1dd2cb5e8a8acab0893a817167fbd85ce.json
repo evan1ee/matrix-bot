@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE portfolio_holdings\n        SET symbol = $1, updated_at = CURRENT_TIMESTAMP\n        WHERE id = $2 AND owner_id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a7f5200d32a87d0ee612318d64d72fd1dd2cb5e8a8acab0893a817167fbd85ce"
+}

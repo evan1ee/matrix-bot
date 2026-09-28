@@ -3,15 +3,70 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::Deserialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
+use crate::domain::portfolio::models::normalise_symbol;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::portfolio::alerts::{AlertCondition, AlertsRepository, PriceAlert};
-use crate::modules::portfolio::models::normalise_symbol;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertCondition {
+    Above,
+    Below,
+}
+
+impl From<crate::domain::portfolio::AlertCondition> for AlertCondition {
+    fn from(c: crate::domain::portfolio::AlertCondition) -> Self {
+        match c {
+            crate::domain::portfolio::AlertCondition::Above => AlertCondition::Above,
+            crate::domain::portfolio::AlertCondition::Below => AlertCondition::Below,
+        }
+    }
+}
+
+impl From<AlertCondition> for crate::domain::portfolio::AlertCondition {
+    fn from(c: AlertCondition) -> Self {
+        match c {
+            AlertCondition::Above => crate::domain::portfolio::AlertCondition::Above,
+            AlertCondition::Below => crate::domain::portfolio::AlertCondition::Below,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PriceAlert {
+    pub id: i64,
+    pub owner_id: String,
+    pub symbol: String,
+    pub target_price_minor: i64,
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub condition: String,
+    pub is_triggered: bool,
+    pub triggered_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<crate::domain::portfolio::PriceAlert> for PriceAlert {
+    fn from(a: crate::domain::portfolio::PriceAlert) -> Self {
+        Self {
+            id: a.id,
+            owner_id: a.owner_id,
+            symbol: a.symbol,
+            target_price_minor: a.target_price_minor,
+            currency: a.currency,
+            currency_exponent: a.currency_exponent,
+            condition: a.condition,
+            is_triggered: a.is_triggered,
+            triggered_at: a.triggered_at,
+            created_at: a.created_at,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateAlertRequest {
@@ -38,11 +93,13 @@ pub async fn list_alerts(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<PriceAlert>>, ApiError> {
-    let alerts = AlertsRepository::list_for_owner(&state.db.pool, &user.owner_id())
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let alerts = state
+        .services
+        .portfolio
+        .list_alerts(&user.account_id)
+        .await?;
 
-    Ok(Json(alerts))
+    Ok(Json(alerts.into_iter().map(PriceAlert::from).collect()))
 }
 
 #[utoipa::path(
@@ -76,24 +133,20 @@ pub async fn create_alert(
         return Err(ApiError::bad_request("Target price must be positive"));
     }
 
-    let owner_id = user.owner_id();
-    let alert = AlertsRepository::create(
-        &state.db.pool,
-        &owner_id,
-        &symbol,
-        target_price_minor,
-        &currency,
-        exponent,
-        payload.condition,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let alert = state
+        .services
+        .portfolio
+        .create_alert(
+            &user.account_id,
+            &symbol,
+            target_price_minor,
+            &currency,
+            exponent,
+            payload.condition.into(),
+        )
+        .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::PortfolioAlertCreated(alert.clone()));
-
-    Ok((StatusCode::CREATED, Json(alert)))
+    Ok((StatusCode::CREATED, Json(alert.into())))
 }
 
 #[utoipa::path(
@@ -112,19 +165,15 @@ pub async fn delete_alert(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let owner_id = user.owner_id();
-
-    let deleted = AlertsRepository::delete(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let deleted = state
+        .services
+        .portfolio
+        .delete_alert(&user.account_id, id)
+        .await?;
 
     if !deleted {
         return Err(ApiError::not_found("Alert not found or access denied"));
     }
-
-    state
-        .broadcaster
-        .send(SystemEvent::PortfolioAlertDeleted { id, owner_id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -139,7 +188,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             broadcaster,
             None,
             "http://localhost:8008".to_string(),

@@ -2,13 +2,12 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::domain::finance::{Category, Transaction};
+use crate::domain::portfolio::{Holding, PortfolioAuditEntry, PriceAlert};
 use crate::domain::recurring_bills::RecurringBill;
 use crate::domain::reminders::Reminder;
 use crate::domain::settings::UserSettings;
 use crate::domain::todos::TodoItem;
 use crate::domain::webhooks::Webhook;
-use crate::modules::portfolio::audit::PortfolioAuditEntry;
-use crate::modules::portfolio::models::Holding;
 
 /// Real-time system events broadcast to SSE clients and internal subscribers.
 ///
@@ -77,8 +76,8 @@ pub enum SystemEvent {
         balance_minor: i64,
     },
     PortfolioAuditLogged(PortfolioAuditEntry),
-    PortfolioAlertCreated(crate::modules::portfolio::alerts::PriceAlert),
-    PortfolioAlertTriggered(crate::modules::portfolio::alerts::PriceAlert),
+    PortfolioAlertCreated(PriceAlert),
+    PortfolioAlertTriggered(PriceAlert),
     PortfolioAlertDeleted {
         id: i64,
         owner_id: String,

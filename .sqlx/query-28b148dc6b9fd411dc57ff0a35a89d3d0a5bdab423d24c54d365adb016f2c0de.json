@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE portfolio_price_alerts SET is_triggered = TRUE, triggered_at = CURRENT_TIMESTAMP WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28b148dc6b9fd411dc57ff0a35a89d3d0a5bdab423d24c54d365adb016f2c0de"
+}
