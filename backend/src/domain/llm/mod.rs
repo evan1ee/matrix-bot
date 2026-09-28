@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
-use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiUserConfig {
     pub owner_id: String,
     pub api_base_url: Option<String>,
@@ -13,10 +11,9 @@ pub struct AiUserConfig {
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     #[serde(default)]
-    #[sqlx(default)]
     pub max_history_turns: Option<i64>,
     pub updated_at: String,
-    #[sqlx(default)]
+    #[serde(default)]
     pub has_api_key: bool,
 }
 
@@ -32,7 +29,7 @@ impl AiUserConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifyAiKeyInput {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
@@ -100,7 +97,6 @@ pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'
                 return Err("API base URL cannot target private or loopback IP addresses");
             }
         } else if let Some(url::Host::Domain(domain)) = parsed.host() {
-            // Resolve domain to IP addresses to prevent SSRF via DNS rebinding / internal aliases
             use std::net::ToSocketAddrs;
             let port = parsed.port_or_known_default().unwrap_or(80);
             if let Ok(addrs) = (domain, port).to_socket_addrs() {
@@ -169,13 +165,13 @@ impl VerifyAiKeyInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifyAiKeyResponse {
     pub valid: bool,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateAiConfigInput {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
@@ -225,7 +221,7 @@ impl UpdateAiConfigInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConversation {
     pub id: String,
     pub owner_id: String,
@@ -234,7 +230,7 @@ pub struct AiConversation {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiMessage {
     pub id: String,
     pub conversation_id: String,
@@ -245,14 +241,14 @@ pub struct AiMessage {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiChatRequest {
     pub prompt: String,
     pub conversation_id: Option<String>,
     pub room_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiChatResponse {
     pub conversation_id: String,
     pub message: String,
@@ -260,7 +256,7 @@ pub struct AiChatResponse {
     pub tool_calls_executed: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConversationWithMessages {
     pub conversation: AiConversation,
     pub messages: Vec<AiMessage>,
@@ -323,7 +319,6 @@ mod tests {
             "API base URL cannot target internal or local domain names"
         );
 
-        // Test domain resolving to loopback (e.g. 127.0.0.1.nip.io or localtest.me)
         let ssrf_dns = UpdateAiConfigInput {
             api_base_url: Some("http://127.0.0.1.nip.io:8000/v1".to_string()),
             ..Default::default()

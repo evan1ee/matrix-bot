@@ -111,7 +111,7 @@ async fn async_main() -> Result<()> {
             &db.pool,
             &matrix_bot::events::EventBroadcaster::default(),
         );
-        matrix_bot::modules::mcp::stdio::run_stdio(&services, &db.pool, &owner_id).await?;
+        matrix_bot::interface::mcp::stdio::run_stdio(&services, &db.pool, &owner_id).await?;
         return Ok(());
     }
 

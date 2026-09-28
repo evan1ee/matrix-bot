@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO ai_user_configs (\n            owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, CAST(CURRENT_TIMESTAMP AS TEXT))\n        ON CONFLICT(owner_id) DO UPDATE SET\n            api_base_url = COALESCE(excluded.api_base_url, ai_user_configs.api_base_url),\n            api_key = CASE\n                WHEN excluded.api_key = '' THEN NULL\n                WHEN excluded.api_key IS NOT NULL THEN excluded.api_key\n                ELSE ai_user_configs.api_key\n            END,\n            model_name = COALESCE(excluded.model_name, ai_user_configs.model_name),\n            system_prompt = COALESCE(excluded.system_prompt, ai_user_configs.system_prompt),\n            temperature = COALESCE(excluded.temperature, ai_user_configs.temperature),\n            max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),\n            updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Float8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a4270b226e854be8947282204437492497c6c3665985c281aba41e7bf90570b"
+}

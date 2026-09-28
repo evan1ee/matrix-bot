@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, created_at)\n        VALUES ($1, $2, $3, $4, $5, $6, CAST(CURRENT_TIMESTAMP AS TEXT))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e62e145ff78df692828d0ce3d9f123ef28870eb1e7308f31ed22f4d864b190a"
+}

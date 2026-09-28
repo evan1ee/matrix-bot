@@ -1,15 +1,5 @@
-//! Why an AI turn did not produce an answer.
-//!
-//! `run_ai_turn` and `run_ai_turn_with_stage` used to return a bare `String`,
-//! so `api/ai.rs::chat` had no way to tell a prompt it should not have
-//! accepted apart from a provider that was down — both answered 400 Bad
-//! Request, with the raw internal message in the body. This type lets the
-//! REST layer answer each failure with the status it actually deserves.
-//!
-//! Kept in its own file rather than folded into `handler.rs`: that file is
-//! already at its line-count ceiling.
+//! Why an LLM/AI turn did not produce an answer.
 
-/// Why an AI turn did not produce an answer.
 #[derive(Debug)]
 pub enum AiError {
     /// The request itself is wrong: an empty or over-long prompt, or a
@@ -32,6 +22,8 @@ impl std::fmt::Display for AiError {
         }
     }
 }
+
+pub type LlmError = AiError;
 
 #[cfg(test)]
 mod tests {

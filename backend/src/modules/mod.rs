@@ -7,9 +7,6 @@ use tracing::info;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 
-pub mod ai;
-pub mod mcp;
-
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.
 ///

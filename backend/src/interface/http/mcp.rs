@@ -12,14 +12,13 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
-use crate::modules::mcp::service::McpService;
-
-use crate::modules::mcp::models::{
+use crate::interface::mcp::models::{
     self, CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenSummary,
 };
-use crate::modules::mcp::repository::McpTokenRepository;
+use crate::interface::mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
+use crate::interface::mcp::service::McpService;
 
 #[derive(Debug, Deserialize)]
 pub struct McpQuery {
@@ -248,10 +247,13 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        crate::db_execute!(
+        crate::accounts::AccountRepository::create_with_id(
             &pool,
-            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+            "acct_test",
+            "Tester",
+            crate::accounts::STATUS_ACTIVE,
         )
+        .await
         .unwrap();
 
         let (raw, token) = McpTokenRepository::create(&pool, "acct_test", "API Test", None)

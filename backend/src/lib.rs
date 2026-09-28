@@ -19,5 +19,6 @@ pub mod error;
 pub mod events;
 pub mod infrastructure;
 pub mod interface;
+pub mod llm;
 pub mod modules;
 pub mod utils;

@@ -11,6 +11,7 @@ pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod life;
+pub mod llm;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
@@ -28,6 +29,7 @@ use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
 use self::life::LifeService;
+use self::llm::LlmService;
 use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
 use self::reminders::ReminderService;
@@ -91,6 +93,7 @@ pub struct AppServices {
     pub footprints: FootprintService,
     pub habits: HabitService,
     pub life: LifeService,
+    pub llm: LlmService,
     pub portfolio: PortfolioService,
     pub recurring_bills: RecurringBillsService,
     pub reminders: ReminderService,
@@ -124,6 +127,7 @@ impl AppServices {
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
         let life = LifeService::new(pool.clone(), events.clone());
+        let llm = LlmService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         let reminders = ReminderService::new(pool.clone(), events.clone());
         let todos = TodoService::new(pool.clone(), events.clone(), reminders.clone());
@@ -143,6 +147,7 @@ impl AppServices {
             footprints,
             habits,
             life,
+            llm,
             portfolio,
             recurring_bills,
             reminders,

@@ -1,7 +1,52 @@
+use async_trait::async_trait;
+
 use crate::db::Database;
-use crate::modules::mcp::{adapter, models, prompts, repository::McpTokenRepository, resources};
-use crate::modules::CommandContext;
+use crate::events::EventBroadcaster;
+use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
+use crate::interface::mcp::{adapter, models, prompts, resources};
+use crate::modules::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
+
+pub struct McpModule;
+
+impl McpModule {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for McpModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl BotModule for McpModule {
+    fn name(&self) -> &str {
+        "MCP"
+    }
+
+    fn commands(&self) -> Vec<CommandHelp> {
+        vec![CommandHelp {
+            name: "mcp".to_string(),
+            usage: "!mcp [token|list|revoke]".to_string(),
+            description:
+                "Manage Model Context Protocol (MCP) server status and personal access tokens"
+                    .to_string(),
+        }]
+    }
+
+    async fn handle_command(
+        &self,
+        ctx: &CommandContext,
+        _services: &crate::application::AppServices,
+        db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
+    ) -> Option<String> {
+        handle_command(ctx, db).await
+    }
+}
 
 pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<String> {
     if ctx.command != "mcp" {
@@ -169,10 +214,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_mcp_module_metadata() {
+        let module = McpModule::new();
+        assert_eq!(module.name(), "MCP");
+        assert_eq!(module.commands().len(), 1);
+        assert_eq!(module.commands()[0].name, "mcp");
+    }
+
     #[tokio::test]
     async fn test_mcp_token_refuses_public_room() {
         let pool = crate::db::pool::test_pool().await;
-        let db = Database { pool: pool };
+        let db = Database { pool };
         let ctx = dummy_ctx("mcp", "token", false);
 
         let reply = handle_command(&ctx, &db).await.unwrap();
@@ -185,13 +238,16 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        crate::db_execute!(
+        crate::accounts::AccountRepository::create_with_id(
             &pool,
-            "INSERT INTO accounts (id, display_name) VALUES ('acct_test', 'Tester')"
+            "acct_test",
+            "Tester",
+            crate::accounts::STATUS_ACTIVE,
         )
+        .await
         .unwrap();
 
-        let db = Database { pool: pool };
+        let db = Database { pool };
         let ctx = dummy_ctx("mcp", "token Claude Laptop", true);
 
         let reply = handle_command(&ctx, &db).await.unwrap();

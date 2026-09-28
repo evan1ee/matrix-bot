@@ -297,14 +297,15 @@ mod tests {
         let account = AccountRepository::create(&state.db.pool, "evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (raw, _token) = crate::modules::mcp::repository::McpTokenRepository::create(
-            &state.db.pool,
-            &account,
-            "a machine",
-            None,
-        )
-        .await
-        .unwrap();
+        let (raw, _token) =
+            crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::create(
+                &state.db.pool,
+                &account,
+                "a machine",
+                None,
+            )
+            .await
+            .unwrap();
 
         let user = extract_bearer(&state, Method::GET, Some(&raw), None)
             .await

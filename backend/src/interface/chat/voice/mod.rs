@@ -98,19 +98,16 @@ pub async fn process_audio_event(
     let ai_prompt = prompt::build_voice_prompt(&transcription.text, transcription.duration_secs);
 
     // 3. Run AI turn with full domain tool capabilities
-    match crate::modules::ai::handler::run_ai_turn_with_stage(
+    let turn_ctx = crate::llm::LlmTurnContext::new(
         services,
         &db.pool,
         ai,
         broadcaster,
         owner_id,
         room.room_id().as_str(),
-        None,
-        &ai_prompt,
         stage_reporter,
-    )
-    .await
-    {
+    );
+    match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
         Ok(ai_turn) => format_voice_turn_response(&ai_turn, &transcription, stt.model()),
         Err(err) => {
             warn!("AI turn failed for transcribed voice: {}", err);
@@ -152,11 +149,11 @@ fn voice_error_message(err: &crate::infrastructure::inference::stt::SttServiceEr
 }
 
 fn format_voice_turn_response(
-    ai_turn: &crate::modules::ai::handler::AiTurnResult,
+    ai_turn: &crate::llm::AiTurnResult,
     _transcription: &VoiceTranscriptionResult,
     engine_label: &str,
 ) -> String {
-    crate::modules::ai::handler::format_response(
+    crate::llm::prompt::format_response(
         &ai_turn.message,
         &ai_turn.model_used,
         Some(engine_label),
@@ -167,7 +164,7 @@ fn format_voice_turn_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::ai::handler::AiTurnResult;
+    use crate::llm::AiTurnResult;
 
     #[test]
     fn test_format_voice_turn_response() {

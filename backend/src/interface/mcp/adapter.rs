@@ -3,8 +3,8 @@ use tracing::{debug, warn};
 
 use super::protocol::{CallToolParams, CallToolResult, McpTool, ToolContent};
 use crate::events::EventBroadcaster;
-use crate::modules::ai::tools::definitions::all_tool_definitions;
-use crate::modules::ai::tools::executor;
+use crate::llm::tools::definitions::all_tool_definitions;
+use crate::llm::tools::executor;
 
 /// Translates all unified AI function calling tool definitions into standard MCP tool schemas.
 pub fn get_mcp_tools() -> Vec<McpTool> {

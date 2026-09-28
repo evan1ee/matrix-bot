@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at\n        FROM ai_user_configs\n        WHERE owner_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "api_base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "api_base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "model_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "model_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "system_prompt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "system_prompt"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "temperature",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "temperature"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "max_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_user_configs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "25a5bb5aad6323aae02a8d4bf8c786bb8d300714c2a4b976735b0f207fd3ce45"
+}

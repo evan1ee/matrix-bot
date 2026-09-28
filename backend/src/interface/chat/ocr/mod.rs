@@ -75,19 +75,16 @@ pub async fn process_image_event(
 
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
-    match crate::modules::ai::handler::run_ai_turn_with_stage(
+    let turn_ctx = crate::llm::LlmTurnContext::new(
         services,
         &db.pool,
         ai,
         broadcaster,
         owner_id,
         room.room_id().as_str(),
-        None,
-        &ai_prompt,
         stage_reporter,
-    )
-    .await
-    {
+    );
+    match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
         Ok(ai_turn) => format_ocr_turn_response(&ai_turn, &ocr_result),
         Err(err) => {
             warn!("AI turn failed for OCR text: {}", err);
@@ -141,11 +138,8 @@ fn ocr_error_message(err: &crate::infrastructure::inference::ocr::OcrServiceErro
     }
 }
 
-fn format_ocr_turn_response(
-    ai_turn: &crate::modules::ai::handler::AiTurnResult,
-    _ocr_result: &OcrResult,
-) -> String {
-    crate::modules::ai::handler::format_response(
+fn format_ocr_turn_response(ai_turn: &crate::llm::AiTurnResult, _ocr_result: &OcrResult) -> String {
+    crate::llm::prompt::format_response(
         &ai_turn.message,
         &ai_turn.model_used,
         Some("PaddleOCR"),
@@ -157,7 +151,7 @@ fn format_ocr_turn_response(
 mod tests {
     use super::*;
     use crate::infrastructure::inference::ocr::OcrServiceError;
-    use crate::modules::ai::handler::AiTurnResult;
+    use crate::llm::AiTurnResult;
 
     /// The regression this guards against: `Unreachable`'s `Display` embeds
     /// the request URL (host + port of the internal inference service), and

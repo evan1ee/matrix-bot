@@ -7,16 +7,16 @@ use tracing::error;
 
 use crate::error::ApiError;
 use crate::events::SystemEvent;
+use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::ai::error::AiError;
-use crate::modules::ai::handler::run_ai_turn;
-use crate::modules::ai::models::{
+use crate::llm::error::AiError;
+use crate::llm::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
     VerifyAiKeyInput, VerifyAiKeyResponse,
 };
-use crate::modules::ai::repository::AiRepository;
-use crate::modules::ai::resolved_config::ResolvedAiConfig;
-use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
+use crate::llm::resolved_config::ResolvedAiConfig;
+use crate::llm::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
+use crate::llm::{run_turn, LlmTurnContext};
 
 /// It used to be a bare `String`, so this always answered 400 — a provider
 /// outage and a bad prompt looked identical to the caller. Each variant now
@@ -64,18 +64,19 @@ pub async fn chat(
         .resolve_target_room(owner_id, payload.room_id.as_deref())
         .await;
 
+    let turn_ctx = LlmTurnContext::new(
+        &state.services,
+        &state.db.pool,
+        &state.ai,
+        Some(&state.broadcaster),
+        owner_id,
+        &room_id,
+        None,
+    );
+
     let turn_result = tokio::time::timeout(
         std::time::Duration::from_secs(180),
-        run_ai_turn(
-            &state.services,
-            &state.db.pool,
-            &state.ai,
-            Some(&state.broadcaster),
-            owner_id,
-            &room_id,
-            payload.conversation_id.as_deref(),
-            prompt,
-        ),
+        run_turn(&turn_ctx, prompt, payload.conversation_id.as_deref()),
     )
     .await
     .map_err(|_| {
@@ -106,10 +107,11 @@ pub async fn list_conversations(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<AiConversation>>, ApiError> {
-    let convs = AiRepository::list_conversations(&state.db.pool, &user.account_id, 20)
+    let convs = llm_repo::list_conversations(&state.db.pool, &user.account_id, 20)
         .await
         .map_err(ApiError::from)?;
-    Ok(Json(convs))
+    let dtos: Vec<AiConversation> = convs.into_iter().map(Into::into).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -125,15 +127,16 @@ pub async fn get_conversation_messages(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<AiMessage>>, ApiError> {
-    let _conv = AiRepository::get_conversation(&state.db.pool, &id, &user.account_id)
+    let _conv = llm_repo::get_conversation(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Conversation not found"))?;
 
-    let messages = AiRepository::get_recent_messages(&state.db.pool, &id, 100)
+    let messages = llm_repo::get_recent_messages(&state.db.pool, &id, 100)
         .await
         .map_err(ApiError::from)?;
-    Ok(Json(messages))
+    let dtos: Vec<AiMessage> = messages.into_iter().map(Into::into).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -149,7 +152,7 @@ pub async fn delete_conversation(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = AiRepository::delete_conversation(&state.db.pool, &id, &user.account_id)
+    let deleted = llm_repo::delete_conversation(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -182,11 +185,12 @@ pub async fn get_ai_config(
         .settings
         .get_or_default(&user.account_id)
         .await;
-    let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
+    let config = llm_repo::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .map(|c| {
-            let mut redacted = c.redacted();
+            let mut redacted: AiUserConfig = c.into();
+            redacted = redacted.redacted();
             if redacted
                 .api_base_url
                 .as_ref()
@@ -261,7 +265,8 @@ pub async fn update_ai_config(
         }
     }
 
-    let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)
+    let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
+    let updated = llm_repo::upsert_user_config(&state.db.pool, &user.account_id, &domain_input)
         .await
         .map_err(ApiError::from)?;
 
@@ -274,7 +279,8 @@ pub async fn update_ai_config(
         .settings
         .get_or_default(&user.account_id)
         .await;
-    let mut redacted = updated.redacted();
+    let dto_updated: AiUserConfig = updated.into();
+    let mut redacted = dto_updated.redacted();
     redacted.max_history_turns = Some(settings.max_history_turns);
 
     Ok(Json(redacted))
@@ -297,7 +303,7 @@ pub async fn verify_ai_config(
         .validate(state.ai.allow_private_base_url)
         .map_err(ApiError::bad_request)?;
 
-    let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
+    let user_config = llm_repo::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -473,7 +479,8 @@ mod tests {
             max_tokens: None,
             max_history_turns: None,
         };
-        AiRepository::upsert_user_config(&state.db.pool, &owner, &input)
+        let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
+        llm_repo::upsert_user_config(&state.db.pool, &owner, &domain_input)
             .await
             .unwrap();
 

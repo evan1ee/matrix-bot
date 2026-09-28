@@ -106,7 +106,7 @@ impl MatrixBot {
         registry.register(SettingsModule::new());
         registry.register(BriefingModule::new());
         registry.register(WebhookModule::new());
-        registry.register(crate::modules::mcp::McpModule::new());
+        registry.register(crate::interface::chat::mcp::McpModule::new());
         // Must precede AiModule: `AiModule::handle_command` claims any
         // non-empty text sent as (or mentioning it in) a direct message, not
         // just `!ai` — see `modules/ai/handler.rs::handle_ai_command_with_stage`.
@@ -118,7 +118,7 @@ impl MatrixBot {
             config.tts_client(),
             config.tts_voice.clone(),
         ));
-        registry.register(crate::modules::ai::AiModule::new(
+        registry.register(crate::interface::chat::llm::LlmModule::new(
             handles.client.clone(),
             config.ai.clone(),
         ));

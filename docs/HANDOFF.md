@@ -117,13 +117,13 @@ backend/src/
 | 10 | portfolio | ✅ |
 | 11 | life + journal + briefing (read models) | ✅ |
 | 12 | ocr + voice + tts + core + account command module | ✅ |
-| 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ☐ |
+| 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ✅ |
 | 14 | delete the `db_*!`/`tx_*!` macros and `modules/`; harden the architecture test | ☐ |
 | — | whole-branch review + one fix wave | ☐ |
 
 Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALLOW_LIST`; the list can only shrink):
 - `interface/channels/matrix/{invite,reaction_targets}.rs`
-- `interface/http/{mcp,mod}.rs`
+- `interface/http/mod.rs`
 
 The last full test run: **803 passed / 0 failed / 13 ignored**.
 

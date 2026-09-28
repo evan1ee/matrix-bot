@@ -4,11 +4,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use super::resolved_config::ResolvedAiConfig;
 use crate::infrastructure::inference::llm::{
     ChatCompletionRequest, LlmClient, StreamedCompletion, ToolCall,
 };
 use crate::interface::channels::matrix::stage::StageReporter;
-use crate::modules::ai::resolved_config::ResolvedAiConfig;
 
 /// Executes an AI turn with real-time streaming updates to Matrix if a `StageReporter`
 /// is available, falling back cleanly to non-streaming on any transport error.

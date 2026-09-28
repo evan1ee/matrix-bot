@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::modules::ai::retrospective::generate_weekly_retrospective;
+use crate::llm::retrospective::generate_weekly_retrospective;
 
 fn normalize_footprint_category(input: &str) -> &'static str {
     let lower = input.trim().to_lowercase();

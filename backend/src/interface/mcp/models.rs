@@ -2,25 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
-pub struct McpToken {
-    pub id: String,
-    pub account_id: String,
-    pub name: String,
-    #[serde(skip_serializing)]
-    pub token_hash: String,
-    pub prefix: String,
-    pub created_at: DateTime<Utc>,
-    pub last_used_at: Option<DateTime<Utc>>,
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-impl McpToken {
-    /// Whether this token has expired.
-    pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
-        self.expires_at.is_some_and(|exp| now > exp)
-    }
-}
+pub use crate::domain::mcp::McpToken;
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateMcpTokenRequest {

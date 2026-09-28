@@ -91,7 +91,7 @@ pub async fn resolve(
     match credential {
         Credential::McpToken(token) => {
             let mcp_token =
-                match crate::modules::mcp::repository::McpTokenRepository::resolve(pool, token)
+                match crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::resolve(pool, token)
                     .await?
                 {
                     Some(mcp_token) => mcp_token,
@@ -104,7 +104,7 @@ pub async fn resolve(
             let pool_for_touch = pool.clone();
             let token_id = mcp_token.id.clone();
             tokio::spawn(async move {
-                let _ = crate::modules::mcp::repository::McpTokenRepository::touch_last_used(
+                let _ = crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::touch_last_used(
                     &pool_for_touch,
                     &token_id,
                 )

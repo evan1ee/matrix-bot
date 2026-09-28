@@ -4,7 +4,7 @@
 
 use crate::infrastructure::inference::llm::LlmEndpoint;
 
-use super::models::AiUserConfig;
+use crate::domain::llm::AiUserConfig;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedAiConfig {
