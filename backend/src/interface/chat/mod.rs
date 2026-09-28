@@ -6,17 +6,21 @@
 pub mod account;
 pub mod bookmarks;
 pub mod briefing;
+pub mod core;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod journal;
 pub mod life;
+pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
 pub mod settings;
 pub mod todos;
+pub mod tts;
+pub mod voice;
 pub mod webhooks;
 
 use tracing::error;

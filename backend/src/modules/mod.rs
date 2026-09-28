@@ -8,11 +8,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 
 pub mod ai;
-pub mod core;
 pub mod mcp;
-pub mod ocr;
-pub mod tts;
-pub mod voice;
 
 /// A message the parser recognised as a command, before its sender has been
 /// resolved to an account.
@@ -361,13 +357,13 @@ mod tests {
     /// `bot/mod.rs` and asserts each entry point actually comes back.
     #[tokio::test]
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
+        use crate::interface::chat::core::CoreModule;
         use crate::interface::chat::finance::FinanceModule;
         use crate::interface::chat::portfolio::PortfolioModule;
         use crate::interface::chat::reminders::ReminderModule;
         use crate::interface::chat::settings::SettingsModule;
         use crate::interface::chat::todos::TodoModule;
-        use crate::modules::core::CoreModule;
-        use crate::modules::tts::TtsModule;
+        use crate::interface::chat::tts::TtsModule;
 
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
@@ -452,7 +448,7 @@ mod tests {
     /// the two registrations in `bot/mod.rs`.
     #[tokio::test]
     async fn test_tts_must_be_registered_before_a_direct_message_catch_all() {
-        use crate::modules::tts::TtsModule;
+        use crate::interface::chat::tts::TtsModule;
 
         struct DirectMessageCatchAll;
 

@@ -15,6 +15,7 @@ use crate::interface::channels::matrix::verification::{
     register_verification_handlers, VerificationPolicy,
 };
 use crate::interface::chat::briefing::BriefingModule;
+use crate::interface::chat::core::CoreModule;
 use crate::interface::chat::finance::FinanceModule;
 use crate::interface::chat::footprints::FootprintsModule;
 use crate::interface::chat::habits::HabitsModule;
@@ -26,7 +27,6 @@ use crate::interface::chat::reminders::ReminderModule;
 use crate::interface::chat::settings::SettingsModule;
 use crate::interface::chat::todos::TodoModule;
 use crate::interface::chat::webhooks::WebhookModule;
-use crate::modules::core::CoreModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
 pub mod attachments;
@@ -113,7 +113,7 @@ impl MatrixBot {
         // Registered after it, `!say` in a DM would be swallowed and answered
         // by the AI instead of TTS. Covered by
         // `modules::tests::test_tts_must_be_registered_before_a_direct_message_catch_all`.
-        registry.register(crate::modules::tts::TtsModule::new(
+        registry.register(crate::interface::chat::tts::TtsModule::new(
             handles.client.clone(),
             config.tts_client(),
             config.tts_voice.clone(),

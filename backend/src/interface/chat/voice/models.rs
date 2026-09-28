@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Voice transcription settings the bot owns. Where the model runs, and which
-/// provider serves it, is `services::stt`'s concern.
+/// provider serves it, is inference's concern.
 #[derive(Debug, Clone)]
 pub struct VoiceConfig {
     pub enabled: bool,

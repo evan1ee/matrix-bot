@@ -22,7 +22,7 @@ use crate::config::AiEnvConfig;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
-use crate::modules::voice::VoiceConfig;
+use crate::interface::chat::voice::VoiceConfig;
 
 /// Everything that differs between handling an image and handling a voice
 /// note: which content carries the media, what to call the two processing
@@ -172,7 +172,7 @@ impl<'a> Attachment<'a> {
     ) -> String {
         match self {
             Self::Image { content, ocr } => {
-                crate::modules::ocr::process_image_event(
+                crate::interface::chat::ocr::process_image_event(
                     db,
                     services,
                     ai,
@@ -191,7 +191,7 @@ impl<'a> Attachment<'a> {
                 voice_config,
                 stt,
             } => {
-                crate::modules::voice::process_audio_event(
+                crate::interface::chat::voice::process_audio_event(
                     db,
                     services,
                     ai,

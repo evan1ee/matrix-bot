@@ -139,9 +139,9 @@ pub struct ApiState {
     /// The API server's shutdown token. Long-lived responses (SSE) end on it,
     /// or graceful shutdown would wait on every open browser tab.
     pub shutdown: tokio_util::sync::CancellationToken,
-    pub ocr_config: crate::modules::ocr::OcrConfig,
+    pub ocr_config: crate::interface::chat::ocr::OcrConfig,
     pub ocr: crate::infrastructure::inference::ocr::OcrClient,
-    pub voice_config: crate::modules::voice::VoiceConfig,
+    pub voice_config: crate::interface::chat::voice::VoiceConfig,
     pub stt: crate::infrastructure::inference::stt::SttClient,
     /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
     pub ai: crate::config::AiEnvConfig,
@@ -209,9 +209,9 @@ impl ApiState {
             pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
-            ocr_config: crate::modules::ocr::OcrConfig::default(),
+            ocr_config: crate::interface::chat::ocr::OcrConfig::default(),
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(None),
-            voice_config: crate::modules::voice::VoiceConfig::default(),
+            voice_config: crate::interface::chat::voice::VoiceConfig::default(),
             stt: crate::infrastructure::inference::stt::SttClient::new(
                 None,
                 None,
@@ -273,12 +273,12 @@ impl ApiState {
             pending_merges: handles.pending_merges,
             sync_health: handles.sync_health,
             shutdown,
-            ocr_config: crate::modules::ocr::OcrConfig {
+            ocr_config: crate::interface::chat::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
                 base_url: config.ocr_base_url.clone(),
             },
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone()),
-            voice_config: crate::modules::voice::VoiceConfig {
+            voice_config: crate::interface::chat::voice::VoiceConfig {
                 enabled: config.voice_enabled,
                 language: config.voice_language.clone(),
             },
@@ -302,8 +302,8 @@ impl ApiState {
     #[cfg(test)]
     pub fn with_ocr_and_voice(
         mut self,
-        ocr_config: crate::modules::ocr::OcrConfig,
-        voice_config: crate::modules::voice::VoiceConfig,
+        ocr_config: crate::interface::chat::ocr::OcrConfig,
+        voice_config: crate::interface::chat::voice::VoiceConfig,
     ) -> Self {
         self.ocr_config = ocr_config;
         self.voice_config = voice_config;

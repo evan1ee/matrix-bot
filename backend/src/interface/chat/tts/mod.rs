@@ -1,6 +1,6 @@
 //! Text-to-speech: `!say <text>` replies with a spoken voice message.
 //!
-//! The speaking happens elsewhere, through `services::tts`: the bundled
+//! The speaking happens elsewhere, through inference services: the bundled
 //! inference server's Kokoro, or any OpenAI-compatible or ElevenLabs
 //! provider, chosen by config. This module is the bot's half: preparing
 //! the text (`text.rs`), deciding whose voice speaks, and sending the result
@@ -59,7 +59,7 @@ fn failure_message(err: &TtsServiceError) -> String {
 
 pub struct TtsModule {
     /// The shared handle to the bot's own Matrix client. `AiModule` and
-    /// `AccountModule` reach Matrix the same way; see `modules/ai/mod.rs`.
+    /// `AccountModule` reach Matrix the same way.
     client: Arc<RwLock<Option<Client>>>,
     tts: TtsClient,
     default_voice: String,

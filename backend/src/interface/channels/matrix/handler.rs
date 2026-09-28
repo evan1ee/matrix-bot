@@ -43,7 +43,7 @@ pub fn register_handlers(
     };
     let ocr_client =
         crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone());
-    let voice_config = crate::modules::voice::VoiceConfig {
+    let voice_config = crate::interface::chat::voice::VoiceConfig {
         enabled: config.voice_enabled,
         language: config.voice_language.clone(),
     };

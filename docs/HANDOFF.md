@@ -116,7 +116,7 @@ backend/src/
 | 9 | finance | ✅ |
 | 10 | portfolio | ✅ |
 | 11 | life + journal + briefing (read models) | ✅ |
-| 12 | ocr + voice + tts + core + account command module | ☐ |
+| 12 | ocr + voice + tts + core + account command module | ✅ |
 | 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ☐ |
 | 14 | delete the `db_*!`/`tx_*!` macros and `modules/`; harden the architecture test | ☐ |
 | — | whole-branch review + one fix wave | ☐ |

@@ -20,7 +20,7 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
 }
 
 /// Processes an incoming Matrix audio or voice note message:
-/// 1. Sends the audio to the configured speech-to-text service (`services::stt`).
+/// 1. Sends the audio to the configured speech-to-text service.
 /// 2. Builds a structured semantic intent prompt with the transcription.
 /// 3. Executes an AI turn with all productivity tools enabled (add_expense, add_todo, create_reminder).
 /// 4. Formats and returns an HTML reply summarizing the actions taken.
