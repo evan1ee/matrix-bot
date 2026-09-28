@@ -18,6 +18,11 @@ use crate::interface::http::habits::{
     CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
     ToggleHabitRequest, UpdateHabitRequest,
 };
+use crate::interface::http::life::{
+    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
+    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
+};
+use crate::interface::http::life_activity::{ActivityEvent, ActivityStats, DayActivityResponse};
 use crate::interface::http::portfolio::{CashBalance, Holding, PortfolioCurrencySummary};
 use crate::interface::http::recurring_bills::{
     CreateBillPayload, RecurringBill, UpdateBillPayload,
@@ -30,11 +35,6 @@ use crate::interface::http::{
     finance_net_worth, footprints, habits, health, life, life_activity, mcp, ocr, portfolio,
     portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
     reminders, rooms, settings, sse, todos, voice, webhooks, webhooks_telegram,
-};
-use crate::modules::life::activity::{ActivityEvent, ActivityStats, DayActivityResponse};
-use crate::modules::life::models::{
-    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
-    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
 };
 
 #[derive(OpenApi)]
@@ -212,9 +212,9 @@ use crate::modules::life::models::{
             rooms::JoinedRoomInfo,
             settings::UserSettings,
             settings::UpdateSettingsRequest,
-            crate::modules::briefing::models::BriefingPayload,
-            crate::modules::briefing::models::BriefingSummary,
-            crate::modules::briefing::models::TickerPerformance,
+            briefing::BriefingPayload,
+            briefing::BriefingSummary,
+            briefing::TickerPerformance,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,

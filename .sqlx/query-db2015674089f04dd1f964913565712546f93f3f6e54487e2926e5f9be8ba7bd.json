@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, occurred_at)\n            VALUES ('!r', $1, 'Alice', 'expense', 4250, 'USD', 2, '2026-09-06 10:30:00'::timestamptz)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db2015674089f04dd1f964913565712546f93f3f6e54487e2926e5f9be8ba7bd"
+}

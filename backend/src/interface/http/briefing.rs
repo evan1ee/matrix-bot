@@ -1,11 +1,79 @@
 use axum::{extract::State, Json};
 use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::briefing::generator::generate_briefing;
-use crate::modules::briefing::models::BriefingPayload;
+
+/// Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct TickerPerformance {
+    pub symbol: String,
+    pub currency: String,
+    pub current_price: f64,
+    pub change_1d_pct: Option<f64>,
+    pub change_1w_pct: Option<f64>,
+    pub change_1m_pct: Option<f64>,
+}
+
+impl From<crate::application::briefing::models::TickerPerformance> for TickerPerformance {
+    fn from(t: crate::application::briefing::models::TickerPerformance) -> Self {
+        Self {
+            symbol: t.symbol,
+            currency: t.currency,
+            current_price: t.current_price,
+            change_1d_pct: t.change_1d_pct,
+            change_1w_pct: t.change_1w_pct,
+            change_1m_pct: t.change_1m_pct,
+        }
+    }
+}
+
+/// Key statistics summarizing a generated morning briefing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BriefingSummary {
+    pub pending_tasks_count: usize,
+    pub habits_completed_count: usize,
+    pub habits_total_count: usize,
+    pub upcoming_bills_count: usize,
+    pub holdings_count: usize,
+}
+
+impl From<crate::application::briefing::models::BriefingSummary> for BriefingSummary {
+    fn from(s: crate::application::briefing::models::BriefingSummary) -> Self {
+        Self {
+            pending_tasks_count: s.pending_tasks_count,
+            habits_completed_count: s.habits_completed_count,
+            habits_total_count: s.habits_total_count,
+            upcoming_bills_count: s.upcoming_bills_count,
+            holdings_count: s.holdings_count,
+        }
+    }
+}
+
+/// Formatted briefing payload ready for Matrix delivery and REST preview.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct BriefingPayload {
+    pub owner_id: String,
+    pub html_content: String,
+    pub plain_text: String,
+    pub summary: BriefingSummary,
+    pub tickers: Vec<TickerPerformance>,
+}
+
+impl From<crate::application::briefing::models::BriefingPayload> for BriefingPayload {
+    fn from(p: crate::application::briefing::models::BriefingPayload) -> Self {
+        Self {
+            owner_id: p.owner_id,
+            html_content: p.html_content,
+            plain_text: p.plain_text,
+            summary: BriefingSummary::from(p.summary),
+            tickers: p.tickers.into_iter().map(TickerPerformance::from).collect(),
+        }
+    }
+}
 
 #[utoipa::path(
     post,
@@ -26,7 +94,10 @@ pub async fn trigger_briefing(
         .get_or_default(&user.account_id)
         .await;
 
-    let payload = generate_briefing(&state.db.pool, &user.owner_id(), &settings)
+    let payload = state
+        .services
+        .briefing
+        .generate_briefing(&user.owner_id(), &settings)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -58,7 +129,7 @@ pub async fn trigger_briefing(
         ),
     });
 
-    Ok(Json(payload))
+    Ok(Json(BriefingPayload::from(payload)))
 }
 
 #[cfg(test)]
@@ -70,7 +141,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

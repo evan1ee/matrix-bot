@@ -9,10 +9,10 @@ use crate::domain::accounts::AccountId;
 use crate::domain::finance::money::format_amount;
 use crate::infrastructure::postgres::repositories::finance as finance_repo;
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::life as life_repo;
 use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
 use crate::infrastructure::postgres::repositories::reminders as reminders_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
-use crate::modules::life::repository::LifeRepository;
 use crate::utils::html::html_escape;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -290,11 +290,12 @@ pub async fn generate_weekly_retrospective(
     let mut days_logged_count = 0;
     let mut mood_counts: HashMap<String, usize> = HashMap::new();
 
+    let acct = AccountId::new(owner_id);
     for i in 0..7 {
         let d = (seven_days_ago + Duration::days(i))
             .format("%Y-%m-%d")
             .to_string();
-        if let Ok(Some(log)) = LifeRepository::get_day_log(pool, owner_id, &d).await {
+        if let Ok(Some(log)) = life_repo::get_day_log(pool, &acct, &d).await {
             days_logged_count += 1;
             *mood_counts.entry(log.mood.to_lowercase()).or_insert(0) += 1;
         }

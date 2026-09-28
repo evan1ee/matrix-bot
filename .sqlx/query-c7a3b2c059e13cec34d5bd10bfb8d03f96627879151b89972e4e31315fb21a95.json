@@ -1,0 +1,138 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)\n        VALUES ($1, $2, '', NULL, NULL, NULL, $3, NOW()::text, NOW()::text)\n        ON CONFLICT(owner_id, log_date) DO UPDATE SET\n            time_allocation = excluded.time_allocation,\n            updated_at = NOW()::text\n        RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "log_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "log_date"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "mood",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "mood"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "weather",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "weather"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "activities",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "activities"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "time_allocation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "time_allocation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "c7a3b2c059e13cec34d5bd10bfb8d03f96627879151b89972e4e31315fb21a95"
+}

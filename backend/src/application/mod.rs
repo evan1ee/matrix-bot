@@ -6,9 +6,11 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod briefing;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod life;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
@@ -21,9 +23,11 @@ use sqlx::PgPool;
 
 use self::accounts::AccountService;
 use self::bookmarks::BookmarkService;
+use self::briefing::BriefingService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
+use self::life::LifeService;
 use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
 use self::reminders::ReminderService;
@@ -82,9 +86,11 @@ impl From<&'static str> for AppError {
 pub struct AppServices {
     pub accounts: AccountService,
     pub bookmarks: BookmarkService,
+    pub briefing: BriefingService,
     pub finance: FinanceService,
     pub footprints: FootprintService,
     pub habits: HabitService,
+    pub life: LifeService,
     pub portfolio: PortfolioService,
     pub recurring_bills: RecurringBillsService,
     pub reminders: ReminderService,
@@ -112,10 +118,12 @@ impl AppServices {
     pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone(), events.clone());
         let bookmarks = BookmarkService::new(pool.clone(), events.clone());
+        let briefing = BriefingService::new(pool.clone());
         let finance = FinanceService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool.clone(), events.clone());
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
+        let life = LifeService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         let reminders = ReminderService::new(pool.clone(), events.clone());
         let todos = TodoService::new(pool.clone(), events.clone(), reminders.clone());
@@ -130,9 +138,11 @@ impl AppServices {
         Self {
             accounts,
             bookmarks,
+            briefing,
             finance,
             footprints,
             habits,
+            life,
             portfolio,
             recurring_bills,
             reminders,

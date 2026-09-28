@@ -1,19 +1,14 @@
-use crate::db::DbPool;
 use chrono::NaiveDate;
 use tracing::error;
 
-use crate::application::settings::SettingsService;
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::modules::life::activity::collect_day_activity;
-use crate::modules::life::models::normalize_mood;
-use crate::modules::life::repository::LifeRepository;
+use crate::application::AppServices;
+use crate::domain::accounts::AccountId;
+use crate::domain::life::normalize_mood;
 use crate::modules::CommandContext;
 use crate::utils::html::html_escape;
 
 pub async fn handle_journal_command(
-    pool: &DbPool,
-    settings: &SettingsService,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &AppServices,
     ctx: &CommandContext,
 ) -> Option<String> {
     let cmd = ctx.command.to_lowercase();
@@ -21,7 +16,7 @@ pub async fn handle_journal_command(
         return None;
     }
 
-    let tz = settings.get_or_default(&ctx.owner_id).await.tz();
+    let tz = services.settings.get_or_default(&ctx.owner_id).await.tz();
     let today_str = chrono::Utc::now()
         .with_timezone(&tz)
         .date_naive()
@@ -33,31 +28,31 @@ pub async fn handle_journal_command(
     // If the top-level command was `!log`, route arguments directly to log handler
     if cmd == "log" {
         if raw_args.is_empty() {
-            return Some(handle_view(pool, &ctx.owner_id, &today_str).await);
+            return Some(handle_view(services, &ctx.owner_id, &today_str).await);
         }
-        return Some(handle_log(pool, broadcaster, &ctx.owner_id, raw_args, &today_str).await);
+        return Some(handle_log(services, &ctx.owner_id, raw_args, &today_str).await);
     }
 
     let mut parts = raw_args.split_whitespace();
     let sub = parts.next().unwrap_or("").to_lowercase();
 
     match sub.as_str() {
-        "" | "today" => Some(handle_view(pool, &ctx.owner_id, &today_str).await),
+        "" | "today" => Some(handle_view(services, &ctx.owner_id, &today_str).await),
         "log" => {
             let rest = raw_args.trim_start_matches("log").trim();
-            Some(handle_log(pool, broadcaster, &ctx.owner_id, rest, &today_str).await)
+            Some(handle_log(services, &ctx.owner_id, rest, &today_str).await)
         }
         "activities" | "events" => {
             let target_date = parts.next().unwrap_or(&today_str);
-            Some(handle_activities(pool, &ctx.owner_id, target_date).await)
+            Some(handle_activities(services, &ctx.owner_id, target_date).await)
         }
         "clear" | "delete" | "rm" => {
             let target_date = parts.next().unwrap_or(&today_str);
-            Some(handle_clear(pool, broadcaster, &ctx.owner_id, target_date).await)
+            Some(handle_clear(services, &ctx.owner_id, target_date).await)
         }
         "help" => Some(handle_help()),
         date_cand if NaiveDate::parse_from_str(date_cand, "%Y-%m-%d").is_ok() => {
-            Some(handle_view(pool, &ctx.owner_id, date_cand).await)
+            Some(handle_view(services, &ctx.owner_id, date_cand).await)
         }
         _ => Some(handle_help()),
     }
@@ -72,8 +67,8 @@ pub fn handle_help() -> String {
      • <code>!journal clear [date]</code> — Clear a daily log entry".to_string()
 }
 
-async fn handle_view(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
-    let day_log = match LifeRepository::get_day_log(pool, owner_id, date_str).await {
+async fn handle_view(services: &AppServices, owner_id: &AccountId, date_str: &str) -> String {
+    let day_log = match services.life.get_day_log(owner_id, date_str).await {
         Ok(log) => log,
         Err(e) => {
             error!("Failed to get day log for {}: {:?}", date_str, e);
@@ -81,7 +76,14 @@ async fn handle_view(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
         }
     };
 
-    let activity = collect_day_activity(pool, owner_id, date_str).await;
+    let activity = match services.life.collect_day_activity(owner_id, date_str).await {
+        Ok(act) => act,
+        Err(_) => crate::domain::life::DayActivityResponse {
+            date: date_str.to_string(),
+            events: Vec::new(),
+            stats: Default::default(),
+        },
+    };
 
     let (mood_disp, weather_disp, note_disp) = match day_log {
         Some(log) => {
@@ -150,12 +152,19 @@ async fn handle_view(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
     )
 }
 
-async fn handle_activities(pool: &DbPool, owner_id: &str, date_str: &str) -> String {
+async fn handle_activities(services: &AppServices, owner_id: &AccountId, date_str: &str) -> String {
     if NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
         return "⚠️ Invalid date format. Please use <code>YYYY-MM-DD</code>.".to_string();
     }
 
-    let activity = collect_day_activity(pool, owner_id, date_str).await;
+    let activity = match services.life.collect_day_activity(owner_id, date_str).await {
+        Ok(act) => act,
+        Err(_) => crate::domain::life::DayActivityResponse {
+            date: date_str.to_string(),
+            events: Vec::new(),
+            stats: Default::default(),
+        },
+    };
     if activity.events.is_empty() {
         return format!(
             "📅 <b>Activities for {}:</b><br/>No activity recorded from other modules on this day.",
@@ -194,9 +203,8 @@ async fn handle_activities(pool: &DbPool, owner_id: &str, date_str: &str) -> Str
 }
 
 async fn handle_log(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    services: &AppServices,
+    owner_id: &AccountId,
     args: &str,
     today_str: &str,
 ) -> String {
@@ -226,23 +234,20 @@ async fn handle_log(
         }
     };
 
-    match LifeRepository::upsert_day_log(
-        pool,
-        owner_id,
-        today_str,
-        normalized_mood,
-        weather_raw,
-        None,
-        note_raw,
-        None,
-    )
-    .await
+    match services
+        .life
+        .upsert_day_log(
+            owner_id,
+            today_str,
+            normalized_mood,
+            weather_raw,
+            None,
+            note_raw,
+            None,
+        )
+        .await
     {
         Ok(log) => {
-            if let Some(bc) = broadcaster {
-                bc.send(SystemEvent::LifeDayLogged(log.clone()));
-            }
-
             let mood_emoji = match normalized_mood {
                 "amazing" => "🌟",
                 "good" => "🙂",
@@ -274,26 +279,13 @@ async fn handle_log(
     }
 }
 
-async fn handle_clear(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    date_str: &str,
-) -> String {
+async fn handle_clear(services: &AppServices, owner_id: &AccountId, date_str: &str) -> String {
     if NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
         return "⚠️ Invalid date format. Use <code>YYYY-MM-DD</code>.".to_string();
     }
 
-    match LifeRepository::delete_day_log(pool, owner_id, date_str).await {
-        Ok(true) => {
-            if let Some(bc) = broadcaster {
-                bc.send(SystemEvent::LifeDayCleared {
-                    owner_id: owner_id.to_string(),
-                    date: date_str.to_string(),
-                });
-            }
-            format!("🗑️ Cleared daily log for <b>{}</b>.", date_str)
-        }
+    match services.life.delete_day_log(owner_id, date_str).await {
+        Ok(true) => format!("🗑️ Cleared daily log for <b>{}</b>.", date_str),
         Ok(false) => format!("⚠️ No daily log entry found for <b>{}</b>.", date_str),
         Err(e) => {
             error!("Failed to delete daily log for {}: {:?}", date_str, e);
@@ -306,25 +298,17 @@ async fn handle_clear(
 mod tests {
     use super::*;
 
-    async fn setup_db() -> DbPool {
-        let pool = crate::db::pool::test_pool().await;
-        crate::db::migrate::run_migrations_unlocked(&pool).await;
-        pool
-    }
-
     #[tokio::test]
     async fn test_journal_flow() {
-        let pool = setup_db().await;
-        let settings = crate::application::settings::SettingsService::new(
-            pool.clone(),
-            crate::events::EventBroadcaster::default(),
-        );
-        let owner = "user_journal_test";
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::new("user_journal_test");
 
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@user:1".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new(owner),
+            owner_id: owner.clone(),
             sender_name: "Tester".to_string(),
             command: "journal".to_string(),
             raw_args: "help".to_string(),
@@ -335,44 +319,34 @@ mod tests {
             stage_reporter: None,
         };
 
-        let help = handle_journal_command(&pool, &settings, None, &ctx)
-            .await
-            .unwrap();
+        let help = handle_journal_command(&services, &ctx).await.unwrap();
         assert!(help.contains("Daily Log (Journal) Commands"));
 
         // Log today
         let mut log_ctx = ctx.clone();
         log_ctx.raw_args = "log amazing | sunny | High productivity day".to_string();
-        let log_res = handle_journal_command(&pool, &settings, None, &log_ctx)
-            .await
-            .unwrap();
+        let log_res = handle_journal_command(&services, &log_ctx).await.unwrap();
         assert!(log_res.contains("Daily Log Saved"));
         assert!(log_res.contains("amazing"));
 
         // View today
         let mut view_ctx = ctx.clone();
         view_ctx.raw_args = "".to_string();
-        let view_res = handle_journal_command(&pool, &settings, None, &view_ctx)
-            .await
-            .unwrap();
+        let view_res = handle_journal_command(&services, &view_ctx).await.unwrap();
         assert!(view_res.contains("amazing"));
         assert!(view_res.contains("High productivity day"));
 
         // Activities
         let mut act_ctx = ctx.clone();
         act_ctx.raw_args = "activities".to_string();
-        let act_res = handle_journal_command(&pool, &settings, None, &act_ctx)
-            .await
-            .unwrap();
+        let act_res = handle_journal_command(&services, &act_ctx).await.unwrap();
         assert!(act_res.contains("Activities for") || act_res.contains("No activity"));
 
         // Clear
         let mut clear_ctx = ctx.clone();
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
         clear_ctx.raw_args = format!("clear {}", today);
-        let clear_res = handle_journal_command(&pool, &settings, None, &clear_ctx)
-            .await
-            .unwrap();
+        let clear_res = handle_journal_command(&services, &clear_ctx).await.unwrap();
         assert!(clear_res.contains("Cleared daily log"));
     }
 }

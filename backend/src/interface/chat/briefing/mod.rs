@@ -4,11 +4,8 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
 
-pub mod generator;
 pub mod handler;
-pub mod models;
 pub mod scheduler;
-pub mod ticker;
 
 pub struct BriefingModule;
 
@@ -56,13 +53,12 @@ impl BotModule for BriefingModule {
         &self,
         ctx: &CommandContext,
         services: &crate::application::AppServices,
-        db: &Database,
+        _db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_briefing_command(
-            &db.pool,
-            &services.settings,
-            &ctx.owner_id,
+            services,
+            ctx.owner_id.as_str(),
             &ctx.full_body,
             broadcaster,
         )

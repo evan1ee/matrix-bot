@@ -2,6 +2,8 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
+use super::models::{BriefingPayload, BriefingSummary, TickerPerformance};
+use super::ticker::{fetch_all_tickers_performance, format_ticker_html, format_ticker_plain};
 use crate::domain::accounts::AccountId;
 use crate::domain::habits::HabitWithStatus;
 use crate::domain::recurring_bills::RecurringBill;
@@ -11,10 +13,6 @@ use crate::infrastructure::postgres::repositories::habits as habits_repo;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as portfolio_holdings_repo;
 use crate::infrastructure::postgres::repositories::recurring_bills as bills_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
-use crate::modules::briefing::models::{BriefingPayload, BriefingSummary, TickerPerformance};
-use crate::modules::briefing::ticker::{
-    fetch_all_tickers_performance, format_ticker_html, format_ticker_plain,
-};
 use crate::utils::html_escape;
 
 /// Formats the local header date line (e.g. "2026-09-18 07:00 (Asia/Shanghai)").

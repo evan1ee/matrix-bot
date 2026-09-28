@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT time_allocation\n        FROM life_day_logs\n        WHERE owner_id = $1 AND time_allocation IS NOT NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "time_allocation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "time_allocation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "15ba37ff75e5f93bcba7e9495fe5ea2e4e07f974df920b704e2dbc5ccd7950a7"
+}

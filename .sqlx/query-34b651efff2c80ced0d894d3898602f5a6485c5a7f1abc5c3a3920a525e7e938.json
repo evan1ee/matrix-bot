@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT h.name AS habit_name, hl.note, hl.created_at\n        FROM habit_logs hl\n        JOIN habits h ON h.id = hl.habit_id\n        WHERE hl.owner_id = $1 AND hl.log_date = $2\n        ORDER BY hl.created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "habit_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habit_logs",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habit_logs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "34b651efff2c80ced0d894d3898602f5a6485c5a7f1abc5c3a3920a525e7e938"
+}

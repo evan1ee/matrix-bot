@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::application::AppServices;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
 use crate::modules::{BotModule, CommandContext, CommandHelp};
@@ -59,10 +60,10 @@ impl BotModule for JournalModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        services: &crate::application::AppServices,
-        db: &Database,
-        broadcaster: Option<&EventBroadcaster>,
+        services: &AppServices,
+        _db: &Database,
+        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_journal_command(&db.pool, &services.settings, broadcaster, ctx).await
+        handler::handle_journal_command(services, ctx).await
     }
 }

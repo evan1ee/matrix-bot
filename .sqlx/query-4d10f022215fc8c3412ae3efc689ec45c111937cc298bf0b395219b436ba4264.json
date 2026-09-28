@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at)\n            VALUES ($1, 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57'::timestamptz)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d10f022215fc8c3412ae3efc689ec45c111937cc298bf0b395219b436ba4264"
+}

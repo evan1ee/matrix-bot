@@ -103,6 +103,10 @@ impl AccountService {
         Ok(core::count(&self.pool).await?)
     }
 
+    pub async fn list_active_ids(&self) -> Result<Vec<AccountId>, AppError> {
+        Ok(core::list_active_ids(&self.pool).await?)
+    }
+
     pub async fn delete(&self, account_id: &AccountId) -> Result<(), AppError> {
         Ok(core::delete(&self.pool, account_id).await?)
     }

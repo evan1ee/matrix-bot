@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT owner_id, birth_date, expected_lifespan_years, created_at, updated_at\n        FROM life_profiles\n        WHERE owner_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_profiles",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "birth_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_profiles",
+            "name": "birth_date"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "expected_lifespan_years",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "life_profiles",
+            "name": "expected_lifespan_years"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_profiles",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_profiles",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a64428436fd49b358adbd17f8c8a53fa7eb9e0600f19d0a7b9708c6300f7af65"
+}

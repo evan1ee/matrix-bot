@@ -147,7 +147,10 @@ pub async fn execute_tool(
                     })
                     .to_string())
                 } else {
-                    Err("Either 'id'/'alert_id' or 'symbol' must be provided to cancel an alert".to_string())
+                    Err(
+                        "Either 'id'/'alert_id' or 'symbol' must be provided to cancel an alert"
+                            .to_string(),
+                    )
                 }
             }
             .await,

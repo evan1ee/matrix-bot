@@ -137,9 +137,9 @@ pub enum SystemEvent {
     },
     LifeProfileUpdated {
         owner_id: String,
-        profile: crate::modules::life::models::LifeProfile,
+        profile: crate::domain::life::LifeProfile,
     },
-    LifeDayLogged(crate::modules::life::models::LifeDayLog),
+    LifeDayLogged(crate::domain::life::LifeDayLog),
     LifeDayCleared {
         owner_id: String,
         date: String,
@@ -211,7 +211,7 @@ impl SystemEvent {
             | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id,
             SystemEvent::LifeProfileUpdated { owner_id, .. }
             | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id,
-            SystemEvent::LifeDayLogged(l) => &l.owner_id,
+            SystemEvent::LifeDayLogged(l) => l.owner_id.as_str(),
             SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => &b.owner_id,
             SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
             SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id,

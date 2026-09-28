@@ -1,15 +1,13 @@
-use crate::db::DbPool;
 use tracing::error;
 
-use super::models::normalize_mood;
-use super::repository::LifeRepository;
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::application::AppServices;
+use crate::domain::accounts::AccountId;
+use crate::domain::life::normalize_mood;
 use crate::utils::html::html_escape;
 
 pub async fn handle_life_command(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    services: &AppServices,
+    owner_id: &AccountId,
     command: &str,
     raw_args: &str,
 ) -> Option<String> {
@@ -29,18 +27,18 @@ pub async fn handle_life_command(
         .to_string();
 
     match sub.as_str() {
-        "stats" | "" => Some(handle_stats(pool, owner_id, &today_str).await),
-        "today" => Some(handle_today(pool, owner_id, &today_str).await),
+        "stats" | "" => Some(handle_stats(services, owner_id, &today_str).await),
+        "today" => Some(handle_today(services, owner_id, &today_str).await),
         "set-birth" | "birth" => {
             let rest = args
                 .trim_start_matches("set-birth")
                 .trim_start_matches("birth")
                 .trim();
-            Some(handle_set_birth(pool, broadcaster, owner_id, rest).await)
+            Some(handle_set_birth(services, owner_id, rest).await)
         }
         "log" => {
             let rest = args.trim_start_matches("log").trim();
-            Some(handle_log(pool, broadcaster, owner_id, rest, &today_str).await)
+            Some(handle_log(services, owner_id, rest, &today_str).await)
         }
         "help" => Some(handle_help()),
         _ => Some(handle_help()),
@@ -51,12 +49,12 @@ fn handle_help() -> String {
     "<b>Visualizing Life (Life Grid) Commands:</b><br/>\
      • <code>!life stats</code> — View age in days, % of life lived, and log summary<br/>\
      • <code>!life today</code> — View today's recorded status<br/>\
-     • <code>!life set-birth &lt;YYYY-MM-DD&gt; [years]</code> — Set birth date & expected lifespan (e.g. <code>!life set-birth 1995-06-15 85</code>)<br/>\
+     • <code>!life set-birth &lt;YYYY-MM-DD&gt; [years]</code> — Set birth date &amp; expected lifespan (e.g. <code>!life set-birth 1995-06-15 85</code>)<br/>\
      • <code>!life log &lt;mood&gt; [note]</code> — Log today (moods: amazing, good, neutral, low, rough)".to_string()
 }
 
-async fn handle_stats(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
-    match LifeRepository::get_stats(pool, owner_id, today_str).await {
+async fn handle_stats(services: &AppServices, owner_id: &AccountId, today_str: &str) -> String {
+    match services.life.get_stats(owner_id, today_str).await {
         Ok(stats) => {
             let profile_msg = match &stats.profile {
                 Some(p) => format!(
@@ -89,8 +87,8 @@ async fn handle_stats(pool: &DbPool, owner_id: &str, today_str: &str) -> String 
     }
 }
 
-async fn handle_today(pool: &DbPool, owner_id: &str, today_str: &str) -> String {
-    match LifeRepository::get_day_log(pool, owner_id, today_str).await {
+async fn handle_today(services: &AppServices, owner_id: &AccountId, today_str: &str) -> String {
+    match services.life.get_day_log(owner_id, today_str).await {
         Ok(Some(log)) => {
             let note = log
                 .note
@@ -123,12 +121,7 @@ async fn handle_today(pool: &DbPool, owner_id: &str, today_str: &str) -> String 
     }
 }
 
-async fn handle_set_birth(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
-    args: &str,
-) -> String {
+async fn handle_set_birth(services: &AppServices, owner_id: &AccountId, args: &str) -> String {
     let mut parts = args.split_whitespace();
     let birth_date = parts.next().unwrap_or("");
     let lifespan_str = parts.next().unwrap_or("80");
@@ -139,14 +132,12 @@ async fn handle_set_birth(
 
     let lifespan = lifespan_str.parse::<i64>().unwrap_or(80).clamp(40, 130);
 
-    match LifeRepository::upsert_profile(pool, owner_id, birth_date, lifespan).await {
+    match services
+        .life
+        .upsert_profile(owner_id, birth_date, lifespan)
+        .await
+    {
         Ok(profile) => {
-            if let Some(bc) = broadcaster {
-                bc.send(SystemEvent::LifeProfileUpdated {
-                    owner_id: owner_id.to_string(),
-                    profile: profile.clone(),
-                });
-            }
             format!(
                 "✅ <b>Life Profile Updated!</b><br/>\
                  Birth date set to <b>{}</b> with expected lifespan of <b>{} years</b>.",
@@ -161,9 +152,8 @@ async fn handle_set_birth(
 }
 
 async fn handle_log(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    services: &AppServices,
+    owner_id: &AccountId,
     args: &str,
     today_str: &str,
 ) -> String {
@@ -178,22 +168,20 @@ async fn handle_log(
         }
     };
 
-    match LifeRepository::upsert_day_log(
-        pool,
-        owner_id,
-        today_str,
-        normalized_mood,
-        None,
-        None,
-        note_raw,
-        None,
-    )
-    .await
+    match services
+        .life
+        .upsert_day_log(
+            owner_id,
+            today_str,
+            normalized_mood,
+            None,
+            None,
+            note_raw,
+            None,
+        )
+        .await
     {
         Ok(log) => {
-            if let Some(bc) = broadcaster {
-                bc.send(SystemEvent::LifeDayLogged(log.clone()));
-            }
             let note_disp = log
                 .note
                 .map(|n| format!("<br/><i>\"{}\"</i>", html_escape(&n)))
@@ -214,43 +202,39 @@ async fn handle_log(
 mod tests {
     use super::*;
 
-    async fn setup_db() -> DbPool {
-        let pool = crate::db::pool::test_pool().await;
-        crate::db::migrate::run_migrations_unlocked(&pool).await;
-        pool
-    }
-
     #[tokio::test]
     async fn test_handle_life_commands() {
-        let pool = setup_db().await;
-        let owner = "user_matrix_1";
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::new("user_matrix_1");
 
         // Help
-        let help = handle_life_command(&pool, None, owner, "life", "help")
+        let help = handle_life_command(&services, &owner, "life", "help")
             .await
             .unwrap();
         assert!(help.contains("Visualizing Life"));
 
         // Set birth
-        let set_res = handle_life_command(&pool, None, owner, "life", "set-birth 1990-01-01 80")
+        let set_res = handle_life_command(&services, &owner, "life", "set-birth 1990-01-01 80")
             .await
             .unwrap();
         assert!(set_res.contains("Life Profile Updated"));
 
         // Log today
-        let log_res = handle_life_command(&pool, None, owner, "life", "log amazing Best day ever")
+        let log_res = handle_life_command(&services, &owner, "life", "log amazing Best day ever")
             .await
             .unwrap();
         assert!(log_res.contains("Day Recorded"));
 
         // Today command
-        let today_res = handle_life_command(&pool, None, owner, "life", "today")
+        let today_res = handle_life_command(&services, &owner, "life", "today")
             .await
             .unwrap();
         assert!(today_res.contains("amazing"));
 
         // Stats command
-        let stats_res = handle_life_command(&pool, None, owner, "life", "stats")
+        let stats_res = handle_life_command(&services, &owner, "life", "stats")
             .await
             .unwrap();
         assert!(stats_res.contains("Life Grid Statistics"));

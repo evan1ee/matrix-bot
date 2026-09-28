@@ -4,10 +4,10 @@ use chrono::{Duration, Utc};
 use super::protocol::{McpResource, ReadResourceResult, ResourceContent};
 use crate::infrastructure::postgres::repositories::finance as finance_repo;
 use crate::infrastructure::postgres::repositories::habits as habits_repo;
+use crate::infrastructure::postgres::repositories::life as life_repo;
 use crate::infrastructure::postgres::repositories::portfolio::cash as portfolio_cash_repo;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as portfolio_holdings_repo;
 use crate::infrastructure::postgres::repositories::todos as todos_repo;
-use crate::modules::life::repository::LifeRepository;
 
 /// Returns the standard read-only resources exposed by MatrixBot to MCP clients.
 pub fn list_resources() -> Vec<McpResource> {
@@ -127,7 +127,8 @@ pub async fn read_resource(
             })
         }
         "matrixbot://life/profile" => {
-            let profile = LifeRepository::get_profile(pool, owner_id)
+            let acct = crate::domain::accounts::AccountId::new(owner_id);
+            let profile = life_repo::get_profile(pool, &acct)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;

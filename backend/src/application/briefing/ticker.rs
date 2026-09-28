@@ -3,8 +3,8 @@ use futures_util::future::join_all;
 use std::collections::HashSet;
 use tracing::warn;
 
+use super::models::TickerPerformance;
 use crate::domain::portfolio::models::Holding;
-use crate::modules::briefing::models::TickerPerformance;
 
 /// Computes multi-timeframe percentage changes from sorted historical daily points `[(date, price)]`.
 pub fn compute_ticker_performance(

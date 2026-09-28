@@ -14,9 +14,12 @@ use crate::interface::channels::matrix::handler::register_handlers;
 use crate::interface::channels::matrix::verification::{
     register_verification_handlers, VerificationPolicy,
 };
+use crate::interface::chat::briefing::BriefingModule;
 use crate::interface::chat::finance::FinanceModule;
 use crate::interface::chat::footprints::FootprintsModule;
 use crate::interface::chat::habits::HabitsModule;
+use crate::interface::chat::journal::JournalModule;
+use crate::interface::chat::life::LifeModule;
 use crate::interface::chat::portfolio::PortfolioModule;
 use crate::interface::chat::recurring_bills::RecurringBillsModule;
 use crate::interface::chat::reminders::ReminderModule;
@@ -24,7 +27,6 @@ use crate::interface::chat::settings::SettingsModule;
 use crate::interface::chat::todos::TodoModule;
 use crate::interface::chat::webhooks::WebhookModule;
 use crate::modules::core::CoreModule;
-use crate::modules::life::LifeModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
 pub mod attachments;
@@ -98,11 +100,11 @@ impl MatrixBot {
         registry.register(FootprintsModule::new());
         registry.register(HabitsModule::new());
         registry.register(LifeModule::new());
-        registry.register(crate::modules::journal::JournalModule::new());
+        registry.register(JournalModule::new());
         registry.register(crate::interface::chat::bookmarks::BookmarksModule::new());
         registry.register(RecurringBillsModule::new());
         registry.register(SettingsModule::new());
-        registry.register(crate::modules::briefing::BriefingModule::new());
+        registry.register(BriefingModule::new());
         registry.register(WebhookModule::new());
         registry.register(crate::modules::mcp::McpModule::new());
         // Must precede AiModule: `AiModule::handle_command` claims any

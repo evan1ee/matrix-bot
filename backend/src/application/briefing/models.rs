@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 
 /// Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TickerPerformance {
     pub symbol: String,
     pub currency: String,
@@ -13,7 +12,7 @@ pub struct TickerPerformance {
 }
 
 /// Key statistics summarizing a generated morning briefing.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingSummary {
     pub pending_tasks_count: usize,
     pub habits_completed_count: usize,
@@ -23,7 +22,7 @@ pub struct BriefingSummary {
 }
 
 /// Formatted briefing payload ready for Matrix delivery and REST preview.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefingPayload {
     pub owner_id: String,
     pub html_content: String,

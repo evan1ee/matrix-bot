@@ -123,6 +123,16 @@ pub async fn count(conn: impl sqlx::PgExecutor<'_>) -> Result<i64, sqlx::Error> 
     Ok(count)
 }
 
+/// Lists IDs of all active accounts.
+pub async fn list_active_ids(
+    conn: impl sqlx::PgExecutor<'_>,
+) -> Result<Vec<AccountId>, sqlx::Error> {
+    let rows = sqlx::query_scalar!("SELECT id FROM accounts WHERE status = 'active'")
+        .fetch_all(conn)
+        .await?;
+    Ok(rows.into_iter().map(AccountId::new).collect())
+}
+
 /// Deletes an account by ID.
 pub async fn delete(
     conn: impl sqlx::PgExecutor<'_>,

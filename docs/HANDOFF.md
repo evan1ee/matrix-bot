@@ -115,7 +115,7 @@ backend/src/
 | 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ✅ |
 | 9 | finance | ✅ |
 | 10 | portfolio | ✅ |
-| 11 | life + journal + briefing (read models) | ☐ |
+| 11 | life + journal + briefing (read models) | ✅ |
 | 12 | ocr + voice + tts + core + account command module | ☐ |
 | 13 | ai + mcp (→ `llm/`, `AiTurnContext`, `MAX_TOOL_ROUNDS`) | ☐ |
 | 14 | delete the `db_*!`/`tx_*!` macros and `modules/`; harden the architecture test | ☐ |
@@ -123,9 +123,9 @@ backend/src/
 
 Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALLOW_LIST`; the list can only shrink):
 - `interface/channels/matrix/{invite,reaction_targets}.rs`
-- `interface/http/{life_activity,mcp,mod}.rs`
+- `interface/http/{mcp,mod}.rs`
 
-The last full test run: **828 passed / 0 failed / 11 ignored**.
+The last full test run: **803 passed / 0 failed / 13 ignored**.
 
 ## 5. How to work
 

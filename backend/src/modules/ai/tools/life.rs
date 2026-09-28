@@ -2,10 +2,9 @@ use crate::db::DbPool;
 use chrono::Utc;
 use serde_json::json;
 
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::modules::ai::retrospective::generate_weekly_retrospective;
-use crate::modules::life::repository::LifeRepository;
 
 fn normalize_footprint_category(input: &str) -> &'static str {
     let lower = input.trim().to_lowercase();
@@ -27,7 +26,7 @@ fn normalize_footprint_category(input: &str) -> &'static str {
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -64,7 +63,9 @@ pub async fn execute_tool(
                     .as_ref()
                     .and_then(|acts| serde_json::to_string(acts).ok());
 
-                let existing = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                let existing = services
+                    .life
+                    .get_day_log(&acct, &date_str)
                     .await
                     .map_err(|e| e.to_string())?;
                 if existing.is_some() {
@@ -74,22 +75,19 @@ pub async fn execute_tool(
                     ));
                 }
 
-                let log = LifeRepository::upsert_day_log(
-                    pool,
-                    owner_id,
-                    &date_str,
-                    mood,
-                    weather,
-                    activities_json.as_deref(),
-                    note,
-                    None,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::LifeDayLogged(log.clone()));
-                }
+                let log = services
+                    .life
+                    .upsert_day_log(
+                        &acct,
+                        &date_str,
+                        mood,
+                        weather,
+                        activities_json.as_deref(),
+                        note,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 serde_json::to_string(&log).map_err(|e| e.to_string())
             }
@@ -98,10 +96,14 @@ pub async fn execute_tool(
 
         "get_life_profile" => Some(
             async {
-                let profile = LifeRepository::get_profile(pool, owner_id)
+                let profile = services
+                    .life
+                    .get_profile(&acct)
                     .await
                     .map_err(|e| e.to_string())?;
-                let stats = LifeRepository::get_stats(pool, owner_id, &today_str)
+                let stats = services
+                    .life
+                    .get_stats(&acct, &today_str)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&json!({
@@ -121,7 +123,9 @@ pub async fn execute_tool(
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| today_str.clone());
 
-                let day_log = LifeRepository::get_day_log(pool, owner_id, &date_str)
+                let day_log = services
+                    .life
+                    .get_day_log(&acct, &date_str)
                     .await
                     .map_err(|e| e.to_string())?;
 

@@ -8,10 +8,7 @@ use crate::db::Database;
 use crate::events::EventBroadcaster;
 
 pub mod ai;
-pub mod briefing;
 pub mod core;
-pub mod journal;
-pub mod life;
 pub mod mcp;
 pub mod ocr;
 pub mod tts;

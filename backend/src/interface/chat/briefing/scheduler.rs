@@ -5,16 +5,11 @@ use tracing::{error, info, warn};
 
 use crate::domain::settings::parse_briefing_time;
 use crate::events::SystemEvent;
-use crate::modules::briefing::generator::generate_briefing;
 use crate::modules::ModuleContext;
 
 /// Checks and delivers automated morning briefings for active users.
 pub async fn run_briefing_tick(ctx: &ModuleContext) {
-    let accounts: Vec<String> = match crate::db_scalar_all!(
-        &ctx.db.pool,
-        String,
-        "SELECT id FROM accounts WHERE status = 'active'"
-    ) {
+    let accounts = match ctx.services.accounts.list_active_ids().await {
         Ok(list) => list,
         Err(err) => {
             error!(
@@ -27,8 +22,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
 
     let now_utc = Utc::now();
 
-    for owner_str in accounts {
-        let owner_id = crate::domain::accounts::AccountId::from(owner_str);
+    for owner_id in accounts {
         let settings = ctx.services.settings.get_or_default(&owner_id).await;
         if !settings.briefing_enabled {
             continue;
@@ -72,7 +66,12 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
             now_local.minute()
         );
 
-        let payload = match generate_briefing(&ctx.db.pool, owner_id.as_str(), &settings).await {
+        let payload = match ctx
+            .services
+            .briefing
+            .generate_briefing(owner_id.as_str(), &settings)
+            .await
+        {
             Ok(p) => p,
             Err(err) => {
                 error!(
