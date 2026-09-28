@@ -128,12 +128,10 @@ fn no_code_searches_parent_directories_for_env_files() {
 /// file no longer offends, so a stale entry can't linger unnoticed.
 const INTERFACE_SQL_ALLOW_LIST: &[&str] = &[
     "interface/channels/matrix/invite.rs",
-    "interface/channels/matrix/reaction.rs",
     "interface/channels/matrix/reaction_targets.rs",
     "interface/http/life_activity.rs",
     "interface/http/mcp.rs",
     "interface/http/mod.rs",
-    "interface/http/reminders.rs",
 ];
 
 #[test]

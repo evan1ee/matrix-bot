@@ -325,13 +325,41 @@ pub async fn resolve_untracked_target(
 
     // 2. Reminder detection
     if lower.contains("reminder") || lower.contains("提醒") {
-        if let Ok(mut reminders) = crate::db_fetch_all!(pool, crate::modules::reminder::models::Reminder, "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at \
-             FROM reminders WHERE owner_id = ? ORDER BY id DESC LIMIT 15", owner_id) {
-            reminders.sort_by_key(|r| if r.status == "pending" { 0 } else { 1 });
+        let account_id = crate::domain::accounts::AccountId::new(owner_id);
+        if let Ok(mut reminders) =
+            crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
+                pool,
+                &account_id,
+                None,
+                None,
+                15,
+                0,
+            )
+            .await
+        {
+            reminders.sort_by_key(|r| {
+                if r.status == crate::domain::reminders::ReminderStatus::Pending {
+                    0
+                } else {
+                    1
+                }
+            });
             for rem in &reminders {
                 if body.contains(&rem.message) || lower.contains(&rem.message.to_lowercase()) {
-                    let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
-                    info!("Resolved untracked reminder #{} ({}) for event {}", rem.id, rem.message, target_event_id);
+                    let _ = record_target(
+                        pool,
+                        target_event_id,
+                        room_id_str,
+                        "reminder",
+                        rem.id,
+                        owner_id,
+                        &rem.message,
+                    )
+                    .await;
+                    info!(
+                        "Resolved untracked reminder #{} ({}) for event {}",
+                        rem.id, rem.message, target_event_id
+                    );
                     return Some(BotMessageTarget {
                         event_id: target_event_id.to_string(),
                         room_id: room_id_str.to_string(),
@@ -342,11 +370,29 @@ pub async fn resolve_untracked_target(
                     });
                 }
             }
-            let in_room_pending: Vec<_> = reminders.iter().filter(|r| r.room_id == room_id_str && r.status == "pending").collect();
+            let in_room_pending: Vec<_> = reminders
+                .iter()
+                .filter(|r| {
+                    r.room_id == room_id_str
+                        && r.status == crate::domain::reminders::ReminderStatus::Pending
+                })
+                .collect();
             if in_room_pending.len() == 1 {
                 let rem = in_room_pending[0];
-                let _ = record_target(pool, target_event_id, room_id_str, "reminder", rem.id, owner_id, &rem.message).await;
-                info!("Resolved single pending reminder #{} for event {}", rem.id, target_event_id);
+                let _ = record_target(
+                    pool,
+                    target_event_id,
+                    room_id_str,
+                    "reminder",
+                    rem.id,
+                    owner_id,
+                    &rem.message,
+                )
+                .await;
+                info!(
+                    "Resolved single pending reminder #{} for event {}",
+                    rem.id, target_event_id
+                );
                 return Some(BotMessageTarget {
                     event_id: target_event_id.to_string(),
                     room_id: room_id_str.to_string(),
@@ -361,13 +407,33 @@ pub async fn resolve_untracked_target(
 
     // 3. Todo task detection
     if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
-        if let Ok(mut todos) = crate::db_fetch_all!(pool, crate::modules::todo::models::TodoItem, "SELECT id, room_id, owner_id, sender_name, text, priority, due_at, completed, created_at, remind_before_minutes \
-             FROM todos WHERE owner_id = ? ORDER BY id DESC LIMIT 15", owner_id) {
+        let account_id = crate::domain::accounts::AccountId::new(owner_id);
+        if let Ok(mut todos) = crate::infrastructure::postgres::repositories::todos::list_all_user(
+            pool,
+            &account_id,
+            None,
+            15,
+            0,
+        )
+        .await
+        {
             todos.sort_by_key(|t| if !t.completed { 0 } else { 1 });
             for todo in &todos {
                 if body.contains(&todo.text) || lower.contains(&todo.text.to_lowercase()) {
-                    let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
-                    info!("Resolved untracked todo #{} ({}) for event {}", todo.id, todo.text, target_event_id);
+                    let _ = record_target(
+                        pool,
+                        target_event_id,
+                        room_id_str,
+                        "todo",
+                        todo.id,
+                        owner_id,
+                        &todo.text,
+                    )
+                    .await;
+                    info!(
+                        "Resolved untracked todo #{} ({}) for event {}",
+                        todo.id, todo.text, target_event_id
+                    );
                     return Some(BotMessageTarget {
                         event_id: target_event_id.to_string(),
                         room_id: room_id_str.to_string(),
@@ -378,11 +444,26 @@ pub async fn resolve_untracked_target(
                     });
                 }
             }
-            let in_room_open: Vec<_> = todos.iter().filter(|t| t.room_id == room_id_str && !t.completed).collect();
+            let in_room_open: Vec<_> = todos
+                .iter()
+                .filter(|t| t.room_id == room_id_str && !t.completed)
+                .collect();
             if in_room_open.len() == 1 {
                 let todo = in_room_open[0];
-                let _ = record_target(pool, target_event_id, room_id_str, "todo", todo.id, owner_id, &todo.text).await;
-                info!("Resolved single open todo #{} for event {}", todo.id, target_event_id);
+                let _ = record_target(
+                    pool,
+                    target_event_id,
+                    room_id_str,
+                    "todo",
+                    todo.id,
+                    owner_id,
+                    &todo.text,
+                )
+                .await;
+                info!(
+                    "Resolved single open todo #{} for event {}",
+                    todo.id, target_event_id
+                );
                 return Some(BotMessageTarget {
                     event_id: target_event_id.to_string(),
                     room_id: room_id_str.to_string(),

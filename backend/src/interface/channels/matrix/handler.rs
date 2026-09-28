@@ -30,7 +30,7 @@ pub fn register_handlers(
     crate::interface::channels::matrix::reaction::register_reaction_handler(
         client,
         db.clone(),
-        broadcaster.clone(),
+        services.clone(),
     );
 
     // 3. Incoming message event handler

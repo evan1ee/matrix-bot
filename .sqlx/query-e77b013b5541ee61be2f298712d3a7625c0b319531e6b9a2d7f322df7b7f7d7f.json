@@ -1,0 +1,272 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE recurring_bills\n        SET\n            paid_installments = $1,\n            next_due_at = $2,\n            status = $3,\n            updated_at = (NOW()::text)\n        WHERE id = $4 AND owner_id = $5\n        RETURNING\n            id, room_id, owner_id, sender_name, name, category,\n            amount_minor, currency, currency_exponent, frequency,\n            due_day, next_due_at, total_installments, paid_installments,\n            auto_pay, status, notes, remind_before_minutes, remind_room_id,\n            created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "amount_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "amount_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "frequency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "frequency"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "due_day",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "due_day"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "next_due_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "next_due_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "total_installments",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "total_installments"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "paid_installments",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "paid_installments"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "auto_pay",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "auto_pay"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "remind_before_minutes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "remind_before_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "remind_room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "remind_room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e77b013b5541ee61be2f298712d3a7625c0b319531e6b9a2d7f322df7b7f7d7f"
+}

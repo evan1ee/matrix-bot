@@ -22,15 +22,15 @@ mod tests {
     use crate::accounts::linking::LINK_CODE_TTL_MINUTES;
     use crate::accounts::session::hash_token;
     use crate::domain::accounts::{LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::accounts as repo;
+    use crate::infrastructure::postgres::repositories::todos as todo_repo;
     use crate::interface::http::account::{
         audit::*, links::*, passkeys::*, recovery::*, sessions::*,
     };
     use crate::interface::http::auth::extractor::VerifiedUser;
     use crate::interface::http::auth::types::{ApiState, AuthUser};
-    use crate::modules::todo::models::TodoPriority;
-    use crate::modules::todo::repository::TodoRepository;
     use axum::extract::{Path, State};
     use axum::Json;
 
@@ -144,15 +144,18 @@ mod tests {
             .await
             .unwrap();
 
-        let todo = TodoRepository::add(
+        let todo = todo_repo::create(
             &state.db.pool,
-            "web",
-            victim.as_str(),
-            "victim",
-            "private",
-            TodoPriority::Medium,
-            None,
-            None,
+            &victim,
+            &NewTodo {
+                room_id: "web".to_string(),
+                sender_name: "victim".to_string(),
+                text: "private".to_string(),
+                priority: TodoPriority::Medium,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
         )
         .await
         .unwrap();
@@ -168,7 +171,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
 
-        let item = TodoRepository::find_owned(&state.db.pool, todo.id, victim.as_str())
+        let item = todo_repo::find_owned(&state.db.pool, &victim, todo.id)
             .await
             .unwrap();
         assert!(item.is_some(), "the victim's row must not have moved");
@@ -186,15 +189,18 @@ mod tests {
             .unwrap();
 
         for text in ["one", "two"] {
-            TodoRepository::add(
+            todo_repo::create(
                 &state.db.pool,
-                "!r:x",
-                old.as_str(),
-                "evan",
-                text,
-                TodoPriority::Medium,
-                None,
-                None,
+                &old,
+                &NewTodo {
+                    room_id: "!r:x".to_string(),
+                    sender_name: "evan".to_string(),
+                    text: text.to_string(),
+                    priority: TodoPriority::Medium,
+                    due_at: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
             )
             .await
             .unwrap();

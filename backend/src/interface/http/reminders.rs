@@ -3,23 +3,113 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::reminder::models::{RecurrencePattern, Reminder};
-use crate::modules::reminder::repository::ReminderRepository;
-use crate::modules::reminder::service::{self, NewReminder, ReminderError};
 
-impl From<ReminderError> for ApiError {
-    fn from(err: ReminderError) -> Self {
-        match err {
-            ReminderError::NotFound => ApiError::not_found(err.to_string()),
-            ReminderError::Db(inner) => ApiError::internal(inner.to_string()),
-            other => ApiError::bad_request(other.to_string()),
+/// Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum RecurrencePattern {
+    None,
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl RecurrencePattern {
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RecurrencePattern::None => "none",
+            RecurrencePattern::Daily => "daily",
+            RecurrencePattern::Weekly => "weekly",
+            RecurrencePattern::Monthly => "monthly",
+            RecurrencePattern::Yearly => "yearly",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "daily" | "day" => RecurrencePattern::Daily,
+            "weekly" | "week" => RecurrencePattern::Weekly,
+            "monthly" | "month" => RecurrencePattern::Monthly,
+            "yearly" | "year" => RecurrencePattern::Yearly,
+            _ => RecurrencePattern::None,
+        }
+    }
+}
+
+/// Status of a reminder in the database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum ReminderStatus {
+    Pending,
+    Triggered,
+    Cancelled,
+    Failed,
+}
+
+impl ReminderStatus {
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReminderStatus::Pending => "pending",
+            ReminderStatus::Triggered => "triggered",
+            ReminderStatus::Cancelled => "cancelled",
+            ReminderStatus::Failed => "failed",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "triggered" => ReminderStatus::Triggered,
+            "cancelled" => ReminderStatus::Cancelled,
+            "failed" => ReminderStatus::Failed,
+            _ => ReminderStatus::Pending,
+        }
+    }
+}
+
+/// A reminder stored in the database.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Reminder {
+    pub id: i64,
+    pub room_id: String,
+    pub owner_id: String,
+    pub sender_name: String,
+    pub message: String,
+    pub trigger_at: DateTime<Utc>,
+    pub recurrence: String,
+    pub status: String,
+    pub retry_count: i64,
+    /// Which module scheduled this reminder, if any — see [`ReminderSource`].
+    pub source_kind: Option<String>,
+    /// The id of the row in that module which scheduled this reminder, so
+    /// changing or retiring that row can reschedule or cancel it.
+    pub source_id: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl From<crate::domain::reminders::Reminder> for Reminder {
+    fn from(r: crate::domain::reminders::Reminder) -> Self {
+        Self {
+            id: r.id,
+            room_id: r.room_id,
+            owner_id: r.owner_id.into_inner(),
+            sender_name: r.sender_name,
+            message: r.message,
+            trigger_at: r.trigger_at,
+            recurrence: r.recurrence.as_str().to_string(),
+            status: r.status.as_str().to_string(),
+            retry_count: r.retry_count,
+            source_kind: r.source_kind.map(|s| s.as_str().to_string()),
+            source_id: r.source_id,
+            created_at: r.created_at,
         }
     }
 }
@@ -71,28 +161,33 @@ pub async fn list_reminders(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
-    let owner_id = user.owner_id();
 
-    let items = ReminderRepository::list_user_reminders(
-        &state.db.pool,
-        &owner_id,
-        query.status.as_deref(),
-        query.room_id.as_deref(),
-        limit,
-        offset,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let domain_items = state
+        .services
+        .reminders
+        .list(
+            &user.account_id,
+            query.status.as_deref(),
+            query.room_id.as_deref(),
+            limit,
+            offset,
+        )
+        .await?;
 
-    let total = ReminderRepository::count_user_reminders(
-        &state.db.pool,
-        &owner_id,
-        query.status.as_deref(),
-        query.room_id.as_deref(),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let total = state
+        .services
+        .reminders
+        .count(
+            &user.account_id,
+            query.status.as_deref(),
+            query.room_id.as_deref(),
+        )
+        .await?;
 
+    let items = domain_items
+        .into_iter()
+        .map(Reminder::from)
+        .collect::<Vec<_>>();
     let has_more = offset + (items.len() as i64) < total;
 
     Ok(Json(ReminderListResponse {
@@ -124,8 +219,8 @@ pub async fn create_reminder(
     let recurrence = payload
         .recurrence
         .as_deref()
-        .map(RecurrencePattern::from_str_or_default)
-        .unwrap_or(RecurrencePattern::None);
+        .map(crate::domain::reminders::RecurrencePattern::from_str_or_default)
+        .unwrap_or(crate::domain::reminders::RecurrencePattern::None);
 
     let room_id = state
         .services
@@ -133,21 +228,22 @@ pub async fn create_reminder(
         .resolve_target_room(&user.account_id, payload.room_id.as_deref())
         .await;
 
-    let reminder = service::create(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.owner_id(),
-        NewReminder {
-            message: &payload.message,
-            trigger_at,
-            room_id: &room_id,
-            owner_name: &user.display_name,
-            recurrence,
-        },
-    )
-    .await?;
+    let input = crate::domain::reminders::NewReminder {
+        message: payload.message,
+        trigger_at,
+        room_id,
+        owner_name: user.display_name,
+        recurrence,
+        source: None,
+    };
 
-    Ok(Json(reminder))
+    let reminder = state
+        .services
+        .reminders
+        .create(&user.account_id, input)
+        .await?;
+
+    Ok(Json(reminder.into()))
 }
 
 /// Mirrors `CreateReminderRequest` rather than patching individual fields: the
@@ -185,10 +281,10 @@ pub async fn update_reminder(
     if payload.seconds == 0 {
         return Err(ApiError::bad_request("Seconds must be greater than 0"));
     }
-    if payload.message.len() > service::MAX_MESSAGE_LEN {
+    if payload.message.len() > crate::domain::reminders::MAX_MESSAGE_LEN {
         return Err(ApiError::bad_request(format!(
             "Message exceeds {} character limit",
-            service::MAX_MESSAGE_LEN
+            crate::domain::reminders::MAX_MESSAGE_LEN
         )));
     }
 
@@ -196,26 +292,22 @@ pub async fn update_reminder(
     let recurrence = payload
         .recurrence
         .as_deref()
-        .map(RecurrencePattern::from_str_or_default)
-        .unwrap_or(RecurrencePattern::None);
+        .map(crate::domain::reminders::RecurrencePattern::from_str_or_default)
+        .unwrap_or(crate::domain::reminders::RecurrencePattern::None);
 
-    let updated = ReminderRepository::update_pending(
-        &state.db.pool,
-        &user.owner_id(),
-        id,
-        &payload.message,
-        trigger_at,
-        recurrence,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .ok_or_else(|| ApiError::not_found("Reminder not found, or is no longer pending"))?;
+    let updated = state
+        .services
+        .reminders
+        .update_pending(
+            &user.account_id,
+            id,
+            &payload.message,
+            trigger_at,
+            recurrence,
+        )
+        .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::ReminderUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -234,33 +326,11 @@ pub async fn delete_reminder(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let owner_id = user.owner_id();
-    let row: Option<(String, String)> = crate::db_fetch_optional!(
-        &state.db.pool,
-        _,
-        "SELECT room_id, status FROM reminders WHERE id = ? AND owner_id = ?",
-        id,
-        &owner_id
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let (room_id, status) = match row {
-        Some(r) => r,
-        None => return Err(ApiError::not_found("Reminder not found or access denied")),
-    };
-
-    if status == "pending" {
-        service::cancel(&state.db.pool, Some(&state.broadcaster), &owner_id, id).await?;
-    } else {
-        crate::db_execute!(&state.db.pool, "DELETE FROM reminders WHERE id = ?", id)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        state.broadcaster.send(SystemEvent::ReminderDeleted {
-            id,
-            room_id,
-            owner_id,
-        });
-    }
+    state
+        .services
+        .reminders
+        .delete_or_cancel(&user.account_id, id)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -278,8 +348,11 @@ pub async fn clear_reminder_history(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<StatusCode, ApiError> {
-    let owner_id = user.owner_id();
-    service::clear_history(&state.db.pool, Some(&state.broadcaster), &owner_id).await?;
+    state
+        .services
+        .reminders
+        .clear_history(&user.account_id)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -16,15 +16,15 @@ use crate::interface::channels::matrix::verification::{
 };
 use crate::interface::chat::footprints::FootprintsModule;
 use crate::interface::chat::habits::HabitsModule;
+use crate::interface::chat::recurring_bills::RecurringBillsModule;
+use crate::interface::chat::reminders::ReminderModule;
 use crate::interface::chat::settings::SettingsModule;
+use crate::interface::chat::todos::TodoModule;
 use crate::interface::chat::webhooks::WebhookModule;
 use crate::modules::core::CoreModule;
 use crate::modules::finance::FinanceModule;
 use crate::modules::life::LifeModule;
 use crate::modules::portfolio::PortfolioModule;
-use crate::modules::recurring_bills::RecurringBillsModule;
-use crate::modules::reminder::ReminderModule;
-use crate::modules::todo::TodoModule;
 use crate::modules::{ModuleContext, ModuleRegistry};
 
 pub mod attachments;

@@ -9,16 +9,62 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::todo::models::{TodoItem, TodoPriority};
-use crate::modules::todo::repository::TodoRepository;
-use crate::modules::todo::service::{self, NewTodo, TodoError, TodoPatch};
 
-impl From<TodoError> for ApiError {
-    fn from(err: TodoError) -> Self {
-        match err {
-            TodoError::NotFound => ApiError::not_found(err.to_string()),
-            TodoError::Db(inner) => ApiError::internal(inner.to_string()),
-            other => ApiError::bad_request(other.to_string()),
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum TodoPriority {
+    Low,
+    Medium,
+    High,
+}
+
+impl TodoPriority {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TodoPriority::Low => "low",
+            TodoPriority::Medium => "medium",
+            TodoPriority::High => "high",
+        }
+    }
+
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "high" | "h" => TodoPriority::High,
+            "low" | "l" => TodoPriority::Low,
+            _ => TodoPriority::Medium,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TodoItem {
+    pub id: i64,
+    pub room_id: String,
+    pub owner_id: String,
+    pub sender_name: String,
+    pub text: String,
+    pub priority: String,
+    /// When the task is due, stored as a real timestamp so a lead-time reminder
+    /// can be computed from it. Rendered for display only at the edges.
+    pub due_at: Option<DateTime<Utc>>,
+    /// Minutes before `due_at` to fire a reminder. `None` means no reminder.
+    pub remind_before_minutes: Option<i64>,
+    pub completed: bool,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl From<crate::domain::todos::TodoItem> for TodoItem {
+    fn from(item: crate::domain::todos::TodoItem) -> Self {
+        Self {
+            id: item.id,
+            room_id: item.room_id,
+            owner_id: item.owner_id.into_inner(),
+            sender_name: item.sender_name,
+            text: item.text,
+            priority: item.priority.as_str().to_string(),
+            due_at: item.due_at,
+            remind_before_minutes: item.remind_before_minutes,
+            completed: item.completed,
+            created_at: item.created_at,
         }
     }
 }
@@ -107,40 +153,26 @@ pub async fn list_todos(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
-    let owner_id = user.owner_id();
 
-    let (items, total) = if let Some(room) = &query.room_id {
-        let items = TodoRepository::list_room_user(
-            &state.db.pool,
-            room,
-            &owner_id,
+    let domain_items = state
+        .services
+        .todos
+        .list(
+            &user.account_id,
+            query.room_id.as_deref(),
             query.completed,
             limit,
             offset,
         )
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total =
-            TodoRepository::count_room_user(&state.db.pool, room, &owner_id, query.completed)
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+        .await?;
 
-        (items, total)
-    } else {
-        let items = TodoRepository::list_all_user(
-            &state.db.pool,
-            &owner_id,
-            query.completed,
-            limit,
-            offset,
-        )
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-        let total = TodoRepository::count_all_user(&state.db.pool, &owner_id, query.completed)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        (items, total)
-    };
+    let total = state
+        .services
+        .todos
+        .count(&user.account_id, query.room_id.as_deref(), query.completed)
+        .await?;
+
+    let items = domain_items.into_iter().map(TodoItem::from).collect();
 
     Ok(Json(TodoListResponse {
         items,
@@ -169,36 +201,32 @@ pub async fn create_todo(
     let priority = payload
         .priority
         .as_deref()
-        .map(TodoPriority::from_str_or_default)
-        .unwrap_or(TodoPriority::Medium);
+        .map(crate::domain::todos::TodoPriority::from_str_or_default)
+        .unwrap_or(crate::domain::todos::TodoPriority::Medium);
 
     let rooms = &state.services.rooms;
     let room_id = rooms
         .resolve_target_room(&user.account_id, payload.room_id.as_deref())
         .await;
 
-    let remind_room = match payload.remind_room_id.as_deref() {
+    let remind_room_id = match payload.remind_room_id.as_deref() {
         Some(rr) => Some(rooms.resolve_target_room(&user.account_id, Some(rr)).await),
         None => None,
     };
 
-    let item = service::create(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.owner_id(),
-        NewTodo {
-            text: &payload.text,
-            priority,
-            room_id: &room_id,
-            sender_name: &user.display_name,
-            due_at: payload.due_at,
-            remind_before_minutes: payload.remind_before_minutes,
-            remind_room_id: remind_room.as_deref(),
-        },
-    )
-    .await?;
+    let input = crate::domain::todos::NewTodo {
+        room_id,
+        sender_name: user.display_name,
+        text: payload.text,
+        priority,
+        due_at: payload.due_at,
+        remind_before_minutes: payload.remind_before_minutes,
+        remind_room_id,
+    };
 
-    Ok(Json(item))
+    let (item, _) = state.services.todos.create(&user.account_id, input).await?;
+
+    Ok(Json(item.into()))
 }
 
 #[utoipa::path(
@@ -222,25 +250,30 @@ pub async fn update_todo(
     let priority = payload
         .priority
         .as_deref()
-        .map(TodoPriority::from_str_or_default);
+        .map(crate::domain::todos::TodoPriority::from_str_or_default);
 
-    let item = service::update(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.owner_id(),
-        id,
-        TodoPatch {
-            text: payload.text.as_deref(),
-            priority,
-            completed: payload.completed,
-            due_at: payload.due_at,
-            remind_before_minutes: payload.remind_before_minutes,
-            remind_room_id: payload.remind_room_id.as_deref(),
-        },
-    )
-    .await?;
+    let rooms = &state.services.rooms;
+    let remind_room_id = match payload.remind_room_id.as_deref() {
+        Some(rr) => Some(rooms.resolve_target_room(&user.account_id, Some(rr)).await),
+        None => None,
+    };
 
-    Ok(Json(item))
+    let patch = crate::domain::todos::TodoPatch {
+        text: payload.text,
+        priority,
+        completed: payload.completed,
+        due_at: payload.due_at,
+        remind_before_minutes: payload.remind_before_minutes,
+        remind_room_id,
+    };
+
+    let (item, _) = state
+        .services
+        .todos
+        .update(&user.account_id, id, patch)
+        .await?;
+
+    Ok(Json(item.into()))
 }
 
 #[utoipa::path(
@@ -259,13 +292,7 @@ pub async fn delete_todo(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    service::delete(
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.owner_id(),
-        id,
-    )
-    .await?;
+    state.services.todos.delete(&user.account_id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -273,10 +300,9 @@ pub async fn delete_todo(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::reminders::{ReminderSource, MAX_LEAD_MINUTES};
     use crate::events::EventBroadcaster;
-    use crate::modules::reminder::models::ReminderSource;
-    use crate::modules::reminder::repository::ReminderRepository;
-    use crate::modules::todo::due_reminder;
+    use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     /// `total` must count only the requested completion state.
     ///
@@ -672,15 +698,14 @@ mod tests {
         assert_eq!(created.due_at.unwrap().timestamp(), due.timestamp());
         assert_eq!(created.remind_before_minutes, Some(60));
 
-        let rem =
-            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
-                &state.db.pool,
-                ReminderSource::Todo,
-                created.id,
-            )
-            .await
-            .unwrap()
-            .expect("a linked reminder must exist");
+        let rem = ReminderRepository::find_pending_for_source(
+            &state.db.pool,
+            ReminderSource::Todo,
+            created.id,
+        )
+        .await
+        .unwrap()
+        .expect("a linked reminder must exist");
         assert_eq!(rem.trigger_at, due - chrono::Duration::minutes(60));
         assert_eq!(rem.room_id, "!room:1");
     }
@@ -726,7 +751,7 @@ mod tests {
         let state = due_reminder_state().await;
         let due = Some(crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6));
 
-        for bad in [0, -5, due_reminder::MAX_LEAD_MINUTES + 1] {
+        for bad in [0, -5, MAX_LEAD_MINUTES + 1] {
             let err = create_todo(
                 State(state.clone()),
                 AuthUser::named("alice", "acct_alice"),
@@ -797,7 +822,7 @@ mod tests {
 
         assert!(cleared.due_at.is_none());
         assert!(
-            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
+            ReminderRepository::find_pending_for_source(
                 &state.db.pool,
                 ReminderSource::Todo,
                 created.id,
@@ -925,7 +950,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            crate::modules::reminder::repository::ReminderRepository::find_pending_for_source(
+            ReminderRepository::find_pending_for_source(
                 &state.db.pool,
                 ReminderSource::Todo,
                 created.id,

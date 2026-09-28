@@ -6,8 +6,12 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod chat;
 pub mod footprints;
 pub mod habits;
+pub mod recurring_bills;
+pub mod reminders;
 pub mod rooms;
 pub mod settings;
+pub mod todos;
 pub mod webhooks;

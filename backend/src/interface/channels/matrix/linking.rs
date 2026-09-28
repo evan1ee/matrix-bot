@@ -103,10 +103,10 @@ async fn notify_linked(accounts: &AccountService, account_id: &AccountId, mxid: 
 mod tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
+    use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::accounts as repo;
-    use crate::modules::todo::models::TodoPriority;
-    use crate::modules::todo::repository::TodoRepository;
+    use crate::infrastructure::postgres::repositories::todos as todo_repo;
 
     async fn db() -> (Database, AccountService) {
         let pool = crate::db::pool::test_pool().await;
@@ -163,15 +163,18 @@ mod tests {
             .await
             .unwrap();
         for text in ["one", "two", "three"] {
-            TodoRepository::add(
+            todo_repo::create(
                 &db.pool,
-                "!r:x",
-                old.as_str(),
-                "evan",
-                text,
-                TodoPriority::Medium,
-                None,
-                None,
+                &old,
+                &NewTodo {
+                    room_id: "!r:x".to_string(),
+                    sender_name: "evan".to_string(),
+                    text: text.to_string(),
+                    priority: TodoPriority::Medium,
+                    due_at: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
             )
             .await
             .unwrap();

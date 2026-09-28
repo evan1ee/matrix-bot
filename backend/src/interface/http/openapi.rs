@@ -11,6 +11,11 @@ use crate::interface::http::habits::{
     CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
     ToggleHabitRequest, UpdateHabitRequest,
 };
+use crate::interface::http::recurring_bills::{
+    CreateBillPayload, RecurringBill, UpdateBillPayload,
+};
+use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderStatus};
+use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
@@ -27,11 +32,6 @@ use crate::modules::life::models::{
     UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
 };
 use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
-use crate::modules::recurring_bills::models::{
-    CreateBillPayload, RecurringBill, UpdateBillPayload,
-};
-use crate::modules::reminder::models::{RecurrencePattern, Reminder, ReminderStatus};
-use crate::modules::todo::models::{TodoItem, TodoPriority};
 
 #[derive(OpenApi)]
 #[openapi(

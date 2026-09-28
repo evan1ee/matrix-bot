@@ -8,8 +8,11 @@ pub mod accounts;
 pub mod bookmarks;
 pub mod footprints;
 pub mod habits;
+pub mod recurring_bills;
+pub mod reminders;
 pub mod rooms;
 pub mod settings;
+pub mod todos;
 pub mod webhooks;
 
 use sqlx::PgPool;
@@ -18,8 +21,11 @@ use self::accounts::AccountService;
 use self::bookmarks::BookmarkService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
+use self::recurring_bills::RecurringBillsService;
+use self::reminders::ReminderService;
 use self::rooms::RoomService;
 use self::settings::SettingsService;
+use self::todos::TodoService;
 use self::webhooks::WebhookService;
 use crate::events::EventBroadcaster;
 
@@ -54,6 +60,12 @@ pub enum AppError {
     },
 }
 
+impl From<&'static str> for AppError {
+    fn from(s: &'static str) -> Self {
+        AppError::Validation(s.to_string())
+    }
+}
+
 /// Every application service, built once by the composition root (`app.rs`
 /// and `main.rs`'s stdio MCP mode) and handed to each front door —
 /// `ApiState` and the Matrix `ModuleContext` — so no adapter constructs a
@@ -68,8 +80,11 @@ pub struct AppServices {
     pub bookmarks: BookmarkService,
     pub footprints: FootprintService,
     pub habits: HabitService,
+    pub recurring_bills: RecurringBillsService,
+    pub reminders: ReminderService,
     pub rooms: RoomService,
     pub settings: SettingsService,
+    pub todos: TodoService,
     pub webhooks: WebhookService,
 }
 
@@ -95,14 +110,21 @@ impl AppServices {
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
+        let reminders = ReminderService::new(pool.clone(), events.clone());
+        let todos = TodoService::new(pool.clone(), events.clone(), reminders.clone());
+        let recurring_bills =
+            RecurringBillsService::new(pool.clone(), events.clone(), reminders.clone());
         let webhooks = WebhookService::new(pool.clone(), events.clone());
         Self {
             accounts,
             bookmarks,
             footprints,
             habits,
+            recurring_bills,
+            reminders,
             rooms,
             settings,
+            todos,
             webhooks,
         }
     }

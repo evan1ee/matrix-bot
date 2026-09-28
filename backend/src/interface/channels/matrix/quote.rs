@@ -5,36 +5,7 @@ use matrix_sdk::ruma::events::AnySyncTimelineEvent;
 use matrix_sdk::ruma::EventId;
 use tracing::warn;
 
-/// Represents a quoted message extracted from a Matrix reply or Markdown quote block.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QuotedMessage {
-    /// Author / sender of the quoted message (if identifiable).
-    pub author: Option<String>,
-    /// Plain-text content of the quoted message.
-    pub body: String,
-    /// Matrix Event ID if known from in_reply_to.
-    pub event_id: Option<String>,
-}
-
-impl QuotedMessage {
-    /// Formats the quoted context and user instruction into an augmented prompt for the AI assistant.
-    pub fn to_context_prompt(&self, user_instruction: &str) -> String {
-        let author_str = self.author.as_deref().unwrap_or("someone");
-        let instruction = user_instruction.trim();
-        let prompt_instruction = if instruction.is_empty() {
-            "Please analyze, explain, or fact check this quoted message as appropriate."
-        } else {
-            instruction
-        };
-
-        format!(
-            "[Context: Replying to quoted message from {}]:\n\"\"\"\n{}\n\"\"\"\n\nUser request: {}",
-            author_str,
-            self.body.trim(),
-            prompt_instruction
-        )
-    }
-}
+pub use crate::domain::chat::QuotedMessage;
 
 /// Extracts any quoted message context and returns (optional_quote, unquoted_prompt).
 pub fn extract_quote_and_prompt(

@@ -137,16 +137,17 @@ mod tests {
     /// serves from, so removing the filter fails this test.
     #[tokio::test]
     async fn test_stream_delivers_only_the_subscribers_own_events() {
-        use crate::modules::todo::models::TodoItem;
+        use crate::domain::accounts::AccountId;
+        use crate::domain::todos::{TodoItem, TodoPriority};
 
         fn todo_for(owner: &str, text: &str) -> TodoItem {
             TodoItem {
                 id: 1,
                 room_id: "!room:1".to_string(),
-                owner_id: owner.to_string(),
+                owner_id: AccountId::from(owner),
                 sender_name: "evan".to_string(),
                 text: text.to_string(),
-                priority: "medium".to_string(),
+                priority: TodoPriority::Medium,
                 due_at: None,
                 remind_before_minutes: None,
                 completed: false,

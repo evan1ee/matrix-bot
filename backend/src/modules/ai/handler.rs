@@ -863,28 +863,35 @@ mod tests {
 
         let (db, owner) = setup_test().await;
 
-        crate::modules::todo::repository::TodoRepository::add(
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
+        crate::infrastructure::postgres::repositories::todos::create(
             &db.pool,
-            "!room:mbm.one",
-            &owner,
-            "Tester",
-            "Deploy Matrix Bot to staging",
-            crate::modules::todo::models::TodoPriority::High,
-            None,
-            None,
+            &owner_acct,
+            &crate::domain::todos::NewTodo {
+                room_id: "!room:mbm.one".to_string(),
+                sender_name: "Tester".to_string(),
+                text: "Deploy Matrix Bot to staging".to_string(),
+                priority: crate::domain::todos::TodoPriority::High,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
         )
         .await
         .unwrap();
 
-        crate::modules::todo::repository::TodoRepository::add(
+        crate::infrastructure::postgres::repositories::todos::create(
             &db.pool,
-            "!room:mbm.one",
-            &owner,
-            "Tester",
-            "Audit cryptographic recovery keys",
-            crate::modules::todo::models::TodoPriority::Medium,
-            None,
-            None,
+            &owner_acct,
+            &crate::domain::todos::NewTodo {
+                room_id: "!room:mbm.one".to_string(),
+                sender_name: "Tester".to_string(),
+                text: "Audit cryptographic recovery keys".to_string(),
+                priority: crate::domain::todos::TodoPriority::Medium,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
         )
         .await
         .unwrap();
@@ -936,6 +943,7 @@ mod tests {
         }
 
         let (db, owner) = setup_test().await;
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
 
         // 1. Test Natural Language Task Creation via Environment Config
         let task_result = run_ai_turn(
@@ -960,14 +968,18 @@ mod tests {
             .contains(&"add_todo".to_string()));
 
         // Verify task was persisted
-        let tasks = crate::modules::todo::repository::TodoRepository::list_all_user(
-            &db.pool, &owner, None, 10, 0,
+        let tasks = crate::infrastructure::postgres::repositories::todos::list_all_user(
+            &db.pool,
+            &owner_acct,
+            None,
+            10,
+            0,
         )
         .await
         .unwrap();
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].text.contains("Prepare slide deck"));
-        assert_eq!(tasks[0].priority, "high");
+        assert_eq!(tasks[0].priority, crate::domain::todos::TodoPriority::High);
 
         // 2. Test Natural Language Expense Recording
         let exp_result = run_ai_turn(
@@ -1074,6 +1086,7 @@ mod tests {
         }
 
         let (db, owner) = setup_test().await;
+        let owner_acct = crate::domain::accounts::AccountId::from(owner.clone());
 
         let result = run_ai_turn( &crate::application::AppServices::new(&db.pool),
             &db.pool,
@@ -1119,8 +1132,13 @@ mod tests {
 
         // Verify reminder in DB
         let reminders =
-            crate::modules::reminder::repository::ReminderRepository::list_user_pending(
-                &db.pool, &owner, 10, 0,
+            crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
+                &db.pool,
+                &owner_acct,
+                Some("pending"),
+                None,
+                10,
+                0,
             )
             .await
             .unwrap();

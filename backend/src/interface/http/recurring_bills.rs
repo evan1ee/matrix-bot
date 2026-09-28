@@ -3,16 +3,121 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
+use crate::domain::reminders::MAX_LEAD_MINUTES;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::due_reminder::MAX_LEAD_MINUTES;
-use crate::modules::recurring_bills::due_reminder;
-use crate::modules::recurring_bills::models::{
-    CreateBillPayload, RecurringBill, UpdateBillPayload,
-};
-use crate::modules::recurring_bills::repository::RecurringBillRepository;
+
+/// Represents a recurring bill, subscription, installment, or recurring transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RecurringBill {
+    pub id: i64,
+    pub room_id: String,
+    pub owner_id: String,
+    pub sender_name: String,
+    pub name: String,
+    pub category: String,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub currency_exponent: i64,
+    pub frequency: String,
+    pub due_day: Option<i32>,
+    pub next_due_at: String,
+    pub total_installments: Option<i32>,
+    pub paid_installments: i32,
+    pub auto_pay: bool,
+    pub status: String,
+    pub notes: Option<String>,
+    /// Minutes before `next_due_at` to send a reminder. `None` means no
+    /// reminder is wanted.
+    pub remind_before_minutes: Option<i64>,
+    /// Matrix room the due reminder is delivered to. Defaults to the bill's own
+    /// room; required when that is the `web` sentinel.
+    pub remind_room_id: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl From<crate::domain::recurring_bills::RecurringBill> for RecurringBill {
+    fn from(b: crate::domain::recurring_bills::RecurringBill) -> Self {
+        Self {
+            id: b.id,
+            room_id: b.room_id,
+            owner_id: b.owner_id.into_inner(),
+            sender_name: b.sender_name,
+            name: b.name,
+            category: b.category,
+            amount_minor: b.amount_minor,
+            currency: b.currency,
+            currency_exponent: b.currency_exponent,
+            frequency: b.frequency,
+            due_day: b.due_day,
+            next_due_at: b.next_due_at,
+            total_installments: b.total_installments,
+            paid_installments: b.paid_installments,
+            auto_pay: b.auto_pay,
+            status: b.status,
+            notes: b.notes,
+            remind_before_minutes: b.remind_before_minutes,
+            remind_room_id: b.remind_room_id,
+            created_at: b.created_at,
+            updated_at: b.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateBillPayload {
+    pub name: String,
+    pub category: String,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub currency_exponent: Option<i64>,
+    pub frequency: Option<String>,
+    pub due_day: Option<i32>,
+    pub next_due_at: String,
+    pub total_installments: Option<i32>,
+    pub auto_pay: Option<bool>,
+    pub notes: Option<String>,
+    /// Minutes before `next_due_at` to send a reminder.
+    pub remind_before_minutes: Option<i64>,
+    /// Where to deliver that reminder. Required when the bill has no Matrix
+    /// room of its own.
+    pub remind_room_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct UpdateBillPayload {
+    pub name: Option<String>,
+    pub category: Option<String>,
+    pub amount_minor: Option<i64>,
+    pub currency: Option<String>,
+    pub frequency: Option<String>,
+    pub due_day: Option<i32>,
+    pub next_due_at: Option<String>,
+    pub total_installments: Option<i32>,
+    pub paid_installments: Option<i32>,
+    pub auto_pay: Option<bool>,
+    pub status: Option<String>,
+    pub notes: Option<String>,
+    /// Absent leaves the lead time alone; `null` clears it; a value sets it.
+    #[serde(default, deserialize_with = "nullable")]
+    #[schema(value_type = Option<i64>)]
+    pub remind_before_minutes: Option<Option<i64>>,
+    pub remind_room_id: Option<String>,
+}
+
+/// Distinguishes an explicit JSON `null` from an absent field, so a PATCH-style
+/// update can clear the lead time rather than only overwrite it.
+fn nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
 
 /// Rejects lead times that are zero, negative, or absurdly far out.
 ///
@@ -65,12 +170,14 @@ pub async fn list_bills(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<RecurringBill>>, ApiError> {
-    let owner_id = user.owner_id();
-    let bills = RecurringBillRepository::list_by_owner(&state.db.pool, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let bills = state
+        .services
+        .recurring_bills
+        .list_by_owner(&user.account_id)
+        .await?;
 
-    Ok(Json(bills))
+    let items = bills.into_iter().map(RecurringBill::from).collect();
+    Ok(Json(items))
 }
 
 #[utoipa::path(
@@ -108,23 +215,31 @@ pub async fn create_bill(
         payload.remind_room_id.as_deref(),
     )?;
 
-    let owner_id = user.owner_id();
-    let display_name = user.display_name;
+    let input = crate::domain::recurring_bills::NewRecurringBill {
+        room_id: "web".to_string(),
+        sender_name: user.display_name,
+        name: payload.name,
+        category: payload.category,
+        amount_minor: payload.amount_minor,
+        currency: payload.currency,
+        currency_exponent: payload.currency_exponent.unwrap_or(2),
+        frequency: payload.frequency.unwrap_or_else(|| "monthly".to_string()),
+        due_day: payload.due_day,
+        next_due_at: payload.next_due_at,
+        total_installments: payload.total_installments,
+        auto_pay: payload.auto_pay.unwrap_or(false),
+        notes: payload.notes,
+        remind_before_minutes: payload.remind_before_minutes,
+        remind_room_id: payload.remind_room_id,
+    };
 
-    let bill =
-        RecurringBillRepository::create(&state.db.pool, "web", &owner_id, &display_name, payload)
-            .await
-            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let (bill, _) = state
+        .services
+        .recurring_bills
+        .create(&user.account_id, input)
+        .await?;
 
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &bill)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state
-        .broadcaster
-        .send(SystemEvent::RecurringBillCreated(bill.clone()));
-
-    Ok(Json(bill))
+    Ok(Json(bill.into()))
 }
 
 #[utoipa::path(
@@ -143,17 +258,14 @@ pub async fn get_bill(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<Json<RecurringBill>, ApiError> {
-    let owner_id = user.owner_id();
-    let bill = RecurringBillRepository::get_by_id(&state.db.pool, id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
+    let bill = state
+        .services
+        .recurring_bills
+        .find_owned(&user.account_id, id)
+        .await?
         .ok_or_else(|| ApiError::not_found("Recurring bill not found"))?;
 
-    if bill.owner_id != owner_id {
-        return Err(ApiError::not_found("Recurring bill not found"));
-    }
-
-    Ok(Json(bill))
+    Ok(Json(bill.into()))
 }
 
 #[utoipa::path(
@@ -175,8 +287,6 @@ pub async fn update_bill(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateBillPayload>,
 ) -> Result<Json<RecurringBill>, ApiError> {
-    let owner_id = user.owner_id();
-
     if let Some(ref name) = payload.name {
         if name.trim().is_empty() {
             return Err(ApiError::bad_request("Bill name cannot be empty"));
@@ -196,26 +306,30 @@ pub async fn update_bill(
         validate_lead(minutes)?;
     }
 
-    let updated = RecurringBillRepository::update(&state.db.pool, id, &owner_id, payload)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                ApiError::not_found("Recurring bill not found or access denied")
-            }
-            err => ApiError::internal(err.to_string()),
-        })?;
+    let patch = crate::domain::recurring_bills::RecurringBillPatch {
+        name: payload.name,
+        category: payload.category,
+        amount_minor: payload.amount_minor,
+        currency: payload.currency,
+        frequency: payload.frequency,
+        due_day: payload.due_day,
+        next_due_at: payload.next_due_at,
+        total_installments: payload.total_installments,
+        paid_installments: payload.paid_installments,
+        auto_pay: payload.auto_pay,
+        status: payload.status,
+        notes: payload.notes,
+        remind_before_minutes: payload.remind_before_minutes,
+        remind_room_id: payload.remind_room_id,
+    };
 
-    // Reconcile from the stored state, so a changed due date, lead time, or
-    // status reschedules or cancels the reminder without a per-field rule here.
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &updated)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let (updated, _) = state
+        .services
+        .recurring_bills
+        .update(&user.account_id, id, patch)
+        .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::RecurringBillUpdated(updated.clone()));
-
-    Ok(Json(updated))
+    Ok(Json(updated.into()))
 }
 
 #[utoipa::path(
@@ -234,25 +348,11 @@ pub async fn delete_bill(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let owner_id = user.owner_id();
-    let success = RecurringBillRepository::delete(&state.db.pool, id, &owner_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    if !success {
-        return Err(ApiError::not_found(
-            "Recurring bill not found or access denied",
-        ));
-    }
-
-    // The bill is gone; its reminder must not outlive it pointing at nothing.
-    due_reminder::tear_down(&state.db.pool, Some(&state.broadcaster), id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
     state
-        .broadcaster
-        .send(SystemEvent::RecurringBillDeleted { id, owner_id });
+        .services
+        .recurring_bills
+        .delete(&user.account_id, id)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -273,46 +373,22 @@ pub async fn pay_bill(
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<Json<RecurringBill>, ApiError> {
-    let owner_id = user.owner_id();
-    // The finance service broadcasts `TransactionCreated` itself, so paying a
-    // bill announces the resulting transaction the same way any other write
-    // through the service does — this call site only announces the parts
-    // specific to the bill.
-    let (bill, _tx) =
-        RecurringBillRepository::mark_paid(&state.db.pool, id, &owner_id, Some(&state.broadcaster))
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => {
-                    ApiError::not_found("Recurring bill not found or access denied")
-                }
-                err => ApiError::internal(err.to_string()),
-            })?;
+    let (bill, _tx, _) = state
+        .services
+        .recurring_bills
+        .mark_paid(&user.account_id, id)
+        .await?;
 
-    // Paying advanced `next_due_at`, so re-arm at the next period — or tear
-    // down if that was the final installment.
-    due_reminder::sync(&state.db.pool, Some(&state.broadcaster), &bill)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    state.broadcaster.send(SystemEvent::RecurringBillPaid {
-        id: bill.id,
-        owner_id: owner_id.clone(),
-        next_due_at: bill.next_due_at.clone(),
-    });
-    state
-        .broadcaster
-        .send(SystemEvent::RecurringBillUpdated(bill.clone()));
-
-    Ok(Json(bill))
+    Ok(Json(bill.into()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::DbPool;
+    use crate::domain::reminders::ReminderSource;
     use crate::events::EventBroadcaster;
-    use crate::modules::reminder::models::ReminderSource;
-    use crate::modules::reminder::repository::ReminderRepository;
+    use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     fn state_with(pool: DbPool) -> ApiState {
         ApiState::new(
@@ -451,7 +527,7 @@ mod tests {
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
-        for bad in [0, -5, crate::modules::due_reminder::MAX_LEAD_MINUTES + 1] {
+        for bad in [0, -5, MAX_LEAD_MINUTES + 1] {
             let err = create_bill(
                 State(state.clone()),
                 alice.clone(),

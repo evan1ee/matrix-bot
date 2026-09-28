@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reminders SET retry_count = retry_count + 1, trigger_at = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f027110c53d4b463d707834f5a9c6c9e03d04f0dbeec621af2c03ffbe7fb9b23"
+}

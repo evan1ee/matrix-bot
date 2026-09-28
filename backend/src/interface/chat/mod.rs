@@ -7,8 +7,11 @@ pub mod account;
 pub mod bookmarks;
 pub mod footprints;
 pub mod habits;
+pub mod recurring_bills;
+pub mod reminders;
 pub mod rooms;
 pub mod settings;
+pub mod todos;
 pub mod webhooks;
 
 use tracing::error;

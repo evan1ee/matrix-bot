@@ -715,7 +715,7 @@ mod tests {
     /// The setting is only worth having if the other modules observe it.
     #[tokio::test]
     async fn test_a_change_here_is_visible_to_the_todo_module() {
-        use crate::modules::todo::TodoModule;
+        use crate::interface::chat::todos::TodoModule;
 
         let db = db().await;
         let settings = SettingsModule::new();

@@ -112,7 +112,7 @@ backend/src/
 | 5 | bookmarks | ✅ |
 | 6 | footprints + habits | ✅ |
 | 7 | webhook | ✅ |
-| 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ☐ |
+| 8 | todo + reminder + recurring_bills + due_reminder (one batch; move `QuotedMessage` to `domain/chat.rs`) | ✅ |
 | 9 | finance | ☐ |
 | 10 | portfolio | ☐ |
 | 11 | life + journal + briefing (read models) | ☐ |
@@ -122,8 +122,8 @@ backend/src/
 | — | whole-branch review + one fix wave | ☐ |
 
 Remaining interim files that still run SQL from `interface/` (`INTERFACE_SQL_ALLOW_LIST`; the list can only shrink):
-- `interface/channels/matrix/{invite,reaction,reaction_targets}.rs`
-- `interface/http/{life_activity,mcp,mod,reminders}.rs`
+- `interface/channels/matrix/{invite,reaction_targets}.rs`
+- `interface/http/{life_activity,mcp,mod}.rs`
 
 The last full test run: **828 passed / 0 failed / 11 ignored**.
 
