@@ -99,7 +99,7 @@ backend/src/
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
 | 8 | Job queue (`0003_jobs`), then move the reminder, briefing, portfolio and bills loops onto it | ☐ needs a plan | — |
 | 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`) | ☐ needs a plan | — |
-| 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | this commit (`docs: rebuild documentation`) |
+| 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | `4bf5bc7` |
 
 ### Step 6: feature layering (`docs/superpowers/plans/2026-09-25-feature-layering.md`)
 
