@@ -39,15 +39,19 @@ fn relative_to_src(file: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// Strips line comments (`//...`) while ignoring `//` inside string literals (`"..."`),
-/// and removes string literal content so string text does not trigger forbidden needles.
+/// Strips line comments (`//...`), inline block comments (`/* .. */`), string
+/// literal content and char literals (`'{'`, `'\''`), so text inside them
+/// triggers neither forbidden needles nor brace counting. Lifetimes (`'a`)
+/// are left intact. Multi-line block comments are not tracked.
 fn strip_comments_and_strings(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
     let mut out = String::new();
-    let mut chars = line.chars().peekable();
+    let mut i = 0;
     let mut in_string = false;
     let mut escape = false;
 
-    while let Some(c) = chars.next() {
+    while i < chars.len() {
+        let c = chars[i];
         if in_string {
             if escape {
                 escape = false;
@@ -60,11 +64,31 @@ fn strip_comments_and_strings(line: &str) -> String {
         } else if c == '"' {
             in_string = true;
             out.push('"');
-        } else if c == '/' && chars.peek() == Some(&'/') {
+        } else if c == '/' && chars.get(i + 1) == Some(&'/') {
             break;
+        } else if c == '/' && chars.get(i + 1) == Some(&'*') {
+            match (i + 2..chars.len().saturating_sub(1))
+                .find(|&j| chars[j] == '*' && chars[j + 1] == '/')
+            {
+                Some(end) => i = end + 1,
+                None => break,
+            }
+        } else if c == '\'' {
+            if chars.get(i + 1) == Some(&'\\') {
+                // Escaped char literal: skip to its closing quote.
+                match (i + 3..chars.len()).find(|&j| chars[j] == '\'') {
+                    Some(end) => i = end,
+                    None => break,
+                }
+            } else if chars.get(i + 2) == Some(&'\'') {
+                i += 2;
+            } else {
+                out.push(c);
+            }
         } else {
             out.push(c);
         }
+        i += 1;
     }
     out
 }
@@ -82,6 +106,106 @@ fn violations(dir: &str, forbidden: &[&str]) -> Vec<String> {
         }
     }
     found
+}
+
+/// Lines of `text` whose non-comment, non-string code contains a forbidden
+/// needle, ignoring `#[cfg(test)]` items: a braced block (`mod tests { .. }`)
+/// or a single-line item (`mod fake;`, a field or variant ending in `,`).
+fn production_hits(text: &str, forbidden: &[&str]) -> Vec<(usize, String)> {
+    let mut found = Vec::new();
+    let mut pending_test_attr = false;
+    let mut skipped_depth = 0i64;
+    for (n, line) in text.lines().enumerate() {
+        let code = strip_comments_and_strings(line);
+        let opens = code.matches('{').count() as i64;
+        let closes = code.matches('}').count() as i64;
+        if skipped_depth > 0 {
+            skipped_depth += opens - closes;
+            continue;
+        }
+        if code.contains("#[cfg(test)]") {
+            pending_test_attr = true;
+            continue;
+        }
+        if pending_test_attr {
+            let trimmed = code.trim();
+            if trimmed.is_empty() || trimmed.starts_with("#[") {
+                continue;
+            }
+            if opens > 0 {
+                skipped_depth = opens - closes;
+                pending_test_attr = false;
+            } else if code.trim_end().ends_with([';', ',']) {
+                pending_test_attr = false;
+            }
+            continue;
+        }
+        if forbidden.iter().any(|needle| code.contains(needle)) {
+            found.push((n + 1, line.trim().to_string()));
+        }
+    }
+    found
+}
+
+/// Like `violations`, but ignores `#[cfg(test)]` items, for layers whose
+/// production code is restricted while their tests may legitimately read
+/// state (`jobs/` runtime, `interface/jobs` handlers).
+fn production_violations(dir: &str, forbidden: &[&str]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in rust_files(&src(dir)) {
+        let text = fs::read_to_string(&file).expect("readable source file");
+        for (n, line) in production_hits(&text, forbidden) {
+            found.push(format!("{}:{n}: {line}", file.display()));
+        }
+    }
+    found
+}
+
+#[test]
+fn scanner_sees_production_code_after_a_cfg_test_field() {
+    let text = "struct X {
+    #[cfg(test)]
+    probe: u8,
+    real: u8,
+}
+impl X {
+    fn f() {
+        sqlx::query!(\"x\");
+    }
+}
+";
+    let hits = production_hits(text, &["sqlx::query"]);
+    assert_eq!(hits.len(), 1, "{hits:?}");
+}
+
+#[test]
+fn scanner_is_not_fooled_by_braces_in_char_literals() {
+    let text = "#[cfg(test)]
+mod tests {
+    fn f() {
+        let c = '{';
+        let q = '\'';
+    }
+}
+fn prod() {
+    sqlx::query!(\"x\");
+}
+";
+    let hits = production_hits(text, &["sqlx::query"]);
+    assert_eq!(hits.len(), 1, "{hits:?}");
+}
+
+#[test]
+fn scanner_skips_cfg_test_modules_and_single_line_items() {
+    let text = "#[cfg(test)]
+mod fake;
+fn prod<'a>(x: &'a str) {}
+#[cfg(test)]
+mod tests {
+    fn f() { sqlx::query!(\"x\"); }
+}
+";
+    assert!(production_hits(text, &["sqlx::query"]).is_empty());
 }
 
 #[test]
@@ -313,8 +437,7 @@ fn no_sqlx_in_interface_or_application() {
 
 #[test]
 fn job_runtime_knows_no_transport_and_runs_no_sql() {
-    // Production code only: runtime tests assert on job rows directly.
-    let v = production_violations(
+    let v = violations(
         "jobs",
         &[
             "axum",
@@ -346,48 +469,6 @@ fn lower_layers_do_not_import_the_job_runtime() {
             v.join("\n")
         );
     }
-}
-
-/// Like `violations`, but ignores `#[cfg(test)]` items (a `mod tests { .. }`
-/// block or a brace-less `mod fake;`): handler tests may legitimately read
-/// state, while production handler code may not.
-fn production_violations(dir: &str, forbidden: &[&str]) -> Vec<String> {
-    let mut found = Vec::new();
-    for file in rust_files(&src(dir)) {
-        let text = fs::read_to_string(&file).expect("readable source file");
-        let mut pending_test_attr = false;
-        let mut skipped_depth = 0i64;
-        for (n, line) in text.lines().enumerate() {
-            let code = strip_comments_and_strings(line);
-            let opens = code.matches('{').count() as i64;
-            let closes = code.matches('}').count() as i64;
-            if skipped_depth > 0 {
-                skipped_depth += opens - closes;
-                continue;
-            }
-            if code.contains("#[cfg(test)]") {
-                pending_test_attr = true;
-                continue;
-            }
-            if pending_test_attr {
-                let trimmed = code.trim();
-                if trimmed.is_empty() || trimmed.starts_with("#[") {
-                    continue;
-                }
-                if opens > 0 {
-                    skipped_depth = opens - closes;
-                    pending_test_attr = false;
-                } else if code.contains(';') {
-                    pending_test_attr = false;
-                }
-                continue;
-            }
-            if forbidden.iter().any(|needle| code.contains(needle)) {
-                found.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
-            }
-        }
-    }
-    found
 }
 
 #[test]

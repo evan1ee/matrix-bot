@@ -260,17 +260,9 @@ mod tests {
         let b = spawn_one(count_r2);
         let total = || R1.load(Ordering::SeqCst) + R2.load(Ordering::SeqCst);
         until("first leader fires", || total() >= 1).await;
-        let killed: i64 = sqlx::query_scalar!(
-            r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_locks
-               WHERE locktype = 'advisory' AND granted
-                 AND classid = (($1::bigint >> 32) & 4294967295)::oid
-                 AND objid = ($1::bigint & 4294967295)::oid
-                 AND objsubid = 1"#,
-            key
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let killed = crate::infrastructure::postgres::advisory::terminate_lock_holder(&pool, key)
+            .await
+            .unwrap();
         assert_eq!(killed, 1, "exactly the lock holder is terminated");
         until("re-election fires again", || total() >= 2).await;
         token.cancel();

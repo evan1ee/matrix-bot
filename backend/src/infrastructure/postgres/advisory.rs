@@ -67,6 +67,23 @@ impl LeaderLock {
     }
 }
 
+/// Test support: terminates the backend(s) holding the session advisory lock
+/// `key` and returns how many were terminated. Lives here so runtime tests
+/// (`jobs/`) need no SQL of their own.
+#[cfg(test)]
+pub(crate) async fn terminate_lock_holder(pool: &PgPool, key: i64) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_locks
+           WHERE locktype = 'advisory' AND granted
+             AND classid = (($1::bigint >> 32) & 4294967295)::oid
+             AND objid = ($1::bigint & 4294967295)::oid
+             AND objsubid = 1"#,
+        key
+    )
+    .fetch_one(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,17 +155,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         let k = key();
         let mut lock = LeaderLock::try_acquire(&pool, k).await.unwrap().unwrap();
-        let killed: i64 = sqlx::query_scalar!(
-            r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_locks
-               WHERE locktype = 'advisory' AND granted
-                 AND classid = (($1::bigint >> 32) & 4294967295)::oid
-                 AND objid = ($1::bigint & 4294967295)::oid
-                 AND objsubid = 1"#,
-            k
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let killed = terminate_lock_holder(&pool, k).await.unwrap();
         assert_eq!(killed, 1, "exactly the lock holder is terminated");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while lock.is_alive().await {
