@@ -28,12 +28,17 @@ pub(crate) async fn run(
         match LeaderLock::try_acquire(&pool, config.scheduler_lock_key).await {
             Ok(Some(mut lock)) => {
                 info!("This instance is now the job scheduler leader");
-                lead(&mut lock, &services, &ticks, &shutdown).await;
-                lock.release().await;
-                if shutdown.is_cancelled() {
+                let lost = lead(&mut lock, &services, &ticks, &shutdown).await;
+                if lost {
+                    // The connection is gone or unresponsive: the server
+                    // already released (or will release) the lock; do not
+                    // wait on an unlock over it.
+                    drop(lock);
+                    warn!("Lost scheduler leadership; retrying");
+                } else {
+                    lock.release().await;
                     return;
                 }
-                warn!("Lost scheduler leadership; retrying");
             }
             Ok(None) => debug!("Another instance leads the scheduler"),
             Err(err) => warn!(error = %err, "Could not try the scheduler lock"),
@@ -47,24 +52,24 @@ pub(crate) async fn run(
 }
 
 /// Fires each tick at once, then every `tick.every`, while the lock's
-/// connection is alive. Returns on shutdown or lost leadership.
+/// connection is alive. Returns `false` on shutdown, `true` on lost leadership.
 async fn lead(
     lock: &mut LeaderLock,
     services: &AppServices,
     ticks: &[Tick],
     shutdown: &CancellationToken,
-) {
+) -> bool {
     let start = tokio::time::Instant::now();
     let mut next: Vec<tokio::time::Instant> = vec![start; ticks.len()];
     loop {
         let due = next.iter().copied().min().unwrap_or(start);
         tokio::select! {
             biased;
-            _ = shutdown.cancelled() => return,
+            _ = shutdown.cancelled() => return false,
             _ = tokio::time::sleep_until(due) => {}
         }
         if !lock.is_alive().await {
-            return;
+            return true;
         }
         let now = tokio::time::Instant::now();
         for (tick, at) in ticks.iter().zip(next.iter_mut()) {
@@ -96,6 +101,9 @@ mod tests {
     static B: AtomicUsize = AtomicUsize::new(0);
     static C: AtomicUsize = AtomicUsize::new(0);
     static E: AtomicUsize = AtomicUsize::new(0);
+    static D: AtomicUsize = AtomicUsize::new(0);
+    static R1: AtomicUsize = AtomicUsize::new(0);
+    static R2: AtomicUsize = AtomicUsize::new(0);
 
     fn count_a(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
         A.fetch_add(1, Ordering::SeqCst);
@@ -107,6 +115,18 @@ mod tests {
     }
     fn count_c(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
         C.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(0) })
+    }
+    fn count_d(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
+        D.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(0) })
+    }
+    fn count_r1(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
+        R1.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(0) })
+    }
+    fn count_r2(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
+        R2.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(0) })
     }
     fn failing(_: &AppServices, _: DateTime<Utc>) -> TickFuture<'_> {
@@ -188,11 +208,75 @@ mod tests {
             token.clone(),
         ));
         until("immediate first fire", || C.load(Ordering::SeqCst) >= 1).await;
-        tokio::time::sleep(Duration::from_millis(700)).await;
+        until("second fire on cadence", || C.load(Ordering::SeqCst) >= 2).await;
         token.cancel();
         task.await.unwrap();
-        let n = C.load(Ordering::SeqCst);
-        assert!((2..=5).contains(&n), "expected 2..=5 fires, got {n}");
+    }
+
+    /// Given a tick whose cadence is 60 s, When leadership starts, Then it
+    /// fires at once (not after `every`) and exactly once in the meantime.
+    #[tokio::test]
+    async fn the_first_fire_is_immediate_not_one_period_late() {
+        let pool = crate::db::pool::test_pool_sized(4).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let token = CancellationToken::new();
+        let task = tokio::spawn(run(
+            pool.clone(),
+            AppServices::new(&pool),
+            vec![tick(60_000, count_d)],
+            Arc::new(JobsConfig::for_tests()),
+            token.clone(),
+        ));
+        until("first fire within the bound", || {
+            D.load(Ordering::SeqCst) >= 1
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        token.cancel();
+        task.await.unwrap();
+        assert_eq!(D.load(Ordering::SeqCst), 1, "no second fire within 60 s");
+    }
+
+    /// Given a leader, When its backend is terminated, Then a scheduler
+    /// with the same key is elected and fires (ticks are 60 s apart, so a
+    /// second fire can only come from a new leadership).
+    #[tokio::test]
+    async fn a_new_leader_is_elected_after_the_leader_connection_dies() {
+        let pool = crate::db::pool::test_pool_sized(6).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let config = Arc::new(JobsConfig::for_tests());
+        let key = config.scheduler_lock_key;
+        let token = CancellationToken::new();
+        let spawn_one = |fire: for<'a> fn(&'a AppServices, DateTime<Utc>) -> TickFuture<'a>| {
+            tokio::spawn(run(
+                pool.clone(),
+                AppServices::new(&pool),
+                vec![tick(60_000, fire)],
+                config.clone(),
+                token.clone(),
+            ))
+        };
+        let a = spawn_one(count_r1);
+        let b = spawn_one(count_r2);
+        let total = || R1.load(Ordering::SeqCst) + R2.load(Ordering::SeqCst);
+        until("first leader fires", || total() >= 1).await;
+        let killed: i64 = sqlx::query_scalar!(
+            r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_locks
+               WHERE locktype = 'advisory' AND granted
+                 AND classid = (($1::bigint >> 32) & 4294967295)::oid
+                 AND objid = ($1::bigint & 4294967295)::oid
+                 AND objsubid = 1"#,
+            key
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(killed, 1, "exactly the lock holder is terminated");
+        until("re-election fires again", || total() >= 2).await;
+        token.cancel();
+        a.await.unwrap();
+        b.await.unwrap();
+        assert_eq!(total(), 2, "one fire per leadership, no double leader");
     }
 
     /// Given a tick that errors, When the scheduler runs, Then it keeps ticking.

@@ -7,7 +7,14 @@
 //! (`PoolConnection::detach`; the pool opens a replacement), and the lock
 //! lives exactly as long as that connection.
 
+use std::time::Duration;
+
 use sqlx::{Connection, PgConnection, PgPool};
+
+/// Bound on one liveness ping or on `release`. A half-open TCP connection
+/// can block a read for many minutes; leadership must not hang on it, so a
+/// timeout counts as a dead connection.
+const LOCK_IO_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct LeaderLock {
     conn: PgConnection,
@@ -37,16 +44,26 @@ impl LeaderLock {
     /// `false` once the lock's connection is gone (the server already
     /// released the lock).
     pub async fn is_alive(&mut self) -> bool {
-        self.conn.ping().await.is_ok()
+        matches!(
+            tokio::time::timeout(LOCK_IO_TIMEOUT, self.conn.ping()).await,
+            Ok(Ok(()))
+        )
     }
 
     /// Unlocks and closes the connection (best effort; closing alone also
     /// releases).
+    ///
+    /// Bounded by `LOCK_IO_TIMEOUT`; on timeout the connection is dropped,
+    /// which closes the socket and so releases the lock server-side.
     pub async fn release(mut self) {
-        let _ = sqlx::query_scalar!(r#"SELECT pg_advisory_unlock($1) AS "unlocked!""#, self.key)
-            .fetch_one(&mut self.conn)
-            .await;
-        let _ = self.conn.close().await;
+        let _ = tokio::time::timeout(LOCK_IO_TIMEOUT, async {
+            let _ =
+                sqlx::query_scalar!(r#"SELECT pg_advisory_unlock($1) AS "unlocked!""#, self.key)
+                    .fetch_one(&mut self.conn)
+                    .await;
+            let _ = self.conn.close().await;
+        })
+        .await;
     }
 }
 
@@ -124,7 +141,9 @@ mod tests {
         let killed: i64 = sqlx::query_scalar!(
             r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_locks
                WHERE locktype = 'advisory' AND granted
-                 AND objid = ($1::bigint & 4294967295)::oid"#,
+                 AND classid = (($1::bigint >> 32) & 4294967295)::oid
+                 AND objid = ($1::bigint & 4294967295)::oid
+                 AND objsubid = 1"#,
             k
         )
         .fetch_one(&pool)
