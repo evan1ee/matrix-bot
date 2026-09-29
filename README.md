@@ -1,182 +1,78 @@
 # Matrix Bot (Rust) 🦀
 
-A modular Matrix bot, embedded REST API, and real-time SSE engine in one binary, with a React SPA frontend and native iOS client support (including a native SwiftUI tab in Element X iOS).
-Built on [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk),
-[`axum`](https://github.com/tokio-rs/axum), [`sqlx`](https://github.com/launchbadge/sqlx),
-and [`webauthn-rs`](https://github.com/kanidm/webauthn-rs).
+A personal AI/life workspace built around Matrix: a chat bot, an embedded REST/SSE API, an MCP server and a React web UI in **one binary**. Built on [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk), [`axum`](https://github.com/tokio-rs/axum), [`sqlx`](https://github.com/launchbadge/sqlx) and [`webauthn-rs`](https://github.com/kanidm/webauthn-rs), with PostgreSQL for storage.
 
-Every feature is reachable through multiple surfaces — as Matrix chat commands, via the Web UI, or from a native iOS app — and all land on the exact same data.
+Every feature is reachable through several surfaces (Matrix chat commands, the web UI, AI tool calls and MCP) and all of them land on the same data.
 
 ---
 
 ## 🌟 Features
 
-- 🤖 **Core** — greetings (`!hello`), latency ping (`!ping`), dynamic module-driven help (`!help`).
-- 📋 **To-Dos** — priorities, due dates, lead-time reminder scheduling, personal & room-wide views, task editing, pagination, and quoted message context capture (replying `!todo add` uses quoted text).
-- ⏰ **Reminders** — one-off and recurring (daily, weekly, monthly, yearly), persisted across process restarts with downtime catch-up, exponential retry backoff, and quoted message context capture (replying `!remind <time>` uses quoted text).
-- 💰 **Finance** — expense and income ledger with customizable categories and monthly summaries. Amounts are stored strictly as integer minor units throughout (zero floating-point inaccuracies).
-- 📈 **Portfolio** — asset holdings with weighted-average cost basis, realized & unrealized P&L, live ticker price fetching, custom price alerts, cash balance gating, manual position recording, and a tamper-evident SHA-256 audit hash chain.
-- 🧾 **Recurring bills** — payment schedules, recurring frequencies, advance reminder notifications, auto-pay marking, and payment history.
-- 🔖 **Bookmarks** — URL saving with automated OpenGraph/metadata scraping, reading time estimation, tag filtering, domain statistics, favorite stars, and archive management.
-- 🎯 **Habits** — daily and weekly habit tracking, streak counters, completion heatmaps, and streak leaderboards.
-- ⏳ **Life Grid & Daily Journal** — Memento Mori lifespan visualization (interactive weeks & decades grid), daily reflection logs (mood, weather, notes), cross-module daily activity timelines, and lifespan statistics.
-- 📍 **Footprints** — travel & location check-in logs with country/city pins, ratings, visited places timeline, and journey statistics.
-- 🔔 **Webhooks** — inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility (`/bot:token/sendMessage`), and a durable retry delivery queue. See [`docs/webhooks.md`](docs/webhooks.md).
-- 🧠 **AI Assistant & Live Web Search** — multi-turn contextual AI threads, live web search & fact checking (powered by Tavily Search API with DuckDuckGo fallback), parallel tool execution, context-aware quoted replies (replying `@bot fact check` or `true?` verifies claims with sourced web snippets), per-user LLM configuration (xAI Grok, OpenAI, Anthropic Claude, Google Gemini), active model switching, and weekly executive retrospectives.
-- 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice bubble (Ogg Opus). By default this is synthesized by the bundled inference server's Kokoro (English + Mandarin, 103 voices, Chinese text normalization), or by OpenAI or ElevenLabs with one env change. Every user picks their own voice.
-- ⚙️ **Settings** — per-user timezone (IANA), default currency code, dev room, conversation history turns, and `!say` voice selection, respected by all modules for consistent date/time rendering.
-- 🗄️ **PostgreSQL** — `DATABASE_URL` is required and must be a `postgres://` URL; versioned migrations in [`backend/migrations/`](backend/migrations) apply automatically at boot via `sqlx::migrate!`. CI runs the full suite against a real PostgreSQL 18 on every pull request. matrix-sdk keeps its own SQLite crypto store under `data/`, unaffected by this setting. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#postgresql-only).
-- 🔐 **Accounts & Security** — passkey (WebAuthn) sign-in, zero-friction Matrix session exchange (`POST /api/v1/auth/matrix/login`), linked Matrix identities, step-up security assertions, delayed Matrix recovery, and an immutable security audit log.
+- 🤖 **Core**: greetings (`!hello`), latency ping (`!ping`), module-driven help (`!help`).
+- 📋 **To-dos**: priorities, due dates, lead-time reminders, personal and room-wide views, editing, pagination, and quoted-message capture (replying `!todo add` uses the quoted text).
+- ⏰ **Reminders**: one-off and recurring (daily, weekly, monthly, yearly), persisted across restarts with downtime catch-up and exponential retry backoff.
+- 💰 **Finance**: expense and income ledger with custom categories and monthly summaries. Amounts are integer minor units throughout, with no floating point.
+- 📈 **Portfolio**: holdings with weighted-average cost basis, realized and unrealized P&L, live price fetching, price alerts, cash-balance gating, and a tamper-evident SHA-256 audit chain.
+- 🧾 **Recurring bills**: schedules, advance reminders, auto-pay marking and payment history.
+- 🔖 **Bookmarks**: URL saving with OpenGraph scraping, reading-time estimates, tags, favorites and archive.
+- 🎯 **Habits**: daily and weekly tracking, streaks, completion heatmaps.
+- ⏳ **Life grid and journal**: lifespan visualization, daily mood/weather/notes, cross-module activity timelines.
+- 📍 **Footprints**: travel and location check-ins with ratings and journey statistics.
+- 🔔 **Webhooks**: inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility and a durable retry queue. See [`docs/api.md`](docs/api.md#inbound-webhook-gateway).
+- 🧠 **AI assistant and web search**: multi-turn threads, tool calling over your own data, live search and fact-checking (Tavily, with DuckDuckGo fallback), per-user model configuration, and weekly retrospectives. See [`docs/llm.md`](docs/llm.md).
+- 🔌 **MCP server**: exposes the same tools, resources and prompts to Claude Desktop, Cursor and other MCP clients over stdio or HTTP/SSE.
+- 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice message (Ogg Opus), synthesized by the bundled Kokoro server or by OpenAI/ElevenLabs. Each user picks a voice.
+- ⚙️ **Settings**: per-user timezone, default currency and voice, respected by every module.
+- 🔐 **Accounts and security**: passkey (WebAuthn) sign-in, linked Matrix identities, step-up assertions, delayed recovery and an audit log.
+- 🗄️ **PostgreSQL 18** as the only application database, with versioned migrations applied at boot. See [`docs/database.md`](docs/database.md).
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ How it works
 
-The system unifies two distinct interaction models — fast, deterministic chat commands and intelligent LLM-driven natural language — on top of a shared domain layer, real-time SSE streaming, and persistent PostgreSQL storage:
+One capability is implemented once and reached through every interface:
 
 ```
-                                      Matrix
-                                        │
-                      ┌─────────────────┴─────────────────┐
-                      │                                   │
-                  Command                         Natural Language
-             (!todo, !finance)                  (@bot ..., direct DM)
-                      │                                   │
-                      │                                  LLM
-                      │                             (xAI / OpenAI)
-                      │                                   │
-                      │                              Tool Calling ────► Live Web Search
-                      │                            (add_todo, etc.)     (Tavily / DDG)
-                      │                                   │
-                      └─────────────────┬─────────────────┘
-                                        │
-                                        ▼
-                                   Domain Layer
-                     (Todo, Finance, Portfolio, Habits, etc.)
-                                        │
-                      ┌─────────────────┴─────────────────┐
-                      ▼                                   ▼
-            PostgreSQL Persistence                 SSE Broadcaster
-              (SQLx Query Layer)                 (Real-Time Web/iOS)
+                    ┌── Matrix chat (!commands, natural language)
+                    ├── REST API + SSE
+ User / LLM ───────►├── MCP
+                    ├── AI tool calls
+                    └── Web UI
+                           │
+                      Application   (services: use cases, transactions, events)
+                           │
+                        Domain      (pure rules and invariants)
+                           │
+                      PostgreSQL
 ```
 
-### Core Architecture Highlights
+- **Two ways in.** Matrix events arrive as `!commands` (parsed deterministically, no LLM, zero token cost) or as natural language routed to the LLM, which calls tools. The embedded Axum server serves `/api/v1/*` and a live SSE stream at `/api/v1/events` for the web UI.
+- **One implementation.** Chat commands, REST handlers, MCP and AI tools all call the same application services over `domain/` rules, so validation, ownership isolation and events are never duplicated.
+- **Live updates.** Every mutation publishes a typed `SystemEvent`, delivered per owner over SSE.
+- **Modular monolith.** No queues or microservices. Optional local OCR, speech-to-text and text-to-speech run in a separate `inference` server the bot reaches over HTTP; a missing one disables only that feature.
 
-1. **Dual Ingress (Matrix & REST/SSE)**:
-   - **Matrix Chat**: Inbound events arrive over Matrix rooms and are classified as either explicit commands or natural language queries.
-   - **REST API & SSE**: An embedded Axum web server provides REST endpoints (`/api/v1/*`) and real-time SSE event streaming (`/api/v1/events`) for the React Web UI and native iOS client (Element X).
-
-2. **Deterministic Commands vs. Natural Language**:
-   - **Commands (`!cmd`)**: Parsed immediately by `CommandParser` in [`backend/src/interface/channels/matrix/dispatcher.rs`](backend/src/interface/channels/matrix/dispatcher.rs). They bypass LLM processing entirely, providing deterministic execution with zero token cost and sub-millisecond response.
-   - **Natural Language**: Routed to [`backend/src/modules/ai/`](backend/src/modules/ai/). The LLM selects tools defined in the function schema, which are dispatched through domain-grouped handlers in [`backend/src/modules/ai/tools/`](backend/src/modules/ai/tools/) (`todo.rs`, `finance.rs`, `reminder.rs`, `portfolio/`, `bills.rs`, `habits.rs`, `life.rs`, `bookmarks.rs`, `webhooks.rs`, `settings.rs`). Tool schemas are colocated directly within their domain tool files.
-
-3. **Unified Domain Layer**:
-   - Both command handlers and AI tool executors delegate to the **exact same domain repositories** (`TodoRepository`, `FinanceRepository`, `ReminderRepository`, `PortfolioRepository`, etc.). Room resolution and caching live in [`backend/src/db/rooms.rs`](backend/src/db/rooms.rs), preventing domain and tool layers from coupling to API modules. Business logic, validations, and ownership isolation are never duplicated.
-
-4. **Persistence & Real-Time Sync**:
-   - All state modifications persist through compile-checked and runtime-bound SQLx queries to **PostgreSQL**, the only application database (`DATABASE_URL`, required, `postgres://`), through the macros in [`backend/src/db/executor.rs`](backend/src/db/executor.rs). Schema changes are forward-only SQL files in [`backend/migrations/`](backend/migrations), applied at boot by `sqlx::migrate!`.
-   - Any state change emits a strongly typed `SystemEvent` through the `EventBroadcaster`, delivered instantly to active web and mobile clients via SSE.
+The reasoning behind the design is in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## 🔐 Authentication & Multi-Client Architecture
+## 🔐 Accounts and security
 
-The backend supports multiple client surfaces with strict ownership isolation:
+Every todo, reminder, transaction, bill, habit, bookmark and holding belongs to an **account**. Messaging the bot in Matrix and browsing the web are one owner with one dataset.
 
-- **Web UI (Browser)**: **Passkeys only** (WebAuthn / FIDO2). No passwords or JWTs. Authenticated via HttpOnly, SameSite cookies backed by server-side session records.
-- **Native iOS & Element X**: **1-Step Matrix Session Exchange** (`POST /api/v1/auth/matrix/login`). The native client exchanges its existing homeserver access token for an opaque backend session token, transmitted via standard `Authorization: Bearer <session_token>` headers.
-- **Matrix Chat**: Bot commands are authenticated via cryptographic Matrix room event signatures, resolved to account owners through linked identities.
+- **Sign-in:** passkeys only (WebAuthn), one button, no username or password. Sessions are server-side; only the SHA-256 of the cookie is stored. Programmatic clients send `Authorization: Bearer <token>`, and MCP clients use a personal access token (`mb_mcp_…`).
+- **Passkeys:** attach several per account. `!passkey add` (alias `!web`) in a DM mints a 10-minute enrollment link for an account with no passkey yet; `!passkeys` lists them.
+- **Linking:** the web UI shows a one-time code (`!link A3F9-K2QX`) that you send to the bot **in a DM**. Proof of ownership is the message sender, so no Matrix password is typed into the web app. Linking an identity that already has data asks before merging.
+- **Step-up:** sensitive actions (managing passkeys, unlinking, signing out other devices, recovery codes) need a passkey assertion from the last 5 minutes.
+- **Recovery:** ten single-use codes, or `!recover` from a linked Matrix account, which is announced immediately, waits 24 hours, can be cancelled from any signed-in device, and then grants a restricted session for 72 hours.
+- **Audit:** every sensitive action is logged per account and sent as a DM to each linked identity.
 
-**Matrix account is the primary identity.** Every todo, reminder,
-transaction, bill, habit, bookmark, and holding belongs to an account. Whether messaging the bot in Matrix, browsing on the web, or using the native iOS app, you are one owner with one unified dataset.
-
-- **Matrix-Driven Passkey Enrollment (`!passkey add` or `!web`)**: send `!passkey add` (or `!web`) to the bot in a direct message. For an account with **no passkey yet**, the bot generates a single-use 10-minute enrollment link that opens the web UI and registers a WebAuthn passkey directly to your existing Matrix account without creating orphan accounts. Once the account has a passkey, the bot refuses: another passkey is added from a signed-in device, and a lost one is replaced through `!recover`.
-- **Multiple Passkeys** — attach multiple passkeys (e.g. MacBook Touch ID, Windows Hello, iPhone Face ID, YubiKey) to a single account. Additional passkeys are added from the **+ Add a passkey** button in the Web UI Security Panel.
-- **Listing passkeys in chat (`!passkeys`)**: `!passkeys` (or `!passkey list`) lists all registered passkeys with index numbers, labels, and creation dates. Removing a passkey, revoking sessions, and unlinking a Matrix identity need a recent passkey, so `!passkey rm` and `!unlink` point at the web app.
-- **Web Sign-in** — one button. Credentials are discoverable, so the browser offers
-  the passkey and the credential itself identifies the account. There is no
-  username or password field.
-- **Native iOS Sign-in** — zero extra login forms. The iOS app presents its active Matrix session token directly to the backend. The backend verifies it against the Matrix homeserver (`/_matrix/client/v3/account/whoami`) and yields a backend session token immediately.
-- **Dual Token Extraction & CSRF Protection** — API requests accept either an `Authorization: Bearer <token>` header or an HttpOnly session cookie. Requests using Bearer authentication bypass browser Origin CSRF checks, ensuring native mobile requests are never blocked by web CORS/Origin constraints.
-- **Sessions** — backed by server-side database rows with SHA-256 token hashing; revoking a session immediately takes effect on its next request.
-- **Linking** — the web UI shows a one-time code and you send it to the bot in a
-  DM (`!link A3F9-K2QX`). Proof of ownership is the message sender, so no Matrix
-  password is ever typed into the web app. Sending the code in a shared room
-  cancels it.
-- **Merging** — linking a Matrix account that already has history reports what
-  it holds and asks before moving anything.
-- **Step-up** — sensitive actions in the web UI (managing passkeys, unlinking identities, signing out other devices, generating recovery codes) require a recent passkey assertion within the last 5 minutes.
-- **Recovery** — ten single-use codes, plus `!recover` from a linked Matrix
-  account. The latter is announced immediately, waits 24 hours, can be cancelled
-  from any signed-in device, and then grants a session that may register a
-  passkey and nothing else for 72 hours.
-
-Every sensitive action is written to a per-account audit log and DM'd to each
-linked Matrix identity.
-
-See [`docs/testing-auth-locally.md`](docs/testing-auth-locally.md) to exercise
-all of this on `localhost` with no hardware key.
-
----
-
-## 📱 iOS & Element X Integration
-
-The backend is built to power native iOS apps, specifically designed to plug directly into **[Element X iOS](https://github.com/element-hq/element-x-ios)** as an additional first-class native tab (e.g. **"Assistant"** or **"Workspace"**).
-
-### Architectural Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       Element X iOS                         │
-│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────┐  │
-│  │  Chats Tab    │ │  People Tab   │ │ ⭐️ Assistant Tab  │  │
-│  │ (Matrix SDK)  │ │ (Matrix SDK)  │ │ (Native SwiftUI)  │  │
-│  └───────┬───────┘ └───────┬───────┘ └─────────┬─────────┘  │
-└──────────┼─────────────────┼───────────────────┼────────────┘
-           │ Matrix Sync     │ Matrix Sync       │ REST API / SSE
-           │ (E2EE, APNs)    │ (E2EE, APNs)      │ Bearer Auth
-           ▼                 ▼                   ▼
-┌────────────────────────────────────┐   ┌────────────────────┐
-│      Matrix Homeserver             │   │ matrix-bot Backend │
-│   (Synapse / Conduit / Dendrite)   │◄──┤ (Axum + PostgreSQL)│
-└────────────────────────────────────┘   └────────────────────┘
-```
-
-1. **Zero-Friction Authentication Handshake**:
-   - Element X is already logged into Matrix with an `access_token`, `matrix_user_id`, and `homeserver_url`.
-   - The native iOS tab calls `POST /api/v1/auth/matrix/login` passing these credentials.
-   - The backend validates the token directly against the homeserver via `GET /_matrix/client/v3/account/whoami`.
-   - If the Matrix user ID matches an existing account (or auto-provisions a new linked account), the backend returns a session token:
-     ```json
-     {
-       "session_token": "mb_sess_...",
-       "account_id": "acc_...",
-       "matrix_user_id": "@alice:example.org"
-     }
-     ```
-   - The token is securely saved in the iOS Keychain.
-
-2. **Native iOS Networking**:
-   - Every subsequent request includes the HTTP header:
-     ```http
-     Authorization: Bearer mb_sess_...
-     ```
-   - Standard REST endpoints (`/api/v1/todos`, `/api/v1/finance/...`, `/api/v1/portfolio/...`, etc.) return strongly typed JSON models.
-   - Native real-time streaming connects to `GET /api/v1/events` via `URLSession.bytes(for:)` for live SSE updates.
-
-3. **Zero-Infra Push Notifications via Matrix**:
-   - **No custom APNs server or certificates required.**
-   - All reminders, bill alerts, and portfolio notifications triggered by the bot's background workers are sent directly as Matrix messages to the user's 1:1 Bot DM room.
-   - Element X iOS already runs background sync and push notifications for incoming room events, delivering native lock-screen push notifications automatically!
-
-👉 **Complete Step-by-Step iOS Integration Guide**:
-See [**`docs/ELEMENT_X_IOS_INTEGRATION.md`**](docs/ELEMENT_X_IOS_INTEGRATION.md) for full Swift networking code (`BotClient.swift`), SwiftUI views (`AssistantTabView.swift`), Keychain management, and instructions on registering the tab inside Element X's `HomeScreen.swift` and `AppCoordinator.swift`.
+Matrix cannot prompt for a passkey, so `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are refused there and point to the web app. Details and local testing without a hardware key: [`docs/api.md`](docs/api.md#authentication).
 
 ---
 
 ## 📋 Command reference
 
-Every feature module exposes intuitive chat commands formatted in HTML for rich Matrix clients (Element, Element X, FluffyChat, Cinny):
+Every feature module exposes intuitive chat commands formatted in HTML for rich Matrix clients (Element, FluffyChat, Cinny):
 
 | Module | Commands | Description |
 |---|---|---|
@@ -195,47 +91,41 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
-| **Account** | `!link <code>`<br>`!recover` | Link Matrix account to web/native identity, initiate delayed recovery |
+| **Account** | `!link <code>`<br>`!recover` | Link a Matrix account to your web identity, initiate delayed recovery |
 
 `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
-deliberately refused on Matrix and point at the web app or native app — see **step-up** security assertions.
+deliberately refused on Matrix and point at the web app (see *Accounts and security*).
+
+---
 
 ---
 
 ## 🌐 REST API
 
-All API endpoints are mounted under `/api/v1`. Authentication is accepted via either:
-1. **HttpOnly Session Cookie**: Standard for the React Web SPA with strict CSRF Origin validation.
-2. **Bearer Token (`Authorization: Bearer <session_token>`)**: Standard for native iOS clients (Element X iOS), exempt from web browser Origin checks.
+Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session cookie (browser, with strict `Origin` checks) or `Authorization: Bearer <token>`. Errors are always `{ "error": "...", "code": 400 }`.
 
-| Category | Endpoint(s) | Description |
+| Area | Base path | What it covers |
 |---|---|---|
-| **Health** | `GET /health/live`<br>`GET /health/ready` | Liveness (process alive, no dependency checks — drives container restarts) and readiness (database + Matrix sync freshness — drives traffic routing) probes. Infrastructure surface: mounted at the router root, **not** under `/api/v1`, and need no auth. |
-| **Auth** | `POST /auth/passkey/{register,login}/{start,finish}`<br>`POST /auth/matrix/login`<br>`POST /auth/logout`<br>`GET /auth/me`<br>`GET /auth/media`<br>`POST /auth/recovery/redeem` | WebAuthn passkey ceremonies, 1-step Matrix session token exchange for iOS, logout, profile info, authenticated media proxy, and single-use recovery code redemption |
-| **Account** | `GET/PUT/DELETE /account/passkeys[/:id]`<br>`GET /account/matrix`<br>`POST /account/matrix/{link,unlink,confirm-merge}`<br>`GET /account/matrix/pending-merge`<br>`GET /account/sessions`<br>`POST /account/sessions/revoke-others`<br>`DELETE /account/sessions/:id`<br>`POST /account/recovery-codes`<br>`GET /account/recovery-status`<br>`POST /account/recovery/cancel`<br>`GET /account/security-events` | Manage passkeys, link/unlink Matrix MXIDs, review pending merges, inspect and revoke active sessions, generate 10 recovery codes, delayed recovery controls, and immutable security audit logs |
-| **AI Config** | `GET/PUT /account/ai-config` | Per-user LLM provider API keys and model parameters |
-| **Webhooks Mgmt** | `GET/POST/PATCH/DELETE /account/webhooks[/:id]`<br>`POST /account/webhooks/:id/{rotate,test}`<br>`GET /account/webhooks/:id/logs` | Create and manage inbound webhook tokens, test delivery, and inspect execution logs |
-| **To-Dos** | `GET/POST /todos`<br>`PATCH/DELETE /todos/:id` | List with filters and pagination, create, update status/priority/due date, and delete |
-| **Reminders** | `GET/POST /reminders`<br>`PATCH/DELETE /reminders/:id` | Manage one-off and recurring scheduled reminders |
-| **Finance** | `GET/POST /finance/transactions`<br>`PUT/DELETE /finance/transactions/:id`<br>`GET /finance/summary`<br>`GET/POST/DELETE /finance/categories[/:id]` | Ledger transactions, monthly category breakdowns, and custom category management |
-| **Portfolio** | `GET/POST /portfolio/holdings`<br>`POST /portfolio/holdings/record`<br>`DELETE /portfolio/holdings/:id`<br>`POST /portfolio/holdings/:id/sell`<br>`PUT /portfolio/holdings/:id/{price,symbol,note}`<br>`POST /portfolio/{refresh-prices,holdings/:id/refresh-price}`<br>`GET /portfolio/{quote,search,summary,history}`<br>`GET /portfolio/activity`<br>`GET /portfolio/activity/verify`<br>`GET /portfolio/cash`<br>`POST /portfolio/cash/{deposit,withdraw}`<br>`GET/POST/DELETE /portfolio/alerts[/:id]` | Positions, cash management, automated market price refreshes, live quotes, price alerts, historical valuations, and tamper-evident SHA-256 cryptographic audit chain verification |
-| **Recurring Bills** | `GET/POST /recurring-bills`<br>`GET/PUT/DELETE /recurring-bills/:id`<br>`POST /recurring-bills/:id/pay` | Recurring subscription/bill tracker with advance reminders and payment recording |
-| **Bookmarks** | `GET/POST /bookmarks`<br>`GET /bookmarks/stats`<br>`GET/PATCH/DELETE /bookmarks/:id`<br>`POST /bookmarks/:id/{toggle-favorite,toggle-archive}` | Read-it-later bookmarking, metadata scraper, domain statistics, favorite & archive filters |
-| **Habits** | `GET/POST /habits`<br>`GET /habits/{stats,heatmap}`<br>`PUT/DELETE /habits/:id`<br>`POST /habits/:id/toggle` | Habit tracker, daily checkoff toggling, streak counters, and completion heatmap |
-| **Life & Journal** | `GET/POST/PUT /life/profile`<br>`GET /life/{year/:year,horizon}`<br>`POST /life/days`<br>`GET/DELETE /life/days/:date`<br>`PUT /life/days/:date/time`<br>`GET /life/days/:date/activity` | Memento Mori lifespan timeline, day entries with mood and reflection, time allocation tracker, and cross-module daily activity aggregations |
-| **Footprints** | `GET/POST /footprints`<br>`GET /footprints/{stats,geocode}`<br>`GET/PUT/DELETE /footprints/:id` | Travel check-ins, location geocoding proxy, visit timeline, and journey statistics |
-| **AI Assistant** | `POST /ai/chat`<br>`POST /ai/verify`<br>`GET/DELETE /ai/conversations[/:id]`<br>`GET /ai/conversations/:id/messages`<br>`GET /ai/retrospective` | Multi-turn contextual AI chat, LLM connectivity testing, conversation management, and weekly executive retrospectives |
-| **Inbound Gateway** | `POST /webhooks/:token`<br>`GET/POST /bot:token/sendMessage` | Inbound generic webhook receiver and drop-in Telegram Bot API message receiver |
-| **Settings & Rooms** | `GET/PUT /settings`<br>`GET /rooms`<br>`POST /rooms/sync` | User preferences (timezone, default currency, dev room) and accessible Matrix room synchronization |
-| **Real-Time Live** | `GET /events` | Server-Sent Events (SSE) stream scoped strictly to authenticated owner's mutations |
+| Health | `/health/live`, `/health/ready` | Liveness and readiness probes (router root, no auth) |
+| Auth | `/auth/*` | Passkey ceremonies, logout, profile, authenticated media, recovery-code redemption |
+| Account | `/account/*` | Passkeys, linked Matrix identities and merges, sessions, recovery, security events, AI config, webhook management |
+| To-dos, reminders | `/todos`, `/reminders` | CRUD with filters and pagination |
+| Finance | `/finance/*` | Transactions, summaries, categories, analytics |
+| Portfolio | `/portfolio/*` | Holdings, trades, cash, prices and quotes, alerts, history, audit-chain verification |
+| Recurring bills | `/recurring-bills` | Schedules and payments |
+| Bookmarks, habits | `/bookmarks`, `/habits` | CRUD, stats, heatmaps |
+| Life, journal, footprints | `/life/*`, `/footprints` | Lifespan grid, day entries, activity, check-ins |
+| AI | `/ai/*` | Chat, conversations, connectivity check, retrospective |
+| MCP | `/mcp/*` | HTTP/SSE transport and token management |
+| Inbound gateway | `/webhooks/:token`, `/bot<token>/sendMessage` | Generic and Telegram-compatible webhook receivers |
+| Settings, rooms | `/settings`, `/rooms` | Preferences and Matrix room picker |
+| Live events | `/events` | SSE stream scoped to the authenticated owner |
 
-`GET /api-docs/openapi.json` serves the auto-generated OpenAPI 3.1 specification; the frontend's TypeScript types and iOS API client models are generated from it.
-
-The SSE stream authenticates via cookie or `Bearer` token. Events carry `{ "type": "TodoCreated", "payload": { ... } }`, allowing real-time reactive UI updates without manual polling.
+`GET /api-docs/openapi.json` serves the generated OpenAPI 3.1 specification (committed as [`backend/openapi.json`](backend/openapi.json)); it is the authoritative endpoint list, and the frontend's TypeScript client is generated from it. Conventions, SSE events and authentication are in [`docs/api.md`](docs/api.md).
 
 ---
 
-## 🛠️ Setup & Running
+## 🛠️ Setup and running
 
 You can run `matrix-bot` in any of the following ways:
 1. **[Standalone Single Binary](#option-1-standalone-single-binary-recommended)** — zero-dependency executable with embedded Web SPA UI (fastest & easiest).
@@ -446,82 +336,96 @@ cargo build --release --bin matrix-bot
 # Output binary: target/release/matrix-bot (or matrix-bot.exe)
 ```
 
-### Test
+---
+
+## 🧑‍💻 Development
+
+Everything below runs against a throwaway local PostgreSQL. **Coding agents never run the bot binary** and never need Matrix credentials, an AI key or a production database; see `AGENTS.md`.
+
+**Toolchain**
+
+| Tool | Version | Why |
+|---|---|---|
+| Rust | stable, with `rustfmt` and `clippy` | backend and inference crates |
+| Docker | any recent | local PostgreSQL 18 for tests |
+| `sqlx-cli` | 0.9 (postgres + rustls) | query cache and migrations: `cargo install sqlx-cli --version ^0.9 --no-default-features --features rustls,postgres --locked` |
+| Node.js | 20+ | frontend build, OpenAPI client generation, Playwright |
+
+Linux and CI containers also need `pkg-config libssl-dev` (and `cmake` for the inference crate). On Windows a cold `openssl-sys` build needs a full Perl on `PATH` (Strawberry, or `scoop install perl`); loading the real Kokoro model in an inference test needs sherpa's `onnxruntime.dll` in `target/debug/deps/` (see `inference/src/tts/kokoro.rs`). Sharing `CARGO_TARGET_DIR` across worktrees speeds up rebuilds.
+
+**Configuration.** The bot reads `.env` from the current directory only. Start from `.env.example`; `ENVIRONMENT=development` relaxes production checks. Tests and builds need no `.env` (`SQLX_OFFLINE=true` reads the committed `.sqlx/` cache).
+
+**Tests** — from the repository root. Database setup, environment variables and troubleshooting are in [`docs/database.md`](docs/database.md#test-databases):
 
 ```bash
-cargo check                            # must be warning-free
-cargo test                             # 494+ tests passing
-npm --prefix frontend run build        # TypeScript & production bundle
-npx --prefix frontend playwright test  # 169 E2E specs
+cargo fmt --all -- --check
+cargo check -p matrix-bot --all-targets                  # warning-free
+cargo test  -p matrix-bot --all-targets                  # includes the architecture test
+cargo test  -p matrix-bot live_postgres -- --ignored --test-threads=1
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test  -p matrix-bot-inference --all-targets        # when inference/ or contracts/ change
+npm --prefix frontend ci && npm --prefix frontend run build
+npm --prefix frontend run test:e2e                       # Playwright; fake API, no backend needed
 ```
 
-After changing a `#[utoipa::path]` or `ToSchema`, regenerate both artifacts:
+Run `npx --prefix frontend playwright install chromium` once per machine. After changing a `#[utoipa::path]` or `ToSchema`, regenerate both artifacts and commit them:
 
 ```bash
 cargo run --bin generate-openapi        # -> backend/openapi.json
 npm --prefix frontend run generate-api  # -> frontend/src/types/api.ts
 ```
 
+**Forge and CI.** Development happens on a self-hosted Gitea (`git.mbm.one`, remote `gitea`, over SSH); GitHub (`origin`) is a mirror updated by hand. Branch from `master` with Conventional prefixes (`feat/…`, `fix/…`, `refactor/…`, `docs/…`), push with `git push -u gitea <branch>` and open the pull request from the link Gitea prints; `gh` only sees the mirror. CI runs on Gitea Actions (`.github/workflows/`) for pushes to `master` and pull requests into it, so a bare feature-branch push does not run it. Jobs run inside a container, so the PostgreSQL service answers to its label (`postgres`), not `127.0.0.1`; the job image must carry Node.js, and `ci.yml` installs `pkg-config`, `libssl-dev` and `cmake` itself. Do not "simplify" those away. Secrets live under Settings → Actions → Secrets on Gitea. Releases are annotated `v*` tags pushed to `gitea`.
+
 ---
 
 ## 🏗️ Layout
 
-Cargo workspace with two members, plus a separate npm frontend and iOS integration guides.
+Cargo workspace with two members, plus a separate npm frontend.
 
 ```
 backend/                      # crate `matrix-bot`: bot + embedded API, one binary
-├── openapi.json              # generated; source of the frontend's & iOS types
+├── migrations/               # forward-only SQL, applied at boot by sqlx::migrate!
+├── openapi.json              # generated; source of the frontend's types
+├── tests/architecture.rs     # enforces layer/dependency rules
 └── src/
-    ├── main.rs               # boots Config, DB, API server, and the Matrix sync loop
+    ├── main.rs, app.rs       # composition roots; app::run owns startup and graceful shutdown
     ├── config.rs             # environment config and boot-time validation
-    ├── accounts/             # the ownership layer
-    │   ├── repository.rs     #   accounts + matrix_links, MXID -> account resolution
-    │   ├── credentials.rs    #   stored passkeys
-    │   ├── session.rs        #   server-side sessions, step-up clock
-    │   ├── linking.rs        #   one-time link codes, claim and unlink
-    │   ├── merge.rs          #   absorbing one account into another
-    │   ├── recovery.rs       #   recovery codes and delayed Matrix recovery
-    │   └── security_events.rs#   per-account audit log
+    ├── domain/<feature>/     # pure rules and invariants (no I/O)
+    ├── application/<feature>/# services: use cases, transactions, events (AppServices)
     ├── interface/            # everything that talks to the outside world
-    │   ├── http/             #   axum REST layer
-    │   │   ├── auth/         #     passkey ceremonies, 1-step Matrix login, cookie/bearer extractor
-    │   │   ├── account.rs    #     passkeys, links, sessions, recovery, audit
-    │   │   └── …             #     todos, reminders, finance, portfolio, bills, bookmarks, habits, life, ai, sse
-    │   └── channels/matrix/  #   Matrix client, dispatcher, verification
-    │       ├── linking.rs    #     !link, handled before the sender is resolved
-    │       └── notify.rs     #     security DMs to linked identities
-    ├── db/                   # pool + the single migration path
-    ├── modules/              # BotModule plugins: core, todo, reminder, finance, portfolio,
-    │                         # recurring_bills, bookmarks, habits, life, journal, footprints,
-    │                         # webhook, ai, settings, account, briefing, mcp, rooms,
-    │                         # ocr (image text), voice (speech→text), tts (text→speech)
-    ├── infrastructure/       # adapters to external systems
-    │   └── inference/        #   never importing from modules/, interface/ or application/
-    │       ├── llm/          #     LlmClient: OpenAI-compatible chat-completions transport
-    │       ├── ocr/          #     client to the inference crate's POST /ocr
-    │       ├── stt/          #     OpenAI-compatible client to POST /v1/audio/transcriptions
-    │       └── tts/          #     OpenAI/ElevenLabs-compatible client to POST /v1/audio/speech
+    │   ├── http/             #   axum REST + SSE, DTOs, auth extractors
+    │   ├── chat/             #   BotModule command handlers per feature
+    │   ├── channels/matrix/  #   Matrix client, dispatcher, E2EE, verification, linking
+    │   └── mcp/              #   MCP protocol adapters
+    ├── llm/                  # prompts, tool loop, tool registry (llm/tools/)
+    ├── infrastructure/
+    │   ├── postgres/         #   repositories, read models, account merge
+    │   ├── inference/        #   llm, ocr, stt, tts clients
+    │   └── web/              #   outbound feeds, SSRF guard
+    ├── accounts/, db/        # legacy facades and pool/migration plumbing (being retired)
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image
 contracts/                    # JSON fixtures each crate asserts for the wire formats it speaks
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime Matrix crypto store (SQLite, gitignored)
-docs/                         # documentation, roadmap, architecture reviews, guides
+docs/                         # architecture, database, api, llm; superpowers/ holds plans, specs, progress
 ```
-
-`AGENTS.md` holds the development conventions; `docs/ARCHITECTURE.md` explains
-*why* the load-bearing parts are shaped the way they are — worth reading
-before changing auth, ownership or migrations.
 
 ---
 
-## 🚀 Roadmap
+## 📚 Documentation
 
-- ~~**PostgreSQL**~~ — shipped. `DATABASE_URL` is required and must be
-  `postgres://`; PostgreSQL 18 is the only application database (matrix-sdk
-  keeps its own SQLite crypto store under `data/`). See
-  [`docs/ARCHITECTURE.md#postgresql-only`](docs/ARCHITECTURE.md#postgresql-only).
-- **Conditional-UI sign-in** — passkey autofill on page load, rather than a
-  button.
-- **Offline Sync for Native iOS** — local SwiftData caching in Element X iOS for offline task and log creation.
+| Document | Contents |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Rules for coding agents: architecture, workflow, constraints, verification |
+| [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, Matrix, accounts, settings, external services |
+| [`docs/database.md`](docs/database.md) | Schema and SQLx conventions, migrations, test databases |
+| [`docs/api.md`](docs/api.md) | REST/SSE conventions, authentication, webhooks, OpenAPI workflow |
+| [`docs/llm.md`](docs/llm.md) | LLM transport, tool loop, agent limits, MCP |
+| [`docs/superpowers/`](docs/superpowers/) | Plans, designs, progress and hand-off state, runbooks |
+| [`SPEC.md`](SPEC.md) | Product roadmap across all phases |
+| [`Design.md`](Design.md) | Frontend design system |
+
+Near-term work: passkey autofill (conditional UI) on page load. Everything else is tracked in `SPEC.md` and `docs/superpowers/HANDOFF.md`.

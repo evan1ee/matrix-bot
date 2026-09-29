@@ -6,8 +6,8 @@ are temporary). Follow this in order before merging, and again before the
 first production boot on the new binary.
 
 See `docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` for the
-design rationale and `docs/ARCHITECTURE.md` (Persistence and migrations;
-Matrix session and crypto store; Verification) for the invariants this
+design rationale and `docs/database.md` (Migrations),
+`docs/architecture.md` (Matrix session and crypto store; Verification) for the invariants this
 protects.
 
 ## 1. Before the first boot
@@ -16,7 +16,7 @@ protects.
    `refactor/postgres-foundation` branched off) against production once, so
    its schema equals what `0001_baseline.sql` adopts. This is a
    precondition, not automatic — see
-   `docs/ARCHITECTURE.md`'s Persistence and migrations section for why
+   `docs/database.md`'s Migrations section for why
    `0001` omits the backfill and rename it depends on already having run.
 2. **Stop the bot.**
 3. Back up the whole `data/` directory — `bot_store/`, `matrix_session.json`,
@@ -72,17 +72,17 @@ Watch the log for, in order:
   any "failed to open/migrate store" error matters more than the presence of
   a success message.
 - **Restored session, not a fresh login.** The restored-session branch of
-  `bot/client.rs` must run (`restore_session` then a successful `whoami`).
+  `interface/channels/matrix/client.rs` must run (`restore_session` then a successful `whoami`).
   Stop the process immediately if either of these appears instead:
   - a fresh-login path being taken
   - a `data/bot_store.orphaned-<timestamp>/` archive being created — this
     means the restore failed and a new device was minted, which peers will
-    see as broken encryption (see `docs/ARCHITECTURE.md`'s Matrix session and
+    see as broken encryption (see `docs/architecture.md`'s Matrix session and
     crypto store section)
 - **`ensure_self_verified` result.** Must log that the device signature was
   uploaded (`Device::verify()` returning `Ok`). A "nothing to sign" result or
   a timeout is a failure — never treat `Recovery::recover()`'s own `Ok` as
-  "verified" (see `docs/ARCHITECTURE.md`'s Verification section).
+  "verified" (see `docs/architecture.md`'s Verification section).
 - **Sync running.** The sync loop starts with no decryption errors on the
   first messages in encrypted rooms.
 - **Migration bookkeeping.** `_sqlx_migrations` has a row for version 1 with
@@ -91,7 +91,7 @@ Watch the log for, in order:
   SELECT version, success FROM _sqlx_migrations ORDER BY version;
   ```
 - **Session reuse log line.** The log shows `Reusing stored Matrix session for
-  ... on device <same ID as before>` (`bot/client.rs`'s restore branch) — the
+  ... on device <same ID as before>` (`interface/channels/matrix/client.rs`'s restore branch) — the
   same check as "Restored session, not a fresh login" above, called out
   explicitly because it's the one line to grep for.
 - **New matrix-sdk store files.** `data/bot_store/matrix-sdk-event-cache.sqlite3`
@@ -108,7 +108,7 @@ retrying boot.
 
 ## 4. After a successful boot
 
-`docs/ARCHITECTURE.md` currently carries a placeholder note next to "Two
+`docs/architecture.md` currently carries a placeholder note next to "Two
 measured facts about matrix-sdk 0.7" (in the Verification section) because
 those two facts — `Recovery::recover` returning `Ok` with nothing signed, and
 `Device::is_cross_signed_by_owner()` lagging a re-query — were measured

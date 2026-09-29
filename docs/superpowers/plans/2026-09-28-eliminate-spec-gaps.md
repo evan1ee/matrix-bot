@@ -1,7 +1,7 @@
 # Master Plan: Eliminating Gaps Between Codebase and SPEC.md
 
 > **Target:** Full alignment between the codebase and [`SPEC.md`](file:///d:/01_Data/code/matrix-hello-bot/SPEC.md) (v2.4.0).  
-> **Approach:** Phased, test-driven refactor respecting settled architectural rulings in [`AGENTS.md`](file:///d:/01_Data/code/matrix-hello-bot/AGENTS.md) and [`docs/HANDOFF.md`](file:///d:/01_Data/code/matrix-hello-bot/docs/HANDOFF.md).  
+> **Approach:** Phased, test-driven refactor respecting settled architectural rulings in [`AGENTS.md`](file:///d:/01_Data/code/matrix-hello-bot/AGENTS.md) and [`docs/HANDOFF.md`](file:///d:/01_Data/code/matrix-hello-bot/docs/superpowers/HANDOFF.md).  
 > **Branch:** `refactor/postgres-layered`
 
 ```mermaid

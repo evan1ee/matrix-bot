@@ -1,8 +1,55 @@
 # Architecture
 
-This is the long-form companion to `AGENTS.md`. `AGENTS.md` states each rule as
-a short imperative; this document explains why it has to be that way — one
-section per area, each covered once.
+Why the system is shaped the way it is. `AGENTS.md` states the rules an agent must follow; this document records the design behind them, one section per area, each covered once. Topic documents:
+
+| Topic | Document |
+|---|---|
+| Schema, migrations, SQLx conventions, test databases | [`database.md`](database.md) |
+| REST/SSE contract, authentication, webhooks, health probes | [`api.md`](api.md) |
+| LLM transport, tool loop, agent limits, MCP server | [`llm.md`](llm.md) |
+| Plans, designs, progress and hand-off state | [`superpowers/`](superpowers/) |
+
+## One capability, many interfaces
+
+The backend is a modular monolith and the source of truth for application state. Every business capability (a todo, an expense, a portfolio trade, a room lookup) is implemented once, in `application/` over `domain/`, and reached through any number of interfaces:
+
+```text
+                     ┌── Matrix chat (BotModule commands)
+                     ├── REST API + SSE (Axum, OpenAPI)
+ User / LLM ────────►├── MCP (stdio + HTTP/SSE)
+                     ├── AI tool calls (llm/tools)
+                     └── Web UI (React SPA, via the REST API)
+                                  │
+                                  ▼
+                 application/<f>  (<F>Service: use cases, transactions, events)
+                                  │
+                                  ▼
+                 domain/<f>       (entities, invariants, pure functions)
+                                  │
+                                  ▼
+                 infrastructure/postgres  (repositories, read models)
+                                  │
+                                  ▼
+                             PostgreSQL
+```
+
+Interfaces parse, authenticate, resolve the caller's scope, call a service, and format the reply. They never re-derive a rule. If two interfaces disagree about a capability, one of them holds business logic that belongs in the service.
+
+### Layers and dependency direction
+
+| Layer | Path (under `backend/src/`) | Owns | May import |
+|---|---|---|---|
+| Domain | `domain/<f>/` | entities, value objects, invariants, domain errors; synchronous and I/O-free | `std`, `chrono`, `uuid`, `serde`, `thiserror` only |
+| Application | `application/<f>/` | `<F>Service` use cases, transaction boundaries, event publication after commit | `domain`, `infrastructure` |
+| Interface | `interface/{http,chat,channels,mcp}/` | protocol translation: Axum handlers and DTOs, `BotModule` handlers, the Matrix channel, MCP | `application`, `domain` |
+| LLM | `llm/` | prompts, the tool-calling loop, conversation context ([`llm.md`](llm.md)) | `application`, `domain` |
+| Infrastructure | `infrastructure/{postgres,inference,web}/` | repositories, HTTP clients for inference, LLM and web feeds | `domain`; never `application` or `interface` |
+
+`backend/tests/architecture.rs` enforces the rules mechanically: layer imports, pure domain modules, zero SQL in `interface/` and `application/`, `AssertSqlSafe` confined to `infrastructure/postgres/merge.rs`, no `dotenvy::dotenv`.
+
+`AppServices` (`application/mod.rs`) is built once per process by a composition root (`app.rs` for the server, `main.rs` for the stdio MCP server) and reaches every adapter as a parameter: `ApiState.services`, `ModuleContext.services`, the `services` argument of `BotModule::handle_command`, and the AI turn. No adapter constructs a service itself.
+
+The per-feature template and the settled rulings live in [`superpowers/HANDOFF.md`](superpowers/HANDOFF.md) §8–9; the realised layout design is `superpowers/specs/2026-09-24-postgres-foundation-design.md` §3.
 
 ## Single process, two front doors
 
@@ -24,25 +71,13 @@ The `mcp` stdio mode is not part of the tree: it is a separate process invocatio
 
 `BotHandles` (`interface/channels/matrix/handles.rs`) also carries `sync_health: SyncHealth` — a lock-free `Arc<AtomicI64>` of the last completed sync's unix millis, written by the sync loop's `sync_with_callback` after every successful response and read by `/health/ready`. `sync_with_callback`, not plain `sync`, is the point of the change: it is the only hook that fires once per completed response rather than once for the whole (otherwise-infinite) sync loop, so it is the one place "a sync completed" can be observed and recorded.
 
-## Liveness and readiness probes
+## Chat command plugin system
 
-`/health/live` (always `200`, touches nothing) and `/health/ready` (`200` when `SELECT 1` succeeds *and* the last recorded sync is within `MATRIX_SYNC_MAX_AGE` — 120s — of now, else `503` with a JSON reason) are mounted at the router root in `interface/http/mod.rs`, not under `/api/v1` and not behind auth — they are infrastructure surface a load balancer or container orchestrator probes, not application API. They deliberately answer different questions: liveness drives container restarts, which cannot fix a downstream outage (a lost database, a homeserver that stopped answering sync) and would only thrash the process while making it worse; readiness drives traffic routing. The former `/api/v1/health` (a single `db_status` field, no Matrix awareness) is retired — this is an intentional public-contract break, not an addition alongside it.
+`BotModule` (`interface/chat/mod.rs`) is the extension point for Matrix commands. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`; registration happens in `interface/channels/matrix/mod.rs::new_full` and **order matters** (the TTS module must be registered before the AI module's direct-message catch-all, and a test pins that). `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules — a deliberate cycle-breaking indirection; keep it if you touch help generation.
 
-`interface/http/rooms.rs::list_rooms` (discovery in `interface/chat/rooms.rs`) is a *room picker* feed, not a room dump: it drops spaces, DMs (`room.is_direct()`), rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where the bot is not a joined member or *none* of the caller's linked MXIDs is. An account can have several Matrix identities, so "the caller" is a set — an account with no link gets an empty list, which is the honest answer rather than an error.
+Background work goes through `spawn_background_workers(&ModuleContext)`, which is how the reminder scheduler (5 s tick) gets the Matrix `Client`, the services and the event broadcaster. `interface/channels/matrix/dispatcher.rs` accepts a message either when it starts with `!` or when the bot is mentioned, strips the HTML mention pill, and yields a `CommandContext`.
 
-## Backend module plugin system
-
-`BotModule` (in `backend/src/interface/chat/mod.rs`) is the extension point. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`. Registration happens in `interface/channels/matrix/mod.rs::new_full` — Core, Todo, Reminder, Finance, Portfolio, Settings. `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules (a deliberate cycle-breaking indirection; keep it if you touch help generation).
-
-Background work goes through `spawn_background_workers(&ModuleContext)` — that's how the reminder scheduler (5s tick loop) gets the Matrix `Client`, `Database`, and broadcaster.
-
-`interface/channels/matrix/dispatcher.rs` accepts a message either when it starts with `!` or when the bot is mentioned, strips the HTML mention pill, and yields a `CommandContext`.
-
-## Event flow (SSE)
-
-Every state mutation — from both the Matrix command path and the REST path — must `broadcaster.send(SystemEvent::…)`. `SystemEvent` is serialized `#[serde(tag = "type", content = "payload")]` and sent as an **unnamed** SSE message, so the frontend reads `EventSource.onmessage` and dispatches on the `type` field (the variant name verbatim, e.g. `TodoCreated` — not snake_case).
-
-The broadcast channel is process-wide. `sse::owned_events` narrows it to one owner via `SystemEvent::owner_id()`, so a client sees only its own rows. **Any new variant must return a meaningful `owner_id()`** — the deletion variants carry an explicit `owner_id` field because their row is already gone. Adding a mutation without a matching event silently breaks the live UI; adding a variant without an owner leaks it or drops it.
+Room caching and target-room resolution belong to `application/rooms` (rules in `domain/rooms`, Matrix-side discovery in `interface/chat/rooms.rs`). `interface/http/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs, rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where the bot is not joined or *none* of the caller's linked MXIDs is. An account can have several Matrix identities, so "the caller" is a set; an account with no link gets an empty list, which is the honest answer rather than an error.
 
 ## Matrix session and crypto store
 
@@ -60,64 +95,32 @@ A fresh login does **not** pin a device ID. It used to (`MATRIX_BOT_MAIN_DEVICE`
 
 Two measured facts about matrix-sdk 0.7 drive the shape of that code. `Recovery::recover` returns `Ok` even when secret storage held no self-signing key and nothing was signed (`SecretStore::import_secrets` gates signing on `has_self_signing`, and a missing secret reads as `None`, not an error). And `Device::is_cross_signed_by_owner()` on our *own* device keeps reporting false for at least a second after the signature is uploaded and re-queried, across restarts, even though `/keys/query` shows it — so the outcome is taken from `Device::verify()` returning `Ok` (the signature reached the server), never from a local re-read. Consequently the bot re-signs on most boots; that is intended and idempotent.
 
-*(Re-measure on 0.18 at first boot — see `docs/runbooks/postgres-foundation-cutover.md` step 4. These facts predate the matrix-sdk 0.18 upgrade and have not yet been reconfirmed against it.)*
+*(Re-measure on 0.18 at first boot — see `superpowers/runbooks/postgres-foundation-cutover.md` step 4. These facts predate the matrix-sdk 0.18 upgrade and have not yet been reconfirmed against it.)*
 
 The acceptance test is `self_verify.rs::test_the_running_bot_session_is_verified_on_the_homeserver` — `#[ignore]`d because it needs credentials, a network, and a bot that has run at least once. It reads the token the running bot saved and asks `/keys/query`, applying Element's own rule via `device_is_cross_signed`; it never logs in, because a second login would mint another device and leave the running session's token to be reasoned about separately.
 
 ## Accounts: one owner, several ways in
 
-`accounts` is the only thing that owns a row. `owner_id` — the column on every data table — holds an `accounts.id` (`acct_` + 32 hex chars) and nothing else.
+`accounts` is the only thing that owns a row. `owner_id` — the column on every data table — holds an `accounts.id` and nothing else. The id is a native PostgreSQL `UUID`, typed `AccountId` in Rust and rendered `acct_<32 hex>` on the wire and in the portfolio audit hash (see [`database.md`](database.md#account-ids)).
 
 Two access paths resolve onto it and are then indistinguishable:
 
-- A Matrix message resolves through `matrix_links` (`interface/channels/matrix/handler.rs` → `AccountRepository::resolve_or_provision`).
+- A Matrix message resolves through `matrix_links` (`interface/channels/matrix/handler.rs` → `AccountService::resolve_or_provision`).
 - A web session resolves directly from the session cookie.
 
 This replaced two disjoint identity spaces: `owner_id` used to hold a raw MXID for anything created over Matrix and `@web-<username>:api` for anything created through the API, so **one human using both saw two separate datasets**. Ownership is now carried, never derived. `AuthUser::owner_id()` returns `account_id` verbatim; if you ever find yourself computing an owner from a subject, that is the bug this design exists to remove.
 
 An unknown MXID gets an **unclaimed** account: real data, no credential, reachable only through that MXID. That is what keeps the bot usable with no web signup. `matrix_links.mxid` is the primary key, and that alone enforces "one Matrix account, one local account" — schema-level, so a concurrent link cannot race it. `resolve_or_provision` handles the other race (the sync loop does not serialise event handlers) by having the loser delete the account it minted.
 
-`accounts/merge.rs` absorbs one account into another, rewriting every table `OWNED_TABLES` lists: a table missing from it is a silent data leak, not a compile error. Sessions do **not** follow a merge — a session belongs to the credential that opened it.
-
-## Auth: passkeys and cookie sessions
-
-Passkeys are the only way to establish a session in the browser. There is still no password and no JWT; `bcrypt` survives only to hash recovery codes. A native client (Element X iOS) exchanges a Matrix session for a backend session token and carries it as `Authorization: Bearer` instead of a cookie, and an MCP client authenticates the same way with an `mb_mcp_`-prefixed personal access token — see `README.md` for both. An MCP token never satisfies the step-up gate below: it is a machine credential, so its creation time is never read as a passkey assertion.
-
-`interface/http/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the credential carries the account handle, so there is no username field anywhere and no user enumeration to defend against. `accounts::account_id_to_handle` is a total bijection between an account id and the WebAuthn user handle — an account id is `acct_` plus the 32 hex chars of 16 random bytes, which is exactly a UUID's simple form, so no column and no UUID generation are needed.
-
-`register/start` mints the account id but writes **no row**; the id has to travel inside the challenge, and an abandoned ceremony must leave nothing behind. Hence `create_with_id` alongside `create`.
-
-`accounts/session.rs` holds sessions server-side. Only the SHA-256 of the cookie is stored, so a leaked backup cannot be replayed. Both timeouts are checked on read rather than swept, so expiry never waits on a background job.
-
-`interface/http/auth/extractor.rs` reads whichever credential the request carries and enforces CSRF twice: `SameSite=Strict`, plus an `Origin` check on every state-changing request that arrived on the ambient session cookie. A missing `Origin` on such a mutating request is **refused** — browsers always send one on `fetch`. A request carrying an explicit `Authorization: Bearer` credential is exempt from the Origin requirement, because a hostile site's ambient authority can never attach a header it does not know the value of.
-
-`VerifiedUser` is the step-up boundary: it wraps `AuthUser` and rejects a session whose last passkey assertion is older than `STEP_UP_WINDOW_MINUTES` (5), or that came from account recovery and is still restricted. Putting it in a handler signature is the whole opt-in. **`interface/http/mod.rs::step_up_tests` drives the real router** (via the extracted `api_routes()`) and fails if a route in its own hand-written `SENSITIVE` list accepts a stale session — but `SENSITIVE` is a literal `const` of `(method, path)` pairs, not something derived from the router, so it does **not** discover a new route on its own. Adding `VerifiedUser` to a handler is necessary but not sufficient: the route must also be appended to `SENSITIVE`, or the test simply never exercises it and a missing `VerifiedUser` ships silently.
-
-`WEBAUTHN_RP_ID` is a bare hostname and ignores ports; `WEBAUTHN_ORIGIN` carries the port and is what the `Origin` header is compared against. Browsing the Vite dev server on `:5173` while `WEBAUTHN_ORIGIN` says `:8080` makes every write fail with "This request did not come from this site". `Config::validate` refuses to boot production on the localhost defaults, because passkeys minted against `localhost` are ones no real browser would return.
-
-## Linking, recovery, and the Matrix ceiling
-
-`!link` is handled in `interface/channels/matrix/linking.rs` **before** the sender is resolved, and that ordering is load-bearing: resolving first would provision an empty account for the very MXID being claimed, turning every first-time link into a merge of nothing. Do not move it into a `BotModule`.
-
-Proof of ownership is the message sender, so no password is involved. `LinkRepository::claim` refuses `!link` outside a DM and burns the code either way — `claim` calls `consume` on the not-a-DM path before returning, so the code is spent even on refusal: in a public room everyone can read it, and a bystander could send it from their own MXID. A link that finds existing data does not merge; it reports the count and records a pending merge in `ApiState.pending_merges`, which is also the *authorisation* for `confirm-merge` (without it, naming any account id would absorb it).
-
-Unlinking keeps every row. Data belongs to the account; unlinking revokes an access path, and the MXID comes back as a stranger.
-
-Recovery has two independent routes. Codes sign you straight in. `!recover` is fenced because it would otherwise close a circle — linking needs a recent passkey, and passkey recovery would need only the Matrix account: the request is announced immediately, does nothing for 24h, any live session can cancel it, and it then grants a session restricted for 72h. Cancelling deliberately takes `AuthUser`, not `VerifiedUser` — demanding a passkey to stop a recovery you did not ask for is backwards.
-
-`interface/chat/account.rs::WEB_ONLY` is the capability ceiling. Matrix cannot prompt for a passkey, so it gets **no** route to a privileged action. `!export`, `!sessions`, `!recoverycodes` and `!unlink` are `WEB_ONLY` entries and answer with a pointer to the web app; `!passkey rm` gives the same pointer. That refusal is what makes the step-up rule a guarantee rather than a decoration.
-
-Matrix keeps exactly three account capabilities: `!link`, `!recover`, and `!passkey add` (alias `!web`), plus the read-only `!passkeys` list. `!passkey add` mints a single-use enrollment link that `/auth/passkey/enroll/start` redeems with no session, and finishing that ceremony opens a full, freshly verified session. So it enrolls only an account's **first** passkey. For an account with none (unclaimed, or one whose owner deleted the last passkey while Matrix was linked), the Matrix identity is already the only way in. Once a passkey exists, a link would let the Matrix account alone add its own passkey and pass `VerifiedUser` at once, which is exactly the circle the `!recover` delay closes. The rule is enforced twice: the bot refuses to mint the link, and `EnrollmentRepository::validate_and_consume` refuses a token for an account that has since gained a passkey, because redemption is where the capability is actually granted. `!unlink` sits behind the wall for the same reason: revoking every session, or cutting the other linked identities a `!recover` request is announced to, would let the Matrix account alone disarm the fence's warning channels.
-
-Two of those are forward-looking rather than descriptive: **there is no financial export feature yet**, and `SecurityEventKind::FinancialDataExported` is constructed nowhere. The command name and the event variant are reserved so that whoever builds export puts it behind `VerifiedUser` on the web side rather than discovering the requirement afterwards. Do not read them as evidence the feature exists.
-
-`interface/channels/matrix/notify.rs` records a `security_events` row and DMs every linked identity, opening a DM room if none exists. Neither half can fail the action it describes — by the time it runs, the thing has happened.
+The merge (`application/accounts/merge.rs`, with its allow-listed dynamic SQL in `infrastructure/postgres/merge.rs`) absorbs one account into another, rewriting every table `OWNED_TABLES` (`domain/accounts`) lists: a table missing from it is a silent data leak, not a compile error. Sessions do **not** follow a merge — a session belongs to the credential that opened it.
 
 ## Per-user settings (timezone, default currency)
 
 Settings is a layered feature (`domain::settings`, `application::settings::SettingsService`, `infrastructure/postgres/repositories/settings.rs`, `interface/chat/settings.rs`'s `SettingsModule`) whose data every *other* feature reads — todo and reminder format timestamps against the sender's zone, finance and portfolio default an amount's currency to it — and which `interface/http/settings.rs` exposes to the web UI. Rows in `user_settings` are keyed by `owner_id`, the same account key every other table uses, and a user has no row until they change something: this is a domain rule (`UserSettings::default()`, UTC/USD), not something baked into SQL — the repository returns `None` for a missing row, and `SettingsService::get`/`get_or_default` apply the default. `get_or_default` additionally swallows a database error into the defaults for a read that must not fail the caller's own work (a command reply, another feature's read path) — a settings lookup must never be the reason a `!todo list` reply is lost.
 
-Every write goes through `SettingsService`, which validates `timezone`/`currency` before persisting regardless of what built the row (`save`), or reads-modifies-writes one field at a time in a single transaction with the row locked (`modify`, `SELECT ... FOR UPDATE`) so two concurrent changes for the same owner cannot interleave and lose one side's update. `SettingsModule::handle_command` broadcasts `SettingsUpdated` (via the service, after commit) on a successful save and on nothing else — a read or a rejected value announces no change. Portfolio follows the same discipline (below). **Todo, Reminder, and Finance do not yet broadcast from the Matrix path** (`due_reminder.rs` documents that gap); the `Option<&EventBroadcaster>` parameter `BotModule::handle_command` takes for that purpose is there so they can.
+
+Every write goes through `SettingsService`, which validates `timezone`/`currency` before persisting regardless of what built the row (`save`), or reads-modifies-writes one field at a time in a single transaction with the row locked (`modify`, `SELECT ... FOR UPDATE`) so two concurrent changes for the same owner cannot interleave and lose one side's update. `SettingsModule::handle_command` broadcasts `SettingsUpdated` (via the service, after commit) on a successful save and on nothing else — a read or a rejected value announces no change. Portfolio follows the same discipline (below).
+
 
 `utils::format_datetime` takes a `chrono_tz::Tz` rather than assuming UTC, and `todo`/`reminder` handlers resolve the sender's zone once, *after* the command is claimed, so an unrelated room message costs no query. The finance handler's `DEFAULT_CURRENCY` constant is gone: `parse_entry` takes the sender's saved currency, so `!expense add 9.99 coffee` books in what they actually spend. An explicit code in the command still wins.
 
@@ -127,17 +130,17 @@ On the frontend, `core/settings.ts` is the single source — `useSettings()` rea
 
 ## Voice replies (`!say`)
 
-`interface/chat/tts` speaks a reply into the room as a native Matrix voice message. It prepares the text (`text.rs` strips HTML and emoji — the phonemiser has no reading for `🔊` or `✅`, and leaving them in produces unpredictable silent gaps mid-sentence), resolves which voice speaks, and uploads the result. Synthesis itself happens elsewhere: `infrastructure/inference/tts` reaches `POST /v1/audio/speech`, served by the bundled inference server's Kokoro (`inference/src/kokoro.rs`) or by any OpenAI-compatible or ElevenLabs provider, chosen by `TTS_BASE_URL` / `TTS_DIALECT`. An unset base URL makes `!say` answer that speech is unavailable, and nothing else changes — the same degrade-one-feature shape `infrastructure/inference/ocr` and `infrastructure/inference/stt` use.
+`interface/chat/tts` speaks a reply into the room as a native Matrix voice message. It prepares the text (`text.rs` strips HTML and emoji — the phonemiser has no reading for `🔊` or `✅`, and leaving them in produces unpredictable silent gaps mid-sentence), resolves which voice speaks, and uploads the result. Synthesis itself happens elsewhere: `infrastructure/inference/tts` reaches `POST /v1/audio/speech`, served by the bundled inference server's Kokoro (`inference/src/tts/kokoro.rs`) or by any OpenAI-compatible or ElevenLabs provider, chosen by `TTS_BASE_URL` / `TTS_DIALECT`. An unset base URL makes `!say` answer that speech is unavailable, and nothing else changes — the same degrade-one-feature shape `infrastructure/inference/ocr` and `infrastructure/inference/stt` use.
 
-The reply is **Ogg Opus, not WAV**, and that is what makes a client draw a voice bubble instead of a file card. The bundled server adds `X-Duration-Ms` and `X-Waveform` response headers, which a Matrix voice message needs and raw audio does not carry. A provider that omits them — every third-party one — still produces a bubble: `infrastructure::inference::tts::ogg_opus_duration` reads the duration straight from the Ogg container, the last page's granule position minus the `OpusHead` pre-skip, and the bubble simply has no amplitude bars. The granule arithmetic of the encoder itself (`inference/src/opus.rs`) has no equivalent local check; it is verified externally with `ffprobe` over the route's own output.
+The reply is **Ogg Opus, not WAV**, and that is what makes a client draw a voice bubble instead of a file card. The bundled server adds `X-Duration-Ms` and `X-Waveform` response headers, which a Matrix voice message needs and raw audio does not carry. A provider that omits them — every third-party one — still produces a bubble: `infrastructure::inference::tts::ogg_opus_duration` reads the duration straight from the Ogg container, the last page's granule position minus the `OpusHead` pre-skip, and the bubble simply has no amplitude bars. The granule arithmetic of the encoder itself (`inference/src/tts/opus.rs`) has no equivalent local check; it is verified externally with `ffprobe` over the route's own output.
 
 The per-user voice is `user_settings.tts_voice: Option<String>`, and `TTS_VOICE` is the house default for someone who has never chosen. It is an `Option` rather than a plain string for the same reason it was an `Option<i64>` before this crate split: `"0"` is a real Kokoro voice, so a bare default would make "never customised" and "chose voice 0" indistinguishable. `!settings voice <voice|none>` validates only the *shape* of a saved value (`parse_tts_voice`) — a Kokoro id, an OpenAI name and an ElevenLabs id all fit the same shape, and the bot has no way to know which voices a configured provider actually has. The bundled server is the one place that does know: it clamps an out-of-range Kokoro id to the nearest valid voice (`kokoro::clamp_speaker_id`) rather than failing the request, and answers 400 to a voice that is not an integer at all.
 
-The Kokoro engine loads once into a `static OnceLock`, deliberately unlike `inference/src/sherpa.rs`, which rebuilds its SenseVoice recogniser on every call — that is fine for a small model loading in milliseconds and wrong for Kokoro, which is 311 MB and takes seconds. It is provisioned at inference server startup the same way the other models are: downloaded from the sherpa-onnx `tts-models` release archive, unpacked into a staging directory, and renamed into place so a route never sees a partial model. Its text-normalisation FSTs ship inside that same archive.
+The Kokoro engine loads once into a `static OnceLock`, deliberately unlike `inference/src/stt/sherpa.rs`, which rebuilds its SenseVoice recogniser on every call — that is fine for a small model loading in milliseconds and wrong for Kokoro, which is 311 MB and takes seconds. It is provisioned at inference server startup the same way the other models are: downloaded from the sherpa-onnx `tts-models` release archive, unpacked into a staging directory, and renamed into place so a route never sees a partial model. Its text-normalisation FSTs ship inside that same archive.
 
-Two build facts follow from the encoder and the runtime living in a separate crate. `matrix-bot-inference` needs `cmake`, because `opusic-sys` compiles a vendored libopus from source for `inference/src/opus.rs`; the bot needs neither `cmake` nor any sherpa shared library at all. On a Windows development machine, a test that loads the real Kokoro model needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
+Two build facts follow from the encoder and the runtime living in a separate crate. `matrix-bot-inference` needs `cmake`, because `opusic-sys` compiles a vendored libopus from source for `inference/src/tts/opus.rs`; the bot needs neither `cmake` nor any sherpa shared library at all. On a Windows development machine, a test that loads the real Kokoro model needs sherpa's own `onnxruntime.dll` copied into `target/debug/deps/` — see that test's own comment in `inference/src/tts/kokoro.rs` for why a version mismatch there dies with an access violation rather than a clean error.
 
-## Two crates, services and inference
+## External services and the inference crate
 
 The workspace has two members. `backend/` builds `matrix-bot`; `inference/` builds `matrix-bot-inference`, an Axum server that hosts the local ONNX models. `default-members = ["backend"]` keeps bare `cargo run` meaning the bot, and `cargo test -p matrix-bot` is the everyday suite — `cargo test --workspace` additionally builds the crate carrying the native ML dependencies, which is why CI scopes the backend jobs explicitly.
 
@@ -146,8 +149,6 @@ OCR reaches the inference server over HTTP via `infrastructure/inference/ocr`, s
 The inference server provisions models in the background (`provision.rs`), spawned beside the listener rather than awaited in front of it, so `/health` answers at once and each route reports 503 until its own files land. Every wire contract between the two crates that a client actually consumes is a JSON fixture in `contracts/` asserted by both sides — a format only one side speaks (the inference server's `verbose_json`, which the bot never requests) is asserted by that side alone — because the two crates' types are separate by design and nothing else would notice a renamed field.
 
 `backend/src/infrastructure/inference/` is the boundary this split created. `interface/` and `application/` define what the application does; `infrastructure/` is how external capabilities are reached. Nothing in `infrastructure/` may import from `interface/` or `application/` — `infrastructure::inference::ocr::OcrScan` is a separate type from `interface::chat::ocr::OcrResult` for exactly that reason, with a `From` impl doing the mapping.
-
-`infrastructure/inference/llm` is the LLM transport: any OpenAI-compatible chat-completions API reached by base URL alone, plus the wire types (`ChatCompletionRequest`, `ToolDefinition`, ...). `llm/` and `interface/chat/llm.rs` keep everything that is the bot's business — prompts, the tool loop, conversation storage, and `resolved_config.rs`, which merges the env defaults with a user's saved AI settings and hands the transport only its `endpoint()`. There is deliberately no per-vendor provider enum: base URL already reaches xAI, OpenAI, Ollama, vLLM and the rest. Text to speech is the one place a dialect exists, because ElevenLabs puts the voice in the URL path, which no base URL can express.
 
 ## Portfolio (investment holdings)
 
@@ -158,24 +159,6 @@ Quantity goes through the same integer-minor-units technique `finance::money` us
 Selling the full quantity held deletes the row — average cost has no meaning for a position of zero. `portfolio_holdings` has no `room_id`/`sender_name`, unlike `transactions`: a holding is a per-owner aggregate like `finance_categories`, not a room-broadcast event log, so there is nothing room-scoped to record.
 
 **Cash is a hard precondition for buying, never for selling.** `portfolio_cash_balances` holds one row per `(owner_id, currency)`, the same "no row until you touch it" convention as `user_settings` — a missing row reads as a zero balance, enforced in `portfolio::cash_repo`, not a schema `CHECK` (nothing in the migrations uses one). `trade::buy` calls `cash_repo::withdraw_cash` as its funding gate: the "is there enough?" check and the debit happen inside that one function, so there is no separate check-then-act window for a concurrent buy to race — if funds are short, `BuyOutcome::InsufficientCash` comes back and *nothing* is written, on either table. `sell` always succeeds in crediting cash with the **gross proceeds** (`cost_of(qty_sold, sell_price)`), not the realized P&L — a losing sale still returns the principal that came back out. `set_price`/`set_note`/`delete` never touch cash: only `buy` and `sell`, the two commands that represent an actual money-for-shares exchange, do. The holding write and the cash write happen inside one transaction in `application::portfolio::trade`, so a buy cannot debit cash without recording the position.
-
-## Persistence and migrations
-
-`db/migrate.rs::run_migrations` is the only migration mechanism: `sqlx::migrate!("./migrations")` applies every file in `backend/migrations/` in order, tracked in `_sqlx_migrations`, serialised across concurrent boots by sqlx's own advisory lock. Migrations are forward-only — a committed migration is never edited; a mistake is fixed by a new migration, not a rewritten old one.
-
-`0001_baseline.sql` is the one migration that looks unlike the rest: it is idempotent DDL (`CREATE TABLE IF NOT EXISTS`, deterministic `ADD COLUMN IF NOT EXISTS`), because its job is to *adopt* the shape the old hand-rolled `db/schema.rs` runner had already built on the live database, not to build the database itself. It reproduces that runner's schema column-for-column, index-for-index, trigger-for-trigger, but deliberately omits data statements — a fresh database has no rows to touch, and the live database already ran them — including the legacy `owner_id` backfill, the credential-less `active` → `unclaimed` demotion, and the `sender_mxid` → `owner_id` rename on `todos`, `reminders`, `transactions` and `recurring_bills` (a rename is also unrepeatable: it would fail on a column that no longer exists). This makes adoption a **precondition, not an automatic step**: the live database must already run current master (pre-branch) once before upgrading, so its schema already equals what `0001_baseline.sql` describes; upgrading straight from an older schema skips the rename and backfill and leaves missing the columns/rows `0001` assumes exist. The production rehearsal test (`migrates_a_real_database`, below) is the release gate that catches drift from this precondition before it reaches production. Every migration after `0001` is a plain forward-only SQL file with no such idempotence requirement, because there is no second adoption to perform.
-
-Because a migration runs against a real, populated database exactly once, a data- or type-rewriting migration is rehearsed before release: restore a `pg_dump` of production locally and run `cargo test -p matrix-bot migrates_a_real_database -- --ignored` (see `catalog.rs`), which applies the migrations to the copy, asserts every table's row count is unchanged, asserts the resulting schema matches what a fresh database gets from the same migrations, and re-verifies every portfolio audit chain. Never point it at production itself — it mutates whatever it is pointed at.
-
-## PostgreSQL only
-
-PostgreSQL is the only application database: `DATABASE_URL` is required and must be `postgres://` or `postgresql://`, and the process refuses to boot otherwise. The one exception is matrix-sdk's own crypto store, which stays SQLite under `data/` regardless of `DATABASE_URL` — that store is matrix-sdk's, not this application's, and is out of scope for this cut. See `docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` for the decision and its rationale, and `docs/POSTGRES_MIGRATION.md` for the history of what differed under the old dual-dialect design.
-
-## Layer-first layout
-
-`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` §3 is the realized architecture: `domain/ → application/ → interface/{http,chat,channels,mcp}, llm/, jobs/, events/ → infrastructure/{postgres,inference}`. `interface/` takes over the role a generic `api/` + `adapters/` split would play elsewhere — it is where Axum handlers, the chat command router, channel adapters (Matrix today, Discord/Telegram later), and the MCP surface live, all translating an inbound request into an application command and an application result back into a response. `llm/` and `jobs/` sit beside `interface/` rather than under it, because a tool-calling loop or a background job handler calls into `application` the same way an HTTP handler does. `domain` depends on nothing but `std`, `chrono`, `uuid`, `serde`, and `thiserror`; `application` depends on `domain` and on the repository/adapter implementations `infrastructure` provides; nothing depends back up the chain.
-
-All features have migrated from `modules/` into the layer-first layout, and the `modules/` directory and interim `db_*!`/`tx_*!` query macros have been deleted. `AppServices` (`application/mod.rs`), built once per process in `app.rs`, wires services together and is threaded to adapters. `backend/tests/architecture.rs` programmatically enforces layer boundaries, pure domain modules, zero raw SQL in `interface/` and `application/`, and restriction of `AssertSqlSafe` to `infrastructure/postgres/merge.rs`.
 
 ## Frontend module mirror
 

@@ -22,7 +22,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
    2. `AGENTS.md` (hard rules, Engineering Principles, Definition of Done);
    3. `docs/superpowers/specs/2026-09-24-postgres-foundation-design.md` (the binding design for the current sub-project);
    4. `docs/superpowers/plans/2026-09-25-feature-layering.md` (the plan in progress).
-3. Set up the environment and start the test database (`docs/DEVELOPMENT.md`), then run the verification list (§5). It must be green before you change anything.
+3. Set up the environment and start the test database (README *Development* and `docs/database.md` → *Test databases*), then run the verification list (§5). It must be green before you change anything.
 4. Continue at **§7 Next actions**.
 
 ## 1. What the refactor is
@@ -99,7 +99,7 @@ backend/src/
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
 | 8 | Job queue (`0003_jobs`), then move the reminder, briefing, portfolio and bills loops onto it | ☐ needs a plan | — |
 | 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`) | ☐ needs a plan | — |
-| 10 | Docs: `AGENTS.md` (remove the macro and portability rules; add layer and migration rules) and `docs/ARCHITECTURE.md` | ☐ | — |
+| 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | this commit (`docs: rebuild documentation`) |
 
 ### Step 6: feature layering (`docs/superpowers/plans/2026-09-25-feature-layering.md`)
 
@@ -192,8 +192,8 @@ The tests create a schema per test and never drop it, which is why the container
 
 ## 7. Next actions (in order)
 
-1. **Step 8: job queue (`0003_jobs`).** Write the design, get the user's approval, then the plan (`docs/plan_eliminate_spec_gaps.md` and `SPEC.md` §5.1 outline it): `jobs` table with `dedupe_key`, `SKIP LOCKED` dequeue, heartbeat reaper, advisory-lock scheduler; then move the reminder, briefing, portfolio-price and bills loops onto it.
-2. **Step 9: outbox (`0004_outbox`)**, then **Step 10: docs** (`AGENTS.md`, `docs/ARCHITECTURE.md`).
+1. **Step 8: job queue (`0003_jobs`).** Write the design, get the user's approval, then the plan (`docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` and `SPEC.md` §5.1 outline it): `jobs` table with `dedupe_key`, `SKIP LOCKED` dequeue, heartbeat reaper, advisory-lock scheduler; then move the reminder, briefing, portfolio-price and bills loops onto it.
+2. **Step 9: outbox (`0004_outbox`)**. When steps 8–9 land, update `docs/architecture.md`, `docs/api.md` (webhook queue) and `docs/database.md` in the same commits.
 3. Follow-up debt from step 7 (R15): retype the `&str` account-id facades (`accounts/*`, `llm/tools/*`) to `AccountId`, then delete the nil-UUID fallback.
 4. Hand the user the merge gates (§10). Merge only on their instruction.
 5. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
@@ -289,7 +289,7 @@ Each feature task also:
 
 These need the human. Prepare them; don't perform them.
 
-1. **Production rehearsal:** restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/runbooks/postgres-foundation-cutover.md`).
+1. **Production rehearsal:** restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/superpowers/runbooks/postgres-foundation-cutover.md`).
 2. **Supervised first boot on matrix-sdk 0.18** against a **copy** of `data/`, following the watch list in the runbook.
 3. **Stray device:** the user checks the bot account for a stray device from about 2026-09-25 00:24 local time.
 
@@ -313,8 +313,11 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-09-25-layer-skeleton.md` | Step 5 (done) |
 | `docs/superpowers/plans/2026-09-25-feature-layering.md` | Step 6: Tasks 1–14, decisions D-A…D-H, the Feature Migration Contract |
 | `docs/superpowers/plans/2026-09-25-feature-survey.md` | Per-feature facts: sizes, tables, coupling, transactions, adapters |
-| `docs/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
-| `AGENTS.md` | Hard rules, Engineering Principles, Definition of Done, Security Rules |
-| `docs/ARCHITECTURE.md` | Rationale behind the non-obvious design choices |
-| `docs/DEVELOPMENT.md` | Environment setup, test database, every test suite, troubleshooting |
-| `docs/GITEA.md` | Remotes, branches, pull requests, Gitea Actions CI, agent rules for the forge |
+| `docs/superpowers/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
+| `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
+| `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |
+| `docs/database.md` | Schema and SQLx conventions, migrations, test databases |
+| `docs/api.md` | REST/SSE conventions, authentication, webhooks, OpenAPI workflow |
+| `docs/llm.md` | LLM transport, tool loop, agent limits, MCP |
+| `README.md` | Setup, deployment, *Development* (toolchain, tests, Gitea and CI) |
+| `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` | Master plan across all four sub-projects |
