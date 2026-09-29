@@ -310,3 +310,97 @@ fn no_sqlx_in_interface_or_application() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn job_runtime_knows_no_transport_and_runs_no_sql() {
+    // Production code only: runtime tests assert on job rows directly.
+    let v = production_violations(
+        "jobs",
+        &[
+            "axum",
+            "matrix_sdk",
+            "utoipa",
+            "reqwest",
+            "crate::interface",
+            "sqlx::query",
+            "query!",
+            "query_as!",
+            "query_scalar!",
+            "QueryBuilder",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "jobs/ may use services and repositories only:\n{}",
+        v.join("\n")
+    );
+}
+
+#[test]
+fn lower_layers_do_not_import_the_job_runtime() {
+    for dir in ["domain", "application", "infrastructure"] {
+        let v = violations(dir, &["crate::jobs"]);
+        assert!(
+            v.is_empty(),
+            "{dir}/ must not depend on crate::jobs:\n{}",
+            v.join("\n")
+        );
+    }
+}
+
+/// Like `violations`, but ignores `#[cfg(test)]` items (a `mod tests { .. }`
+/// block or a brace-less `mod fake;`): handler tests may legitimately read
+/// state, while production handler code may not.
+fn production_violations(dir: &str, forbidden: &[&str]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in rust_files(&src(dir)) {
+        let text = fs::read_to_string(&file).expect("readable source file");
+        let mut pending_test_attr = false;
+        let mut skipped_depth = 0i64;
+        for (n, line) in text.lines().enumerate() {
+            let code = strip_comments_and_strings(line);
+            let opens = code.matches('{').count() as i64;
+            let closes = code.matches('}').count() as i64;
+            if skipped_depth > 0 {
+                skipped_depth += opens - closes;
+                continue;
+            }
+            if code.contains("#[cfg(test)]") {
+                pending_test_attr = true;
+                continue;
+            }
+            if pending_test_attr {
+                let trimmed = code.trim();
+                if trimmed.is_empty() || trimmed.starts_with("#[") {
+                    continue;
+                }
+                if opens > 0 {
+                    skipped_depth = opens - closes;
+                    pending_test_attr = false;
+                } else if code.contains(';') {
+                    pending_test_attr = false;
+                }
+                continue;
+            }
+            if forbidden.iter().any(|needle| code.contains(needle)) {
+                found.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn job_handlers_are_interface_code() {
+    // interface_runs_no_sql already scans interface/ recursively; this pins
+    // that the handlers live there (a missing dir panics in rust_files).
+    let v = production_violations(
+        "interface/jobs",
+        &["sqlx::", "crate::infrastructure::postgres::repositories"],
+    );
+    assert!(
+        v.is_empty(),
+        "job handlers call services, never repositories:\n{}",
+        v.join("\n")
+    );
+}
