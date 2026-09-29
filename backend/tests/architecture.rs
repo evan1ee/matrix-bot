@@ -507,3 +507,25 @@ fn interface_never_records_passkey_security_events() {
         offending.join("\n")
     );
 }
+
+/// `recovery_completed` and its siblings are written by `AccountService`
+/// (`redeem_recovery_code`, `redeem_recovery_request`), once per recovery. The
+/// HTTP layer once wrote a second row after opening the session; it may not
+/// name a recovery event kind at all. (Chat names them only to word a DM.)
+#[test]
+fn http_never_records_recovery_security_events() {
+    let dir = src("interface/http");
+    assert!(
+        dir.is_dir(),
+        "expected {} to exist — did interface/http move or get renamed?",
+        dir.display()
+    );
+
+    let offending = production_violations("interface/http", &["SecurityEventKind::Recovery"]);
+    assert!(
+        offending.is_empty(),
+        "interface/http production code must not name recovery security-event kinds; \
+         AccountService records them:\n{}",
+        offending.join("\n")
+    );
+}

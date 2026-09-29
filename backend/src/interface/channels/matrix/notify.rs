@@ -19,20 +19,20 @@ use matrix_sdk::ruma::UserId;
 use matrix_sdk::Client;
 use tracing::{error, warn};
 
-use crate::accounts::{AccountRepository, SecurityEventKind, SecurityEventRepository};
-use crate::db::Database;
-use crate::domain::accounts::AccountId;
+use crate::application::accounts::AccountService;
+use crate::domain::accounts::{AccountId, SecurityEventKind};
 
-/// Records an event and announces it to every linked Matrix identity.
-pub async fn notify_account(
+/// Announces an event to every linked Matrix identity.
+///
+/// Writes no audit row: `AccountService` records the event exactly once, in the
+/// operation that caused it, and a second row here would double it.
+pub async fn announce_account(
     client: Option<&Client>,
-    db: &Database,
+    accounts: &AccountService,
     account_id: &AccountId,
     kind: SecurityEventKind,
     detail: Option<&str>,
 ) {
-    SecurityEventRepository::record(&db.pool, account_id, kind, detail).await;
-
     if !kind.warrants_a_dm() {
         return;
     }
@@ -46,7 +46,7 @@ pub async fn notify_account(
         return;
     };
 
-    let mxids = match AccountRepository::linked_mxids(&db.pool, account_id).await {
+    let mxids = match accounts.linked_mxids(account_id).await {
         Ok(mxids) => mxids,
         Err(err) => {
             error!(
@@ -148,47 +148,57 @@ pub async fn send_dm_html(client: &Client, mxid: &str, plain: &str, html: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{AccountRepository, SecurityEventRepository, STATUS_ACTIVE};
+    use crate::application::AppServices;
+    use crate::domain::accounts::STATUS_ACTIVE;
 
-    async fn db() -> Database {
+    async fn services() -> AppServices {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        Database { pool }
+        AppServices::new(&pool)
     }
 
-    /// With no Matrix client the event must still be recorded. An account with
-    /// no linked identity would otherwise have no record of anything at all.
+    /// The audit row is `AccountService`'s to write, once. Announcing with
+    /// nowhere to send it must therefore leave the log exactly as it found it,
+    /// or every announcement would double the row the service already wrote.
     #[tokio::test]
-    async fn test_the_event_is_logged_even_with_nowhere_to_send_it() {
-        let db = db().await;
-        let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
+    async fn test_announcing_writes_no_audit_row_of_its_own() {
+        let services = services().await;
+        let acct_id = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let acct_id = AccountId::from(account.as_str());
 
-        notify_account(
+        announce_account(
             None,
-            &db,
+            &services.accounts,
             &acct_id,
             SecurityEventKind::RecoveryRequested,
             Some("from @evan:mbm.one"),
         )
         .await;
 
-        let events = SecurityEventRepository::list(&db.pool, &acct_id, 10)
+        let events = services
+            .accounts
+            .list_security_events(&acct_id, 10)
             .await
             .unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "recovery_requested");
-        assert_eq!(events[0].detail.as_deref(), Some("from @evan:mbm.one"));
+        assert!(events.is_empty(), "announcing must not record: {events:?}");
     }
 
-    /// Notifying an account that has since been deleted must not panic — the
+    /// Announcing an account that has since been deleted must not panic — the
     /// row is gone, the log line is orphaned, and the caller carries on.
     #[tokio::test]
     async fn test_notifying_a_missing_account_is_harmless() {
-        let db = db().await;
+        let services = services().await;
         let acct_id = AccountId::from("acct_gone");
-        notify_account(None, &db, &acct_id, SecurityEventKind::PasskeyRemoved, None).await;
+        announce_account(
+            None,
+            &services.accounts,
+            &acct_id,
+            SecurityEventKind::PasskeyRemoved,
+            None,
+        )
+        .await;
     }
 }

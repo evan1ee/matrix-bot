@@ -6,14 +6,12 @@ use axum::{
     response::Response,
     Json,
 };
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
-use crate::domain::accounts::{
-    hash_token, SecurityEventKind, COOKIE_NAME, RECOVERY_RESTRICTION_HOURS,
-};
+use crate::domain::accounts::{hash_token, restriction_expiry, COOKIE_NAME};
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::{with_session_cookie, SessionResponse};
@@ -112,7 +110,6 @@ pub async fn redeem_recovery(
     if resolved_account_id.is_none() {
         if let Ok(account_id) = crate::interface::chat::account::redeem_matured_recovery(
             &state.services.accounts,
-            &state.db,
             None,
             code,
         )
@@ -153,7 +150,7 @@ pub async fn redeem_recovery(
         .and_then(|v| v.to_str().ok());
 
     // Mint a restricted session (restricted to registering a new passkey)
-    let restricted_until = Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS);
+    let restricted_until = restriction_expiry(Utc::now());
     let token = state
         .services
         .accounts
@@ -165,13 +162,6 @@ pub async fn redeem_recovery(
         )
         .await
         .map_err(|err| ApiError::internal(format!("Could not open restricted session: {err}")))?;
-
-    // Record security event
-    state
-        .services
-        .accounts
-        .record_security_event(&account_id, SecurityEventKind::RecoveryCompleted, None)
-        .await;
 
     let body = Json(SessionResponse {
         account_id: account_id.to_string(),
@@ -186,6 +176,7 @@ mod tests {
     use super::*;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
+    use chrono::Duration;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {
@@ -249,6 +240,154 @@ mod tests {
         )
         .await;
         assert!(res_bad.is_err());
+    }
+
+    async fn state_with_account() -> (ApiState, crate::domain::accounts::AccountId) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            EventBroadcaster::default(),
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let account_id = state
+            .services
+            .accounts
+            .create("Recovery User", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+        (state, account_id)
+    }
+
+    async fn audit_kinds(
+        state: &ApiState,
+        account_id: &crate::domain::accounts::AccountId,
+    ) -> Vec<String> {
+        let mut kinds: Vec<String> = state
+            .services
+            .accounts
+            .list_security_events(account_id, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        kinds.sort();
+        kinds
+    }
+
+    fn redeem_request(code: &str) -> Json<RedeemRecoveryRequest> {
+        Json(RedeemRecoveryRequest {
+            code: code.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn redeeming_a_code_records_exactly_the_events_it_did_before() {
+        let (state, account_id) = state_with_account().await;
+        let codes = state
+            .services
+            .accounts
+            .issue_recovery_codes(&account_id)
+            .await
+            .unwrap();
+
+        redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&codes[0]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            audit_kinds(&state, &account_id).await,
+            vec![
+                "recovery_code_used",
+                "recovery_codes_issued",
+                "recovery_completed"
+            ]
+        );
+    }
+
+    /// A matured `!recover` code used through the web is one recovery, so it
+    /// leaves one `recovery_completed` row, whichever layer announced it.
+    #[tokio::test]
+    async fn a_matured_request_records_recovery_completed_once() {
+        let (state, account_id) = state_with_account().await;
+        let (code, _) = state
+            .services
+            .accounts
+            .request_recovery(&account_id, None)
+            .await
+            .unwrap();
+        crate::infrastructure::postgres::repositories::accounts::recovery::set_valid_after(
+            &state.db.pool,
+            &account_id,
+            Utc::now() - Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+
+        redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&code),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            audit_kinds(&state, &account_id).await,
+            vec!["recovery_completed", "recovery_requested"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_recovery_session_is_restricted_for_72_hours() {
+        let (state, account_id) = state_with_account().await;
+        let codes = state
+            .services
+            .accounts
+            .issue_recovery_codes(&account_id)
+            .await
+            .unwrap();
+        let before = Utc::now();
+
+        let response = redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&codes[0]),
+        )
+        .await
+        .unwrap();
+
+        let set_cookie = response
+            .headers()
+            .get(axum::http::header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap();
+        let token = crate::domain::accounts::cookie_value(set_cookie, COOKIE_NAME).unwrap();
+        let session = state
+            .services
+            .accounts
+            .resolve_session(token)
+            .await
+            .unwrap()
+            .unwrap();
+        let expected = crate::domain::accounts::restriction_expiry(before);
+        let restricted_until = session
+            .restricted_until
+            .expect("session must be restricted");
+        assert!(
+            (restricted_until - expected).num_seconds().abs() <= 5,
+            "restricted_until {restricted_until} should be ~{expected}"
+        );
     }
 
     #[tokio::test]

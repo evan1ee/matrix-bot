@@ -215,21 +215,29 @@ impl AccountService {
         Ok(recovery::remaining(&self.pool, account_id).await?)
     }
 
+    /// Consumes a backup code. Redeeming one is the whole of that recovery, so
+    /// it records both the use and the completion, once each; callers only
+    /// open the restricted session.
     pub async fn redeem_recovery_code(&self, code: &str) -> Result<Option<AccountId>, AppError> {
         let maybe_acct = recovery::redeem(&self.pool, code).await?;
         if let Some(ref account_id) = maybe_acct {
             self.record_security_event(account_id, SecurityEventKind::RecoveryCodeUsed, None)
                 .await;
+            self.record_security_event(account_id, SecurityEventKind::RecoveryCompleted, None)
+                .await;
         }
         Ok(maybe_acct)
     }
 
+    /// Starts a Matrix-initiated recovery and records the single
+    /// `recovery_requested` row; `detail` says who asked.
     pub async fn request_recovery(
         &self,
         account_id: &AccountId,
+        detail: Option<&str>,
     ) -> Result<(String, DateTime<Utc>), AppError> {
         let res = recovery::request(&self.pool, account_id).await?;
-        self.record_security_event(account_id, SecurityEventKind::RecoveryRequested, None)
+        self.record_security_event(account_id, SecurityEventKind::RecoveryRequested, detail)
             .await;
         Ok(res)
     }
@@ -250,6 +258,8 @@ impl AccountService {
         Ok(recovery::pending(&self.pool, account_id).await?)
     }
 
+    /// Redeems a matured `!recover` code. Records `recovery_completed` itself;
+    /// no caller may record it again.
     pub async fn redeem_recovery_request(&self, code: &str) -> Result<MaturedRecovery, AppError> {
         let res = recovery::redeem_request(&self.pool, code).await?;
         if let MaturedRecovery::Ready { ref account_id } = res {

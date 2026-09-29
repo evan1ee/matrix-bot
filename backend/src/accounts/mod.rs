@@ -26,7 +26,6 @@
 //! steal by guessing its id.
 
 pub mod linking;
-pub mod recovery;
 pub mod repository;
 pub mod security_events;
 
@@ -37,7 +36,6 @@ pub use crate::domain::accounts::{
     STATUS_UNCLAIMED,
 };
 pub use linking::{LinkOutcome, LinkRepository};
-pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;
 pub use security_events::{SecurityEventKind, SecurityEventRepository};
 

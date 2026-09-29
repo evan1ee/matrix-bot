@@ -358,7 +358,7 @@ mod tests {
         state
             .services
             .accounts
-            .request_recovery(&user.account_id)
+            .request_recovery(&user.account_id, None)
             .await
             .unwrap();
         assert!(state

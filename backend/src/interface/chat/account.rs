@@ -27,7 +27,7 @@ use crate::domain::accounts::{
     AccountId, MaturedRecovery, SecurityEventKind, RECOVERY_DELAY_HOURS,
 };
 use crate::events::EventBroadcaster;
-use crate::interface::channels::matrix::notify::notify_account;
+use crate::interface::channels::matrix::notify::announce_account;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
 
@@ -105,7 +105,7 @@ impl BotModule for AccountModule {
         &self,
         ctx: &CommandContext,
         services: &AppServices,
-        db: &Database,
+        _db: &Database,
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         let command = ctx.command.to_lowercase();
@@ -121,7 +121,7 @@ impl BotModule for AccountModule {
 
         match command.as_str() {
             "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
-            "recover" => Some(self.handle_recover(ctx, services, db).await),
+            "recover" => Some(self.handle_recover(ctx, services).await),
             _ => None,
         }
     }
@@ -132,12 +132,7 @@ impl AccountModule {
     ///
     /// Refused outside a direct message: the code is in the reply, and a reply
     /// in a shared room would hand it to everyone present.
-    async fn handle_recover(
-        &self,
-        ctx: &CommandContext,
-        services: &AppServices,
-        db: &Database,
-    ) -> String {
+    async fn handle_recover(&self, ctx: &CommandContext, services: &AppServices) -> String {
         if !ctx.is_direct {
             return "Send <code>!recover</code> in a direct message — the reply contains \
                     a code that must not be shown to a room."
@@ -161,7 +156,12 @@ impl AccountModule {
             );
         }
 
-        let (code, valid_after) = match services.accounts.request_recovery(&ctx.owner_id).await {
+        let detail = format!("requested from {}", ctx.sender_mxid);
+        let (code, valid_after) = match services
+            .accounts
+            .request_recovery(&ctx.owner_id, Some(&detail))
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 tracing::error!("Could not start recovery for {}: {:?}", ctx.owner_id, err);
@@ -173,12 +173,12 @@ impl AccountModule {
         // else started this, the real owner has to hear about it — on a channel
         // the attacker may not control.
         let client = self.client.read().await.clone();
-        notify_account(
+        announce_account(
             client.as_ref(),
-            db,
+            &services.accounts,
             &ctx.owner_id,
             SecurityEventKind::RecoveryRequested,
-            Some(&format!("requested from {}", ctx.sender_mxid)),
+            Some(&detail),
         )
         .await;
 
@@ -320,15 +320,14 @@ impl AccountModule {
 /// Redeems a matured recovery code presented in the web UI.
 pub async fn redeem_matured_recovery(
     accounts: &AccountService,
-    db: &Database,
     client: Option<&Client>,
     code: &str,
 ) -> Result<AccountId, RecoveryRejection> {
     match accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
-            notify_account(
+            announce_account(
                 client,
-                db,
+                accounts,
                 &account_id,
                 SecurityEventKind::RecoveryCompleted,
                 None,
@@ -509,16 +508,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_premature_code_is_refused_in_the_web_ui_too() {
-        let (db, services) = setup().await;
+        let (_db, services) = setup().await;
         let account = services
             .accounts
             .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, &db, None, &code)
+            redeem_matured_recovery(&services.accounts, None, &code)
                 .await
                 .unwrap_err(),
             RecoveryRejection::TooEarly
@@ -533,7 +536,11 @@ mod tests {
             .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
 
         repo::recovery::set_valid_after(
             &db.pool,
@@ -544,7 +551,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, &db, None, &code)
+            redeem_matured_recovery(&services.accounts, None, &code)
                 .await
                 .unwrap(),
             account
@@ -556,6 +563,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_completed");
+    }
+
+    async fn audit_rows(
+        services: &AppServices,
+        account: &AccountId,
+    ) -> Vec<(String, Option<String>)> {
+        let mut rows: Vec<_> = services
+            .accounts
+            .list_security_events(account, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.kind, e.detail))
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    /// `!recover` leaves exactly one `recovery_requested` row, carrying who asked.
+    #[tokio::test]
+    async fn test_recover_records_one_request_row_with_the_requester() {
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        module()
+            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            audit_rows(&services, &account).await,
+            vec![(
+                "recovery_requested".to_string(),
+                Some("requested from @evan:mbm.one".to_string())
+            )]
+        );
+    }
+
+    /// Redeeming a matured code is one recovery: one `recovery_completed` row.
+    #[tokio::test]
+    async fn test_a_matured_code_records_recovery_completed_exactly_once() {
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
+        repo::recovery::set_valid_after(
+            &db.pool,
+            &account,
+            chrono::Utc::now() - chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+
+        redeem_matured_recovery(&services.accounts, None, &code)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            audit_rows(&services, &account).await,
+            vec![
+                ("recovery_completed".to_string(), None),
+                ("recovery_requested".to_string(), None),
+            ]
+        );
     }
 
     #[tokio::test]
