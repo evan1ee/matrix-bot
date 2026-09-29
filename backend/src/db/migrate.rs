@@ -221,6 +221,7 @@ mod tests {
             ("web_users", "account_id"),
             ("mcp_tokens", "account_id"),
             ("account_rooms", "account_id"),
+            ("jobs", "account_id"),
         ];
 
         for (table, col) in tables_and_cols {
@@ -480,7 +481,8 @@ mod tests {
 
         for _ in 0..2 {
             sqlx::query(
-                "INSERT INTO jobs (job_type, dedupe_key) VALUES ('t', 'k')                  ON CONFLICT (job_type, dedupe_key) DO NOTHING",
+                "INSERT INTO jobs (job_type, dedupe_key) VALUES ('t', 'k') \
+                 ON CONFLICT (job_type, dedupe_key) DO NOTHING",
             )
             .execute(&pool)
             .await
@@ -491,7 +493,8 @@ mod tests {
                 .unwrap();
         }
         let (keyed, unkeyed): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*) FILTER (WHERE dedupe_key IS NOT NULL),                     COUNT(*) FILTER (WHERE dedupe_key IS NULL) FROM jobs",
+            "SELECT COUNT(*) FILTER (WHERE dedupe_key IS NOT NULL), \
+                    COUNT(*) FILTER (WHERE dedupe_key IS NULL) FROM jobs",
         )
         .fetch_one(&pool)
         .await
