@@ -2,10 +2,9 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
-pub mod scheduler;
 
 pub struct BriefingModule;
 
@@ -57,13 +56,6 @@ impl BotModule for BriefingModule {
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body, broadcaster).await
-    }
-
-    async fn spawn_background_workers(
-        &self,
-        ctx: &ModuleContext,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
-        vec![scheduler::start_briefing_scheduler(ctx.clone())]
     }
 }
 

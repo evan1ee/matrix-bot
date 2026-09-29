@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use crate::application::AppServices;
 use crate::jobs::{JobError, JobHandler};
 
+pub mod briefing;
 pub mod reminders;
 
 #[cfg(test)]
@@ -42,12 +43,18 @@ pub trait Delivery: Send + Sync {
     async fn send_dm(&self, mxid: &str, plain: &str, html: &str) -> Result<(), DeliveryError>;
 }
 
-/// Every job handler; tasks 9-10 register theirs here.
+/// Every job handler; task 10 registers the rest here.
 pub fn handlers(services: &AppServices, delivery: Arc<dyn Delivery>) -> Vec<Arc<dyn JobHandler>> {
-    vec![Arc::new(reminders::ReminderFireHandler::new(
-        services.clone(),
-        delivery,
-    ))]
+    vec![
+        Arc::new(reminders::ReminderFireHandler::new(
+            services.clone(),
+            delivery.clone(),
+        )),
+        Arc::new(briefing::BriefingSendHandler::new(
+            services.clone(),
+            delivery,
+        )),
+    ]
 }
 
 /// A payload that does not parse never will: fail the job now.

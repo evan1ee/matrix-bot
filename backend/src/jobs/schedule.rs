@@ -22,13 +22,24 @@ fn reminders(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
     Box::pin(s.reminders.enqueue_due(now))
 }
 
+fn briefing(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.briefing.enqueue_due(now))
+}
+
 pub fn default_ticks() -> Vec<Tick> {
-    // Tasks 9-10 add briefing (30 s), alerts (120 s), refresh (3600 s).
-    vec![Tick {
-        name: "reminders",
-        every: Duration::from_secs(5),
-        fire: reminders,
-    }]
+    // Task 10 adds alerts (120 s) and refresh (3600 s).
+    vec![
+        Tick {
+            name: "reminders",
+            every: Duration::from_secs(5),
+            fire: reminders,
+        },
+        Tick {
+            name: "briefing",
+            every: Duration::from_secs(30),
+            fire: briefing,
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -41,6 +52,6 @@ mod tests {
             .iter()
             .map(|t| (t.name, t.every.as_secs()))
             .collect();
-        assert_eq!(cadences, [("reminders", 5)]);
+        assert_eq!(cadences, [("reminders", 5), ("briefing", 30)]);
     }
 }

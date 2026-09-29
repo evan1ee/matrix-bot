@@ -121,9 +121,14 @@ impl AppServices {
     pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone(), events.clone());
         let bookmarks = BookmarkService::new(pool.clone(), events.clone());
-        let briefing = BriefingService::new(pool.clone());
-        let finance = FinanceService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool.clone(), events.clone());
+        let briefing = BriefingService::new(
+            pool.clone(),
+            events.clone(),
+            settings.clone(),
+            accounts.clone(),
+        );
+        let finance = FinanceService::new(pool.clone(), events.clone());
         let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
         let habits = HabitService::new(pool.clone(), events.clone());
         let life = LifeService::new(pool.clone(), events.clone());
