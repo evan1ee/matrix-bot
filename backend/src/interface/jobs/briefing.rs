@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::{info, warn};
+use chrono::Utc;
+use tracing::{error, info, warn};
 
 use super::{parse_payload, Delivery, DeliveryError, MATRIX_RETRY};
 use crate::application::briefing::BriefingPayload;
@@ -55,6 +56,14 @@ impl JobHandler for BriefingSendHandler {
         if !settings.briefing_enabled {
             return Ok(());
         }
+        // A job deferred through an outage can outlive its day; sending it
+        // late would double up with the next day's briefing and move
+        // last_briefing_date backwards. Strictly today's local date only.
+        let today = Utc::now().with_timezone(&settings.tz()).date_naive();
+        if p.local_date != today {
+            info!(%owner, job_date = %p.local_date, %today, "Stale briefing job dropped");
+            return Ok(());
+        }
         let briefing = self
             .services
             .briefing
@@ -67,7 +76,12 @@ impl JobHandler for BriefingSendHandler {
         self.services
             .briefing
             .record_sent(&owner, p.local_date, &briefing.summary)
-            .await?;
+            .await
+            .map_err(|err| {
+                // The message may already be out: a retry would send it again.
+                error!(%owner, error = %err, "Briefing sent but the day could not be recorded");
+                JobError::Permanent(anyhow::anyhow!("record briefing day: {err}"))
+            })?;
         info!(%owner, delivered, "Morning briefing completed");
         Ok(())
     }
@@ -102,7 +116,7 @@ impl BriefingSendHandler {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Timelike, Utc};
+    use chrono::{Duration, NaiveDate, Timelike};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -160,8 +174,18 @@ mod tests {
         }
     }
 
-    fn payload() -> serde_json::Value {
-        serde_json::json!({ "local_date": "2026-09-29" })
+    fn payload(date: NaiveDate) -> serde_json::Value {
+        serde_json::json!({ "local_date": date })
+    }
+
+    fn ymd(date: NaiveDate) -> String {
+        date.format("%Y-%m-%d").to_string()
+    }
+
+    /// The account's current local date, as the handler computes it.
+    async fn today(f: &Fixture) -> NaiveDate {
+        let tz = f.services.settings.get_or_default(&f.owner).await.tz();
+        Utc::now().with_timezone(&tz).date_naive()
     }
 
     async fn last_date(f: &Fixture) -> Option<String> {
@@ -185,7 +209,9 @@ mod tests {
         let fake = FakeDelivery::disconnected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
-        let out = handler.run(&ctx(Some(f.owner)), payload()).await;
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
 
         assert!(
             matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
@@ -200,13 +226,15 @@ mod tests {
         let f = fixture("acct_brief_done", true).await;
         f.services
             .settings
-            .update_last_briefing_date(&f.owner, "2026-09-29")
+            .update_last_briefing_date(&f.owner, &ymd(today(&f).await))
             .await
             .unwrap();
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
-        let out = handler.run(&ctx(Some(f.owner)), payload()).await;
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
 
         assert!(out.is_ok(), "{out:?}");
         assert!(fake.room_sends.lock().unwrap().is_empty());
@@ -218,7 +246,9 @@ mod tests {
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
-        let out = handler.run(&ctx(Some(f.owner)), payload()).await;
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
 
         assert!(out.is_ok(), "{out:?}");
         assert!(fake.room_sends.lock().unwrap().is_empty());
@@ -232,14 +262,19 @@ mod tests {
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
-        let out = handler.run(&ctx(Some(f.owner)), payload()).await;
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
 
         assert!(out.is_ok(), "{out:?}");
         let sends = fake.room_sends.lock().unwrap().clone();
         assert_eq!(sends.len(), 1);
         assert_eq!(sends[0].0, ROOM);
         assert!(sends[0].2.contains("早安简报"));
-        assert_eq!(last_date(&f).await.as_deref(), Some("2026-09-29"));
+        assert_eq!(
+            last_date(&f).await.as_deref(),
+            Some(ymd(today(&f).await).as_str())
+        );
         assert_eq!(
             sent_events(&mut rx),
             ["0 tasks, 0 habits, 0 bills, 0 holdings"]
@@ -250,15 +285,25 @@ mod tests {
     #[tokio::test]
     async fn a_failed_send_still_records_the_day() {
         let f = fixture("acct_brief_fail", true).await;
+        let mut rx = f.events.subscribe();
         let handler = BriefingSendHandler::new(
             f.services.clone(),
             FakeDelivery::failing_once("homeserver down"),
         );
 
-        let out = handler.run(&ctx(Some(f.owner)), payload()).await;
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
 
         assert!(out.is_ok(), "{out:?}");
-        assert_eq!(last_date(&f).await.as_deref(), Some("2026-09-29"));
+        assert_eq!(
+            last_date(&f).await.as_deref(),
+            Some(ymd(today(&f).await).as_str())
+        );
+        assert_eq!(
+            sent_events(&mut rx),
+            ["0 tasks, 0 habits, 0 bills, 0 holdings"]
+        );
     }
 
     #[tokio::test]
@@ -266,8 +311,65 @@ mod tests {
         let f = fixture("acct_brief_noacct", true).await;
         let handler = BriefingSendHandler::new(f.services.clone(), FakeDelivery::connected());
 
-        let out = handler.run(&ctx(None), payload()).await;
+        let out = handler.run(&ctx(None), payload(today(&f).await)).await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+    }
+
+    /// A briefing deferred across midnight is stale: nothing is sent,
+    /// recorded or published for a date that is no longer today.
+    #[tokio::test]
+    async fn a_stale_date_is_dropped_without_sending() {
+        let f = fixture("acct_brief_stale", true).await;
+        let mut rx = f.events.subscribe();
+        let fake = FakeDelivery::connected();
+        let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
+        let yesterday = today(&f).await - Duration::days(1);
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(yesterday)).await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert_eq!(last_date(&f).await, None);
+        assert!(sent_events(&mut rx).is_empty());
+    }
+
+    /// Given jobs for two consecutive days that run in the wrong order,
+    /// Then last_briefing_date never moves backwards.
+    #[tokio::test]
+    async fn last_briefing_date_never_moves_backwards() {
+        let f = fixture("acct_brief_order", true).await;
+        let handler = BriefingSendHandler::new(f.services.clone(), FakeDelivery::connected());
+        let now = today(&f).await;
+
+        let newer = handler.run(&ctx(Some(f.owner)), payload(now)).await;
+        let older = handler
+            .run(&ctx(Some(f.owner)), payload(now - Duration::days(1)))
+            .await;
+
+        assert!(newer.is_ok() && older.is_ok(), "{newer:?} {older:?}");
+        assert_eq!(last_date(&f).await, Some(ymd(now)));
+    }
+
+    /// The connection can drop between the pre-check and the send.
+    #[tokio::test]
+    async fn a_connection_lost_during_the_send_waits_and_records_nothing() {
+        let f = fixture("acct_brief_lost", true).await;
+        let fake = FakeDelivery::connected();
+        fake.room_results
+            .lock()
+            .unwrap()
+            .push_back(Err(DeliveryError::NotConnected));
+        let handler = BriefingSendHandler::new(f.services.clone(), fake);
+
+        let out = handler
+            .run(&ctx(Some(f.owner)), payload(today(&f).await))
+            .await;
+
+        assert!(
+            matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
+            "{out:?}"
+        );
+        assert_eq!(last_date(&f).await, None);
     }
 }
