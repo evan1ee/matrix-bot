@@ -64,7 +64,7 @@ impl AccountService {
     }
 
     /// Stores an already-serialised passkey row and records `PasskeyAdded`.
-    pub async fn add_passkey(
+    pub(crate) async fn add_passkey(
         &self,
         account_id: &AccountId,
         credential_id: &str,
@@ -142,10 +142,14 @@ impl AccountService {
     }
 }
 
+/// A serialisation failure is our own fault, not an outside dependency's, so it
+/// is reported as `Database` (protocol error), the variant `app_error.rs` maps
+/// to an opaque 500 with the detail logged; the client never sees it.
 fn serialise(passkey: &Passkey) -> Result<String, AppError> {
-    serde_json::to_string(passkey).map_err(|err| AppError::External {
-        service: "passkey serialisation",
-        source: err.into(),
+    serde_json::to_string(passkey).map_err(|err| {
+        AppError::Database(sqlx::Error::Protocol(format!(
+            "could not serialise passkey: {err}"
+        )))
     })
 }
 

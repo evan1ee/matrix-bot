@@ -65,6 +65,7 @@ pub async fn create(
     Ok(token)
 }
 
+/// Resolves a cookie to a live session, refreshing its idle clock.
 pub async fn resolve(pool: &sqlx::PgPool, token: &str) -> Result<Option<Session>, sqlx::Error> {
     let id_hash = hash_token(token);
 
@@ -102,6 +103,7 @@ pub async fn resolve(pool: &sqlx::PgPool, token: &str) -> Result<Option<Session>
     }))
 }
 
+/// Records that the holder just proved possession of a passkey.
 pub async fn mark_verified(
     conn: impl sqlx::PgExecutor<'_>,
     id_hash: &str,
@@ -127,6 +129,8 @@ pub async fn revoke(conn: impl sqlx::PgExecutor<'_>, id_hash: &str) -> Result<()
     Ok(())
 }
 
+/// Signs out every session for an account except, optionally, the one
+/// asking. Used by "sign out other devices" and by account recovery.
 pub async fn revoke_all_for_account(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,
@@ -146,6 +150,8 @@ pub async fn revoke_all_for_account(
     Ok(affected)
 }
 
+/// Live sessions for an account, newest first -- the "where you are signed
+/// in" list.
 pub async fn list_for_account(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,
