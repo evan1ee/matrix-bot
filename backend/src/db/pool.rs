@@ -50,6 +50,15 @@ pub fn pg_test_url() -> String {
 /// The pool is returned **unmigrated**; callers run whichever schema they need.
 #[cfg(test)]
 pub async fn test_pool() -> crate::db::DbPool {
+    test_pool_sized(2).await
+}
+
+/// [`test_pool`] with an explicit connection cap.
+///
+/// For tests that need more than two concurrent connections (concurrent
+/// claimers, a LISTEN connection, the runtime).
+#[cfg(test)]
+pub async fn test_pool_sized(max_connections: u32) -> crate::db::DbPool {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -77,7 +86,49 @@ pub async fn test_pool() -> crate::db::DbPool {
 
     let separator = if base.contains('?') { "&" } else { "?" };
     let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
-    connect_pool(&scoped, 2).await.expect("scoped test pool")
+    connect_pool(&scoped, max_connections)
+        .await
+        .expect("scoped test pool")
+}
+
+/// A pool on a **private database** of the test server, unmigrated.
+///
+/// For the one thing a schema cannot isolate: `LISTEN`/`NOTIFY` is
+/// database-wide, so a test asserting that *no* notification arrived needs a
+/// database no other test writes to. Needs a role allowed to `CREATE
+/// DATABASE`; like the per-test schemas, the database is left behind.
+#[cfg(test)]
+pub async fn test_pool_private_database(max_connections: u32) -> crate::db::DbPool {
+    use sqlx::postgres::PgConnectOptions;
+    use std::str::FromStr;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let options = PgConnectOptions::from_str(&base).expect("TEST_DATABASE_URL parses");
+    let name = format!(
+        "priv_{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+
+    let admin = connect_pool(&base, 1)
+        .await
+        .expect("TEST_DATABASE_URL must point at a reachable server");
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE DATABASE ")
+        .push(&name)
+        .build()
+        .execute(&admin)
+        .await
+        .expect("CREATE DATABASE needs a role that may create databases");
+    admin.close().await;
+
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect_with(options.database(&name))
+        .await
+        .expect("private database pool")
 }
 
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.

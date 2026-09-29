@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH next_job AS (\n            SELECT id FROM jobs\n            WHERE status = 'pending' AND available_at <= NOW() AND job_type = ANY($2::text[])\n            ORDER BY priority DESC, available_at ASC, id ASC\n            LIMIT 1\n            FOR UPDATE SKIP LOCKED\n        )\n        UPDATE jobs\n        SET status = 'running', locked_at = NOW(), locked_by = $1, started_at = NOW(),\n            heartbeat_at = NOW(), attempts = jobs.attempts + 1, updated_at = NOW()\n        FROM next_job\n        WHERE jobs.id = next_job.id\n        RETURNING jobs.id, jobs.job_type, jobs.account_id, jobs.payload,\n                  jobs.attempts, jobs.max_attempts, jobs.backoff_seconds\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "job_type"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "max_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "max_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "backoff_seconds",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "backoff_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "36b7bad2d0d13bd690fe9184db2b3746bb8960d087a7f4299d45434cd59ac831"
+}
