@@ -485,3 +485,25 @@ fn job_handlers_are_interface_code() {
         v.join("\n")
     );
 }
+
+/// The audit rows for a passkey's lifecycle belong to `AccountService`, which
+/// records them exactly once inside `register_passkey`, `rename_passkey` and
+/// `delete_passkey`. An interface that names a passkey event kind is writing the
+/// row a second time (as `register_finish` once did).
+#[test]
+fn interface_never_records_passkey_security_events() {
+    let dir = src("interface");
+    assert!(
+        dir.is_dir(),
+        "expected {} to exist — did interface/ move or get renamed?",
+        dir.display()
+    );
+
+    let offending = production_violations("interface", &["SecurityEventKind::Passkey"]);
+    assert!(
+        offending.is_empty(),
+        "interface production code must not name passkey security-event kinds; \
+         AccountService records them:\n{}",
+        offending.join("\n")
+    );
+}
