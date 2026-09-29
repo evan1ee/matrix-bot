@@ -468,4 +468,47 @@ mod tests {
         }
         assert!(checked > 0, "expected at least one migration file to check");
     }
+
+    /// Given a migrated schema, When a job row is inserted twice with the same
+    /// (job_type, dedupe_key), Then the second insert is a no-op; and an
+    /// un-keyed job never conflicts. Runtime `sqlx::query` on purpose: this
+    /// pins the DDL itself, not a repository.
+    #[tokio::test]
+    async fn test_0003_jobs_table_dedupes_on_type_and_key() {
+        let pool = crate::db::pool::test_pool().await;
+        run_migrations_unlocked(&pool).await;
+
+        for _ in 0..2 {
+            sqlx::query(
+                "INSERT INTO jobs (job_type, dedupe_key) VALUES ('t', 'k')                  ON CONFLICT (job_type, dedupe_key) DO NOTHING",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("INSERT INTO jobs (job_type) VALUES ('t')")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let (keyed, unkeyed): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*) FILTER (WHERE dedupe_key IS NOT NULL),                     COUNT(*) FILTER (WHERE dedupe_key IS NULL) FROM jobs",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((keyed, unkeyed), (1, 2));
+
+        let defaults: (String, i32, i32, i32) = sqlx::query_as(
+            "SELECT status, attempts, max_attempts, backoff_seconds FROM jobs LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(defaults, ("pending".to_string(), 0, 3, 10));
+
+        let bad = sqlx::query("INSERT INTO jobs (job_type, status) VALUES ('t', 'bogus')")
+            .execute(&pool)
+            .await;
+        assert!(bad.is_err(), "the status CHECK must reject unknown states");
+    }
 }
