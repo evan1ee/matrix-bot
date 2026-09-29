@@ -50,28 +50,47 @@ pub(crate) struct OwnedTask {
 /// the process running with no API or no Matrix connection; instead this
 /// cancels `shutdown` so the rest of `run` tears down and the process exits,
 /// relying on the surrounding orchestrator (systemd, Docker, k8s) to restart
-/// it.
+///
+/// Returns the name of the task that ended on its own, if any: its `JoinHandle`
+/// has been consumed, so it must not be awaited again by `stop_by`.
 async fn supervise_front_doors(
     shutdown: &CancellationToken,
     api: &mut JoinHandle<()>,
     matrix: &mut JoinHandle<()>,
     jobs: &mut JoinHandle<()>,
-) {
+) -> Option<&'static str> {
     tokio::select! {
-        _ = shutdown.cancelled() => {}
+        _ = shutdown.cancelled() => None,
         result = &mut *api => {
             log_early_exit("REST API server", result);
             shutdown.cancel();
+            Some("REST API server")
         }
         result = &mut *matrix => {
             log_early_exit("Matrix sync loop", result);
             shutdown.cancel();
+            Some("Matrix sync loop")
         }
         result = &mut *jobs => {
             log_early_exit("Job runtime", result);
             shutdown.cancel();
+            Some("Job runtime")
         }
     }
+}
+
+/// Stops every task except `ended` (already joined by the supervisor) by
+/// `deadline`. Awaiting a completed `JoinHandle` again panics.
+pub(crate) async fn stop_remaining(
+    deadline: Instant,
+    tasks: Vec<OwnedTask>,
+    ended: Option<&str>,
+) -> Vec<&'static str> {
+    let tasks = tasks
+        .into_iter()
+        .filter(|t| Some(t.name) != ended)
+        .collect();
+    stop_by(deadline, tasks).await
 }
 
 fn log_early_exit(name: &str, result: Result<(), tokio::task::JoinError>) {
@@ -112,7 +131,6 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         jobs::schedule::default_ticks(),
         jobs::JobsConfig::production(config.job_workers, config.job_worker_host.clone()),
     );
-    let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
 
     let listener = http::bind(&config).await?;
     let api = http::start_api_server(
@@ -125,6 +143,9 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         shutdown.child_token(),
     )?;
     let mut api = api;
+    // Spawned only once nothing fallible remains before supervision: an earlier
+    // `?` would leave it detached, its token never cancelled.
+    let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
     let mut matrix = tokio::spawn(run_bot_loop(
         config,
         db.clone(),
@@ -134,7 +155,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         shutdown.child_token(),
     ));
 
-    supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs_task).await;
+    let ended = supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs_task).await;
     info!("Shutting down Matrix Bot & Web API server...");
     let deadline = Instant::now() + SHUTDOWN_GRACE;
 
@@ -154,7 +175,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
             handle: matrix,
         },
     ];
-    let laggards = stop_by(deadline, tasks).await;
+    let laggards = stop_remaining(deadline, tasks, ended).await;
     if !laggards.is_empty() {
         warn!(
             "Did not stop within {:?}, aborted: {}",
@@ -376,5 +397,58 @@ mod tests {
             "a runtime that stops on its own must stop the process, not leave \
              it running with no background jobs"
         );
+    }
+
+    fn tasks_of(
+        api: JoinHandle<()>,
+        matrix: JoinHandle<()>,
+        jobs: JoinHandle<()>,
+    ) -> Vec<OwnedTask> {
+        vec![
+            OwnedTask {
+                name: "Job runtime",
+                handle: jobs,
+            },
+            OwnedTask {
+                name: "REST API server",
+                handle: api,
+            },
+            OwnedTask {
+                name: "Matrix sync loop",
+                handle: matrix,
+            },
+        ]
+    }
+
+    /// Given a task that ended on its own, When shutdown runs, Then the
+    /// consumed handle is not awaited again (that panics) and nothing lags.
+    #[tokio::test(start_paused = true)]
+    async fn stopping_after_an_early_exit_does_not_rejoin_the_ended_task() {
+        for ended_name in ["Job runtime", "REST API server"] {
+            let shutdown = CancellationToken::new();
+            let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+            let early = |name: &str| {
+                if name == ended_name {
+                    tokio::spawn(async {})
+                } else {
+                    waiter(shutdown.clone())
+                }
+            };
+            let mut api = early("REST API server");
+            let mut matrix = waiter(shutdown.clone());
+            let mut jobs = early("Job runtime");
+
+            let ended = supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+            assert_eq!(ended, Some(ended_name));
+
+            let started = Instant::now();
+            let laggards = stop_remaining(
+                started + Duration::from_secs(15),
+                tasks_of(api, matrix, jobs),
+                ended,
+            )
+            .await;
+            assert!(laggards.is_empty(), "{ended_name}: {laggards:?}");
+        }
     }
 }
