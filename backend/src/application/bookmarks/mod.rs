@@ -173,13 +173,14 @@ mod tests {
     async fn setup() -> (BookmarkService, AccountId, EventBroadcaster) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        let owner = crate::application::AppServices::new(&pool)
+            .accounts
+            .resolve_or_provision("@alice:mbm.one")
+            .await
+            .unwrap();
         let events = EventBroadcaster::default();
         let service = BookmarkService::new(pool, events.clone());
-        (service, AccountId::new(owner), events)
+        (service, owner, events)
     }
 
     #[tokio::test]

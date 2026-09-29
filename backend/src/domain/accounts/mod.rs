@@ -534,6 +534,63 @@ mod tests {
         assert_eq!(display_name_for_mxid("@"), "@");
     }
 
+    /// Routine sign-ins must not DM, or the channel becomes noise and the one
+    /// message that matters — a recovery warning — gets ignored with the rest.
+    #[test]
+    fn test_only_meaningful_events_are_notified() {
+        assert!(!SecurityEventKind::SignedIn.warrants_a_dm());
+
+        for kind in [
+            SecurityEventKind::PasskeyRemoved,
+            SecurityEventKind::MatrixUnlinked,
+            SecurityEventKind::RecoveryRequested,
+            SecurityEventKind::FinancialDataExported,
+        ] {
+            assert!(kind.warrants_a_dm(), "{} must be announced", kind.as_str());
+        }
+    }
+
+    /// The recovery warning has to tell someone what to do about it, because it
+    /// is the only thing standing between a stolen Matrix account and a stolen
+    /// local one.
+    #[test]
+    fn test_the_recovery_warning_says_how_to_stop_it() {
+        let message = SecurityEventKind::RecoveryRequested.message(None);
+        assert!(message.contains("24 hours"));
+        assert!(message.contains("cancel"));
+    }
+
+    #[test]
+    fn test_details_are_included_when_present() {
+        let with = SecurityEventKind::MatrixLinked.message(Some("@evan:mbm.one"));
+        assert!(with.contains("@evan:mbm.one"));
+
+        let without = SecurityEventKind::MatrixLinked.message(None);
+        assert!(!without.contains('('));
+    }
+
+    /// A malformed MXID must still produce something renderable rather than an
+    /// empty string, because this lands in a UI label.
+    #[test]
+    fn test_display_name_survives_a_malformed_mxid() {
+        assert_eq!(display_name_for_mxid("nonsense"), "nonsense");
+        assert_eq!(display_name_for_mxid("@"), "@");
+        assert_eq!(display_name_for_mxid("@:server"), "@:server");
+        assert_eq!(display_name_for_mxid("@a:b.c"), "a");
+    }
+
+    /// Anything that is not a real account id must fail closed rather than
+    /// producing some other account's handle.
+    #[test]
+    fn test_malformed_account_ids_have_no_handle() {
+        for bad in ["acct_", "acct_notactuallyhex", "@evan:mbm.one", ""] {
+            assert!(
+                bad.parse::<AccountId>().is_err(),
+                "{bad} must not map to a handle"
+            );
+        }
+    }
+
     #[test]
     fn test_web_only_command_gate() {
         assert!(web_only_command_description("export").is_some());

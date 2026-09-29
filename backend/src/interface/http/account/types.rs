@@ -1,5 +1,6 @@
 //! Request and response shapes shared by the account endpoints.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -127,4 +128,27 @@ pub struct RecoveryCodesResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RenamePasskeyRequest {
     pub label: String,
+}
+
+// One row of the account's security log, as the web UI reads it.
+//
+// The domain event also carries the owning account; the wire shape does not,
+// because the caller can only ever list their own.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SecurityEvent {
+    pub id: i64,
+    pub kind: String,
+    pub detail: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl From<&crate::domain::accounts::SecurityEvent> for SecurityEvent {
+    fn from(ev: &crate::domain::accounts::SecurityEvent) -> Self {
+        Self {
+            id: ev.id,
+            kind: ev.kind.clone(),
+            detail: ev.detail.clone(),
+            created_at: ev.created_at,
+        }
+    }
 }

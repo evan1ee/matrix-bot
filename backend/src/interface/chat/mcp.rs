@@ -238,14 +238,11 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        crate::accounts::AccountRepository::create_with_id(
+        crate::db::pool::seed_account(
             &pool,
-            "acct_test",
-            "Tester",
-            crate::accounts::STATUS_ACTIVE,
+            &crate::domain::accounts::AccountId::from("acct_test"),
         )
-        .await
-        .unwrap();
+        .await;
 
         let db = Database { pool };
         let ctx = dummy_ctx("mcp", "token Claude Laptop", true);

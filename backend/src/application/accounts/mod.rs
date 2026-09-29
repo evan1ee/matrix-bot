@@ -294,11 +294,172 @@ impl AccountService {
         MergeService::preview(&self.pool, from).await
     }
 
+    /// Merges `from` into `into` and records `accounts_merged` on `into`, once,
+    /// after the merge has committed. A merge that fails records nothing.
     pub async fn merge(
         &self,
         from: &AccountId,
         into: &AccountId,
     ) -> Result<MergeOutcome, AppError> {
-        MergeService::merge(&self.pool, from, into).await
+        let outcome = MergeService::merge(&self.pool, from, into).await?;
+        self.record_security_event(
+            into,
+            SecurityEventKind::AccountsMerged,
+            Some(&format!("{} rows", outcome.moved.total())),
+        )
+        .await;
+        Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::accounts::STATUS_ACTIVE;
+    use crate::domain::todos::{NewTodo, TodoPriority};
+    use crate::infrastructure::postgres::repositories::todos as todo_repo;
+
+    async fn service() -> AccountService {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        AccountService::new(pool, EventBroadcaster::default())
+    }
+
+    /// `(kind, detail)` of every audit row of the account, oldest first.
+    async fn audit(service: &AccountService, account: &AccountId) -> Vec<(String, Option<String>)> {
+        let mut rows: Vec<_> = service
+            .list_security_events(account, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.kind, e.detail))
+            .collect();
+        rows.reverse();
+        rows
+    }
+
+    async fn add_todo(service: &AccountService, owner: &AccountId) {
+        todo_repo::create(
+            service.pool(),
+            owner,
+            &NewTodo {
+                room_id: "!r:x".to_string(),
+                sender_name: "someone".to_string(),
+                text: "item".to_string(),
+                priority: TodoPriority::Medium,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// R29: a completed merge leaves exactly one `accounts_merged` row on the
+    /// surviving account, counting the moved rows. The HTTP handler used to
+    /// write it; the service owns it now so no other caller can forget it.
+    #[tokio::test]
+    async fn merge_records_accounts_merged_once() {
+        let service = service().await;
+        let into = service.create("into", STATUS_ACTIVE).await.unwrap();
+        let from = service.resolve_or_provision("@old:mbm.one").await.unwrap();
+        add_todo(&service, &from).await;
+        add_todo(&service, &from).await;
+
+        let outcome = service.merge(&from, &into).await.unwrap();
+        assert_eq!(outcome.moved.total(), 2);
+
+        assert_eq!(
+            audit(&service, &into).await,
+            vec![(
+                "accounts_merged".to_string(),
+                Some(format!("{} rows", outcome.moved.total()))
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_link_records_matrix_linked_once_on_success_only() {
+        let service = service().await;
+        let account = service.create("evan", STATUS_ACTIVE).await.unwrap();
+
+        // Refused outside a DM: the code is burned and nothing is recorded.
+        let code = service.issue_link_challenge(&account).await.unwrap();
+        let outcome = service.claim_link(&code, "@evan:mbm.one", false).await;
+        assert_eq!(outcome.unwrap(), LinkOutcome::NotADirectMessage);
+        assert_eq!(
+            service
+                .claim_link(&code, "@evan:mbm.one", true)
+                .await
+                .unwrap(),
+            LinkOutcome::UnknownCode,
+            "the code was burned by the refusal"
+        );
+        assert!(audit(&service, &account).await.is_empty());
+
+        let code = service.issue_link_challenge(&account).await.unwrap();
+        let outcome = service.claim_link(&code, "@evan:mbm.one", true).await;
+        assert_eq!(
+            outcome.unwrap(),
+            LinkOutcome::Linked {
+                account_id: account
+            }
+        );
+        assert_eq!(
+            audit(&service, &account).await,
+            vec![(
+                "matrix_linked".to_string(),
+                Some("@evan:mbm.one".to_string())
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn claiming_an_mxid_on_a_claimed_account_records_nothing() {
+        let service = service().await;
+        let theirs = service.create("theirs", STATUS_ACTIVE).await.unwrap();
+        let held = service.issue_link_challenge(&theirs).await.unwrap();
+        service
+            .claim_link(&held, "@evan:mbm.one", true)
+            .await
+            .unwrap();
+
+        let mine = service.create("mine", STATUS_ACTIVE).await.unwrap();
+        let code = service.issue_link_challenge(&mine).await.unwrap();
+        let outcome = service.claim_link(&code, "@evan:mbm.one", true).await;
+        assert_eq!(outcome.unwrap(), LinkOutcome::AlreadyLinked);
+        assert!(audit(&service, &mine).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unlink_records_matrix_unlinked_only_when_it_removed_something() {
+        let service = service().await;
+        let account = service.create("evan", STATUS_ACTIVE).await.unwrap();
+        let code = service.issue_link_challenge(&account).await.unwrap();
+        service
+            .claim_link(&code, "@evan:mbm.one", true)
+            .await
+            .unwrap();
+
+        let stranger = service.create("stranger", STATUS_ACTIVE).await.unwrap();
+        assert!(!service.unlink(&stranger, "@evan:mbm.one").await.unwrap());
+        assert!(audit(&service, &stranger).await.is_empty());
+
+        assert!(service.unlink(&account, "@evan:mbm.one").await.unwrap());
+        assert!(!service.unlink(&account, "@evan:mbm.one").await.unwrap());
+        assert_eq!(
+            audit(&service, &account).await,
+            vec![
+                (
+                    "matrix_linked".to_string(),
+                    Some("@evan:mbm.one".to_string())
+                ),
+                (
+                    "matrix_unlinked".to_string(),
+                    Some("@evan:mbm.one".to_string())
+                ),
+            ]
+        );
     }
 }

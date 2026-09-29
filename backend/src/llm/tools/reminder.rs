@@ -1,4 +1,3 @@
-use crate::db::DbPool;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use crate::domain::accounts::AccountId;
@@ -9,7 +8,6 @@ use serde_json::json;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
-    pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
     owner_id: &str,
     room_id: &str,
@@ -118,20 +116,15 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let sender_name = if let Ok(Some(acct)) =
-                    crate::accounts::AccountRepository::find(pool, owner_id).await
-                {
+                let sender_name = if let Ok(Some(acct)) = services.accounts.find(&acct).await {
                     if !acct.display_name.trim().is_empty() {
                         acct.display_name
                     } else {
                         "You".to_string()
                     }
-                } else if let Ok(Some(account_id)) =
-                    crate::accounts::AccountRepository::find_by_mxid(pool, owner_id).await
+                } else if let Ok(Some(account_id)) = services.accounts.find_by_mxid(owner_id).await
                 {
-                    if let Ok(Some(acct)) =
-                        crate::accounts::AccountRepository::find(pool, &account_id).await
-                    {
+                    if let Ok(Some(acct)) = services.accounts.find(&account_id).await {
                         if !acct.display_name.trim().is_empty() {
                             acct.display_name
                         } else {
@@ -293,7 +286,6 @@ mod tests {
 
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            &pool,
             None,
             "test_user",
             "!room:example.org",
@@ -329,7 +321,6 @@ mod tests {
             .to_string();
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            &pool,
             None,
             "test_user",
             "!room:example.org",
@@ -355,19 +346,16 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
 
-        let acct_id = crate::accounts::AccountRepository::create(
-            &pool,
-            "evan",
-            crate::accounts::STATUS_ACTIVE,
-        )
-        .await
-        .unwrap();
+        let acct_id = crate::application::AppServices::new(&pool)
+            .accounts
+            .create("evan", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
 
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            &pool,
             None,
-            &acct_id,
+            &acct_id.to_string(),
             "!room:example.org",
             "set_reminder",
             &json!({
@@ -384,7 +372,7 @@ mod tests {
 
         let items = crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
             &pool,
-            &AccountId::new(&acct_id),
+            &acct_id,
             Some("all"),
             None,
             10,

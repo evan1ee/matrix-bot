@@ -286,12 +286,13 @@ mod tests {
     async fn setup_db() -> (AppServices, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        let owner = AppServices::new(&pool)
+            .accounts
+            .resolve_or_provision("@alice:mbm.one")
+            .await
+            .unwrap();
         let services = AppServices::new(&pool);
-        (services, crate::domain::accounts::AccountId::new(owner))
+        (services, owner)
     }
 
     #[tokio::test]

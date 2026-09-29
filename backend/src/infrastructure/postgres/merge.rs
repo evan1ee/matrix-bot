@@ -245,6 +245,8 @@ pub async fn preview(pool: &sqlx::PgPool, from: &AccountId) -> Result<MergePrevi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::PgPool;
+    use std::collections::BTreeSet;
 
     #[test]
     #[should_panic(expected = "not in the merge allow-list")]
@@ -329,5 +331,91 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(left, vec!["food".to_string()]);
+    }
+
+    /// Every table in the schema that has `column`.
+    async fn tables_with_column(pool: &PgPool, column: &str) -> BTreeSet<String> {
+        sqlx::query_scalar!(
+            "SELECT table_name FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND column_name = $1",
+            column
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    fn declared(lists: &[&[&str]]) -> BTreeSet<String> {
+        lists
+            .iter()
+            .flat_map(|list| list.iter())
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    async fn migrated_pool() -> PgPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        pool
+    }
+
+    /// The list a merge walks must be derived from the schema, not remembered.
+    ///
+    /// It fell three tables behind before this existed, so a merge silently
+    /// stranded a user's finance share, their audit ledger and their reaction
+    /// targets on an account it then deleted. A new `owner_id` table must now be
+    /// classified as following a merge or explicitly not, or this fails.
+    #[tokio::test]
+    async fn test_owned_tables_and_exceptions_match_the_schema() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "owner_id").await;
+        let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry owner_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
+
+        for table in OWNER_ID_MERGED_SEPARATELY {
+            assert!(
+                !OWNED_TABLES.contains(table),
+                "{table} cannot both follow a merge and be excluded from one"
+            );
+        }
+    }
+
+    /// Same rule for the other ownership column. An unclassified table here leaves
+    /// a row pointing at an account id that the merge is about to delete.
+    #[tokio::test]
+    async fn test_account_id_tables_are_all_classified() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "account_id").await;
+        let classified = declared(&[
+            ACCOUNT_ID_FOLLOWS,
+            ACCOUNT_ID_DISCARDED,
+            ACCOUNT_ID_UNTOUCHED,
+        ]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry account_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
     }
 }

@@ -129,11 +129,13 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@target_user:mbm.one")
-                .await
-                .unwrap();
-        let owner_id = AccountId::from(owner.as_str());
+        let owner_id =
+            crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+                &pool,
+                "@target_user:mbm.one",
+            )
+            .await
+            .unwrap();
 
         record_target(
             &pool,

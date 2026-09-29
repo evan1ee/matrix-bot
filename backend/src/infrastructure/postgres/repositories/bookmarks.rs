@@ -392,10 +392,13 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
-        (pool, AccountId::new(owner))
+            crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+                &pool,
+                "@alice:mbm.one",
+            )
+            .await
+            .unwrap();
+        (pool, owner)
     }
 
     #[tokio::test]

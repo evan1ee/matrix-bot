@@ -4,7 +4,6 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::accounts::AccountRepository;
 use crate::error::ApiError;
 use crate::interface::http::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
 use crate::interface::http::auth::types::{
@@ -53,7 +52,10 @@ pub async fn get_current_user(
     // An account can have several linked Matrix identities, so there is no
     // single "the" MXID any more. The first link supplies the avatar, purely
     // so the UI has a picture to show; nothing here decides anything.
-    let linked = AccountRepository::linked_mxids(&state.db.pool, &auth_user.account_id)
+    let linked = state
+        .services
+        .accounts
+        .linked_mxids(&auth_user.account_id)
         .await
         .unwrap_or_default();
 

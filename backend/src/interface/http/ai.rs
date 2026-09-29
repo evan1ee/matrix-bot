@@ -368,11 +368,11 @@ mod tests {
     async fn setup_state() -> (ApiState, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner_str =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
-                .await
-                .unwrap();
-        let owner = AccountId::from(owner_str.as_str());
+        let owner = crate::application::AppServices::new(&pool)
+            .accounts
+            .resolve_or_provision("@apitest:mbm.one")
+            .await
+            .unwrap();
         let state = ApiState::new(
             Database { pool },
             EventBroadcaster::default(),

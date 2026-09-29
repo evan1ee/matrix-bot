@@ -20,7 +20,7 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::domain::accounts::{
-        hash_token, LinkOutcome, LINK_CODE_TTL_MINUTES, STATUS_ACTIVE, STATUS_UNCLAIMED,
+        hash_token, AccountId, LinkOutcome, LINK_CODE_TTL_MINUTES, STATUS_ACTIVE, STATUS_UNCLAIMED,
     };
     use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::events::EventBroadcaster;
@@ -227,6 +227,83 @@ mod tests {
 
         // Consumed, so it cannot be replayed.
         assert!(pending_merge(State(state), user).await.unwrap().0.is_none());
+    }
+
+    /// Pins the audit trail of a confirmed merge across the move of the write
+    /// from the handler into `AccountService::merge`: one row, on the
+    /// surviving account, counting what moved.
+    #[tokio::test]
+    async fn confirming_a_merge_records_accounts_merged_exactly_once() {
+        let state = state().await;
+        let user = signed_in(&state, "evan").await;
+        let old = state
+            .services
+            .accounts
+            .resolve_or_provision("@evan:mbm.one")
+            .await
+            .unwrap();
+        todo_repo::create(
+            &state.db.pool,
+            &old,
+            &NewTodo {
+                room_id: "!r:x".to_string(),
+                sender_name: "evan".to_string(),
+                text: "one".to_string(),
+                priority: TodoPriority::Medium,
+                due_at: None,
+                remind_before_minutes: None,
+                remind_room_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        note_pending_merge(&state, &user.account_id, &old).await;
+
+        let _ = confirm_merge(
+            State(state.clone()),
+            VerifiedUser(user.clone()),
+            Json(ConfirmMergeRequest {
+                from_account: old.to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let events = list_security_events(State(state), user).await.unwrap().0;
+        let merged: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == "accounts_merged")
+            .collect();
+        assert_eq!(merged.len(), 1, "exactly one accounts_merged row");
+        assert_eq!(merged[0].detail.as_deref(), Some("1 rows"));
+    }
+
+    /// The security-events list is a public contract: the web UI reads exactly
+    /// these keys.
+    #[test]
+    fn security_event_json_shape_is_unchanged() {
+        let event = crate::domain::accounts::SecurityEvent {
+            id: 7,
+            account_id: AccountId::from_seed("shape"),
+            kind: "signed_in".to_string(),
+            detail: Some("from a phone".to_string()),
+            created_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
+        };
+
+        let json = serde_json::to_value(SecurityEvent::from(&event)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": 7,
+                "kind": "signed_in",
+                "detail": "from a phone",
+                "created_at": "2026-01-02T03:04:05Z",
+            })
+        );
     }
 
     #[tokio::test]

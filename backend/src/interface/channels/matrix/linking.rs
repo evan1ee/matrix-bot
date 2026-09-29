@@ -7,11 +7,13 @@
 //! it already attached, turning every first-time link into a merge of nothing.
 //!
 //! So this runs first, on the raw MXID, and never provisions.
+//!
+//! The `matrix_linked` audit row is written by `AccountService::claim_link`;
+//! this handler only words the reply.
 
 use crate::application::accounts::AccountService;
 use crate::db::Database;
-use crate::domain::accounts::{AccountId, LinkOutcome};
-use crate::utils::html::html_escape as escape;
+use crate::domain::accounts::LinkOutcome;
 
 /// Where a completed link should record a merge awaiting confirmation.
 pub type PendingMerges = tokio::sync::RwLock<std::collections::HashMap<String, String>>;
@@ -49,8 +51,7 @@ pub async fn handle_link_command(
              Unlink it there first."
                 .to_string()
         }
-        Ok(LinkOutcome::Linked { account_id }) => {
-            notify_linked(accounts, &account_id, sender_mxid).await;
+        Ok(LinkOutcome::Linked { .. }) => {
             "Linked. This Matrix account and your web account are now the same \
              account — anything you add here shows up there, and the other way round."
                 .to_string()
@@ -87,16 +88,6 @@ pub async fn handle_link_command(
             "Something went wrong linking that account. Try again shortly.".to_string()
         }
     }
-}
-
-async fn notify_linked(accounts: &AccountService, account_id: &AccountId, mxid: &str) {
-    accounts
-        .record_security_event(
-            account_id,
-            crate::domain::accounts::SecurityEventKind::MatrixLinked,
-            Some(&escape(mxid)),
-        )
-        .await;
 }
 
 #[cfg(test)]
@@ -228,5 +219,26 @@ mod tests {
 
         let events = accounts.list_security_events(&account, 10).await.unwrap();
         assert_eq!(events[0].kind, "matrix_linked");
+    }
+
+    /// The audit row belongs to `AccountService::claim_link`; the `!link`
+    /// handler must not write it a second time (it once did, doubling the row).
+    #[tokio::test]
+    async fn linking_records_matrix_linked_once() {
+        let (db, accounts) = db().await;
+        let account = accounts.create("evan", STATUS_ACTIVE).await.unwrap();
+        let code = accounts.issue_link_challenge(&account).await.unwrap();
+
+        handle_link_command(&accounts, &db, &code, "@evan:mbm.one", true, None).await;
+
+        let linked: Vec<_> = accounts
+            .list_security_events(&account, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "matrix_linked")
+            .collect();
+        assert_eq!(linked.len(), 1, "exactly one matrix_linked row");
+        assert_eq!(linked[0].detail.as_deref(), Some("@evan:mbm.one"));
     }
 }

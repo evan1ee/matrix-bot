@@ -508,24 +508,62 @@ fn interface_never_records_passkey_security_events() {
     );
 }
 
-/// `recovery_completed` and its siblings are written by `AccountService`
-/// (`redeem_recovery_code`, `redeem_recovery_request`), once per recovery. The
-/// HTTP layer once wrote a second row after opening the session; it may not
-/// name a recovery event kind at all. (Chat names them only to word a DM.)
+/// The audit log has exactly one writer: `AccountService`, which records each
+/// row inside the operation that causes it (`claim_link`, `merge`, `unlink`,
+/// the recovery and passkey methods). Interface code that records an event
+/// writes it a second time (`!link` once doubled `matrix_linked`) or writes one
+/// the service does not know about.
+///
+/// Two needles express that precisely:
+/// - the write calls (`record_security_event`, the repository's
+///   `security_events::record`) may appear nowhere in `interface/` or `llm/`;
+///   reading and listing events for the web UI (`list_security_events`) is not
+///   matched;
+/// - an event *kind* may be named only where it words a Matrix DM
+///   (`announce_account` takes one to pick the message) — never in the HTTP
+///   layer, which announces nothing, nor anywhere else. The web DTO maps the
+///   kind as a plain string, so it never needs the enum.
 #[test]
-fn http_never_records_recovery_security_events() {
-    let dir = src("interface/http");
+fn interface_never_writes_security_events() {
+    for dir in ["interface", "llm"] {
+        assert!(
+            src(dir).is_dir(),
+            "expected {} to exist — did it move or get renamed?",
+            src(dir).display()
+        );
+    }
+
+    let mut writes = production_violations("interface", &WRITE_NEEDLES);
+    writes.extend(production_violations("llm", &WRITE_NEEDLES));
     assert!(
-        dir.is_dir(),
-        "expected {} to exist — did interface/http move or get renamed?",
-        dir.display()
+        writes.is_empty(),
+        "interface/llm production code must not write security events;          AccountService records them:
+{}",
+        writes.join("
+")
     );
 
-    let offending = production_violations("interface/http", &["SecurityEventKind::Recovery"]);
+    /// Files that name a kind only to word an announcement DM.
+    const DM_WORDING: [&str; 2] = [
+        "interface/channels/matrix/notify.rs",
+        "interface/chat/account.rs",
+    ];
+    let stray_kinds: Vec<_> = production_violations("interface", &["SecurityEventKind::"])
+        .into_iter()
+        .filter(|hit| {
+            let hit = hit.replace(std::path::MAIN_SEPARATOR, "/");
+            !DM_WORDING.iter().any(|file| hit.contains(file))
+        })
+        .collect();
     assert!(
-        offending.is_empty(),
-        "interface/http production code must not name recovery security-event kinds; \
-         AccountService records them:\n{}",
-        offending.join("\n")
+        stray_kinds.is_empty(),
+        "security-event kinds may be named only to word a DM ({DM_WORDING:?}):
+{}",
+        stray_kinds.join(
+            "
+"
+        )
     );
 }
+
+const WRITE_NEEDLES: [&str; 2] = ["record_security_event", "security_events::record"];

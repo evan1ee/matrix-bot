@@ -66,3 +66,64 @@ pub async fn list(
 
     Ok(rows.into_iter().map(Into::into).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::accounts::STATUS_ACTIVE;
+    use crate::infrastructure::postgres::repositories::accounts::core;
+    use sqlx::PgPool;
+
+    async fn db() -> PgPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_events_are_recorded_and_listed_newest_first() {
+        let pool = db().await;
+        let acct = core::create(&pool, "evan", STATUS_ACTIVE).await.unwrap();
+
+        record(&pool, &acct, SecurityEventKind::SignedIn, None).await;
+        record(
+            &pool,
+            &acct,
+            SecurityEventKind::MatrixLinked,
+            Some("@evan:mbm.one"),
+        )
+        .await;
+
+        let events = list(&pool, &acct, 10).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "matrix_linked");
+        assert_eq!(events[0].detail.as_deref(), Some("@evan:mbm.one"));
+    }
+
+    /// One account's log must never show another's.
+    #[tokio::test]
+    async fn test_the_log_is_per_account() {
+        let pool = db().await;
+        let mine = core::create(&pool, "mine", STATUS_ACTIVE).await.unwrap();
+        let theirs = core::create(&pool, "theirs", STATUS_ACTIVE).await.unwrap();
+
+        record(&pool, &theirs, SecurityEventKind::SignedIn, None).await;
+
+        assert!(list(&pool, &mine, 10).await.unwrap().is_empty());
+        assert_eq!(list(&pool, &theirs, 10).await.unwrap().len(), 1);
+    }
+
+    /// Recording must not be able to fail an action that already happened.
+    #[tokio::test]
+    async fn test_recording_against_a_broken_table_does_not_panic() {
+        let pool = crate::db::pool::test_pool().await;
+        // No migrations: the table does not exist.
+        record(
+            &pool,
+            &AccountId::from_seed("acct_a"),
+            SecurityEventKind::SignedIn,
+            None,
+        )
+        .await;
+    }
+}

@@ -6,7 +6,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::accounts::AccountRepository;
 use crate::error::ApiError;
 #[allow(unused_imports)]
 use crate::error::ApiErrorResponse;
@@ -220,14 +219,14 @@ pub async fn issue_matrix_session(
     mxid: &str,
     user_agent: Option<&str>,
 ) -> Result<axum::response::Response, ApiError> {
-    let account_id = AccountRepository::resolve_or_provision(&state.db.pool, mxid)
-        .await
-        .map_err(|err| {
-            tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
-            ApiError::internal("Failed to resolve user account")
-        })?;
+    let accounts = &state.services.accounts;
+    let account_id = accounts.resolve_or_provision(mxid).await.map_err(|err| {
+        tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
+        ApiError::internal("Failed to resolve user account")
+    })?;
 
-    let display_name = AccountRepository::find(&state.db.pool, &account_id)
+    let display_name = accounts
+        .find(&account_id)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?
         .map(|a| a.display_name)
@@ -236,18 +235,13 @@ pub async fn issue_matrix_session(
     let session_token = state
         .services
         .accounts
-        .create_session(
-            &crate::domain::accounts::AccountId::new(&account_id),
-            user_agent.or(Some("ElementX-iOS")),
-            None,
-            None,
-        )
+        .create_session(&account_id, user_agent.or(Some("ElementX-iOS")), None, None)
         .await
         .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
 
     let body = Json(MatrixLoginResponse {
         session_token: session_token.clone(),
-        account_id,
+        account_id: account_id.to_string(),
         display_name,
         mxid: mxid.to_string(),
     });
@@ -287,7 +281,10 @@ mod tests {
 
         assert!(res.headers().contains_key(header::SET_COOKIE));
 
-        let account_id = AccountRepository::find_by_mxid(&state.db.pool, "@alice:example.org")
+        let account_id = state
+            .services
+            .accounts
+            .find_by_mxid("@alice:example.org")
             .await
             .unwrap();
         assert!(account_id.is_some());

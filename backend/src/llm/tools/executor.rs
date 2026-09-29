@@ -72,16 +72,8 @@ pub async fn execute(
     }
 
     // 3. Try reminder tools
-    if let Some(res) = reminder::execute_tool(
-        services,
-        pool,
-        broadcaster,
-        owner_id,
-        room_id,
-        name,
-        &parsed_args,
-    )
-    .await
+    if let Some(res) =
+        reminder::execute_tool(services, broadcaster, owner_id, room_id, name, &parsed_args).await
     {
         return res;
     }

@@ -206,7 +206,7 @@ use crate::interface::http::{
             account::RecoveryCodesResponse,
             account::RenamePasskeyRequest,
             account::MergePreview,
-            crate::accounts::security_events::SecurityEvent,
+            account::SecurityEvent,
             auth::UserProfileResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,

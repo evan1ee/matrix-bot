@@ -102,11 +102,11 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         for id in ids {
-            crate::accounts::AccountRepository::create_with_id(
+            crate::infrastructure::postgres::repositories::accounts::core::create_with_id(
                 &pool,
-                &id.to_string(),
+                id,
                 "Tester",
-                crate::accounts::STATUS_ACTIVE,
+                crate::domain::accounts::STATUS_ACTIVE,
             )
             .await
             .unwrap();

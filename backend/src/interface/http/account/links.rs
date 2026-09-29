@@ -2,7 +2,7 @@
 
 use axum::{extract::State, Json};
 
-use crate::domain::accounts::{AccountId, SecurityEventKind, LINK_CODE_TTL_MINUTES};
+use crate::domain::accounts::{AccountId, LINK_CODE_TTL_MINUTES};
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -140,16 +140,6 @@ pub async fn confirm_merge(
         .write()
         .await
         .remove(&user.account_id.to_string());
-
-    state
-        .services
-        .accounts
-        .record_security_event(
-            &user.account_id,
-            SecurityEventKind::AccountsMerged,
-            Some(&format!("{} rows", outcome.moved.total())),
-        )
-        .await;
 
     Ok(Json(MergePreview::from(outcome.moved)))
 }

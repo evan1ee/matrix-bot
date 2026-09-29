@@ -475,8 +475,9 @@ pub async fn count_outbox_by_webhook(
 mod tests {
     use super::*;
 
-    use crate::accounts::{AccountRepository, STATUS_ACTIVE};
+    use crate::domain::accounts::STATUS_ACTIVE;
     use crate::domain::webhooks::hash_token;
+    use crate::infrastructure::postgres::repositories::accounts::core as accounts_repo;
 
     async fn setup_db() -> PgPool {
         let pool = crate::db::pool::test_pool().await;
@@ -487,10 +488,9 @@ mod tests {
     #[tokio::test]
     async fn test_webhooks_repository_crud() {
         let pool = setup_db().await;
-        let acct_str = AccountRepository::create(&pool, "test_whk", STATUS_ACTIVE)
+        let owner = accounts_repo::create(&pool, "test_whk", STATUS_ACTIVE)
             .await
             .unwrap();
-        let owner = AccountId::from(acct_str);
 
         let id = "whk_test_1";
         let raw_token = "whk_random_secret_string";

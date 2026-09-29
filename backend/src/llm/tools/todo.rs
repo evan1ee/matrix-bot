@@ -358,10 +358,12 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
-        let account_id =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        let account_id = crate::application::AppServices::new(&db.pool)
+            .accounts
+            .resolve_or_provision("@alice:mbm.one")
+            .await
+            .unwrap()
+            .to_string();
         (db, account_id)
     }
 

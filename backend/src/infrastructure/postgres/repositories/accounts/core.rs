@@ -205,4 +205,130 @@ mod tests {
         let second = resolve_or_provision(&p, "@bob:matrix.org").await.unwrap();
         assert_eq!(first, second);
     }
+
+    #[tokio::test]
+    async fn test_ids_are_prefixed_and_unique() {
+        let pool = pool().await;
+        let a = create(&pool, "a", STATUS_ACTIVE).await.unwrap();
+        let b = create(&pool, "b", STATUS_ACTIVE).await.unwrap();
+
+        let (a_text, b_text) = (a.to_string(), b.to_string());
+        assert!(a_text.starts_with("acct_"), "got {a_text}");
+        assert_eq!(a_text.len(), "acct_".len() + 32);
+        assert_ne!(a_text, b_text);
+        assert_ne!(a, b);
+    }
+
+    /// An unknown MXID must get exactly one account, and a second message from
+    /// the same MXID must land on it rather than making another.
+    #[tokio::test]
+    async fn test_provisioning_is_stable_for_a_repeated_sender() {
+        let pool = pool().await;
+
+        let first = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let second = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+
+        assert_eq!(first, second);
+
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "a repeated sender must not accumulate accounts");
+    }
+
+    /// A provisioned account is unclaimed and named after the localpart.
+    #[tokio::test]
+    async fn test_provisioned_account_is_unclaimed() {
+        let pool = pool().await;
+        let id = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+
+        let account = find(&pool, &id).await.unwrap().unwrap();
+        assert!(account.is_unclaimed());
+        assert_eq!(account.display_name, "evan");
+    }
+
+    /// Two different senders must never share an account.
+    #[tokio::test]
+    async fn test_two_senders_get_two_accounts() {
+        let pool = pool().await;
+        let a = resolve_or_provision(&pool, "@a:x").await.unwrap();
+        let b = resolve_or_provision(&pool, "@b:x").await.unwrap();
+        assert_ne!(a, b);
+    }
+
+    /// The sync loop does not serialise event handlers, so two messages from a
+    /// brand-new MXID can resolve concurrently. Both must agree on one account,
+    /// and no orphan may be left behind — a stranded account would silently own
+    /// whichever rows the losing task had already written.
+    #[tokio::test]
+    async fn test_concurrent_first_messages_converge_on_one_account() {
+        let pool = pool().await;
+
+        let mut results = Vec::new();
+        for _ in 0..8 {
+            let pool = pool.clone();
+            results.push(tokio::spawn(async move {
+                resolve_or_provision(&pool, "@racer:x").await.unwrap()
+            }));
+        }
+
+        let mut ids = Vec::new();
+        for handle in results {
+            ids.push(handle.await.unwrap());
+        }
+
+        assert!(
+            ids.windows(2).all(|w| w[0] == w[1]),
+            "resolved to different accounts: {ids:?}"
+        );
+
+        let accounts = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(accounts, 1, "the losing task left an orphan account behind");
+    }
+
+    #[tokio::test]
+    async fn test_linked_mxids_lists_every_route_to_an_account() {
+        let pool = pool().await;
+        let account = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+
+        sqlx::query!(
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
+            "@evan:work.org",
+            account.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mxids = linked_mxids(&pool, &account).await.unwrap();
+        assert_eq!(mxids.len(), 2);
+        assert!(mxids.contains(&"@evan:work.org".to_string()));
+    }
+
+    /// One MXID may reach only one account. This is the schema-level guarantee
+    /// the whole linking design rests on, so it is asserted directly.
+    #[tokio::test]
+    async fn test_an_mxid_cannot_be_linked_to_two_accounts() {
+        let pool = pool().await;
+        let first = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let other = create(&pool, "other", STATUS_ACTIVE).await.unwrap();
+        assert_ne!(first, other);
+
+        let duplicate = sqlx::query!(
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
+            "@evan:mbm.one",
+            other.as_uuid()
+        )
+        .execute(&pool)
+        .await;
+
+        assert!(
+            duplicate.is_err(),
+            "the primary key must reject a second link"
+        );
+    }
 }

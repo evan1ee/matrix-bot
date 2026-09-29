@@ -403,13 +403,7 @@ mod tests {
     }
 
     async fn ensure_account(pool: &DbPool, owner: &AccountId) {
-        let _ = crate::accounts::AccountRepository::create_with_id(
-            pool,
-            owner,
-            "test",
-            crate::accounts::STATUS_ACTIVE,
-        )
-        .await;
+        crate::db::pool::seed_account(pool, owner).await;
     }
 
     #[test]

@@ -269,8 +269,7 @@ pub async fn get_webhook_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{AccountRepository, STATUS_ACTIVE};
-    use crate::domain::accounts::AccountId;
+    use crate::domain::accounts::STATUS_ACTIVE;
     use crate::events::EventBroadcaster;
     use crate::interface::http::webhooks::dto::{InboundPayload, TelegramQuery};
     use crate::interface::http::webhooks::inbound::inbound_webhook;
@@ -293,10 +292,12 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_api_flow() {
         let state = test_state().await;
-        let acct_str = AccountRepository::create(&state.db.pool, "alice", STATUS_ACTIVE)
+        let acct = state
+            .services
+            .accounts
+            .create("alice", STATUS_ACTIVE)
             .await
             .unwrap();
-        let acct = AccountId::from(acct_str);
         let user = AuthUser::for_account(acct);
         let verified = VerifiedUser(AuthUser::for_account(acct));
 

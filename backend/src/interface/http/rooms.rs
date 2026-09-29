@@ -123,14 +123,8 @@ mod tests {
     async fn state_with_account(account_id: &str) -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::accounts::AccountRepository::create_with_id(
-            &pool,
-            account_id,
-            "Tester",
-            crate::accounts::STATUS_ACTIVE,
-        )
-        .await
-        .unwrap();
+        crate::db::pool::seed_account(&pool, &crate::domain::accounts::AccountId::from(account_id))
+            .await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

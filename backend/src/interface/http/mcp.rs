@@ -247,14 +247,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let owner = crate::domain::accounts::AccountId::from_seed("test");
-        crate::accounts::AccountRepository::create_with_id(
-            &pool,
-            &owner,
-            "Tester",
-            crate::accounts::STATUS_ACTIVE,
-        )
-        .await
-        .unwrap();
+        crate::db::pool::seed_account(&pool, &owner).await;
 
         let (raw, token) = McpTokenRepository::create(&pool, &owner, "API Test", None)
             .await

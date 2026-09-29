@@ -423,11 +423,12 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
-                .await
-                .unwrap();
-        (db, AccountId::from(owner.as_str()))
+        let owner = crate::application::AppServices::new(&db.pool)
+            .accounts
+            .resolve_or_provision("@user:mbm.one")
+            .await
+            .unwrap();
+        (db, owner)
     }
 
     #[tokio::test]
