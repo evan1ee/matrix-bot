@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 use matrix_sdk::Client;
 
 use crate::interface::channels::matrix::linking::PendingMerges;
+use crate::interface::channels::matrix::live_client::MatrixHandle;
 use crate::interface::channels::matrix::sync_health::SyncHealth;
 
 #[derive(Clone, Default)]
@@ -36,4 +37,6 @@ pub struct BotHandles {
     pub pending_merges: Arc<PendingMerges>,
     /// When the sync loop last completed a sync, read by `/health/ready`.
     pub sync_health: SyncHealth,
+    /// This generation's client for the job handlers; empty while disconnected.
+    pub matrix: MatrixHandle,
 }

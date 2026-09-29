@@ -127,6 +127,21 @@ impl AiEnvConfig {
     }
 }
 
+/// Job queue workers per instance when `JOB_WORKERS` is unset.
+pub const DEFAULT_JOB_WORKERS: usize = 4;
+/// Upper bound on `JOB_WORKERS`; each running job holds a pool connection.
+pub const MAX_JOB_WORKERS: usize = 32;
+
+fn parse_job_workers(raw: Option<&str>) -> Result<usize> {
+    match raw {
+        None => Ok(DEFAULT_JOB_WORKERS),
+        Some(v) => v
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("JOB_WORKERS must be a whole number (got '{v}')")),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -142,6 +157,10 @@ pub struct Config {
     pub registration_secret: Option<String>,
     pub registration_open: bool,
     pub db_max_connections: u32,
+    /// Concurrent job-queue workers in this instance (`JOB_WORKERS`, 1..=32, default 4).
+    pub job_workers: usize,
+    /// Host part of each worker id (`<host>:<pid>:<uuid>`), from `HOSTNAME`/`COMPUTERNAME`; diagnostic only.
+    pub job_worker_host: String,
     /// Origins permitted to call the API cross-origin.
     ///
     /// Empty by default: the SPA is served by this same server, and the Vite dev
@@ -278,6 +297,11 @@ impl Config {
             .and_then(|c| c.parse().ok())
             .unwrap_or(10);
 
+        let job_workers = parse_job_workers(env::var("JOB_WORKERS").ok().as_deref())?;
+        let job_worker_host = env::var("HOSTNAME")
+            .or_else(|_| env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "unknown-host".to_string());
+
         let cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS")
             .unwrap_or_default()
             .split(',')
@@ -364,6 +388,8 @@ impl Config {
             registration_secret,
             registration_open,
             db_max_connections,
+            job_workers,
+            job_worker_host,
             cors_allowed_origins,
             webauthn_rp_id,
             webauthn_origin,
@@ -407,6 +433,13 @@ impl Config {
             anyhow::bail!("MATRIX_PASSWORD cannot be empty");
         }
 
+        if !(1..=MAX_JOB_WORKERS).contains(&self.job_workers) {
+            anyhow::bail!(
+                "JOB_WORKERS must be between 1 and {MAX_JOB_WORKERS} (got {})",
+                self.job_workers
+            );
+        }
+
         let is_prod = is_production();
 
         // A production deployment still on the development Relying Party would
@@ -445,9 +478,8 @@ impl Config {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_config_validation() {
-        let valid_cfg = Config {
+    fn valid_config() -> Config {
+        Config {
             homeserver: "https://matrix.org".to_string(),
             username: "bot".to_string(),
             password: "secretpassword".to_string(),
@@ -459,6 +491,8 @@ mod tests {
             registration_secret: None,
             registration_open: true,
             db_max_connections: 5,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),
@@ -478,7 +512,46 @@ mod tests {
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn test_job_workers_must_be_between_1_and_32() {
+        let base = valid_config();
+        for bad in [0, 33] {
+            assert!(
+                Config {
+                    job_workers: bad,
+                    ..base.clone()
+                }
+                .validate()
+                .is_err(),
+                "{bad}"
+            );
+        }
+        for good in [1, 4, 32] {
+            assert!(
+                Config {
+                    job_workers: good,
+                    ..base.clone()
+                }
+                .validate()
+                .is_ok(),
+                "{good}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_job_workers() {
+        assert_eq!(parse_job_workers(None).unwrap(), DEFAULT_JOB_WORKERS);
+        assert_eq!(parse_job_workers(Some("8")).unwrap(), 8);
+        assert!(parse_job_workers(Some("four")).is_err());
+    }
+
+    #[test]
+    fn test_config_validation() {
+        let valid_cfg = valid_config();
         assert!(valid_cfg.validate().is_ok());
 
         let invalid_cfg = Config {
@@ -505,6 +578,8 @@ mod tests {
             registration_secret: None,
             registration_open: true,
             db_max_connections: 5,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),

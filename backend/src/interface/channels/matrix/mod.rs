@@ -32,11 +32,13 @@ use crate::interface::chat::{ModuleContext, ModuleRegistry};
 pub mod attachments;
 pub mod client;
 pub mod command_flow;
+pub mod delivery;
 pub mod dispatcher;
 pub mod handler;
 pub mod handles;
 pub mod invite;
 pub mod linking;
+pub mod live_client;
 pub mod media;
 pub mod notify;
 pub mod quote;
@@ -169,6 +171,11 @@ impl MatrixBot {
             .registry
             .spawn_all_background_workers(&module_ctx)
             .await;
+
+        // Job handlers send through this generation's client while it syncs;
+        // dropping the guard (any return path, including cancellation of this
+        // future) hands them `None`, so their jobs defer instead of failing.
+        let _published = self.handles.matrix.publish(self.client.clone());
 
         tracing::info!("Matrix Bot is active and listening for events...");
 

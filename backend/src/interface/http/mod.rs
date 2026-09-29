@@ -386,6 +386,8 @@ mod server_shutdown_tests {
             registration_secret: None,
             registration_open: false,
             db_max_connections: 1,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),

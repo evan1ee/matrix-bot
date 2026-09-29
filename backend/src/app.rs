@@ -1,12 +1,13 @@
-//! Composition root: builds every long-lived component once, starts both front
-//! doors (the Axum API server and the Matrix sync loop), and stops them within
+//! Composition root: builds every long-lived component once, starts the front
+//! doors (the Axum API server and the Matrix sync loop) and the job runtime, and stops them within
 //! a fixed bound when shutdown is requested.
 //!
 //! Shutdown is one `CancellationToken` tree. The caller (`main.rs`) owns the
-//! root and cancels it on SIGINT/SIGTERM; the API server and the Matrix loop
-//! each get a child token, so cancelling the root reaches both and neither can
-//! cancel the other.
+//! root and cancels it on SIGINT/SIGTERM; the API server, the Matrix loop and the job runtime
+//! each get a child token, so cancelling the root reaches all three and none
+//! can cancel another.
 
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -17,9 +18,12 @@ use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
 use crate::events::EventBroadcaster;
+use crate::interface::channels::matrix::delivery::MatrixDelivery;
 use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::sync_loop::run_bot_loop;
 use crate::interface::http;
+use crate::interface::jobs::Delivery;
+use crate::jobs;
 
 /// Signal to return, including closing the database pool (spec §5.3).
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
@@ -39,8 +43,8 @@ pub(crate) struct OwnedTask {
     pub handle: JoinHandle<()>,
 }
 
-/// Waits for `shutdown` to be cancelled, or for either front door's task to
-/// end on its own — which is always an error, since both hold a child of
+/// Waits for `shutdown` to be cancelled, or for the API server, the Matrix loop
+/// or the job runtime to end on its own — which is always an error, since each holds a child of
 /// `shutdown` and exit only when it fires. A front door that stops on its
 /// own (task panic, or a bug that lets its loop return) would otherwise leave
 /// the process running with no API or no Matrix connection; instead this
@@ -51,6 +55,7 @@ async fn supervise_front_doors(
     shutdown: &CancellationToken,
     api: &mut JoinHandle<()>,
     matrix: &mut JoinHandle<()>,
+    jobs: &mut JoinHandle<()>,
 ) {
     tokio::select! {
         _ = shutdown.cancelled() => {}
@@ -60,6 +65,10 @@ async fn supervise_front_doors(
         }
         result = &mut *matrix => {
             log_early_exit("Matrix sync loop", result);
+            shutdown.cancel();
+        }
+        result = &mut *jobs => {
+            log_early_exit("Job runtime", result);
             shutdown.cancel();
         }
     }
@@ -94,6 +103,16 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // and the pending merges survive a Matrix reconnect.
     let handles = BotHandles::default();
+    let delivery: Arc<dyn Delivery> = Arc::new(MatrixDelivery::new(handles.matrix.clone()));
+    let registry = jobs::Registry::new(crate::interface::jobs::handlers(&services, delivery))?;
+    let runtime = jobs::JobRuntime::new(
+        db.pool.clone(),
+        services.clone(),
+        registry,
+        jobs::schedule::default_ticks(),
+        jobs::JobsConfig::production(config.job_workers, config.job_worker_host.clone()),
+    );
+    let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
 
     let listener = http::bind(&config).await?;
     let api = http::start_api_server(
@@ -115,11 +134,17 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         shutdown.child_token(),
     ));
 
-    supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
+    supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs_task).await;
     info!("Shutting down Matrix Bot & Web API server...");
     let deadline = Instant::now() + SHUTDOWN_GRACE;
 
+    // The runtime goes first: its shutdown releases running jobs, which needs
+    // the pool open. All three share the one deadline.
     let tasks = vec![
+        OwnedTask {
+            name: "Job runtime",
+            handle: jobs_task,
+        },
         OwnedTask {
             name: "REST API server",
             handle: api,
@@ -270,7 +295,12 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
+        let mut jobs = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
 
         assert!(
             shutdown.is_cancelled(),
@@ -293,7 +323,12 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix).await;
+        let mut jobs = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
+
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
 
         assert!(shutdown.is_cancelled());
     }
@@ -310,15 +345,36 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
         shutdown.cancel();
+        let mut jobs = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
 
         // Must return promptly via the shutdown branch, not hang waiting on
         // the tasks (which also complete once cancelled, but that's not the
         // branch under test).
         tokio::time::timeout(
             Duration::from_secs(1),
-            supervise_front_doors(&shutdown, &mut api, &mut matrix),
+            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs),
         )
         .await
         .expect("must return promptly once shutdown was already requested");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_job_runtime_ending_early_cancels_shutdown() {
+        let shutdown = CancellationToken::new();
+        let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+        let mut api = waiter(shutdown.clone());
+        let mut matrix = waiter(shutdown.clone());
+        let mut jobs = tokio::spawn(async {}); // ends immediately, unrequested
+
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+
+        assert!(
+            shutdown.is_cancelled(),
+            "a runtime that stops on its own must stop the process, not leave \
+             it running with no background jobs"
+        );
     }
 }

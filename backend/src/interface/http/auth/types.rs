@@ -454,6 +454,8 @@ mod tests {
             registration_secret: None,
             registration_open: false,
             db_max_connections: 10,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "bot.example.com".to_string(),
             webauthn_origin: "https://bot.example.com".to_string(),

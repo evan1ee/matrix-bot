@@ -11,4 +11,5 @@
 pub mod channels;
 pub mod chat;
 pub mod http;
+pub mod jobs;
 pub mod mcp;
