@@ -88,36 +88,40 @@ impl PortfolioService {
         Ok(marked)
     }
 
-    /// Fetches each active symbol's price once, marks every met alert
-    /// triggered (publishing `PortfolioAlertTriggered`) and returns them.
-    /// A symbol whose price cannot be fetched is skipped.
+    /// Fetches `symbol`'s price, marks every met active alert triggered
+    /// (publishing `PortfolioAlertTriggered`) and returns them. No active
+    /// alert means no fetch; an unfetchable price is skipped.
     ///
     /// Marking is the idempotency guard and the caller notifies afterwards,
     /// so an alert marked here must reach the caller: a database error after
     /// some alerts were marked returns those (the rest are still active and
     /// the next check finds them) instead of losing their notifications.
-    pub async fn trigger_due_alerts(&self) -> Result<Vec<TriggeredAlert>, AppError> {
-        let mut triggered = Vec::new();
-        for symbol in self.list_active_alert_symbols().await? {
-            let quote = match fetch_latest_price(&symbol).await {
-                Ok(q) => q,
-                Err(err) => {
-                    debug!(%symbol, %err, "No price for alert check");
-                    continue;
-                }
-            };
-            if let Err(err) = self
-                .trigger_alerts_for_symbol(&symbol, quote.price, &mut triggered)
-                .await
-            {
-                if triggered.is_empty() {
-                    return Err(err);
-                }
-                warn!(%symbol, error = %err, "Alert check stopped early; notifying what triggered");
-                break;
-            }
+    pub async fn trigger_symbol_alerts(
+        &self,
+        symbol: &str,
+    ) -> Result<Vec<TriggeredAlert>, AppError> {
+        if self.list_active_alerts_for_symbol(symbol).await?.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(triggered)
+        let quote = match fetch_latest_price(symbol).await {
+            Ok(q) => q,
+            Err(err) => {
+                debug!(%symbol, %err, "No price for alert check");
+                return Ok(Vec::new());
+            }
+        };
+        let mut triggered = Vec::new();
+        match self
+            .trigger_alerts_for_symbol(symbol, quote.price, &mut triggered)
+            .await
+        {
+            Err(err) if triggered.is_empty() => Err(err),
+            Err(err) => {
+                warn!(%symbol, error = %err, "Alert check stopped early; notifying what triggered");
+                Ok(triggered)
+            }
+            Ok(()) => Ok(triggered),
+        }
     }
 
     /// Marks the active alerts on `symbol` that `price` meets and appends

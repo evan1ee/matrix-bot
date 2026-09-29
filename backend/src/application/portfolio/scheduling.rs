@@ -13,6 +13,8 @@ impl PortfolioService {
     /// exists and no earlier check is still queued or running. A check reads
     /// the current prices whenever it runs, so while Matrix is down one
     /// waiting job covers every tick and no backlog of checks builds up.
+    // Check-then-enqueue is not transactional: ticks run on the single
+    // leader, and the minute-bucket dedupe key backstops a rare overlap.
     pub async fn enqueue_alert_check(&self, now: DateTime<Utc>) -> Result<usize, AppError> {
         if self.list_active_alert_symbols().await?.is_empty() {
             return Ok(0);
@@ -155,10 +157,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trigger_due_alerts_with_no_alerts_is_empty() {
+    async fn trigger_symbol_alerts_without_alerts_is_empty_and_needs_no_price() {
         let (s, _) = services(&["acct_pf_trig_none"]).await;
 
-        assert!(s.portfolio.trigger_due_alerts().await.unwrap().is_empty());
+        assert!(s
+            .portfolio
+            .trigger_symbol_alerts("AAPL")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// The marking is the idempotency guard: a met alert is returned once,

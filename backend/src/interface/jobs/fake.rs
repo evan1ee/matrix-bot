@@ -17,6 +17,8 @@ pub(crate) struct FakeDelivery {
     pub room_sends: Mutex<Vec<(String, String, String)>>,
     /// `(mxid, plain, html)`
     pub dms: Mutex<Vec<(String, String, String)>>,
+    /// Popped per DM (after it is recorded); empty means `Ok(())`.
+    pub dm_results: Mutex<VecDeque<Result<(), DeliveryError>>>,
 }
 
 impl FakeDelivery {
@@ -74,6 +76,10 @@ impl Delivery for FakeDelivery {
             .lock()
             .unwrap()
             .push((mxid.into(), plain.into(), html.into()));
-        Ok(())
+        self.dm_results
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Ok(()))
     }
 }

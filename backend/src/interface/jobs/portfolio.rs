@@ -1,6 +1,7 @@
 //! `portfolio.check_alerts` and `portfolio.refresh_prices`: alert evaluation
 //! with DMs to linked identities, and the hourly per-owner price refresh.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,7 +9,7 @@ use tracing::{debug, warn};
 
 use super::{Delivery, MATRIX_RETRY};
 use crate::application::portfolio::TriggeredAlert;
-use crate::application::AppServices;
+use crate::application::{AppError, AppServices};
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::jobs::{JobContext, JobError, JobHandler};
@@ -100,16 +101,42 @@ impl JobHandler for CheckAlertsHandler {
         if !self.delivery.is_connected() {
             return Err(JobError::Unavailable(MATRIX_RETRY));
         }
-        for hit in self.services.portfolio.trigger_due_alerts().await? {
-            let owner = &hit.alert.owner_id;
-            let mxids = match self.services.accounts.linked_mxids(owner).await {
-                Ok(mxids) => mxids,
-                Err(err) => {
-                    warn!(%owner, error = %err, "Could not read linked identities for an alert");
-                    Vec::new()
-                }
-            };
-            self.notify(&hit, mxids).await;
+        let symbols = self.services.portfolio.list_active_alert_symbols().await?;
+        let portfolio = self.services.portfolio.clone();
+        self.check_symbols(symbols, |symbol| {
+            let portfolio = portfolio.clone();
+            async move { portfolio.trigger_symbol_alerts(&symbol).await }
+        })
+        .await
+    }
+}
+
+impl CheckAlertsHandler {
+    /// Evaluates one symbol at a time and sends its DMs before the next
+    /// symbol's price is fetched: a timeout or shutdown mid-check (with a
+    /// single attempt) then loses at most the symbol in flight, not alerts
+    /// already marked for earlier ones.
+    pub(crate) async fn check_symbols<F, Fut>(
+        &self,
+        symbols: Vec<String>,
+        mut trigger: F,
+    ) -> Result<(), JobError>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<Vec<TriggeredAlert>, AppError>>,
+    {
+        for symbol in symbols {
+            for hit in trigger(symbol).await? {
+                let owner = &hit.alert.owner_id;
+                let mxids = match self.services.accounts.linked_mxids(owner).await {
+                    Ok(mxids) => mxids,
+                    Err(err) => {
+                        warn!(%owner, error = %err, "Could not read linked identities for an alert");
+                        Vec::new()
+                    }
+                };
+                self.notify(&hit, mxids).await;
+            }
         }
         Ok(())
     }
@@ -157,6 +184,7 @@ mod tests {
     use crate::domain::jobs::JobId;
     use crate::domain::portfolio::alerts::AlertCondition;
     use crate::interface::jobs::fake::FakeDelivery;
+    use crate::interface::jobs::DeliveryError;
 
     async fn services(names: &[&str]) -> (AppServices, Vec<AccountId>) {
         let pool = crate::db::pool::test_pool().await;
@@ -253,6 +281,10 @@ mod tests {
     async fn a_triggered_alert_is_sent_to_every_linked_mxid() {
         let (s, _) = services(&["acct_pf_h_dm"]).await;
         let fake = FakeDelivery::connected();
+        fake.dm_results
+            .lock()
+            .unwrap()
+            .push_back(Err(DeliveryError::Failed("homeserver down".into())));
         let handler = CheckAlertsHandler::new(s, fake.clone());
         let hit = TriggeredAlert {
             alert: alert("above", 20_000),
@@ -269,22 +301,54 @@ mod tests {
         assert!(dms[0].1.contains("Price Alert: AAPL"));
     }
 
+    /// The DMs for symbol A are out before symbol B is even evaluated, so a
+    /// timeout or shutdown during B cannot lose A's already-marked alerts.
     #[tokio::test]
-    async fn refresh_prices_captures_a_snapshot_for_the_jobs_account() {
+    async fn dms_for_one_symbol_are_sent_before_the_next_is_evaluated() {
+        let (s, _) = services(&["acct_pf_h_order"]).await;
+        let owner = s
+            .accounts
+            .resolve_or_provision("@order:test")
+            .await
+            .unwrap();
+        let fake = FakeDelivery::connected();
+        let handler = CheckAlertsHandler::new(s, fake.clone());
+        let seen_at_b = Arc::new(std::sync::Mutex::new(None));
+
+        let out = handler
+            .check_symbols(vec!["A".into(), "B".into()], |symbol| {
+                let fake = fake.clone();
+                let seen_at_b = seen_at_b.clone();
+                let mut hit = alert("above", 20_000);
+                hit.owner_id = owner;
+                async move {
+                    if symbol == "B" {
+                        *seen_at_b.lock().unwrap() = Some(fake.dms.lock().unwrap().len());
+                        return Ok(Vec::new());
+                    }
+                    Ok(vec![TriggeredAlert {
+                        alert: hit,
+                        price_minor: 21_000,
+                    }])
+                }
+            })
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert_eq!(*seen_at_b.lock().unwrap(), Some(1));
+    }
+
+    /// An owner without holdings still runs cleanly. That the snapshot row is
+    /// written is proven in application::portfolio::scheduling, because
+    /// get_history cannot observe it.
+    #[tokio::test]
+    async fn refresh_prices_succeeds_for_an_owner_without_holdings() {
         let (s, o) = services(&["acct_pf_h_snap"]).await;
-        let handler = RefreshPricesHandler::new(s.clone());
+        let handler = RefreshPricesHandler::new(s);
 
         let out = handler.run(&ctx(Some(o[0])), serde_json::json!({})).await;
 
         assert!(out.is_ok(), "{out:?}");
-        // The stored row cannot be observed through get_history (it drops
-        // today's stored row and appends a live point); the snapshot row is
-        // asserted in application::portfolio::scheduling.
-        let history = s.portfolio.get_history(&o[0], "7d", "USD").await.unwrap();
-        assert_eq!(
-            history.points.last().map(|p| p.total_net_worth_minor),
-            Some(0)
-        );
     }
 
     #[tokio::test]
