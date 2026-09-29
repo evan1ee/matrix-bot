@@ -11,10 +11,8 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{
-        session::{hash_token, COOKIE_NAME},
-        AccountRepository, SessionRepository, STATUS_ACTIVE,
-    };
+    use crate::accounts::{AccountRepository, SessionRepository, STATUS_ACTIVE};
+    use crate::domain::accounts::{hash_token, COOKIE_NAME};
     use crate::error::ApiError;
     use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
@@ -260,7 +258,7 @@ mod tests {
         // Just past the window.
         let stale = AuthUser {
             last_verified_at: Utc::now()
-                - Duration::minutes(crate::accounts::session::STEP_UP_WINDOW_MINUTES + 1),
+                - Duration::minutes(crate::domain::accounts::STEP_UP_WINDOW_MINUTES + 1),
             ..fresh.clone()
         };
         assert!(!stale.may_perform_sensitive_action(Utc::now()));

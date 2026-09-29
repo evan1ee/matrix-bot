@@ -11,8 +11,9 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
-use crate::accounts::RECOVERY_RESTRICTION_HOURS;
-use crate::domain::accounts::SecurityEventKind;
+use crate::domain::accounts::{
+    hash_token, SecurityEventKind, COOKIE_NAME, RECOVERY_RESTRICTION_HOURS,
+};
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::{with_session_cookie, SessionResponse};
@@ -137,10 +138,8 @@ pub async fn redeem_recovery(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) =
-            crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
-        {
-            let old_id_hash = crate::accounts::session::hash_token(old_token);
+        if let Some(old_token) = crate::accounts::principal::cookie_value(cookies, COOKIE_NAME) {
+            let old_id_hash = hash_token(old_token);
             let _ = state
                 .services
                 .accounts

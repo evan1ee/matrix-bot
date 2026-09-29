@@ -15,23 +15,10 @@
 
 use crate::db::DbPool;
 use chrono::{DateTime, Duration, Utc};
-use sha2::{Digest, Sha256};
 
-/// The cookie a browser presents to prove who it is.
-pub const COOKIE_NAME: &str = "mb_session";
-
-/// How long a session survives without being used.
-pub const IDLE_TIMEOUT_DAYS: i64 = 30;
-
-/// How long a session survives at all, however active.
-pub const ABSOLUTE_TIMEOUT_DAYS: i64 = 90;
-
-/// How recent a passkey assertion must be for a sensitive action.
-///
-/// Five minutes, matching the "sudo mode" convention users already know from
-/// GitHub. Long enough to link an account without re-tapping a key mid-flow,
-/// short enough that a walked-away-from laptop is not an unlocked one.
-pub const STEP_UP_WINDOW_MINUTES: i64 = 5;
+pub use crate::domain::accounts::{
+    hash_token, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME, IDLE_TIMEOUT_DAYS, STEP_UP_WINDOW_MINUTES,
+};
 
 /// A live session, as the extractor sees it.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -73,18 +60,6 @@ impl Session {
             && now.signed_duration_since(self.last_seen_at) < Duration::days(IDLE_TIMEOUT_DAYS)
             && now.signed_duration_since(self.created_at) < Duration::days(ABSOLUTE_TIMEOUT_DAYS)
     }
-}
-
-/// Hashes a session cookie into its storage key.
-pub fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    digest
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
 }
 
 impl From<crate::domain::accounts::Session> for Session {

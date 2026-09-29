@@ -53,7 +53,7 @@ impl AuthUser {
     /// to reach a sensitive action however recently it authenticated.
     pub fn may_perform_sensitive_action(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
         let recent = now.signed_duration_since(self.last_verified_at)
-            < chrono::Duration::minutes(crate::accounts::session::STEP_UP_WINDOW_MINUTES);
+            < chrono::Duration::minutes(crate::domain::accounts::STEP_UP_WINDOW_MINUTES);
         let restricted = self.restricted_until.is_some_and(|until| now < until);
 
         recent && !restricted

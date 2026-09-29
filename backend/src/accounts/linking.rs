@@ -13,11 +13,7 @@
 use crate::db::DbPool;
 use chrono::{DateTime, Utc};
 
-/// How long a link code stays usable.
-///
-/// Long enough to switch to a Matrix client and paste it, short enough that a
-/// code left on screen is not a standing invitation.
-pub const LINK_CODE_TTL_MINUTES: i64 = 5;
+pub use crate::domain::accounts::LINK_CODE_TTL_MINUTES;
 
 /// Why a `!link` attempt did not result in a link.
 #[derive(Debug, PartialEq, Eq)]

@@ -4,8 +4,7 @@ use bcrypt::{hash, verify};
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::accounts::{
-    AccountId, MaturedRecovery, RECOVERY_CODE_COUNT, RECOVERY_DELAY_HOURS,
-    RECOVERY_RESTRICTION_HOURS, RECOVERY_WINDOW_HOURS,
+    AccountId, MaturedRecovery, RECOVERY_CODE_COUNT, RECOVERY_DELAY_HOURS, RECOVERY_WINDOW_HOURS,
 };
 
 const RECOVERY_HASH_COST: u32 = 8;
@@ -231,7 +230,7 @@ pub async fn redeem_request(
 }
 
 pub fn restriction_expiry() -> DateTime<Utc> {
-    Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS)
+    crate::domain::accounts::restriction_expiry(Utc::now())
 }
 
 fn random_code() -> String {

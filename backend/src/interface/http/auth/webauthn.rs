@@ -17,9 +17,9 @@ use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
 use crate::accounts::{
-    handle_to_account_id, session::COOKIE_NAME, AccountRepository, CredentialRepository,
-    SessionRepository,
+    handle_to_account_id, AccountRepository, CredentialRepository, SessionRepository,
 };
+use crate::domain::accounts::{hash_token, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME};
 use crate::error::ApiError;
 use crate::interface::http::auth::types::{ApiState, Ceremony};
 
@@ -421,10 +421,8 @@ async fn issue_session(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) =
-            crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
-        {
-            let old_id_hash = crate::accounts::session::hash_token(old_token);
+        if let Some(old_token) = crate::accounts::principal::cookie_value(cookies, COOKIE_NAME) {
+            let old_id_hash = hash_token(old_token);
             let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
         }
     }
@@ -447,7 +445,7 @@ pub fn with_session_cookie(
     token: &str,
     secure: bool,
 ) -> axum::response::Response {
-    let max_age = crate::accounts::session::ABSOLUTE_TIMEOUT_DAYS * 24 * 60 * 60;
+    let max_age = ABSOLUTE_TIMEOUT_DAYS * 24 * 60 * 60;
     let cookie = format!(
         "{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{}",
         if secure { "; Secure" } else { "" }

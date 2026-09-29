@@ -359,7 +359,7 @@ impl Modify for SecurityAddon {
             "session_cookie",
             SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Cookie(
                 utoipa::openapi::security::ApiKeyValue::with_description(
-                    crate::accounts::session::COOKIE_NAME,
+                    crate::domain::accounts::COOKIE_NAME,
                     "Session cookie set by the passkey sign-in endpoints. HttpOnly, so \
                      it is sent by the browser automatically and is not readable by \
                      JavaScript.",

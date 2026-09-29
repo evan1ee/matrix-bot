@@ -1,8 +1,7 @@
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-use crate::accounts::session::hash_token;
-use crate::domain::accounts::AccountId;
+use crate::domain::accounts::{hash_token, AccountId};
 use crate::domain::mcp::McpToken;
 
 /// Mints a new MCP personal access token and stores its hash in the database.

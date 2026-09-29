@@ -19,9 +19,9 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::linking::LINK_CODE_TTL_MINUTES;
-    use crate::accounts::session::hash_token;
-    use crate::domain::accounts::{LinkOutcome, STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::accounts::{
+        hash_token, LinkOutcome, LINK_CODE_TTL_MINUTES, STATUS_ACTIVE, STATUS_UNCLAIMED,
+    };
     use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::accounts as repo;
