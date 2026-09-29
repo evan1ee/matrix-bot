@@ -2,6 +2,7 @@
 //!
 //! Provides repositories, read models, and dynamic table-level merge operations.
 
+pub mod advisory;
 pub mod job_notifications;
 pub mod merge;
 pub mod read_models;

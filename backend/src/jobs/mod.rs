@@ -8,6 +8,8 @@
 
 pub(crate) mod reaper;
 pub mod registry;
+pub mod schedule;
+pub(crate) mod scheduler;
 #[cfg(test)]
 pub(crate) mod testing;
 pub(crate) mod wakeup;
@@ -23,10 +25,11 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::application::AppError;
+use crate::application::{AppError, AppServices};
 use crate::domain::accounts::AccountId;
 use crate::domain::jobs::{JobId, JobType};
 pub use registry::Registry;
+pub use schedule::Tick;
 
 pub const DEFAULT_JOB_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -150,15 +153,25 @@ pub fn worker_id(host: &str) -> String {
 
 pub struct JobRuntime {
     pool: PgPool,
+    services: AppServices,
     registry: Arc<Registry>,
+    ticks: Vec<Tick>,
     config: Arc<JobsConfig>,
 }
 
 impl JobRuntime {
-    pub fn new(pool: PgPool, registry: Registry, config: JobsConfig) -> Self {
+    pub fn new(
+        pool: PgPool,
+        services: AppServices,
+        registry: Registry,
+        ticks: Vec<Tick>,
+        config: JobsConfig,
+    ) -> Self {
         Self {
             pool,
+            services,
             registry: Arc::new(registry),
+            ticks,
             config: Arc::new(config),
         }
     }
@@ -178,6 +191,13 @@ impl JobRuntime {
         ));
         tasks.spawn(reaper::run(
             self.pool.clone(),
+            self.config.clone(),
+            shutdown.clone(),
+        ));
+        tasks.spawn(scheduler::run(
+            self.pool.clone(),
+            self.services.clone(),
+            self.ticks.clone(),
             self.config.clone(),
             shutdown.clone(),
         ));
@@ -212,6 +232,7 @@ impl JobRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::jobs::{JobStatus, NewJob};
 
     /// Given each AppError variant, When converted, Then infrastructure
     /// failures retry and input/ownership failures are permanent.
@@ -257,5 +278,35 @@ mod tests {
         };
         assert!(!ctx(2).is_last_attempt());
         assert!(ctx(3).is_last_attempt());
+    }
+
+    /// Given a runtime with one scripted handler and no ticks, When a job is
+    /// enqueued, Then it completes; When shutdown fires, Then run returns
+    /// within 2 s.
+    #[tokio::test]
+    async fn the_runtime_runs_jobs_and_stops_on_cancel() {
+        let h = testing::Harness::new().await;
+        let registry = Registry::new(vec![Arc::new(testing::Scripted::new(
+            testing::Behaviour::Succeed,
+        ))])
+        .unwrap();
+        let token = CancellationToken::new();
+        let runtime = JobRuntime::new(
+            h.pool.clone(),
+            AppServices::new(&h.pool),
+            registry,
+            Vec::new(),
+            JobsConfig::for_tests(),
+        );
+        let task = tokio::spawn(runtime.run(token.clone()));
+        let id = h
+            .enqueue(NewJob::test_job(testing::TEST_TYPE, Some("e2e")))
+            .await;
+        h.wait_for_status(id, JobStatus::Completed).await;
+        token.cancel();
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
     }
 }
