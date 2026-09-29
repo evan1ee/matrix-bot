@@ -403,7 +403,8 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │   ├── postgres/         #   repositories, read models, account merge
     │   ├── inference/        #   llm, ocr, stt, tts clients
     │   └── web/              #   outbound feeds, SSRF guard
-    ├── accounts/, db/        # legacy facades and pool/migration plumbing (being retired)
+    ├── db/                   # pool, migration runner, test pools
+    ├── accounts/             # legacy account facades (being retired)
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image

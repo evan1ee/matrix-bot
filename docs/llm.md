@@ -38,11 +38,11 @@ MCP client ──────────┴────────────
 
 ## The turn
 
-`llm::run_turn` runs one user turn for an `AiTurnContext` (account, room, prompt, optional quoted message, optional `StageReporter`):
+`llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, room, optional broadcaster and `StageReporter`) and a prompt:
 
 1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`.
 2. **Context.** The active conversation for `(owner, room)` is loaded; one idle longer than `SESSION_TTL_SECONDS` (1 h) is replaced by a fresh one, and `!ai reset` clears it. Immediate retries are deduped by checking the conversation's tail message before inserting.
-3. **Tool loop.** The model may request tools; each round executes them, appends `tool` messages and calls the model again. Concurrent calls in a round run through `futures_util::future::join_all`. The loop stops after `MAX_TOOL_ROUNDS` (5); prompts are capped at `MAX_PROMPT_LENGTH` (16384 characters).
+3. **Tool loop.** The model may request tools; each round executes them, appends `tool` messages and calls the model again. Concurrent calls in a round run through `futures_util::future::join_all`. The loop stops after `MAX_TOOL_ROUNDS` (5); the Matrix front door rejects prompts over `MAX_PROMPT_LENGTH` (16384 bytes).
 4. **Reply.** Matrix replies go out as `text_html(&plain, &html)`. When a `StageReporter` is present the reply streams as in-place message updates and falls back to a plain completion on any transport error. The web endpoint is `POST /ai/chat`. Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
 
 ### Agent rules

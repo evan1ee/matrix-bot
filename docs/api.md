@@ -39,11 +39,11 @@ The broadcast channel is process-wide. `sse::owned_events` narrows it to one own
 
 Passkeys are the only way to establish a session in the browser. There is still no password and no JWT; `bcrypt` survives only to hash recovery codes. A native client (Element X iOS) exchanges a Matrix session for a backend session token and carries it as `Authorization: Bearer` instead of a cookie, and an MCP client authenticates the same way with an `mb_mcp_`-prefixed personal access token — see `README.md` for both. An MCP token never satisfies the step-up gate below: it is a machine credential, so its creation time is never read as a passkey assertion.
 
-`interface/http/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the credential carries the account handle, so there is no username field anywhere and no user enumeration to defend against. `accounts::account_id_to_handle` is a total bijection between an account id and the WebAuthn user handle — an account id is `acct_` plus the 32 hex chars of 16 random bytes, which is exactly a UUID's simple form, so no column and no UUID generation are needed.
+`interface/http/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the credential carries the account handle, so there is no username field anywhere and no user enumeration to defend against. `domain::accounts::account_id_to_handle` maps an account id to the WebAuthn user handle and back: the account id *is* a UUID (rendered `acct_<32 hex>`), so the handle needs no column of its own.
 
 `register/start` mints the account id but writes **no row**; the id has to travel inside the challenge, and an abandoned ceremony must leave nothing behind. Hence `create_with_id` alongside `create`.
 
-`accounts/session.rs` holds sessions server-side. Only the SHA-256 of the cookie is stored, so a leaked backup cannot be replayed. Both timeouts are checked on read rather than swept, so expiry never waits on a background job.
+Sessions are held server-side (`infrastructure/postgres/repositories/accounts/sessions.rs`). Only the SHA-256 of the cookie is stored, so a leaked backup cannot be replayed. Both timeouts are checked on read rather than swept, so expiry never waits on a background job.
 
 `interface/http/auth/extractor.rs` reads whichever credential the request carries and enforces CSRF twice: `SameSite=Strict`, plus an `Origin` check on every state-changing request that arrived on the ambient session cookie. A missing `Origin` on such a mutating request is **refused** — browsers always send one on `fetch`. A request carrying an explicit `Authorization: Bearer` credential is exempt from the Origin requirement, because a hostile site's ambient authority can never attach a header it does not know the value of.
 
@@ -75,7 +75,7 @@ A native client that is already signed in to Matrix (for example a SwiftUI tab i
 
 1. The client posts its existing credentials to `POST /api/v1/auth/matrix/login`: `{ "access_token": "syt_…", "homeserver": "https://…" }`.
 2. The backend calls the homeserver's `/_matrix/client/v3/account/whoami` to prove the token belongs to that MXID, then resolves or provisions the account (`AccountService::resolve_or_provision`).
-3. The response carries an opaque backend token, `{ "session_token": "mb_sess_…", "account_id": "acct_…", "display_name": "…", "mxid": "@…" }`. Every later request sends `Authorization: Bearer <session_token>`; the SSE stream authenticates the same way.
+3. The response carries an opaque backend token, `{ "session_token": "<opaque token>", "account_id": "acct_…", "display_name": "…", "mxid": "@…" }`. Every later request sends `Authorization: Bearer <session_token>`; the SSE stream authenticates the same way.
 
 Bearer requests are exempt from the browser `Origin` check (see *CSRF*). Push notifications need no custom APNs: the bot's reminders, bill alerts and price alerts are ordinary Matrix messages to the user's bot DM, which the Matrix client already delivers. The Swift client and view code that used to live in `docs/` is in git history (`docs/ELEMENT_X_IOS_INTEGRATION.md` at `c728bd5`).
 

@@ -76,18 +76,19 @@ interface/chat/              BotModule command handlers per feature
 interface/channels/matrix/   matrix-sdk client, sync loop, E2EE, verification
 interface/mcp/               MCP protocol adapters
 llm/                         prompts, tool loop, tool registry (llm/tools/)
-infrastructure/postgres/     repositories/<f>.rs, read_models/, merge.rs, pool
+infrastructure/postgres/     repositories/<f>.rs, read_models/, merge.rs, ping
 infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
 infrastructure/web/          outbound web feeds, SSRF guard
 app.rs / main.rs             composition roots
-accounts/, db/               legacy facades and pool/migration plumbing (being retired; do not extend)
+db/                          pool, migration runner, test pools and the schema catalog test
+accounts/                    legacy facades over the accounts repositories (being retired; do not extend)
 ```
 
 | Layer | Owns | May not import |
 |---|---|---|
 | `domain` | rules and invariants | anything but `std`, `chrono`, `uuid`, `serde`, `thiserror`; no Axum, matrix-sdk, sqlx, reqwest, utoipa, React, MCP |
 | `application` | use cases, transactions | axum, matrix-sdk, reqwest, utoipa, `interface` |
-| `interface`, `llm` | protocol translation | SQL of any kind |
+| `interface`, `llm` | protocol translation, AI orchestration | SQL of any kind outside `#[cfg(test)]` (the architecture test enforces this for `interface/` and `application/`; keep `llm/` to it too) |
 | `infrastructure` | external capabilities | `application`, `interface` |
 
 - Before adding a module, check whether an existing one already owns the responsibility. Do not create new top-level layers without a clear reason and an ADR.
