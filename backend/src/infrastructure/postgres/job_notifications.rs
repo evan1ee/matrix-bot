@@ -58,7 +58,8 @@ mod tests {
     async fn a_skipped_duplicate_sends_no_notification() {
         // NOTIFY is database-wide: a shared test database would let parallel
         // tests' inserts wake this listener, so "none" needs a private one.
-        let pool = crate::db::pool::test_pool_private_database(3).await;
+        const DB: &str = "priv_skip_notify";
+        let pool = crate::db::pool::test_pool_private_database(DB, 3).await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let mut listener = JobNotifications::connect(&pool).await.unwrap();
         let job = NewJob::test_job(JobType::PortfolioCheckAlerts, Some("k"));
@@ -86,5 +87,7 @@ mod tests {
             .unwrap();
         let extra = tokio::time::timeout(Duration::from_millis(500), listener.next()).await;
         assert!(extra.is_err(), "the skipped duplicate must not notify");
+        drop(listener);
+        crate::db::pool::drop_private_database(pool, DB).await;
     }
 }

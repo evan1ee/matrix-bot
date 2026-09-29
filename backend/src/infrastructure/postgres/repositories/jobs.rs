@@ -88,6 +88,7 @@ pub async fn enqueue(exec: impl PgExecutor<'_>, job: &NewJob) -> sqlx::Result<Op
     Ok(id.map(JobId))
 }
 
+/// The next due job of one of `types`, `FOR UPDATE SKIP LOCKED` so
 /// concurrent claimers never block on or double-take a row. Claiming spends
 /// an attempt.
 pub async fn claim(
@@ -270,13 +271,14 @@ pub struct JobRecord {
     pub available_at: chrono::DateTime<chrono::Utc>,
     pub locked_by: Option<String>,
     pub error: Option<String>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub account_id: Option<AccountId>,
 }
 
 #[cfg(test)]
 pub async fn get(exec: impl PgExecutor<'_>, id: JobId) -> sqlx::Result<Option<JobRecord>> {
     let row = sqlx::query!(
-        "SELECT id, job_type, status, attempts, available_at, locked_by, error, account_id \
+        "SELECT id, job_type, status, attempts, available_at, locked_by, error, completed_at, account_id \
          FROM jobs WHERE id = $1",
         id.0
     )
@@ -290,6 +292,7 @@ pub async fn get(exec: impl PgExecutor<'_>, id: JobId) -> sqlx::Result<Option<Jo
         available_at: r.available_at,
         locked_by: r.locked_by,
         error: r.error,
+        completed_at: r.completed_at,
         account_id: r.account_id.map(AccountId::from_uuid),
     }))
 }
@@ -326,7 +329,6 @@ mod tests {
     use sqlx::PgPool;
 
     use super::*;
-    use crate::domain::accounts::AccountId;
     use crate::domain::jobs::{JobId, JobStatus, JobType, NewJob};
 
     const W1: &str = "w1";
@@ -430,7 +432,7 @@ mod tests {
     /// Given 200 jobs, When four claimers race on separate connections and
     /// threads, Then every job is claimed exactly once (SKIP LOCKED).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn two_concurrent_claimers_never_get_the_same_job() {
+    async fn concurrent_claimers_never_get_the_same_job() {
         const JOBS: usize = 200;
         const CLAIMERS: usize = 4;
         let pool = crate::db::pool::test_pool_sized(CLAIMERS as u32).await;
@@ -583,12 +585,15 @@ mod tests {
             reap_stale(&pool, Duration::from_secs(120)).await.unwrap(),
             2
         );
+        let requeued = get(&pool, again).await.unwrap().unwrap();
         assert_eq!(
-            get(&pool, again).await.unwrap().unwrap().status,
-            JobStatus::Pending
+            (requeued.status, requeued.attempts),
+            (JobStatus::Pending, 1)
         );
+        assert!(requeued.completed_at.is_none());
         let failed = get(&pool, last).await.unwrap().unwrap();
         assert_eq!(failed.status, JobStatus::Failed);
+        assert!(failed.completed_at.is_some());
         assert!(failed.error.unwrap().contains("heartbeat"));
         assert_eq!(
             get(&pool, fresh).await.unwrap().unwrap().status,

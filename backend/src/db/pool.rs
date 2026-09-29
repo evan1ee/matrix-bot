@@ -95,40 +95,57 @@ pub async fn test_pool_sized(max_connections: u32) -> crate::db::DbPool {
 ///
 /// For the one thing a schema cannot isolate: `LISTEN`/`NOTIFY` is
 /// database-wide, so a test asserting that *no* notification arrived needs a
-/// database no other test writes to. Needs a role allowed to `CREATE
-/// DATABASE`; like the per-test schemas, the database is left behind.
+/// database no other test writes to. `name` is chosen by the caller and is
+/// unique per test; any leftover database of that name (a previous run that
+/// panicked before cleaning up) is dropped first, so at most one database per
+/// test ever exists. Pair with [`drop_private_database`]. Needs a role allowed
+/// to `CREATE DATABASE`.
 #[cfg(test)]
-pub async fn test_pool_private_database(max_connections: u32) -> crate::db::DbPool {
-    use sqlx::postgres::PgConnectOptions;
-    use std::str::FromStr;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
+pub async fn test_pool_private_database(name: &str, max_connections: u32) -> crate::db::DbPool {
     let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let options = PgConnectOptions::from_str(&base).expect("TEST_DATABASE_URL parses");
-    let name = format!(
-        "priv_{}_{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
+    drop_database(&admin, name).await;
     sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE DATABASE ")
-        .push(&name)
+        .push(name)
         .build()
         .execute(&admin)
         .await
         .expect("CREATE DATABASE needs a role that may create databases");
     admin.close().await;
 
-    PgPoolOptions::new()
-        .max_connections(max_connections)
-        .acquire_timeout(std::time::Duration::from_secs(10))
-        .connect_with(options.database(&name))
+    connect_pool(&private_database_url(&base, name), max_connections)
         .await
         .expect("private database pool")
+}
+
+/// Closes `pool` and drops the database [`test_pool_private_database`] made.
+#[cfg(test)]
+pub async fn drop_private_database(pool: crate::db::DbPool, name: &str) {
+    pool.close().await;
+    let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let admin = connect_pool(&base, 1).await.expect("admin pool");
+    drop_database(&admin, name).await;
+    admin.close().await;
+}
+
+#[cfg(test)]
+fn private_database_url(base: &str, name: &str) -> String {
+    let mut url = url::Url::parse(base).expect("TEST_DATABASE_URL parses");
+    url.set_path(&format!("/{name}"));
+    url.to_string()
+}
+
+#[cfg(test)]
+async fn drop_database(admin: &crate::db::DbPool, name: &str) {
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP DATABASE IF EXISTS ")
+        .push(name)
+        .push(" WITH (FORCE)")
+        .build()
+        .execute(admin)
+        .await
+        .expect("drop private test database");
 }
 
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.

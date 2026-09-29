@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_type, status, attempts, available_at, locked_by, error, account_id FROM jobs WHERE id = $1",
+  "query": "SELECT id, job_type, status, attempts, available_at, locked_by, error, completed_at, account_id FROM jobs WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,17 @@
       },
       {
         "ordinal": 7,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
         "name": "account_id",
         "type_info": "Uuid",
         "origin": {
@@ -105,8 +116,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "dfb329682a1f9728629c1097175339ecbde4eec396f7cc9dba407ef72a5a7a06"
+  "hash": "665f9ed8514a78d8cc68854f14925a2bd6bd417f92bb7d9c54ac5284ea191e1c"
 }
