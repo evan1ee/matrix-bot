@@ -67,7 +67,7 @@ impl LinkRepository {
                 .await?;
         Ok(res.map(|c| LinkChallenge {
             code: c.code,
-            account_id: c.account_id.into_inner(),
+            account_id: c.account_id.to_string(),
             expires_at: c.expires_at,
             consumed_at: c.consumed_at,
         }))
@@ -86,14 +86,14 @@ impl LinkRepository {
         .await?;
         Ok(match outcome {
             crate::domain::accounts::LinkOutcome::Linked { account_id } => LinkOutcome::Linked {
-                account_id: account_id.into_inner(),
+                account_id: account_id.to_string(),
             },
             crate::domain::accounts::LinkOutcome::NeedsMergeConfirmation {
                 account_id,
                 from_account,
             } => LinkOutcome::NeedsMergeConfirmation {
-                account_id: account_id.into_inner(),
-                from_account: from_account.into_inner(),
+                account_id: account_id.to_string(),
+                from_account: from_account.to_string(),
             },
             crate::domain::accounts::LinkOutcome::UnknownCode => LinkOutcome::UnknownCode,
             crate::domain::accounts::LinkOutcome::AlreadyLinked => LinkOutcome::AlreadyLinked,
@@ -288,9 +288,10 @@ mod tests {
         let theirs = AccountRepository::create(&pool, "theirs", STATUS_ACTIVE)
             .await
             .unwrap();
+        let theirs_id = crate::domain::accounts::AccountId::from(theirs.as_str());
         sqlx::query!(
             "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', $1)",
-            &theirs
+            theirs_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -350,10 +351,11 @@ mod tests {
             .await
             .unwrap();
 
+        let acct_id = crate::domain::accounts::AccountId::from(account.as_str());
         sqlx::query!(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
              VALUES ('!r:x', $1, 'evan', 'keep me', 'medium', FALSE)",
-            &account
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -370,12 +372,15 @@ mod tests {
             .is_none());
 
         // The row is exactly where it was.
-        let owner: String =
+        let owner: uuid::Uuid =
             sqlx::query_scalar!("SELECT owner_id FROM todos WHERE text = 'keep me'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(owner, account);
+        assert_eq!(
+            crate::domain::accounts::AccountId::from_uuid(owner).to_string(),
+            account
+        );
     }
 
     /// A later message from an unlinked MXID starts a fresh, empty account

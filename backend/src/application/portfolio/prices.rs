@@ -32,7 +32,7 @@ impl PortfolioService {
 
         let price_minor = price_to_minor(fetched.price, holding.currency_exponent);
 
-        let updated = repo::set_price(&self.pool, owner.as_str(), &holding.symbol, price_minor)
+        let updated = repo::set_price(&self.pool, owner, &holding.symbol, price_minor)
             .await?
             .ok_or_else(|| {
                 AppError::NotFound(format!("Holding for {} not found", holding.symbol))
@@ -43,11 +43,7 @@ impl PortfolioService {
 
         info!(
             "Refreshed price for {} (owner {}): {:.2} {} ({} minor units)",
-            holding.symbol,
-            owner.as_str(),
-            fetched.price,
-            holding.currency,
-            price_minor
+            holding.symbol, owner, fetched.price, holding.currency, price_minor
         );
 
         Ok(updated)
@@ -56,14 +52,10 @@ impl PortfolioService {
     pub async fn refresh_all_for_owner(&self, owner: &AccountId) -> RefreshSummary {
         let mut summary = RefreshSummary::default();
 
-        let holdings = match repo::list(&self.pool, owner.as_str()).await {
+        let holdings = match repo::list(&self.pool, owner).await {
             Ok(h) => h,
             Err(e) => {
-                error!(
-                    "Failed to list holdings for owner {}: {}",
-                    owner.as_str(),
-                    e
-                );
+                error!("Failed to list holdings for owner {}: {}", owner, e);
                 return summary;
             }
         };

@@ -69,8 +69,8 @@ pub async fn move_rows(
 
     let bulk_sql = format!("UPDATE {table} SET {column} = $1 WHERE {column} = $2");
     let bulk = sqlx::query(AssertSqlSafe(bulk_sql.as_str()))
-        .bind(into.as_str())
-        .bind(from.as_str())
+        .bind(into.as_uuid())
+        .bind(from.as_uuid())
         .execute(&mut *conn)
         .await;
 
@@ -93,7 +93,7 @@ pub async fn move_rows(
             let select_keys_sql =
                 format!("SELECT CAST({key} AS TEXT) FROM {table} WHERE {column} = $1");
             let keys: Vec<String> = sqlx::query_scalar(AssertSqlSafe(select_keys_sql.as_str()))
-                .bind(from.as_str())
+                .bind(from.as_uuid())
                 .fetch_all(&mut *conn)
                 .await?;
 
@@ -109,8 +109,8 @@ pub async fn move_rows(
                     .await?;
 
                 let one = sqlx::query(AssertSqlSafe(update_row_sql.as_str()))
-                    .bind(into.as_str())
-                    .bind(from.as_str())
+                    .bind(into.as_uuid())
+                    .bind(from.as_uuid())
                     .bind(&value)
                     .execute(&mut *conn)
                     .await;
@@ -151,7 +151,7 @@ pub async fn delete_leftovers(
 
     let count_sql = format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1");
     let leftover: i64 = sqlx::query_scalar(AssertSqlSafe(count_sql.as_str()))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .fetch_one(&mut *conn)
         .await
         .unwrap_or(0);
@@ -159,7 +159,7 @@ pub async fn delete_leftovers(
     if leftover > 0 {
         let delete_sql = format!("DELETE FROM {table} WHERE {column} = $1");
         sqlx::query(AssertSqlSafe(delete_sql.as_str()))
-            .bind(from.as_str())
+            .bind(from.as_uuid())
             .execute(&mut *conn)
             .await?;
     }
@@ -179,13 +179,13 @@ pub async fn discard_account_table(
         sqlx::query(AssertSqlSafe(
             "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = $1",
         ))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .execute(conn)
         .await?;
     } else {
         let delete_sql = format!("DELETE FROM {table} WHERE account_id = $1");
         sqlx::query(AssertSqlSafe(delete_sql.as_str()))
-            .bind(from.as_str())
+            .bind(from.as_uuid())
             .execute(conn)
             .await?;
     }
@@ -199,7 +199,7 @@ pub async fn delete_account(
     from: &AccountId,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(AssertSqlSafe("DELETE FROM accounts WHERE id = $1"))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .execute(conn)
         .await?;
     Ok(())
@@ -217,7 +217,7 @@ pub async fn count_rows(
 
     let count_sql = format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1");
     let count: i64 = sqlx::query_scalar(AssertSqlSafe(count_sql.as_str()))
-        .bind(owner.as_str())
+        .bind(owner.as_uuid())
         .fetch_one(executor)
         .await
         .unwrap_or(0);
@@ -280,14 +280,23 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        for (owner, name) in [
-            ("acct_from", "food"),
-            ("acct_from", "travel"),
-            ("acct_into", "food"),
-        ] {
+        let from = AccountId::new("acct_from");
+        let into = AccountId::new("acct_into");
+
+        for acc in [&from, &into] {
+            sqlx::query!(
+                "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+                acc.as_uuid()
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        for (owner, name) in [(&from, "food"), (&from, "travel"), (&into, "food")] {
             sqlx::query!(
                 "INSERT INTO finance_categories (owner_id, name) VALUES ($1, $2)",
-                owner,
+                owner.as_uuid(),
                 name
             )
             .execute(&pool)
@@ -296,8 +305,6 @@ mod tests {
         }
 
         let mut tx = pool.begin().await.unwrap();
-        let from = AccountId::new("acct_from");
-        let into = AccountId::new("acct_into");
         let moved = move_rows(&mut tx, "finance_categories", "owner_id", &from, &into)
             .await
             .expect("a collision must not fail the move");
@@ -307,7 +314,7 @@ mod tests {
 
         let names: Vec<String> = sqlx::query_scalar!(
             "SELECT name FROM finance_categories WHERE owner_id = $1 ORDER BY name",
-            "acct_into"
+            into.as_uuid()
         )
         .fetch_all(&pool)
         .await
@@ -316,7 +323,7 @@ mod tests {
 
         let left: Vec<String> = sqlx::query_scalar!(
             "SELECT name FROM finance_categories WHERE owner_id = $1",
-            "acct_from"
+            from.as_uuid()
         )
         .fetch_all(&pool)
         .await

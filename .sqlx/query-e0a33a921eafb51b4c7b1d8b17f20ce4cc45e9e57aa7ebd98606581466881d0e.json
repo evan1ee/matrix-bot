@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'a', 'active'), ($2, 'b', 'active') ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0a33a921eafb51b4c7b1d8b17f20ce4cc45e9e57aa7ebd98606581466881d0e"
+}

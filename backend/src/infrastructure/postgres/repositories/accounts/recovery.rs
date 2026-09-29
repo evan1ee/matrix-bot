@@ -18,7 +18,7 @@ pub async fn issue_codes(
 
     sqlx::query!(
         "DELETE FROM recovery_codes WHERE account_id = $1",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(&mut *tx)
     .await?;
@@ -31,7 +31,7 @@ pub async fn issue_codes(
 
         sqlx::query!(
             "INSERT INTO recovery_codes (account_id, code_hash) VALUES ($1, $2)",
-            account_id.as_str(),
+            account_id.as_uuid(),
             &hashed,
         )
         .execute(&mut *tx)
@@ -54,7 +54,7 @@ pub async fn set_valid_after(
     sqlx::query!(
         "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
         valid_after,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(pool)
     .await?;
@@ -67,7 +67,7 @@ pub async fn remaining(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM recovery_codes WHERE account_id = $1 AND used_at IS NULL"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(conn)
     .await?;
@@ -78,7 +78,7 @@ pub async fn redeem(pool: &sqlx::PgPool, code: &str) -> Result<Option<AccountId>
     let normalised = normalise(code);
 
     let candidates =
-        sqlx::query!("SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL")
+        sqlx::query!(r#"SELECT id, account_id AS "account_id: uuid::Uuid", code_hash FROM recovery_codes WHERE used_at IS NULL"#)
             .fetch_all(pool)
             .await?;
 
@@ -97,7 +97,7 @@ pub async fn redeem(pool: &sqlx::PgPool, code: &str) -> Result<Option<AccountId>
                 return Ok(None);
             }
 
-            return Ok(Some(AccountId::new(row.account_id)));
+            return Ok(Some(AccountId::from_uuid(row.account_id)));
         }
     }
 
@@ -114,7 +114,7 @@ pub async fn request(
         "UPDATE recovery_requests SET cancelled_at = $1 \
          WHERE account_id = $2 AND cancelled_at IS NULL AND consumed_at IS NULL",
         Utc::now(),
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(&mut *tx)
     .await?;
@@ -133,7 +133,7 @@ pub async fn request(
          (id, account_id, code_hash, requested_at, valid_after, expires_at) \
          VALUES ($1, $2, $3, $4, $5, $6)",
         id,
-        account_id.as_str(),
+        account_id.as_uuid(),
         &hashed,
         now,
         valid_after,
@@ -161,7 +161,7 @@ pub async fn cancel_all(
         "UPDATE recovery_requests SET cancelled_at = $1 \
          WHERE account_id = $2 AND cancelled_at IS NULL AND consumed_at IS NULL",
         Utc::now(),
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?
@@ -177,7 +177,7 @@ pub async fn pending(
         "SELECT valid_after FROM recovery_requests \
          WHERE account_id = $1 AND cancelled_at IS NULL AND consumed_at IS NULL \
            AND expires_at > $2 ORDER BY requested_at DESC LIMIT 1",
-        account_id.as_str(),
+        account_id.as_uuid(),
         Utc::now(),
     )
     .fetch_optional(conn)
@@ -193,8 +193,8 @@ pub async fn redeem_request(
     let now = Utc::now();
 
     let candidates = sqlx::query!(
-        "SELECT id, account_id, code_hash, valid_after FROM recovery_requests \
-         WHERE cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > $1",
+        r#"SELECT id, account_id AS "account_id: uuid::Uuid", code_hash, valid_after FROM recovery_requests
+         WHERE cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > $1"#,
         now,
     )
     .fetch_all(pool)
@@ -220,7 +220,7 @@ pub async fn redeem_request(
 
         return Ok(if consumed == 1 {
             MaturedRecovery::Ready {
-                account_id: AccountId::new(row.account_id),
+                account_id: AccountId::from_uuid(row.account_id),
             }
         } else {
             MaturedRecovery::Unavailable

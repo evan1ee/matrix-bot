@@ -45,7 +45,7 @@ impl From<crate::domain::recurring_bills::RecurringBill> for RecurringBill {
         Self {
             id: b.id,
             room_id: b.room_id,
-            owner_id: b.owner_id.into_inner(),
+            owner_id: b.owner_id.to_string(),
             sender_name: b.sender_name,
             name: b.name,
             category: b.category,
@@ -430,6 +430,7 @@ mod tests {
     async fn test_bill_lead_time_schedules_rearms_and_tears_down() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -524,6 +525,7 @@ mod tests {
     async fn test_lead_time_is_validated_at_the_boundary() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
         let alice = AuthUser::named("alice", "acct_alice");
 
@@ -566,6 +568,7 @@ mod tests {
     async fn test_recurring_bills_api_flow() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

@@ -20,6 +20,7 @@ use tracing::{error, warn};
 
 use crate::config::AiEnvConfig;
 use crate::db::Database;
+use crate::domain::accounts::AccountId;
 use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
 use crate::interface::chat::voice::VoiceConfig;
@@ -166,7 +167,7 @@ impl<'a> Attachment<'a> {
         ai: &AiEnvConfig,
         broadcaster: Option<&EventBroadcaster>,
         room: &Room,
-        owner_id: &str,
+        owner_id: &AccountId,
         media_bytes: &[u8],
         reporter: &StageReporter,
     ) -> String {
@@ -248,21 +249,22 @@ pub async fn handle_attachment(
     let (plain_stage, html_stage) = attachment.stage_labels();
     let stage_indicator = StageIndicator::start(room, plain_stage, html_stage).await;
 
-    let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-        &db.pool,
-        ev.sender.as_str(),
-    )
-    .await
-    {
-        Ok(owner_id) => owner_id,
-        Err(err) => {
-            error!("Could not resolve account for {}: {:?}", ev.sender, err);
-            typing_guard.stop().await;
-            let (plain, html) = attachment.account_error();
-            stage_indicator.cancel_with_error(plain, html).await;
-            return;
-        }
-    };
+    let owner_id =
+        match crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+            &db.pool,
+            ev.sender.as_str(),
+        )
+        .await
+        {
+            Ok(owner_id) => owner_id,
+            Err(err) => {
+                error!("Could not resolve account for {}: {:?}", ev.sender, err);
+                typing_guard.stop().await;
+                let (plain, html) = attachment.account_error();
+                stage_indicator.cancel_with_error(plain, html).await;
+                return;
+            }
+        };
 
     let media_bytes = match crate::interface::channels::matrix::media::download_media_file(
         &room.client(),

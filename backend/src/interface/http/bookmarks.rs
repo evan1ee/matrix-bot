@@ -32,7 +32,7 @@ impl From<crate::domain::bookmarks::Bookmark> for Bookmark {
     fn from(b: crate::domain::bookmarks::Bookmark) -> Self {
         Self {
             id: b.id,
-            owner_id: b.owner_id.into_inner(),
+            owner_id: b.owner_id.to_string(),
             url: b.url,
             title: b.title,
             description: b.description,

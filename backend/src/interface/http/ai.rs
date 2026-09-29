@@ -362,15 +362,17 @@ pub async fn get_retrospective(
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::domain::accounts::AccountId;
     use crate::events::EventBroadcaster;
 
-    async fn setup_state() -> (ApiState, String) {
+    async fn setup_state() -> (ApiState, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
+        let owner_str =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
                 .await
                 .unwrap();
+        let owner = AccountId::from(owner_str.as_str());
         let state = ApiState::new(
             Database { pool: pool },
             EventBroadcaster::default(),

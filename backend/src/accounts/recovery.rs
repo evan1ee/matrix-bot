@@ -87,7 +87,7 @@ impl RecoveryRepository {
         let res =
             crate::infrastructure::postgres::repositories::accounts::recovery::redeem(pool, code)
                 .await?;
-        Ok(res.map(|a| a.into_inner()))
+        Ok(res.map(|a| a.to_string()))
     }
 
     /// Starts a Matrix-initiated recovery.
@@ -133,7 +133,7 @@ impl RecoveryRepository {
         Ok(match res {
             crate::domain::accounts::MaturedRecovery::Ready { account_id } => {
                 MaturedRecovery::Ready {
-                    account_id: account_id.into_inner(),
+                    account_id: account_id.to_string(),
                 }
             }
             crate::domain::accounts::MaturedRecovery::TooEarly => MaturedRecovery::TooEarly,
@@ -298,10 +298,11 @@ mod tests {
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
         // Wind the clock forward.
+        let acct_id = crate::domain::accounts::AccountId::from(acct.as_str());
         sqlx::query!(
             "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
-            &acct
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -343,10 +344,11 @@ mod tests {
             .is_none());
 
         // Even once it would have matured, it is dead.
+        let acct_id = crate::domain::accounts::AccountId::from(acct.as_str());
         sqlx::query!(
             "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
-            &acct
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -370,10 +372,11 @@ mod tests {
         let (first, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
         let (second, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
+        let acct_id = crate::domain::accounts::AccountId::from(acct.as_str());
         sqlx::query!(
             "UPDATE recovery_requests SET valid_after = $1 WHERE account_id = $2",
             Utc::now() - Duration::minutes(1),
-            &acct
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -401,11 +404,12 @@ mod tests {
         let acct = account(&pool, "evan").await;
         let (code, _) = RecoveryRepository::request(&pool, &acct).await.unwrap();
 
+        let acct_id = crate::domain::accounts::AccountId::from(acct.as_str());
         sqlx::query!(
             "UPDATE recovery_requests SET valid_after = $1, expires_at = $2 WHERE account_id = $3",
             Utc::now() - Duration::hours(2),
             Utc::now() - Duration::hours(1),
-            &acct
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await

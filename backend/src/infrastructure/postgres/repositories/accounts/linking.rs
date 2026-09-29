@@ -10,7 +10,7 @@ use crate::domain::accounts::{
 
 struct LinkChallengeRow {
     code: String,
-    account_id: String,
+    account_id: uuid::Uuid,
     expires_at: DateTime<Utc>,
     consumed_at: Option<DateTime<Utc>>,
 }
@@ -47,7 +47,7 @@ pub async fn issue(
         "INSERT INTO matrix_link_challenges (code, account_id, created_at, expires_at) \
          VALUES ($1, $2, $3, $4)",
         code,
-        account_id.as_str(),
+        account_id.as_uuid(),
         now,
         expires,
     )
@@ -126,10 +126,10 @@ pub async fn claim(
             }
         }
         None => {
-            let previous_account = sqlx::query_scalar!(
-                "SELECT account_id FROM security_events \
-                 WHERE kind = 'matrix_unlinked' AND detail = $1 \
-                 ORDER BY id DESC LIMIT 1",
+            let previous_account: Option<uuid::Uuid> = sqlx::query_scalar!(
+                r#"SELECT account_id AS "account_id: uuid::Uuid" FROM security_events
+                 WHERE kind = 'matrix_unlinked' AND detail = $1
+                 ORDER BY id DESC LIMIT 1"#,
                 mxid,
             )
             .fetch_optional(pool)
@@ -138,7 +138,7 @@ pub async fn claim(
             sqlx::query!(
                 "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
                 mxid,
-                challenge.account_id.as_str(),
+                challenge.account_id.as_uuid(),
             )
             .execute(pool)
             .await?;
@@ -173,7 +173,7 @@ pub async fn unlink(
     let affected = sqlx::query!(
         "DELETE FROM matrix_links WHERE mxid = $1 AND account_id = $2",
         mxid,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?
@@ -190,7 +190,7 @@ pub async fn link(
     sqlx::query!(
         "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
         mxid,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?;

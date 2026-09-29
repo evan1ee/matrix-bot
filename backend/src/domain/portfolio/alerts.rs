@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::accounts::AccountId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlertCondition {
@@ -35,7 +37,7 @@ impl AlertCondition {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PriceAlert {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub symbol: String,
     pub target_price_minor: i64,
     pub currency: String,

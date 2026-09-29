@@ -300,7 +300,7 @@ mod tests {
         let (raw, _token) =
             crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::create(
                 &state.db.pool,
-                &account,
+                &crate::domain::accounts::AccountId::from(account.as_str()),
                 "a machine",
                 None,
             )

@@ -69,7 +69,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
         let payload = match ctx
             .services
             .briefing
-            .generate_briefing(owner_id.as_str(), &settings)
+            .generate_briefing(&owner_id, &settings)
             .await
         {
             Ok(p) => p,

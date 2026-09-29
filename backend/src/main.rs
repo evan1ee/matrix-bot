@@ -111,7 +111,10 @@ async fn async_main() -> Result<()> {
             &db.pool,
             &matrix_bot::events::EventBroadcaster::default(),
         );
-        matrix_bot::interface::mcp::stdio::run_stdio(&services, &db.pool, &owner_id).await?;
+        let account_id: matrix_bot::domain::accounts::AccountId = owner_id
+            .parse()
+            .map_err(|_| anyhow::anyhow!("--owner must be an account id (acct_<uuid>)"))?;
+        matrix_bot::interface::mcp::stdio::run_stdio(&services, &db.pool, &account_id).await?;
         return Ok(());
     }
 

@@ -218,6 +218,7 @@ mod tests {
     async fn test_refresh_empty_holdings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:x"]).await;
         let services = crate::application::AppServices::new(&pool);
 
         let reply =
@@ -231,6 +232,7 @@ mod tests {
     async fn test_record_holding_without_cash() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:x"]).await;
         let services = crate::application::AppServices::new(&pool);
 
         let reply = handle_portfolio_command(

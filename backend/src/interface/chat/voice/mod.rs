@@ -19,6 +19,8 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
         .unwrap_or(0.0)
 }
 
+use crate::domain::accounts::AccountId;
+
 /// Processes an incoming Matrix audio or voice note message:
 /// 1. Sends the audio to the configured speech-to-text service.
 /// 2. Builds a structured semantic intent prompt with the transcription.
@@ -31,7 +33,7 @@ pub async fn process_audio_event(
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
-    owner_id: &str,
+    owner_id: &AccountId,
     audio_bytes: &[u8],
     mime_type: Option<&str>,
     audio_duration: Option<std::time::Duration>,

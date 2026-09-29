@@ -176,7 +176,7 @@ impl AccountModule {
         notify_account(
             client.as_ref(),
             db,
-            ctx.owner_id.as_str(),
+            &ctx.owner_id,
             SecurityEventKind::RecoveryRequested,
             Some(&format!("requested from {}", ctx.sender_mxid)),
         )
@@ -329,7 +329,7 @@ pub async fn redeem_matured_recovery(
             notify_account(
                 client,
                 db,
-                account_id.as_str(),
+                &account_id,
                 SecurityEventKind::RecoveryCompleted,
                 None,
             )

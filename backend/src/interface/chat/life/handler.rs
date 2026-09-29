@@ -206,6 +206,7 @@ mod tests {
     async fn test_handle_life_commands() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["user_matrix_1"]).await;
         let services = AppServices::new(&pool);
         let owner = AccountId::new("user_matrix_1");
 

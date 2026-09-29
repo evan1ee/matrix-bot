@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, account_id, code_hash FROM recovery_codes WHERE used_at IS NULL",
+  "query": "SELECT id, account_id AS \"account_id: uuid::Uuid\", code_hash FROM recovery_codes WHERE used_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -16,8 +16,8 @@
       },
       {
         "ordinal": 1,
-        "name": "account_id",
-        "type_info": "Text",
+        "name": "account_id: uuid::Uuid",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "recovery_codes",
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "b8471dcae287aa79d817b11446913a3a3d58c0933f889b405d82ec8afb762633"
+  "hash": "25b0a4232ccc91a764bd0ea1d0e903855a42d791bf4598f321bd03bcbc5904bf"
 }

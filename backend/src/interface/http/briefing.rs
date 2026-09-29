@@ -97,7 +97,7 @@ pub async fn trigger_briefing(
     let payload = state
         .services
         .briefing
-        .generate_briefing(&user.owner_id(), &settings)
+        .generate_briefing(&user.account_id, &settings)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
@@ -140,6 +140,7 @@ mod tests {
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
@@ -155,7 +156,10 @@ mod tests {
         let user = AuthUser::named("@alice:example.org", "acct_alice");
 
         let res = trigger_briefing(State(state), user).await.unwrap();
-        assert_eq!(res.owner_id, "acct_alice");
+        assert_eq!(
+            res.owner_id,
+            crate::domain::accounts::AccountId::from("acct_alice").to_string()
+        );
         assert!(res.html_content.contains("早安简报"));
         assert!(res.plain_text.contains("早安简报"));
     }

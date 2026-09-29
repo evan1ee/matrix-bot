@@ -40,7 +40,7 @@ impl RoomService {
 
     /// The account's cached rooms, in picker order.
     pub async fn cached_rooms(&self, account_id: &AccountId) -> Result<Vec<CachedRoom>, AppError> {
-        Ok(repo::list_for_account(&self.pool, account_id.as_str()).await?)
+        Ok(repo::list_for_account(&self.pool, account_id).await?)
     }
 
     /// Replaces the account's cache with a fresh discovery and returns the
@@ -54,9 +54,9 @@ impl RoomService {
         rooms: &[JoinedRoom],
     ) -> Result<Vec<CachedRoom>, AppError> {
         let mut tx = self.pool.begin().await?;
-        repo::delete_for_account(&mut *tx, account_id.as_str()).await?;
+        repo::delete_for_account(&mut *tx, account_id).await?;
         for room in rooms {
-            repo::insert(&mut *tx, account_id.as_str(), room).await?;
+            repo::insert(&mut *tx, account_id, room).await?;
         }
         tx.commit().await?;
         self.cached_rooms(account_id).await
@@ -85,7 +85,7 @@ impl RoomService {
     }
 
     pub async fn is_cached(&self, account_id: &AccountId, room_id: &str) -> Result<bool, AppError> {
-        Ok(repo::is_cached(&self.pool, account_id.as_str(), room_id).await?)
+        Ok(repo::is_cached(&self.pool, account_id, room_id).await?)
     }
 
     /// Caches a room whose membership the caller has just proven live, so the
@@ -95,7 +95,7 @@ impl RoomService {
         account_id: &AccountId,
         room: &JoinedRoom,
     ) -> Result<(), AppError> {
-        Ok(repo::insert(&self.pool, account_id.as_str(), room).await?)
+        Ok(repo::insert(&self.pool, account_id, room).await?)
     }
 
     /// The Matrix identities linked to the account: a room is reachable for
@@ -115,12 +115,12 @@ impl RoomService {
         let mxids = logged_or_default(
             self.accounts.linked_mxids(account_id).await,
             "linked Matrix ids",
-            account_id.as_str(),
+            account_id,
         );
         let dev_room_id = logged_or_default(
             self.settings.get(account_id).await.map(|s| s.dev_room_id),
             "dev room setting",
-            account_id.as_str(),
+            account_id,
         );
         domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
     }
@@ -144,9 +144,9 @@ impl RoomService {
 
     async fn cached_rooms_or_empty(&self, account_id: &AccountId) -> Vec<CachedRoom> {
         logged_or_default(
-            repo::list_for_account(&self.pool, account_id.as_str()).await,
+            repo::list_for_account(&self.pool, account_id).await,
             "room cache",
-            account_id.as_str(),
+            account_id,
         )
     }
 }
@@ -157,10 +157,10 @@ impl RoomService {
 fn logged_or_default<T: Default, E: std::fmt::Display>(
     result: Result<T, E>,
     input: &str,
-    account_id: &str,
+    account_id: &AccountId,
 ) -> T {
     result.unwrap_or_else(|err| {
-        warn!(account_id, error = %err, "Resolving a room without the {input}");
+        warn!(%account_id, error = %err, "Resolving a room without the {input}");
         T::default()
     })
 }

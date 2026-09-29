@@ -64,7 +64,10 @@ impl AuthUser {
     pub fn for_account(account_id: impl Into<AccountId>) -> Self {
         let account_id = account_id.into();
         Self {
-            display_name: account_id.trim_start_matches("acct_").to_string(),
+            display_name: account_id
+                .to_string()
+                .trim_start_matches("acct_")
+                .to_string(),
             account_id,
             session_id_hash: "test-session".to_string(),
             last_verified_at: chrono::Utc::now(),

@@ -302,6 +302,7 @@ mod tests {
     async fn test_journal_flow() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["user_journal_test"]).await;
         let services = AppServices::new(&pool);
         let owner = AccountId::new("user_journal_test");
 

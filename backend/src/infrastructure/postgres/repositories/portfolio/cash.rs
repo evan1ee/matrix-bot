@@ -2,11 +2,12 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use super::audit::record_audit_entry;
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::models::{CashBalance, WithdrawOutcome};
 
 pub async fn get_cash_or_zero(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
 ) -> Result<CashBalance, sqlx::Error> {
@@ -16,7 +17,7 @@ pub async fn get_cash_or_zero(
         FROM portfolio_cash_balances
         WHERE owner_id = $1 AND currency = $2
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         currency
     )
     .fetch_optional(pool)
@@ -25,7 +26,7 @@ pub async fn get_cash_or_zero(
     Ok(found
         .map(|r| CashBalance {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             currency: r.currency,
             currency_exponent: r.currency_exponent,
             balance_minor: r.balance_minor,
@@ -33,7 +34,7 @@ pub async fn get_cash_or_zero(
         })
         .unwrap_or(CashBalance {
             id: 0,
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
             currency: currency.to_string(),
             currency_exponent,
             balance_minor: 0,
@@ -41,7 +42,10 @@ pub async fn get_cash_or_zero(
         }))
 }
 
-pub async fn list_cash(pool: &PgPool, owner_id: &str) -> Result<Vec<CashBalance>, sqlx::Error> {
+pub async fn list_cash(
+    pool: &PgPool,
+    owner_id: &AccountId,
+) -> Result<Vec<CashBalance>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
         SELECT id, owner_id, currency, currency_exponent, balance_minor, updated_at
@@ -49,7 +53,7 @@ pub async fn list_cash(pool: &PgPool, owner_id: &str) -> Result<Vec<CashBalance>
         WHERE owner_id = $1
         ORDER BY currency ASC
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -58,7 +62,7 @@ pub async fn list_cash(pool: &PgPool, owner_id: &str) -> Result<Vec<CashBalance>
         .into_iter()
         .map(|r| CashBalance {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             currency: r.currency,
             currency_exponent: r.currency_exponent,
             balance_minor: r.balance_minor,
@@ -69,7 +73,7 @@ pub async fn list_cash(pool: &PgPool, owner_id: &str) -> Result<Vec<CashBalance>
 
 pub async fn credit_cash(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
     amount_minor: i64,
@@ -82,7 +86,7 @@ pub async fn credit_cash(
             balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor,
             updated_at = CURRENT_TIMESTAMP
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         currency,
         currency_exponent,
         amount_minor
@@ -95,7 +99,7 @@ pub async fn credit_cash(
 
 pub async fn deposit_cash_at(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
     amount_minor: i64,
@@ -122,7 +126,7 @@ pub async fn deposit_cash_at(
 
 pub async fn debit_cash(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     amount_minor: i64,
 ) -> Result<WithdrawOutcome, sqlx::Error> {
@@ -130,7 +134,7 @@ pub async fn debit_cash(
 
     let existing = sqlx::query!(
         "SELECT id, balance_minor, currency_exponent FROM portfolio_cash_balances WHERE owner_id = $1 AND currency = $2 FOR UPDATE",
-        owner_id,
+        owner_id.as_uuid(),
         currency
     )
     .fetch_optional(&mut *tx)
@@ -170,7 +174,7 @@ pub async fn debit_cash(
 
     Ok(WithdrawOutcome::Ok(CashBalance {
         id: updated.id,
-        owner_id: updated.owner_id,
+        owner_id: AccountId::from_uuid(updated.owner_id),
         currency: updated.currency,
         currency_exponent: updated.currency_exponent,
         balance_minor: updated.balance_minor,
@@ -180,7 +184,7 @@ pub async fn debit_cash(
 
 pub async fn withdraw_cash_at(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     amount_minor: i64,
     executed_at: Option<DateTime<Utc>>,

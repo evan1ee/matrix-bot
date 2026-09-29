@@ -226,7 +226,7 @@ mod tests {
         match rx.recv().await.unwrap() {
             SystemEvent::BookmarkDeleted { id, owner_id } => {
                 assert_eq!(id, b.id);
-                assert_eq!(owner_id, owner.as_str());
+                assert_eq!(owner_id, owner.to_string());
             }
             other => panic!("Unexpected event: {other:?}"),
         }

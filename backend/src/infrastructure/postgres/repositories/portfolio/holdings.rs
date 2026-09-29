@@ -1,13 +1,14 @@
 use sqlx::PgPool;
 
 use super::cash::list_cash;
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::models::{
     build_summaries, normalise_symbol, Holding, PortfolioCurrencySummary,
 };
 
 pub async fn find(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
 ) -> Result<Option<Holding>, sqlx::Error> {
     let row = sqlx::query!(
@@ -18,7 +19,7 @@ pub async fn find(
         FROM portfolio_holdings
         WHERE owner_id = $1 AND symbol = $2
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .fetch_optional(pool)
@@ -26,7 +27,7 @@ pub async fn find(
 
     Ok(row.map(|r| Holding {
         id: r.id,
-        owner_id: r.owner_id,
+        owner_id: AccountId::from_uuid(r.owner_id),
         symbol: r.symbol,
         quantity_minor: r.quantity_minor,
         avg_cost_minor: r.avg_cost_minor,
@@ -43,7 +44,7 @@ pub async fn find(
 pub async fn find_owned(
     pool: &PgPool,
     id: i64,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<Holding>, sqlx::Error> {
     let row = sqlx::query!(
         r#"
@@ -54,14 +55,14 @@ pub async fn find_owned(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|r| Holding {
         id: r.id,
-        owner_id: r.owner_id,
+        owner_id: AccountId::from_uuid(r.owner_id),
         symbol: r.symbol,
         quantity_minor: r.quantity_minor,
         avg_cost_minor: r.avg_cost_minor,
@@ -75,7 +76,7 @@ pub async fn find_owned(
     }))
 }
 
-pub async fn list(pool: &PgPool, owner_id: &str) -> Result<Vec<Holding>, sqlx::Error> {
+pub async fn list(pool: &PgPool, owner_id: &AccountId) -> Result<Vec<Holding>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
         SELECT id, owner_id, symbol, quantity_minor, avg_cost_minor, currency,
@@ -85,7 +86,7 @@ pub async fn list(pool: &PgPool, owner_id: &str) -> Result<Vec<Holding>, sqlx::E
         WHERE owner_id = $1
         ORDER BY symbol ASC
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -94,7 +95,7 @@ pub async fn list(pool: &PgPool, owner_id: &str) -> Result<Vec<Holding>, sqlx::E
         .into_iter()
         .map(|r| Holding {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             symbol: r.symbol,
             quantity_minor: r.quantity_minor,
             avg_cost_minor: r.avg_cost_minor,
@@ -111,7 +112,7 @@ pub async fn list(pool: &PgPool, owner_id: &str) -> Result<Vec<Holding>, sqlx::E
 
 pub async fn set_price(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     price_minor: i64,
 ) -> Result<Option<Holding>, sqlx::Error> {
@@ -122,7 +123,7 @@ pub async fn set_price(
         WHERE owner_id = $2 AND symbol = $3
         "#,
         price_minor,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .execute(pool)
@@ -136,7 +137,7 @@ pub async fn set_price(
 
 pub async fn set_note(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     note: Option<&str>,
 ) -> Result<Option<Holding>, sqlx::Error> {
@@ -147,7 +148,7 @@ pub async fn set_note(
         WHERE owner_id = $2 AND symbol = $3
         "#,
         note,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .execute(pool)
@@ -161,7 +162,7 @@ pub async fn set_note(
 
 pub async fn update_symbol(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     id: i64,
     new_symbol: &str,
 ) -> Result<Result<Holding, String>, sqlx::Error> {
@@ -184,7 +185,7 @@ pub async fn update_symbol(
         "#,
         normalized,
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .execute(pool)
     .await?;
@@ -199,13 +200,17 @@ pub async fn update_symbol(
     }
 }
 
-pub async fn delete(pool: &PgPool, owner_id: &str, symbol: &str) -> Result<bool, sqlx::Error> {
+pub async fn delete(
+    pool: &PgPool,
+    owner_id: &AccountId,
+    symbol: &str,
+) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         DELETE FROM portfolio_holdings
         WHERE owner_id = $1 AND symbol = $2
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .execute(pool)
@@ -216,22 +221,22 @@ pub async fn delete(pool: &PgPool, owner_id: &str, symbol: &str) -> Result<bool,
 
 pub async fn summary(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Vec<PortfolioCurrencySummary>, sqlx::Error> {
     let holdings = list(pool, owner_id).await?;
     let cash_balances = list_cash(pool, owner_id).await?;
     Ok(build_summaries(&holdings, &cash_balances))
 }
 
-pub async fn list_holding_owners(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+pub async fn list_holding_owners(pool: &PgPool) -> Result<Vec<AccountId>, sqlx::Error> {
     let rows = sqlx::query_scalar!(
         r#"
-        SELECT DISTINCT owner_id
+        SELECT DISTINCT owner_id AS "owner_id: uuid::Uuid"
         FROM portfolio_holdings
         "#
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows)
+    Ok(rows.into_iter().map(AccountId::from_uuid).collect())
 }

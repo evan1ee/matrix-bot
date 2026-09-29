@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "webhook_outbox",
@@ -172,7 +172,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
+        "Uuid",
         "Int8",
         "Int8"
       ]

@@ -45,16 +45,17 @@ pub fn list_resources() -> Vec<McpResource> {
     ]
 }
 
+use crate::domain::accounts::AccountId;
+
 /// Reads a specific resource URI for an authenticated owner.
 pub async fn read_resource(
     pool: &DbPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     uri: &str,
 ) -> Result<ReadResourceResult, String> {
     match uri {
         "matrixbot://todos/pending" => {
-            let acct = crate::domain::accounts::AccountId::new(owner_id);
-            let todos = todos_repo::list_all_user(pool, &acct, Some(false), 50, 0)
+            let todos = todos_repo::list_all_user(pool, owner_id, Some(false), 50, 0)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?;
@@ -67,17 +68,16 @@ pub async fn read_resource(
             })
         }
         "matrixbot://finance/recent" => {
-            let acct = crate::domain::accounts::AccountId::new(owner_id);
             let filter = crate::domain::finance::ListTransactionsFilter {
                 limit: Some(20),
                 ..Default::default()
             };
-            let transactions = finance_repo::list(pool, &acct, &filter)
+            let transactions = finance_repo::list(pool, owner_id, &filter)
                 .await
                 .map_err(|e| e.to_string())?;
             let now = Utc::now();
             let from = now - Duration::days(30);
-            let summary = finance_repo::summary(pool, &acct, from, now).await.ok();
+            let summary = finance_repo::summary(pool, owner_id, from, now).await.ok();
             let payload = serde_json::json!({
                 "monthly_summary": summary,
                 "recent_transactions": transactions,
@@ -112,9 +112,8 @@ pub async fn read_resource(
             })
         }
         "matrixbot://habits/today" => {
-            let acct = crate::domain::accounts::AccountId::new(owner_id);
             let today_str = Utc::now().format("%Y-%m-%d").to_string();
-            let habits = habits_repo::find_all_with_status(pool, &acct, &today_str)
+            let habits = habits_repo::find_all_with_status(pool, owner_id, &today_str)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&habits).map_err(|e| e.to_string())?;
@@ -127,8 +126,7 @@ pub async fn read_resource(
             })
         }
         "matrixbot://life/profile" => {
-            let acct = crate::domain::accounts::AccountId::new(owner_id);
-            let profile = life_repo::get_profile(pool, &acct)
+            let profile = life_repo::get_profile(pool, owner_id)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;

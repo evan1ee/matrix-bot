@@ -2,6 +2,8 @@ use crate::db::DbPool;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{error, info};
 
+use crate::domain::accounts::AccountId;
+
 use super::protocol::{error_codes, JsonRpcRequest, JsonRpcResponse};
 use super::service::McpService;
 
@@ -9,7 +11,7 @@ use super::service::McpService;
 pub async fn run_stdio(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> anyhow::Result<()> {
     eprintln!(
         "[MCP] Starting matrix-bot MCP server in STDIO mode for owner '{}'...",

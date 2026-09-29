@@ -61,10 +61,9 @@ pub struct WeeklyRetrospective {
 pub async fn generate_weekly_retrospective(
     pool: &DbPool,
     settings: &SettingsService,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> anyhow::Result<WeeklyRetrospective> {
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
-    let settings = settings.get_or_default(&acct).await;
+    let settings = settings.get_or_default(owner_id).await;
     let tz = settings.tz();
     let default_currency = settings.currency.clone();
 
@@ -89,7 +88,7 @@ pub async fn generate_weekly_retrospective(
                 .and_utc()
         });
 
-    let summaries = finance_repo::summary(pool, &AccountId::new(owner_id), start_dt, now).await?;
+    let summaries = finance_repo::summary(pool, owner_id, start_dt, now).await?;
 
     let mut spends_by_currency: Vec<CurrencySpendSummary> = summaries
         .iter()
@@ -203,15 +202,13 @@ pub async fn generate_weekly_retrospective(
         })
     };
 
-    let acct = AccountId::new(owner_id);
-
     // 2. Tasks
-    let all_tasks = todos_repo::list_all_user(pool, &acct, None, 200, 0).await?;
+    let all_tasks = todos_repo::list_all_user(pool, owner_id, None, 200, 0).await?;
     let completed_tasks_count = all_tasks.iter().filter(|t| t.completed).count();
     let active_tasks_count = all_tasks.iter().filter(|t| !t.completed).count();
 
     // 3. Habits
-    let habits_with_status = habits_repo::find_all_with_status(pool, &acct, &period_end).await?;
+    let habits_with_status = habits_repo::find_all_with_status(pool, owner_id, &period_end).await?;
     let active_habits_count = habits_with_status.len();
     let mut total_possible_habit_days = 0;
     let mut total_completed_habit_days = 0;
@@ -230,7 +227,7 @@ pub async fn generate_weekly_retrospective(
     };
 
     // 4. Upcoming Bills (next 7 days) — Group by currency, never sum across currencies.
-    let bills = bills_repo::list_by_owner(pool, &acct).await?;
+    let bills = bills_repo::list_by_owner(pool, owner_id).await?;
     let mut upcoming_bills_count = 0;
     let mut bills_by_currency: HashMap<String, (i64, i64)> = HashMap::new();
 
@@ -280,7 +277,7 @@ pub async fn generate_weekly_retrospective(
 
     // 5. Upcoming Reminders (next 7 days)
     let reminders =
-        reminders_repo::list_user_reminders(pool, &acct, Some("pending"), None, 50, 0).await?;
+        reminders_repo::list_user_reminders(pool, owner_id, Some("pending"), None, 50, 0).await?;
     let upcoming_reminders_count = reminders
         .iter()
         .filter(|r| r.trigger_at.to_rfc3339().as_str() <= next_period_end.as_str())
@@ -290,12 +287,11 @@ pub async fn generate_weekly_retrospective(
     let mut days_logged_count = 0;
     let mut mood_counts: HashMap<String, usize> = HashMap::new();
 
-    let acct = AccountId::new(owner_id);
     for i in 0..7 {
         let d = (seven_days_ago + Duration::days(i))
             .format("%Y-%m-%d")
             .to_string();
-        if let Ok(Some(log)) = life_repo::get_day_log(pool, &acct, &d).await {
+        if let Ok(Some(log)) = life_repo::get_day_log(pool, owner_id, &d).await {
             days_logged_count += 1;
             *mood_counts.entry(log.mood.to_lowercase()).or_insert(0) += 1;
         }
@@ -358,7 +354,7 @@ pub async fn generate_weekly_retrospective(
 pub async fn handle_retrospective_command(
     pool: &DbPool,
     settings: &SettingsService,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> String {
     match generate_weekly_retrospective(pool, settings, owner_id).await {
         Ok(retro) => {
@@ -438,13 +434,21 @@ mod tests {
     #[tokio::test]
     async fn test_retrospective_keeps_currencies_strictly_apart() {
         let pool = test_db().await;
-        let owner = "@user:example.com";
+        let owner = AccountId::from_seed("retro_test");
         let settings = SettingsService::new(pool.clone(), EventBroadcaster::default());
+
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'User', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // User sets default currency to CNY
         settings
             .save(
-                &crate::domain::accounts::AccountId::new(owner),
+                &owner,
                 UserSettings {
                     timezone: "Asia/Shanghai".to_string(),
                     currency: "CNY".to_string(),
@@ -454,15 +458,14 @@ mod tests {
             .await
             .unwrap();
 
-        let owner_acct = AccountId::new(owner);
         // Add expense: Shake Shack lunch: 16.50 USD (1650 minor)
-        let cat_food = finance_repo::create_category(&pool, &owner_acct, "Food")
+        let cat_food = finance_repo::create_category(&pool, &owner, "Food")
             .await
             .unwrap()
             .unwrap();
         finance_repo::create_transaction(
             &pool,
-            &owner_acct,
+            &owner,
             &crate::domain::finance::NewTransaction {
                 direction: crate::domain::finance::Direction::Expense,
                 amount_minor: 1650,
@@ -482,13 +485,13 @@ mod tests {
         .unwrap();
 
         // Add expense: Groceries: 45.00 CNY (4500 minor)
-        let cat_groceries = finance_repo::create_category(&pool, &owner_acct, "Groceries")
+        let cat_groceries = finance_repo::create_category(&pool, &owner, "Groceries")
             .await
             .unwrap()
             .unwrap();
         finance_repo::create_transaction(
             &pool,
-            &owner_acct,
+            &owner,
             &crate::domain::finance::NewTransaction {
                 direction: crate::domain::finance::Direction::Expense,
                 amount_minor: 4500,
@@ -513,7 +516,7 @@ mod tests {
             .to_string();
         bills_repo::create(
             &pool,
-            &AccountId::new(owner),
+            &owner,
             &NewRecurringBill {
                 room_id: "room1".to_string(),
                 sender_name: "User".to_string(),
@@ -537,7 +540,7 @@ mod tests {
 
         bills_repo::create(
             &pool,
-            &AccountId::new(owner),
+            &owner,
             &NewRecurringBill {
                 room_id: "room1".to_string(),
                 sender_name: "User".to_string(),
@@ -559,7 +562,7 @@ mod tests {
         .await
         .unwrap();
 
-        let retro = generate_weekly_retrospective(&pool, &settings, owner)
+        let retro = generate_weekly_retrospective(&pool, &settings, &owner)
             .await
             .unwrap();
 

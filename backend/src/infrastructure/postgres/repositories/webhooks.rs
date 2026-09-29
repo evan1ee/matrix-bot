@@ -9,7 +9,7 @@ use crate::domain::webhooks::{Webhook, WebhookOutboxItem};
 #[derive(Debug, sqlx::FromRow)]
 struct WebhookRow {
     id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     name: String,
     token_prefix: String,
     default_room_id: String,
@@ -24,7 +24,7 @@ impl From<WebhookRow> for Webhook {
     fn from(r: WebhookRow) -> Self {
         Self {
             id: r.id,
-            owner_id: AccountId::from(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             name: r.name,
             token_prefix: r.token_prefix,
             default_room_id: r.default_room_id,
@@ -41,7 +41,7 @@ impl From<WebhookRow> for Webhook {
 struct WebhookOutboxRow {
     id: String,
     webhook_id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     room_id: String,
     severity: String,
     title: Option<String>,
@@ -61,7 +61,7 @@ impl From<WebhookOutboxRow> for WebhookOutboxItem {
         Self {
             id: r.id,
             webhook_id: r.webhook_id,
-            owner_id: AccountId::from(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             room_id: r.room_id,
             severity: r.severity,
             title: r.title,
@@ -101,7 +101,7 @@ pub async fn create(
             last_triggered_at, created_at
         "#,
         id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         name,
         token_hash,
         token_prefix,
@@ -151,7 +151,7 @@ pub async fn find_by_id(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -174,7 +174,7 @@ pub async fn list_by_owner(
         WHERE owner_id = $1
         ORDER BY created_at DESC
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -208,7 +208,7 @@ pub async fn update(
         default_room_id,
         is_active,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -237,7 +237,7 @@ pub async fn rotate_token(
         token_hash,
         token_prefix,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -249,7 +249,7 @@ pub async fn delete(pool: &PgPool, id: &str, owner_id: &AccountId) -> Result<boo
     let res = sqlx::query!(
         "DELETE FROM webhooks WHERE id = $1 AND owner_id = $2",
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(pool)
     .await?;
@@ -287,7 +287,7 @@ pub async fn enqueue_outbox(
         "#,
         id,
         webhook_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         room_id,
         severity,
         title,
@@ -445,7 +445,7 @@ pub async fn list_outbox_by_webhook(
         LIMIT $3 OFFSET $4
         "#,
         webhook_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         limit,
         offset
     )
@@ -463,7 +463,7 @@ pub async fn count_outbox_by_webhook(
     let count = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM webhook_outbox WHERE webhook_id = $1 AND owner_id = $2",
         webhook_id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_one(pool)
     .await?;

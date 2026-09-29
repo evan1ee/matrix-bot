@@ -8,9 +8,10 @@
 //!
 //! Now every row is owned by an `accounts` row, and both access paths resolve
 //! onto it: a Matrix message resolves through [`matrix_links`], a web session
-//! resolves directly. `owner_id` stays a `TEXT` column compared for equality,
-//! so every repository and every ownership predicate is unchanged — only the
-//! value it holds is different.
+//! resolves directly. `owner_id` is a native `UUID` column with a foreign key to
+//! `accounts(id)` (migration `0002_account_uuid`), compared for equality, so
+//! every ownership predicate is unchanged. On the wire and in the audit hash
+//! it is still the `acct_<32 hex>` text form.
 //!
 //! # Two statuses, one difference
 //!

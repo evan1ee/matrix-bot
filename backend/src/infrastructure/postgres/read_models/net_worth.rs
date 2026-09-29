@@ -40,7 +40,7 @@ pub async fn compute_net_worth(
         WHERE owner_id = $1
         GROUP BY currency, currency_exponent
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -58,7 +58,7 @@ pub async fn compute_net_worth(
         FROM portfolio_cash_balances
         WHERE owner_id = $1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -77,7 +77,7 @@ pub async fn compute_net_worth(
         FROM portfolio_holdings
         WHERE owner_id = $1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -197,7 +197,15 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let user_id = AccountId::new("user1");
+        let user_id = AccountId::from_seed("user1");
+
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'User', 'active') ON CONFLICT DO NOTHING",
+            user_id.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Insert a transaction (ledger cash: $50.00 USD)
         sqlx::query!(
@@ -205,7 +213,7 @@ mod tests {
             INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, occurred_at)
             VALUES ('web', $1, 'User', 'income', 5000, 'USD', 2, CURRENT_TIMESTAMP)
             "#,
-            user_id.as_str()
+            user_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -217,7 +225,7 @@ mod tests {
             INSERT INTO portfolio_cash_balances (owner_id, currency, currency_exponent, balance_minor)
             VALUES ($1, 'USD', 2, 10000)
             "#,
-            user_id.as_str()
+            user_id.as_uuid()
         )
         .execute(&pool)
         .await

@@ -9,7 +9,7 @@ use crate::domain::recurring_bills::{NewRecurringBill, RecurringBill, RecurringB
 struct RecurringBillRow {
     id: i64,
     room_id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     sender_name: String,
     name: String,
     category: String,
@@ -35,7 +35,7 @@ impl From<RecurringBillRow> for RecurringBill {
         Self {
             id: r.id,
             room_id: r.room_id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             sender_name: r.sender_name,
             name: r.name,
             category: r.category,
@@ -81,7 +81,7 @@ pub async fn create<'e>(
             created_at, updated_at
         "#,
         input.room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         input.sender_name,
         input.name,
         input.category,
@@ -145,7 +145,7 @@ pub async fn find_owned<'e>(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -170,7 +170,7 @@ pub async fn list_by_owner<'e>(
         WHERE owner_id = $1
         ORDER BY next_due_at ASC
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -243,7 +243,7 @@ pub async fn update<'e>(
         has_remind_room,
         remind_room_val,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -259,7 +259,7 @@ pub async fn delete<'e>(
     let result = sqlx::query!(
         r#"DELETE FROM recurring_bills WHERE id = $1 AND owner_id = $2"#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -296,7 +296,7 @@ pub async fn record_payment<'e>(
         next_due_at,
         status,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -317,7 +317,14 @@ mod tests {
     #[tokio::test]
     async fn test_recurring_bill_repository_crud() {
         let pool = setup_test_db().await;
-        let owner = AccountId::new("acct_alice");
+        let owner = AccountId::from_seed("alice");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'Alice', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let input = NewRecurringBill {
             room_id: "!room:bills".to_string(),

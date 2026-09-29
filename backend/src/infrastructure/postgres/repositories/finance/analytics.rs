@@ -7,7 +7,7 @@ use crate::domain::finance::FinanceShare;
 
 #[derive(Debug, sqlx::FromRow)]
 struct ShareRow {
-    owner_id: String,
+    owner_id: uuid::Uuid,
     token: String,
     is_enabled: bool,
     title: Option<String>,
@@ -18,7 +18,7 @@ struct ShareRow {
 impl From<ShareRow> for FinanceShare {
     fn from(r: ShareRow) -> Self {
         Self {
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             token: r.token,
             is_enabled: r.is_enabled,
             title: r.title,
@@ -38,7 +38,7 @@ pub async fn primary_currency(pool: &PgPool, owner_id: &AccountId) -> Result<Str
         ORDER BY COUNT(*) DESC
         LIMIT 1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -69,7 +69,7 @@ pub async fn monthly_cashflow_rows(
         GROUP BY month_str, direction
         ORDER BY month_str ASC
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         currency,
         cutoff_start
     )
@@ -103,7 +103,7 @@ pub async fn category_slice_rows(
         GROUP BY c.name
         ORDER BY total_minor DESC
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         currency,
         cutoff_start
     )
@@ -142,7 +142,7 @@ pub async fn recent_public_transactions(
         ORDER BY t.occurred_at DESC
         LIMIT $4
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         currency,
         cutoff_start,
         limit
@@ -180,7 +180,7 @@ pub async fn create_share(
         DO UPDATE SET token = $2, is_enabled = TRUE, title = $3, updated_at = NOW()
         RETURNING owner_id, token, is_enabled, title, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         token,
         title
     )
@@ -206,7 +206,7 @@ pub async fn upsert_share(
         DO UPDATE SET is_enabled = $3, title = $4, updated_at = NOW()
         RETURNING owner_id, token, is_enabled, title, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         token,
         is_enabled,
         title
@@ -228,7 +228,7 @@ pub async fn get_share(
         FROM finance_shares
         WHERE owner_id = $1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -268,7 +268,7 @@ pub async fn toggle_share(
         WHERE owner_id = $1
         RETURNING owner_id, token, is_enabled, title, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         is_enabled
     )
     .fetch_optional(pool)
@@ -290,7 +290,7 @@ pub async fn update_share_title(
         WHERE owner_id = $1
         RETURNING owner_id, token, is_enabled, title, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         title
     )
     .fetch_optional(pool)

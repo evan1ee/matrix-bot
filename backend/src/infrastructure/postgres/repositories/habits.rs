@@ -13,7 +13,7 @@ use crate::domain::habits::{calculate_streaks, DayStatus, Habit, HabitWithStatus
 #[derive(Debug, sqlx::FromRow)]
 struct HabitRow {
     id: i64,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     name: String,
     description: Option<String>,
     frequency: String,
@@ -28,7 +28,7 @@ impl From<HabitRow> for Habit {
     fn from(row: HabitRow) -> Self {
         Self {
             id: row.id,
-            owner_id: AccountId::new(row.owner_id),
+            owner_id: AccountId::from_uuid(row.owner_id),
             name: row.name,
             description: row.description,
             frequency: row.frequency,
@@ -57,7 +57,7 @@ pub async fn create_habit<'e>(
         VALUES ($1, $2, $3, $4, $5, $6, FALSE)
         RETURNING id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         name,
         description,
         frequency,
@@ -83,7 +83,7 @@ pub async fn find_by_id<'e>(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -105,7 +105,7 @@ pub async fn find_by_name<'e>(
         LIMIT 1
         "#,
         name,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -125,7 +125,7 @@ pub async fn find_all_by_owner<'e>(
         WHERE owner_id = $1 AND archived = FALSE
         ORDER BY id ASC
         "#,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -146,7 +146,7 @@ pub async fn find_completed_log_dates<'e>(
         ORDER BY log_date ASC
         "#,
         habit_id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -221,7 +221,7 @@ pub async fn update_habit<'e>(
         category,
         target_days_per_week,
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -237,7 +237,7 @@ pub async fn delete_habit<'e>(
     let res = sqlx::query!(
         "DELETE FROM habits WHERE id = $1 AND owner_id = $2",
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -259,7 +259,7 @@ pub async fn toggle_log(
         WHERE habit_id = $1 AND owner_id = $2 AND log_date = $3
         "#,
         habit_id,
-        owner.as_str(),
+        owner.as_uuid(),
         log_date
     )
     .fetch_optional(pool)
@@ -276,7 +276,7 @@ pub async fn toggle_log(
                 "#,
                 new_state,
                 habit_id,
-                owner.as_str(),
+                owner.as_uuid(),
                 log_date
             )
             .execute(pool)
@@ -290,7 +290,7 @@ pub async fn toggle_log(
                 VALUES ($1, $2, $3, TRUE, $4)
                 "#,
                 habit_id,
-                owner.as_str(),
+                owner.as_uuid(),
                 log_date,
                 note
             )
@@ -313,7 +313,7 @@ pub async fn get_heatmap<'e>(
         GROUP BY log_date
         ORDER BY log_date ASC
         "#,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -336,7 +336,15 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let owner = AccountId::new("user_habit_test");
+        let owner = AccountId::from_seed("user_habit_test");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
         let habit = create_habit(
             &pool,
             &owner,

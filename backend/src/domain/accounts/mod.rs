@@ -15,85 +15,164 @@ pub use merge::{MergeOutcome, MergePreview};
 pub const LINK_CODE_TTL_MINUTES: i64 = 5;
 
 /// The single owner identifier used across all application tables.
-/// Wraps the `acct_<32 hex chars>` string representation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AccountId(String);
+/// Wraps a native `uuid::Uuid`, formatting and serialising as `acct_<32 hex chars>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AccountId(uuid::Uuid);
 
 impl AccountId {
-    /// Creates a new `AccountId` from a string-like value.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+    /// Creates a new `AccountId`.
+    pub fn new(id: impl Into<AccountId>) -> Self {
+        id.into()
     }
 
-    /// Borrows the underlying string slice.
-    pub fn as_str(&self) -> &str {
+    /// Creates a new `AccountId` from a UUID.
+    pub fn from_uuid(id: uuid::Uuid) -> Self {
+        Self(id)
+    }
+
+    /// Generates a new random `AccountId` using UUID v4.
+    pub fn generate() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+
+    /// Returns a reference to the underlying UUID.
+    pub fn as_uuid(&self) -> &uuid::Uuid {
         &self.0
     }
 
-    /// Consumes the wrapper and returns the owned string.
-    pub fn into_inner(self) -> String {
+    /// Returns the underlying UUID.
+    pub fn uuid(&self) -> uuid::Uuid {
         self.0
     }
 
-    /// Converts this account ID to a UUID WebAuthn user handle if it matches
-    /// the `acct_<32 hex characters>` format.
-    pub fn to_handle(&self) -> Option<uuid::Uuid> {
-        uuid::Uuid::parse_str(self.0.strip_prefix("acct_")?).ok()
+    /// Consumes the wrapper and returns the UUID.
+    pub fn into_inner(self) -> uuid::Uuid {
+        self.0
+    }
+
+    /// Converts this account ID to a UUID WebAuthn user handle.
+    pub fn to_handle(&self) -> uuid::Uuid {
+        self.0
     }
 
     /// Converts a UUID WebAuthn user handle back into an `AccountId`.
     pub fn from_handle(handle: &uuid::Uuid) -> Self {
-        Self(format!("acct_{}", handle.simple()))
+        Self(*handle)
+    }
+
+    /// Deterministically generates an `AccountId` from a seed name (for tests and predictable IDs).
+    pub fn from_seed(seed: &str) -> Self {
+        Self(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_DNS,
+            seed.as_bytes(),
+        ))
     }
 }
 
 impl std::fmt::Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        write!(f, "acct_{}", self.0.simple())
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("invalid account id format: expected acct_<uuid> or raw uuid")]
+pub struct ParseAccountIdError;
+
+impl std::str::FromStr for AccountId {
+    type Err = ParseAccountIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let stripped = s.strip_prefix("acct_").unwrap_or(s);
+        let u = uuid::Uuid::parse_str(stripped).map_err(|_| ParseAccountIdError)?;
+        Ok(Self(u))
     }
 }
 
 impl std::ops::Deref for AccountId {
-    type Target = str;
+    type Target = uuid::Uuid;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl AsRef<str> for AccountId {
-    fn as_ref(&self) -> &str {
+impl AsRef<uuid::Uuid> for AccountId {
+    fn as_ref(&self) -> &uuid::Uuid {
         &self.0
     }
 }
 
-impl std::borrow::Borrow<str> for AccountId {
-    fn borrow(&self) -> &str {
-        &self.0
+impl From<uuid::Uuid> for AccountId {
+    fn from(u: uuid::Uuid) -> Self {
+        Self(u)
+    }
+}
+
+impl From<&AccountId> for AccountId {
+    fn from(id: &AccountId) -> Self {
+        *id
+    }
+}
+
+impl From<&uuid::Uuid> for AccountId {
+    fn from(u: &uuid::Uuid) -> Self {
+        Self(*u)
+    }
+}
+
+// Legacy facades still carry the id as a `String` that this crate formatted
+// itself, so it always parses. Untrusted input (HTTP bodies, CLI flags) must go
+// through `FromStr` and reject a malformed id. An unparseable string maps to the
+// nil UUID, which no `accounts` row can have: reads find nothing and writes fail
+// on the foreign key, so a bad id fails closed instead of reaching another
+// account. Tests instead seed a deterministic id so fixtures can say
+// `AccountId::from("alice")`.
+impl From<&str> for AccountId {
+    fn from(s: &str) -> Self {
+        #[cfg(test)]
+        return s.parse().unwrap_or_else(|_| Self::from_seed(s));
+        #[cfg(not(test))]
+        s.parse().unwrap_or_else(|_| {
+            tracing::error!("malformed account id; using the nil id, which matches no account");
+            Self(uuid::Uuid::nil())
+        })
     }
 }
 
 impl From<String> for AccountId {
     fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for AccountId {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self::from(s.as_str())
     }
 }
 
 impl From<&String> for AccountId {
     fn from(s: &String) -> Self {
-        Self(s.clone())
+        Self::from(s.as_str())
     }
 }
 
-impl From<AccountId> for String {
+impl From<AccountId> for uuid::Uuid {
     fn from(id: AccountId) -> Self {
         id.0
+    }
+}
+
+impl Serialize for AccountId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("acct_{}", self.0.simple()))
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -501,21 +580,26 @@ mod tests {
 
     #[test]
     fn test_account_id_handle_round_trip() {
-        let id = AccountId::new("acct_26ab01c0f4c19b7d854f46dca154ee89");
-        let handle = id.to_handle().expect("valid handle");
+        let id: AccountId = "acct_26ab01c0f4c19b7d854f46dca154ee89".parse().unwrap();
+        let handle = id.to_handle();
         assert_eq!(AccountId::from_handle(&handle), id);
+        assert_eq!(id.to_string(), "acct_26ab01c0f4c19b7d854f46dca154ee89");
     }
 
     #[test]
-    fn test_malformed_account_ids_have_no_handle() {
-        for bad in [
-            "26ab01c0f4c19b7d854f46dca154ee89",
-            "acct_",
-            "acct_nothex",
-            "@user:server",
-            "",
-        ] {
-            assert!(AccountId::new(bad).to_handle().is_none());
+    fn test_account_id_hyphenated_and_simple() {
+        let simple: AccountId = "acct_26ab01c0f4c19b7d854f46dca154ee89".parse().unwrap();
+        let hyphenated: AccountId = "acct_26ab01c0-f4c1-9b7d-854f-46dca154ee89".parse().unwrap();
+        let raw: AccountId = "26ab01c0-f4c1-9b7d-854f-46dca154ee89".parse().unwrap();
+        assert_eq!(simple, hyphenated);
+        assert_eq!(simple, raw);
+        assert_eq!(format!("{simple}"), "acct_26ab01c0f4c19b7d854f46dca154ee89");
+    }
+
+    #[test]
+    fn test_malformed_account_ids_fail_parsing() {
+        for bad in ["acct_", "acct_nothex", "@user:server", "", "acct_too_short"] {
+            assert!(bad.parse::<AccountId>().is_err());
         }
     }
 
@@ -547,7 +631,7 @@ mod tests {
         let now = Utc::now();
         let session = Session {
             id_hash: "hash".to_string(),
-            account_id: AccountId::new("acct_1"),
+            account_id: AccountId::from_seed("test_user_1"),
             created_at: now - Duration::days(5),
             last_seen_at: now - Duration::minutes(10),
             last_verified_at: now - Duration::minutes(5),

@@ -25,7 +25,7 @@ impl LlmService {
         &self,
         account_id: &AccountId,
     ) -> Result<Option<AiUserConfig>, AppError> {
-        llm_repo::get_user_config(&self.pool, account_id.as_str())
+        llm_repo::get_user_config(&self.pool, account_id)
             .await
             .map_err(AppError::Database)
     }
@@ -35,7 +35,7 @@ impl LlmService {
         account_id: &AccountId,
         input: &UpdateAiConfigInput,
     ) -> Result<AiUserConfig, AppError> {
-        let config = llm_repo::upsert_user_config(&self.pool, account_id.as_str(), input)
+        let config = llm_repo::upsert_user_config(&self.pool, account_id, input)
             .await
             .map_err(AppError::Database)?;
         self.broadcaster
@@ -50,7 +50,7 @@ impl LlmService {
         id: &str,
         account_id: &AccountId,
     ) -> Result<Option<AiConversation>, AppError> {
-        llm_repo::get_conversation(&self.pool, id, account_id.as_str())
+        llm_repo::get_conversation(&self.pool, id, account_id)
             .await
             .map_err(AppError::Database)
     }
@@ -60,7 +60,7 @@ impl LlmService {
         account_id: &AccountId,
         limit: i64,
     ) -> Result<Vec<AiConversation>, AppError> {
-        llm_repo::list_conversations(&self.pool, account_id.as_str(), limit)
+        llm_repo::list_conversations(&self.pool, account_id, limit)
             .await
             .map_err(AppError::Database)
     }
@@ -70,7 +70,7 @@ impl LlmService {
         id: &str,
         account_id: &AccountId,
     ) -> Result<bool, AppError> {
-        let deleted = llm_repo::delete_conversation(&self.pool, id, account_id.as_str())
+        let deleted = llm_repo::delete_conversation(&self.pool, id, account_id)
             .await
             .map_err(AppError::Database)?;
         if deleted {

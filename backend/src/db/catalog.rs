@@ -160,21 +160,23 @@ mod tests {
         crate::db::pool::drop_pg_schema("rehearsal_fresh").await;
 
         // Every audit chain still verifies.
-        let owners: Vec<String> =
+        let owners: Vec<uuid::Uuid> =
             sqlx::query_scalar!("SELECT DISTINCT owner_id FROM portfolio_audit_log")
                 .fetch_all(&copy)
                 .await
                 .unwrap();
         for owner in owners {
+            let account_id = crate::domain::accounts::AccountId::from_uuid(owner);
             let result =
                 crate::infrastructure::postgres::repositories::portfolio::audit::verify_audit_chain(
-                    &copy, &owner,
+                    &copy,
+                    &account_id,
                 )
                 .await
                 .unwrap();
             assert!(
                 result.is_valid,
-                "audit chain broken for {owner}: {result:?}"
+                "audit chain broken for {account_id}: {result:?}"
             );
         }
     }

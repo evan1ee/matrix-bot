@@ -171,7 +171,7 @@ pub struct FinanceShare {
 impl From<crate::domain::finance::FinanceShare> for FinanceShare {
     fn from(s: crate::domain::finance::FinanceShare) -> Self {
         Self {
-            owner_id: s.owner_id.into_inner(),
+            owner_id: s.owner_id.to_string(),
             token: s.token,
             is_enabled: s.is_enabled,
             title: s.title,
@@ -342,6 +342,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

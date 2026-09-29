@@ -23,6 +23,16 @@ mod tests {
         pool
     }
 
+    async fn insert_account(pool: &PgPool, owner: &AccountId) {
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn log(
         pool: &PgPool,
@@ -34,6 +44,7 @@ mod tests {
         category_id: Option<i64>,
         when: chrono::DateTime<Utc>,
     ) -> crate::domain::finance::Transaction {
+        insert_account(pool, owner).await;
         let input = NewTransaction {
             direction,
             amount_minor: minor,
@@ -57,6 +68,8 @@ mod tests {
         let pool = setup().await;
         let owner_a = AccountId::new("acct_a");
         let owner_b = AccountId::new("acct_b");
+        insert_account(&pool, &owner_a).await;
+        insert_account(&pool, &owner_b).await;
 
         assert!(categories::create_category(&pool, &owner_a, "food")
             .await
@@ -78,6 +91,7 @@ mod tests {
     async fn test_deleting_a_category_uncategorises_rather_than_deletes() {
         let pool = setup().await;
         let owner = AccountId::new("acct_a");
+        insert_account(&pool, &owner).await;
         let cat = categories::create_category(&pool, &owner, "food")
             .await
             .unwrap()
@@ -113,6 +127,8 @@ mod tests {
         let pool = setup().await;
         let owner_a = AccountId::new("acct_a");
         let owner_b = AccountId::new("acct_b");
+        insert_account(&pool, &owner_a).await;
+        insert_account(&pool, &owner_b).await;
 
         let cat = categories::create_category(&pool, &owner_a, "food")
             .await

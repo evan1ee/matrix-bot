@@ -115,6 +115,7 @@ mod tests {
     async fn setup_services() -> (Database, crate::application::AppServices) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         let services = crate::application::AppServices::new(&pool);
         (Database { pool }, services)
     }
@@ -234,6 +235,7 @@ mod tests {
     async fn test_the_module_broadcasts_events() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
         let services = crate::application::AppServices::with_events(&pool, &broadcaster);

@@ -91,7 +91,7 @@ impl From<crate::domain::accounts::Session> for Session {
     fn from(s: crate::domain::accounts::Session) -> Self {
         Self {
             id_hash: s.id_hash,
-            account_id: s.account_id.into_inner(),
+            account_id: s.account_id.to_string(),
             created_at: s.created_at,
             last_seen_at: s.last_seen_at,
             last_verified_at: s.last_verified_at,
@@ -197,6 +197,7 @@ mod tests {
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_a", "acct_b", "acct_evan"]).await;
         pool
     }
 
@@ -247,7 +248,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(session.account_id, "acct_evan");
+        assert_eq!(
+            session.account_id,
+            crate::domain::accounts::AccountId::from("acct_evan").to_string()
+        );
         assert!(session.is_recently_verified(Utc::now()));
         assert!(!session.is_restricted(Utc::now()));
     }
@@ -346,7 +350,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].account_id, "acct_a");
+        assert_eq!(
+            listed[0].account_id,
+            crate::domain::accounts::AccountId::from("acct_a").to_string()
+        );
     }
 
     /// Both timeouts are checked on read, so neither depends on a sweep job.

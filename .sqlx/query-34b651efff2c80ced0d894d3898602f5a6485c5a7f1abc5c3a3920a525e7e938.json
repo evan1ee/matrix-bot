@@ -39,7 +39,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Text"
       ]
     },

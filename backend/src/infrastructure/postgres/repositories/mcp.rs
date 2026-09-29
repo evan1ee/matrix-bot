@@ -2,13 +2,14 @@ use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 use crate::accounts::session::hash_token;
+use crate::domain::accounts::AccountId;
 use crate::domain::mcp::McpToken;
 
 /// Mints a new MCP personal access token and stores its hash in the database.
 /// Returns the plaintext token (only returned at creation time) and the model row.
 pub async fn create(
     conn: impl sqlx::PgExecutor<'_>,
-    account_id: &str,
+    account_id: &AccountId,
     name: &str,
     expires_in_days: Option<i64>,
 ) -> Result<(String, McpToken), sqlx::Error> {
@@ -27,7 +28,7 @@ pub async fn create(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
         id,
-        account_id,
+        account_id.as_uuid(),
         name,
         token_hash,
         prefix,
@@ -39,7 +40,7 @@ pub async fn create(
 
     let row = McpToken {
         id,
-        account_id: account_id.to_string(),
+        account_id: *account_id,
         name: name.to_string(),
         token_hash,
         prefix,
@@ -54,7 +55,7 @@ pub async fn create(
 /// Lists all tokens belonging to an account.
 pub async fn list_for_account(
     conn: impl sqlx::PgExecutor<'_>,
-    account_id: &str,
+    account_id: &AccountId,
 ) -> Result<Vec<McpToken>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
@@ -63,7 +64,7 @@ pub async fn list_for_account(
         WHERE account_id = $1
         ORDER BY created_at DESC
         "#,
-        account_id
+        account_id.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -73,7 +74,7 @@ pub async fn list_for_account(
         .into_iter()
         .map(|r| McpToken {
             id: r.id,
-            account_id: r.account_id,
+            account_id: AccountId::from_uuid(r.account_id),
             name: r.name,
             token_hash: r.token_hash,
             prefix: r.prefix,
@@ -106,7 +107,7 @@ pub async fn resolve(
     };
     let token = McpToken {
         id: r.id,
-        account_id: r.account_id,
+        account_id: AccountId::from_uuid(r.account_id),
         name: r.name,
         token_hash: r.token_hash,
         prefix: r.prefix,
@@ -138,12 +139,12 @@ pub async fn touch_last_used(conn: impl sqlx::PgExecutor<'_>, id: &str) -> Resul
 /// Deletes a token by ID, scoped to owner.
 pub async fn delete(
     conn: impl sqlx::PgExecutor<'_>,
-    account_id: &str,
+    account_id: &AccountId,
     token_id: &str,
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query!(
         r#"DELETE FROM mcp_tokens WHERE account_id = $1 AND id = $2"#,
-        account_id,
+        account_id.as_uuid(),
         token_id
     )
     .execute(conn)
@@ -154,13 +155,13 @@ pub async fn delete(
 /// Revokes a token by exact ID or prefix match.
 pub async fn revoke_by_id_or_prefix(
     conn: impl sqlx::PgExecutor<'_>,
-    account_id: &str,
+    account_id: &AccountId,
     target: &str,
 ) -> Result<bool, sqlx::Error> {
     let prefix_query = format!("{}%", target.trim_end_matches('.'));
     let res = sqlx::query!(
         r#"DELETE FROM mcp_tokens WHERE account_id = $1 AND (id = $2 OR prefix LIKE $3 OR token_hash = $2)"#,
-        account_id,
+        account_id.as_uuid(),
         target,
         prefix_query
     )
@@ -174,7 +175,7 @@ pub struct McpTokenRepository;
 impl McpTokenRepository {
     pub async fn create(
         conn: impl sqlx::PgExecutor<'_>,
-        account_id: &str,
+        account_id: &AccountId,
         name: &str,
         expires_in_days: Option<i64>,
     ) -> Result<(String, McpToken), sqlx::Error> {
@@ -183,7 +184,7 @@ impl McpTokenRepository {
 
     pub async fn list_for_account(
         conn: impl sqlx::PgExecutor<'_>,
-        account_id: &str,
+        account_id: &AccountId,
     ) -> Result<Vec<McpToken>, sqlx::Error> {
         list_for_account(conn, account_id).await
     }
@@ -204,7 +205,7 @@ impl McpTokenRepository {
 
     pub async fn delete(
         conn: impl sqlx::PgExecutor<'_>,
-        account_id: &str,
+        account_id: &AccountId,
         token_id: &str,
     ) -> Result<bool, sqlx::Error> {
         delete(conn, account_id, token_id).await
@@ -212,7 +213,7 @@ impl McpTokenRepository {
 
     pub async fn revoke_by_id_or_prefix(
         conn: impl sqlx::PgExecutor<'_>,
-        account_id: &str,
+        account_id: &AccountId,
         target: &str,
     ) -> Result<bool, sqlx::Error> {
         revoke_by_id_or_prefix(conn, account_id, target).await
@@ -228,17 +229,17 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let acct_id = "acct_mcp_test";
+        let acct_id = AccountId::from_seed("mcp_test");
         sqlx::query!(
             "INSERT INTO accounts (id, display_name) VALUES ($1, 'Alice')",
-            acct_id
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
 
         // Mint token
-        let (raw_token, token) = create(&pool, acct_id, "Claude Test", None).await.unwrap();
+        let (raw_token, token) = create(&pool, &acct_id, "Claude Test", None).await.unwrap();
 
         assert!(raw_token.starts_with("mb_mcp_"));
         assert_eq!(token.account_id, acct_id);
@@ -252,16 +253,16 @@ mod tests {
         assert_eq!(resolved.id, token.id);
 
         // List
-        let list = list_for_account(&pool, acct_id).await.unwrap();
+        let list = list_for_account(&pool, &acct_id).await.unwrap();
         assert_eq!(list.len(), 1);
 
         // Touch last used
         touch_last_used(&pool, &token.id).await.unwrap();
-        let list_after_touch = list_for_account(&pool, acct_id).await.unwrap();
+        let list_after_touch = list_for_account(&pool, &acct_id).await.unwrap();
         assert!(list_after_touch[0].last_used_at.is_some());
 
         // Revoke
-        let revoked = delete(&pool, acct_id, &token.id).await.unwrap();
+        let revoked = delete(&pool, &acct_id, &token.id).await.unwrap();
         assert!(revoked);
 
         // Resolve after revoke returns None

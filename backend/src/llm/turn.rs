@@ -87,7 +87,7 @@ pub async fn run_turn(
     let history_limit = ctx
         .services
         .settings
-        .get_or_default(&crate::domain::accounts::AccountId::from(ctx.owner_id))
+        .get_or_default(ctx.owner_id)
         .await
         .max_history_turns as i64;
     let recent_messages = llm_repo::get_recent_messages(ctx.pool, &conversation.id, history_limit)
@@ -219,7 +219,7 @@ pub async fn run_turn(
                         let services = ctx.services;
                         let pool = ctx.pool;
                         let broadcaster = ctx.broadcaster;
-                        let owner_id = ctx.owner_id;
+                        let owner_id = ctx.owner_id.to_string();
                         let room_id = ctx.room_id;
                         async move {
                             info!(
@@ -230,7 +230,7 @@ pub async fn run_turn(
                                 services,
                                 pool,
                                 broadcaster,
-                                owner_id,
+                                &owner_id,
                                 room_id,
                                 &func_name,
                                 &args,

@@ -12,12 +12,14 @@ use super::protocol::{
 use super::resources;
 use crate::events::EventBroadcaster;
 
+use crate::domain::accounts::AccountId;
+
 /// Core service engine dispatching MCP JSON-RPC protocol requests.
 pub struct McpService<'a> {
     pub services: &'a crate::application::AppServices,
     pub pool: &'a DbPool,
     pub broadcaster: Option<&'a EventBroadcaster>,
-    pub owner_id: &'a str,
+    pub owner_id: &'a AccountId,
 }
 
 impl<'a> McpService<'a> {
@@ -25,7 +27,7 @@ impl<'a> McpService<'a> {
         services: &'a crate::application::AppServices,
         pool: &'a DbPool,
         broadcaster: Option<&'a EventBroadcaster>,
-        owner_id: &'a str,
+        owner_id: &'a AccountId,
     ) -> Self {
         Self {
             services,
@@ -202,7 +204,8 @@ mod tests {
     async fn test_mcp_service_initialize() {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
-        let service = McpService::new(&services, &pool, None, "test_owner");
+        let owner = AccountId::from_seed("test_owner");
+        let service = McpService::new(&services, &pool, None, &owner);
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -222,7 +225,8 @@ mod tests {
     async fn test_mcp_service_tools_list() {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
-        let service = McpService::new(&services, &pool, None, "test_owner");
+        let owner = AccountId::from_seed("test_owner");
+        let service = McpService::new(&services, &pool, None, &owner);
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -243,7 +247,8 @@ mod tests {
     async fn test_mcp_service_resources_and_prompts() {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
-        let service = McpService::new(&services, &pool, None, "test_owner");
+        let owner = AccountId::from_seed("test_owner");
+        let service = McpService::new(&services, &pool, None, &owner);
 
         let req_res = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),

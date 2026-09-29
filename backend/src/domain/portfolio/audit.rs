@@ -4,13 +4,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::domain::accounts::AccountId;
+
 pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// An immutable, cryptographically signed record of a portfolio activity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortfolioAuditEntry {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub action: String,
     pub symbol: Option<String>,
     pub quantity_minor: Option<i64>,
@@ -148,5 +150,33 @@ mod tests {
             1700000000000,
         );
         assert_ne!(base, changed);
+    }
+
+    /// Historical audit chains were hashed over the `acct_<32 hex>` text id.
+    /// Migrating the column to UUID must not change a single digest, or every
+    /// existing chain would fail verification. The expected value was computed
+    /// independently (SHA-256 over the colon-joined fields), not by this function.
+    #[test]
+    fn test_compute_entry_hash_matches_pre_migration_pinned_digest() {
+        let account: AccountId = "acct_26ab01c0f4c19b7d854f46dca154ee89".parse().unwrap();
+        assert_eq!(account.to_string(), "acct_26ab01c0f4c19b7d854f46dca154ee89");
+        let hash = compute_entry_hash(
+            GENESIS_HASH,
+            &account.to_string(),
+            "deposit",
+            None,
+            None,
+            None,
+            100000,
+            "USD",
+            2,
+            None,
+            Some("Initial deposit"),
+            1700000000000,
+        );
+        assert_eq!(
+            hash,
+            "72ca1f928a023b967e62543a2140a699c27afd81865fbef37b422ea07186ae3b"
+        );
     }
 }

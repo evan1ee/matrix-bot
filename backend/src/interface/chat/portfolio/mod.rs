@@ -153,6 +153,7 @@ mod tests {
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         Database { pool }
     }
 
@@ -350,7 +351,10 @@ mod tests {
         let mut saw_holding = false;
         let mut saw_cash = false;
         while let Ok(event) = rx.try_recv() {
-            assert_eq!(event.owner_id(), "@alice:a");
+            assert_eq!(
+                event.owner_id(),
+                crate::domain::accounts::AccountId::from("@alice:a").to_string()
+            );
             match event {
                 crate::events::SystemEvent::PortfolioHoldingCreated(_) => saw_holding = true,
                 crate::events::SystemEvent::PortfolioCashUpdated { balance_minor, .. } => {

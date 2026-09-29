@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "reminders",
@@ -142,7 +142,7 @@
         "Timestamptz",
         "Text",
         "Int8",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [

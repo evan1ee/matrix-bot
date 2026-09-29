@@ -30,15 +30,13 @@ impl SecurityEventRepository {
     /// Records an event. Errors are logged and swallowed — see the module note.
     pub async fn record(
         pool: &DbPool,
-        account_id: &str,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
         kind: SecurityEventKind,
         detail: Option<&str>,
     ) {
+        let id = account_id.into();
         crate::infrastructure::postgres::repositories::accounts::security_events::record(
-            pool,
-            &crate::domain::accounts::AccountId::new(account_id),
-            kind,
-            detail,
+            pool, &id, kind, detail,
         )
         .await;
     }
@@ -46,14 +44,13 @@ impl SecurityEventRepository {
     /// The account's recent history, newest first.
     pub async fn list(
         pool: &DbPool,
-        account_id: &str,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
         limit: i64,
     ) -> Result<Vec<SecurityEvent>, sqlx::Error> {
+        let id = account_id.into();
         let events =
             crate::infrastructure::postgres::repositories::accounts::security_events::list(
-                pool,
-                &crate::domain::accounts::AccountId::new(account_id),
-                limit,
+                pool, &id, limit,
             )
             .await?;
         Ok(events

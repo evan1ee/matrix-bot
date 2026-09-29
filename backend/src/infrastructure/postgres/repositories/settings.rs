@@ -4,6 +4,7 @@
 
 use sqlx::PgExecutor;
 
+use crate::domain::accounts::AccountId;
 use crate::domain::settings::UserSettings;
 
 /// `user_settings` as stored. Private: rows become the domain type at this
@@ -40,13 +41,13 @@ impl From<UserSettingsRow> for UserSettings {
 /// themselves (`domain::settings::UserSettings::default`).
 pub async fn get(
     conn: impl PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<UserSettings>, sqlx::Error> {
     let row = sqlx::query_as!(
         UserSettingsRow,
         "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, \
          briefing_time, tts_voice FROM user_settings WHERE owner_id = $1",
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -61,13 +62,13 @@ pub async fn get(
 /// makes the first write for a new owner atomic.
 pub async fn get_for_update(
     conn: impl PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<UserSettings>, sqlx::Error> {
     let row = sqlx::query_as!(
         UserSettingsRow,
         "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, \
          briefing_time, tts_voice FROM user_settings WHERE owner_id = $1 FOR UPDATE",
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -77,7 +78,7 @@ pub async fn get_for_update(
 /// Writes preferences, creating the row if it does not exist.
 pub async fn upsert(
     conn: impl PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
     settings: &UserSettings,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
@@ -94,7 +95,7 @@ pub async fn upsert(
             briefing_time = excluded.briefing_time, \
             tts_voice = excluded.tts_voice, \
             updated_at = CURRENT_TIMESTAMP",
-        owner_id,
+        owner_id.as_uuid(),
         settings.timezone,
         settings.currency,
         settings.dev_room_id,
@@ -111,11 +112,11 @@ pub async fn upsert(
 /// The last date string `YYYY-MM-DD` the morning briefing was delivered.
 pub async fn get_last_briefing_date(
     conn: impl PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query!(
         "SELECT last_briefing_date FROM user_settings WHERE owner_id = $1",
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -125,7 +126,7 @@ pub async fn get_last_briefing_date(
 /// Updates the last briefing date for an owner.
 pub async fn update_last_briefing_date(
     conn: impl PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
     date_str: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
@@ -134,7 +135,7 @@ pub async fn update_last_briefing_date(
          ON CONFLICT (owner_id) DO UPDATE SET \
             last_briefing_date = excluded.last_briefing_date, \
             updated_at = CURRENT_TIMESTAMP",
-        owner_id,
+        owner_id.as_uuid(),
         date_str
     )
     .execute(conn)
@@ -160,21 +161,33 @@ mod tests {
         }
     }
 
+    async fn ensure_account(pool: &sqlx::PgPool, owner: &AccountId) {
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     /// Every user starts without a row, so this is the common path, not an edge.
     #[tokio::test]
     async fn a_user_with_no_row_has_no_stored_settings() {
         let pool = pool().await;
-        assert_eq!(get(&pool, "@evan:mbm.one").await.unwrap(), None);
+        let owner = AccountId::from_seed("evan");
+        assert_eq!(get(&pool, &owner).await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn upsert_creates_then_updates_in_place() {
         let pool = pool().await;
-        let owner = "@evan:mbm.one";
+        let owner = AccountId::from_seed("evan");
+        ensure_account(&pool, &owner).await;
 
         upsert(
             &pool,
-            owner,
+            &owner,
             &UserSettings {
                 dev_room_id: Some("!dev:mbm.one".to_string()),
                 max_history_turns: 15,
@@ -185,7 +198,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let created = get(&pool, owner).await.unwrap().unwrap();
+        let created = get(&pool, &owner).await.unwrap().unwrap();
         assert_eq!(created.timezone, "Asia/Shanghai");
         assert_eq!(created.currency, "CNY");
         assert_eq!(created.dev_room_id.as_deref(), Some("!dev:mbm.one"));
@@ -194,7 +207,7 @@ mod tests {
 
         upsert(
             &pool,
-            owner,
+            &owner,
             &UserSettings {
                 dev_room_id: None,
                 max_history_turns: 20,
@@ -204,7 +217,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let updated = get(&pool, owner).await.unwrap().unwrap();
+        let updated = get(&pool, &owner).await.unwrap().unwrap();
         assert_eq!(updated.timezone, "Europe/Berlin");
         assert_eq!(updated.dev_room_id, None);
         assert_eq!(updated.max_history_turns, 20);
@@ -226,11 +239,12 @@ mod tests {
     #[tokio::test]
     async fn saving_speaker_zero_round_trips_as_zero_not_unset() {
         let pool = pool().await;
-        let owner = "@evan:mbm.one";
+        let owner = AccountId::from_seed("evan");
+        ensure_account(&pool, &owner).await;
 
         upsert(
             &pool,
-            owner,
+            &owner,
             &UserSettings {
                 tts_voice: Some("0".to_string()),
                 ..UserSettings::default()
@@ -239,7 +253,7 @@ mod tests {
         .await
         .unwrap();
 
-        let read_back = get(&pool, owner).await.unwrap().unwrap();
+        let read_back = get(&pool, &owner).await.unwrap().unwrap();
         assert_eq!(read_back.tts_voice.as_deref(), Some("0"));
     }
 
@@ -248,26 +262,32 @@ mod tests {
     #[tokio::test]
     async fn settings_are_isolated_per_owner() {
         let pool = pool().await;
-        upsert(&pool, "@evan:mbm.one", &settings("Asia/Shanghai", "CNY"))
+        let owner1 = AccountId::from_seed("evan");
+        let owner2 = AccountId::from_seed("web-evan");
+        ensure_account(&pool, &owner1).await;
+        ensure_account(&pool, &owner2).await;
+
+        upsert(&pool, &owner1, &settings("Asia/Shanghai", "CNY"))
             .await
             .unwrap();
 
-        assert_eq!(get(&pool, "@web-evan:api").await.unwrap(), None);
+        assert_eq!(get(&pool, &owner2).await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn last_briefing_date_tracking() {
         let pool = pool().await;
-        let owner = "@evan:mbm.one";
+        let owner = AccountId::from_seed("evan");
+        ensure_account(&pool, &owner).await;
 
-        assert_eq!(get_last_briefing_date(&pool, owner).await.unwrap(), None);
+        assert_eq!(get_last_briefing_date(&pool, &owner).await.unwrap(), None);
 
-        update_last_briefing_date(&pool, owner, "2026-09-18")
+        update_last_briefing_date(&pool, &owner, "2026-09-18")
             .await
             .unwrap();
 
         assert_eq!(
-            get_last_briefing_date(&pool, owner).await.unwrap(),
+            get_last_briefing_date(&pool, &owner).await.unwrap(),
             Some("2026-09-18".to_string())
         );
     }
@@ -278,17 +298,18 @@ mod tests {
     #[tokio::test]
     async fn a_row_that_predates_the_tts_voice_column_reads_as_unset() {
         let pool = pool().await;
-        let owner = "@evan:mbm.one";
+        let owner = AccountId::from_seed("evan");
+        ensure_account(&pool, &owner).await;
 
         sqlx::query!(
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, 'UTC', 'USD')",
-            owner
+            owner.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        let settings = get(&pool, owner).await.unwrap().unwrap();
+        let settings = get(&pool, &owner).await.unwrap().unwrap();
         assert_eq!(settings.tts_voice, None);
     }
 }

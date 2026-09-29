@@ -3,12 +3,13 @@ use sqlx::PgPool;
 
 use super::cash::list_cash;
 use super::holdings::list;
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::history::DailySnapshot;
 use crate::domain::portfolio::models::scale_product;
 
 pub async fn record_snapshot(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     snapshot_date: &str,
     currency: &str,
     currency_exponent: i64,
@@ -29,7 +30,7 @@ pub async fn record_snapshot(
             total_net_worth_minor = excluded.total_net_worth_minor,
             currency_exponent = excluded.currency_exponent
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         snapshot_date,
         currency,
         currency_exponent,
@@ -45,7 +46,7 @@ pub async fn record_snapshot(
 
 pub async fn get_snapshots(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
     cutoff_date: &str,
 ) -> Result<Vec<DailySnapshot>, sqlx::Error> {
@@ -57,7 +58,7 @@ pub async fn get_snapshots(
         WHERE owner_id = $1 AND currency = $2 AND snapshot_date >= $3
         ORDER BY snapshot_date ASC
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         currency,
         cutoff_date
     )
@@ -68,7 +69,7 @@ pub async fn get_snapshots(
         .into_iter()
         .map(|r| DailySnapshot {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             snapshot_date: r.snapshot_date,
             currency: r.currency,
             currency_exponent: r.currency_exponent,
@@ -82,7 +83,7 @@ pub async fn get_snapshots(
 
 pub async fn capture_current_snapshot_for_owner(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<(), sqlx::Error> {
     let holdings = list(pool, owner_id).await?;
     let cash_list = list_cash(pool, owner_id).await?;

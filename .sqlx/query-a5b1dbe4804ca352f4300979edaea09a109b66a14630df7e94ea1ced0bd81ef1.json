@@ -13,7 +13,7 @@
         "Text",
         "Timestamptz",
         "Int8",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": []

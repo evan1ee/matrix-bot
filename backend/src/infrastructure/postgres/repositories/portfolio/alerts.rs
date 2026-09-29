@@ -1,11 +1,12 @@
 use chrono::Utc;
 use sqlx::PgPool;
 
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 
 pub async fn create(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     target_price_minor: i64,
     currency: &str,
@@ -23,7 +24,7 @@ pub async fn create(
         RETURNING id, owner_id, symbol, target_price_minor, currency, currency_exponent,
                   condition, is_triggered, triggered_at, created_at
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         norm_symbol,
         target_price_minor,
         norm_currency,
@@ -35,7 +36,7 @@ pub async fn create(
 
     Ok(PriceAlert {
         id: row.id,
-        owner_id: row.owner_id,
+        owner_id: AccountId::from_uuid(row.owner_id),
         symbol: row.symbol,
         target_price_minor: row.target_price_minor,
         currency: row.currency,
@@ -50,7 +51,7 @@ pub async fn create(
 pub async fn find_by_id(
     pool: &PgPool,
     id: i64,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<PriceAlert>, sqlx::Error> {
     let row = sqlx::query!(
         r#"
@@ -60,14 +61,14 @@ pub async fn find_by_id(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|r| PriceAlert {
         id: r.id,
-        owner_id: r.owner_id,
+        owner_id: AccountId::from_uuid(r.owner_id),
         symbol: r.symbol,
         target_price_minor: r.target_price_minor,
         currency: r.currency,
@@ -79,7 +80,10 @@ pub async fn find_by_id(
     }))
 }
 
-pub async fn list_for_owner(pool: &PgPool, owner_id: &str) -> Result<Vec<PriceAlert>, sqlx::Error> {
+pub async fn list_for_owner(
+    pool: &PgPool,
+    owner_id: &AccountId,
+) -> Result<Vec<PriceAlert>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
         SELECT id, owner_id, symbol, target_price_minor, currency, currency_exponent,
@@ -88,7 +92,7 @@ pub async fn list_for_owner(pool: &PgPool, owner_id: &str) -> Result<Vec<PriceAl
         WHERE owner_id = $1
         ORDER BY is_triggered ASC, created_at DESC
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -97,7 +101,7 @@ pub async fn list_for_owner(pool: &PgPool, owner_id: &str) -> Result<Vec<PriceAl
         .into_iter()
         .map(|r| PriceAlert {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             symbol: r.symbol,
             target_price_minor: r.target_price_minor,
             currency: r.currency,
@@ -133,7 +137,7 @@ pub async fn list_active_for_symbol(
         .into_iter()
         .map(|r| PriceAlert {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             symbol: r.symbol,
             target_price_minor: r.target_price_minor,
             currency: r.currency,
@@ -156,11 +160,11 @@ pub async fn list_active_symbols(pool: &PgPool) -> Result<Vec<String>, sqlx::Err
     Ok(rows.into_iter().map(|r| r.symbol).collect())
 }
 
-pub async fn delete(pool: &PgPool, id: i64, owner_id: &str) -> Result<bool, sqlx::Error> {
+pub async fn delete(pool: &PgPool, id: i64, owner_id: &AccountId) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM portfolio_price_alerts WHERE id = $1 AND owner_id = $2",
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .execute(pool)
     .await?;

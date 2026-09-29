@@ -459,6 +459,7 @@ mod tests {
     async fn setup_service() -> (TodoService, EventBroadcaster) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:1"]).await;
         let broadcaster = EventBroadcaster::default();
         let reminders = ReminderService::new(pool.clone(), broadcaster.clone());
         let todos = TodoService::new(pool, broadcaster.clone(), reminders);

@@ -65,7 +65,7 @@ async fn deliver_to_matrix(
                     reminder.room_id.as_str(),
                     entity_type,
                     entity_id,
-                    reminder.owner_id.as_str(),
+                    &reminder.owner_id,
                     &reminder.message,
                 )
                 .await;
@@ -99,7 +99,7 @@ async fn deliver_to_matrix(
                     reminder.room_id.as_str(),
                     entity_type,
                     entity_id,
-                    reminder.owner_id.as_str(),
+                    &reminder.owner_id,
                     &reminder.message,
                 )
                 .await;

@@ -504,6 +504,7 @@ mod tests {
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["user_api_1"]).await;
         let db = Database { pool: pool.clone() };
         let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();

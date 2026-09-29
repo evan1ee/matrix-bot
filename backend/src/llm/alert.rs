@@ -21,11 +21,12 @@ pub fn is_ai_error_alerted() -> bool {
     AI_ERROR_ALERTED.load(Ordering::Relaxed)
 }
 
-/// Sends an outage notification to the DEV room, sending strictly once per incident.
+use crate::domain::accounts::AccountId;
+
 pub async fn notify_dev_room_ai_error(
     settings: &SettingsService,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
-    owner_id: &str,
+    owner_id: &AccountId,
     error_msg: &str,
 ) {
     // Only send once per outage incident!
@@ -51,8 +52,7 @@ pub async fn notify_dev_room_ai_error(
 
     // Determine target DEV room:
     // 1. Check user's settings.dev_room_id
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
-    let settings = settings.get_or_default(&acct).await;
+    let settings = settings.get_or_default(owner_id).await;
     let target_room_id = if let Some(ref room_id) = settings.dev_room_id {
         Some(room_id.clone())
     } else {

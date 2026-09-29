@@ -206,7 +206,7 @@ mod tests {
             .unwrap();
         }
 
-        note_pending_merge(&state, user.account_id.as_str(), old.as_str()).await;
+        note_pending_merge(&state, &user.account_id, &old).await;
 
         let pending = pending_merge(State(state.clone()), user.clone())
             .await

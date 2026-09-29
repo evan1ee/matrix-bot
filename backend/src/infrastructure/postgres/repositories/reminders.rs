@@ -15,7 +15,7 @@ pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 struct ReminderRow {
     id: i64,
     room_id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     sender_name: String,
     message: String,
     trigger_at: DateTime<Utc>,
@@ -32,7 +32,7 @@ impl From<ReminderRow> for Reminder {
         Self {
             id: r.id,
             room_id: r.room_id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             sender_name: r.sender_name,
             message: r.message,
             trigger_at: r.trigger_at,
@@ -71,7 +71,7 @@ pub async fn create<'e>(
             recurrence, status, retry_count, source_kind, source_id, created_at
         "#,
         input.room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         input.owner_name,
         input.message,
         input.trigger_at,
@@ -100,7 +100,7 @@ pub async fn find_owned<'e>(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -168,7 +168,7 @@ pub async fn count_user_pending<'e>(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) FROM reminders WHERE owner_id = $1 AND status = 'pending'"#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_one(conn)
     .await?;
@@ -276,7 +276,7 @@ pub async fn update_pending<'e>(
         trigger_at,
         recurrence_str,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -292,7 +292,7 @@ pub async fn cancel<'e>(
     let result = sqlx::query!(
         r#"UPDATE reminders SET status = 'cancelled' WHERE id = $1 AND owner_id = $2 AND status = 'pending'"#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -308,7 +308,7 @@ pub async fn force_cancel_owned<'e>(
     let result = sqlx::query!(
         r#"UPDATE reminders SET status = 'cancelled' WHERE id = $1 AND owner_id = $2"#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -324,7 +324,7 @@ pub async fn delete_history_item<'e>(
     let result = sqlx::query!(
         r#"DELETE FROM reminders WHERE id = $1 AND owner_id = $2 AND status != 'pending'"#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -338,7 +338,7 @@ pub async fn clear_user_history<'e>(
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
         r#"DELETE FROM reminders WHERE owner_id = $1 AND status != 'pending'"#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -370,7 +370,7 @@ pub async fn list_user_reminders<'e>(
             ORDER BY trigger_at ASC
             LIMIT $3 OFFSET $4
             "#,
-            owner_id.as_str(),
+            owner_id.as_uuid(),
             room_id,
             limit,
             offset
@@ -399,7 +399,7 @@ pub async fn list_user_reminders<'e>(
             ORDER BY trigger_at DESC, id DESC
             LIMIT $4 OFFSET $5
             "#,
-            owner_id.as_str(),
+            owner_id.as_uuid(),
             room_id,
             filter,
             limit,
@@ -435,7 +435,7 @@ pub async fn count_user_reminders<'e>(
             (status = $3)
           )
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         room_id,
         filter
     )
@@ -461,6 +461,14 @@ mod tests {
     async fn test_reminders_crud_flow() {
         let pool = setup_test_db().await;
         let owner = AccountId::new("acct_alice");
+
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'alice', 'active')",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let now = now_at_storage_precision();
 
         let new = NewReminder {

@@ -18,17 +18,20 @@ pub fn get_mcp_tools() -> Vec<McpTool> {
         .collect()
 }
 
+use crate::domain::accounts::AccountId;
+
 /// Executes an MCP tool call by delegating to the unified AI tool executor.
 pub async fn call_mcp_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     params: CallToolParams,
 ) -> CallToolResult {
+    let owner_str = owner_id.to_string();
     debug!(
         "MCP tool call '{}' requested by owner '{}'",
-        params.name, owner_id
+        params.name, owner_str
     );
     let args_str = params
         .arguments
@@ -41,7 +44,7 @@ pub async fn call_mcp_tool(
         services,
         pool,
         broadcaster,
-        owner_id,
+        &owner_str,
         "mcp",
         &params.name,
         &args_str,

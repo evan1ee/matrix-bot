@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use crate::domain::settings::UserSettings;
 use anyhow::Result;
 
@@ -20,7 +21,7 @@ impl BriefingService {
 
     pub async fn generate_briefing(
         &self,
-        owner_id: &str,
+        owner_id: &AccountId,
         settings: &UserSettings,
     ) -> Result<BriefingPayload> {
         generator::generate_briefing(&self.pool, owner_id, settings).await

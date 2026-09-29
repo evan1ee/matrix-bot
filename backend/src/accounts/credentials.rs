@@ -46,7 +46,7 @@ impl From<crate::domain::accounts::StoredCredential> for StoredCredential {
     fn from(s: crate::domain::accounts::StoredCredential) -> Self {
         Self {
             id: s.id,
-            account_id: s.account_id.into_inner(),
+            account_id: s.account_id.to_string(),
             passkey_json: s.passkey_json,
             label: s.label,
             created_at: s.created_at,
@@ -206,7 +206,7 @@ impl EnrollmentRepository {
             token,
         )
         .await?;
-        Ok(res.map(|a| a.into_inner()))
+        Ok(res.map(|a| a.to_string()))
     }
 }
 
@@ -219,6 +219,8 @@ mod tests {
     async fn db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_a", "acct_b", "acct_matrix", "acct_primary"])
+            .await;
         pool
     }
 
@@ -226,11 +228,20 @@ mod tests {
     /// authenticator, so the shape of the blob is irrelevant to the ownership
     /// and lockout rules under test here.
     async fn add_raw(pool: &DbPool, id: &str, account_id: &str) {
+        let acct = crate::domain::accounts::AccountId::from(account_id);
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            acct.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
         sqlx::query!(
             "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
              VALUES ($1, $2, '{}', 'test key')",
             id,
-            account_id
+            acct.as_uuid()
         )
         .execute(pool)
         .await
@@ -248,7 +259,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(mine.len(), 2);
-        assert!(mine.iter().all(|c| c.account_id == "acct_a"));
+        assert!(mine.iter().all(
+            |c| c.account_id == crate::domain::accounts::AccountId::from("acct_a").to_string()
+        ));
     }
 
     /// Removing the only passkey would lock the account out of itself.
@@ -351,7 +364,14 @@ mod tests {
         let consumed = EnrollmentRepository::validate_and_consume(&pool, &token)
             .await
             .unwrap();
-        assert_eq!(consumed.as_deref(), Some("acct_matrix"));
+        assert_eq!(
+            consumed.as_deref(),
+            Some(
+                crate::domain::accounts::AccountId::from("acct_matrix")
+                    .to_string()
+                    .as_str()
+            )
+        );
 
         // Second consumption fails (single-use)
         let second = EnrollmentRepository::validate_and_consume(&pool, &token)
@@ -366,8 +386,10 @@ mod tests {
         add_raw(&pool, "cred_only", "acct_primary").await;
 
         // Insert matrix link
+        let acct = crate::domain::accounts::AccountId::from("acct_primary");
         sqlx::query!(
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', 'acct_primary')"
+            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', $1)",
+            acct.as_uuid()
         )
         .execute(&pool)
         .await

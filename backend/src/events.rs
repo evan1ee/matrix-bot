@@ -164,57 +164,63 @@ impl SystemEvent {
     /// handler delivers an event only to the client whose session matches this
     /// value, so an event with no owner would either leak to everyone or never
     /// be delivered.
-    pub fn owner_id(&self) -> &str {
+    pub fn owner_id(&self) -> String {
         match self {
             SystemEvent::TodoCreated(item) | SystemEvent::TodoUpdated(item) => {
-                item.owner_id.as_str()
+                item.owner_id.to_string()
             }
             SystemEvent::ReminderCreated(rem)
             | SystemEvent::ReminderUpdated(rem)
-            | SystemEvent::ReminderTriggered(rem) => rem.owner_id.as_str(),
-            SystemEvent::TodoDeleted { owner_id, .. } => owner_id,
+            | SystemEvent::ReminderTriggered(rem) => rem.owner_id.to_string(),
+            SystemEvent::TodoDeleted { owner_id, .. } => owner_id.clone(),
             SystemEvent::ReminderCancelled { owner_id, .. }
             | SystemEvent::ReminderDeleted { owner_id, .. }
-            | SystemEvent::ReminderHistoryCleared { owner_id } => owner_id,
+            | SystemEvent::ReminderHistoryCleared { owner_id } => owner_id.clone(),
             SystemEvent::TransactionCreated(tx) | SystemEvent::TransactionUpdated(tx) => {
-                tx.owner_id.as_str()
+                tx.owner_id.to_string()
             }
-            SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
-            SystemEvent::CategoryCreated(cat) => cat.owner_id.as_str(),
-            SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
-            SystemEvent::SettingsUpdated { owner_id, .. } => owner_id,
+            SystemEvent::TransactionDeleted { owner_id, .. } => owner_id.clone(),
+            SystemEvent::CategoryCreated(cat) => cat.owner_id.to_string(),
+            SystemEvent::CategoryDeleted { owner_id, .. } => owner_id.clone(),
+            SystemEvent::SettingsUpdated { owner_id, .. } => owner_id.clone(),
             SystemEvent::PortfolioHoldingCreated(h) | SystemEvent::PortfolioHoldingUpdated(h) => {
-                &h.owner_id
+                h.owner_id.to_string()
             }
-            SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id,
-            SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id,
-            SystemEvent::PortfolioAuditLogged(entry) => &entry.owner_id,
+            SystemEvent::PortfolioHoldingDeleted { owner_id, .. } => owner_id.clone(),
+            SystemEvent::PortfolioCashUpdated { owner_id, .. } => owner_id.clone(),
+            SystemEvent::PortfolioAuditLogged(entry) => entry.owner_id.to_string(),
             SystemEvent::PortfolioAlertCreated(a) | SystemEvent::PortfolioAlertTriggered(a) => {
-                &a.owner_id
+                a.owner_id.to_string()
             }
-            SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id,
+            SystemEvent::PortfolioAlertDeleted { owner_id, .. } => owner_id.clone(),
             SystemEvent::RecurringBillCreated(b) | SystemEvent::RecurringBillUpdated(b) => {
-                b.owner_id.as_str()
+                b.owner_id.to_string()
             }
             SystemEvent::RecurringBillDeleted { owner_id, .. }
-            | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id,
-            SystemEvent::WebhookCreated(w) | SystemEvent::WebhookUpdated(w) => &w.owner_id,
+            | SystemEvent::RecurringBillPaid { owner_id, .. } => owner_id.clone(),
+            SystemEvent::WebhookCreated(w) | SystemEvent::WebhookUpdated(w) => {
+                w.owner_id.to_string()
+            }
             SystemEvent::WebhookDeleted { owner_id, .. }
-            | SystemEvent::WebhookTriggered { owner_id, .. } => owner_id,
+            | SystemEvent::WebhookTriggered { owner_id, .. } => owner_id.clone(),
             SystemEvent::AiConversationUpdated { owner_id, .. }
             | SystemEvent::AiConversationDeleted { owner_id, .. }
-            | SystemEvent::AiConfigUpdated { owner_id } => owner_id,
-            SystemEvent::FootprintCreated(f) | SystemEvent::FootprintUpdated(f) => &f.owner_id,
-            SystemEvent::FootprintDeleted { owner_id, .. } => owner_id,
-            SystemEvent::HabitCreated(h) | SystemEvent::HabitUpdated(h) => &h.owner_id,
+            | SystemEvent::AiConfigUpdated { owner_id } => owner_id.clone(),
+            SystemEvent::FootprintCreated(f) | SystemEvent::FootprintUpdated(f) => {
+                f.owner_id.to_string()
+            }
+            SystemEvent::FootprintDeleted { owner_id, .. } => owner_id.clone(),
+            SystemEvent::HabitCreated(h) | SystemEvent::HabitUpdated(h) => h.owner_id.to_string(),
             SystemEvent::HabitDeleted { owner_id, .. }
-            | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id,
+            | SystemEvent::HabitLogToggled { owner_id, .. } => owner_id.clone(),
             SystemEvent::LifeProfileUpdated { owner_id, .. }
-            | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id,
-            SystemEvent::LifeDayLogged(l) => l.owner_id.as_str(),
-            SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => &b.owner_id,
-            SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
-            SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id,
+            | SystemEvent::LifeDayCleared { owner_id, .. } => owner_id.clone(),
+            SystemEvent::LifeDayLogged(l) => l.owner_id.to_string(),
+            SystemEvent::BookmarkCreated(b) | SystemEvent::BookmarkUpdated(b) => {
+                b.owner_id.to_string()
+            }
+            SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id.clone(),
+            SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id.clone(),
         }
     }
 }
@@ -288,8 +294,14 @@ mod tests {
         let mine = SystemEvent::TodoCreated(todo_owned_by("@web-evan:api"));
         let theirs = SystemEvent::TodoUpdated(todo_owned_by("@evan:mbm.one"));
 
-        assert_eq!(mine.owner_id(), "@web-evan:api");
-        assert_eq!(theirs.owner_id(), "@evan:mbm.one");
+        assert_eq!(
+            mine.owner_id(),
+            crate::domain::accounts::AccountId::from("@web-evan:api").to_string()
+        );
+        assert_eq!(
+            theirs.owner_id(),
+            crate::domain::accounts::AccountId::from("@evan:mbm.one").to_string()
+        );
         assert_ne!(mine.owner_id(), theirs.owner_id());
 
         let deleted = SystemEvent::TodoDeleted {

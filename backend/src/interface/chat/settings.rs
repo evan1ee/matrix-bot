@@ -352,6 +352,7 @@ mod tests {
     async fn service() -> SettingsService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         SettingsService::new(pool, EventBroadcaster::default())
     }
 
@@ -476,7 +477,10 @@ mod tests {
             .unwrap();
 
         let event = rx.try_recv().expect("a settings change must be broadcast");
-        assert_eq!(event.owner_id(), "@alice:a");
+        assert_eq!(
+            event.owner_id(),
+            crate::domain::accounts::AccountId::from("@alice:a").to_string()
+        );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 
@@ -679,6 +683,7 @@ mod tests {
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         Database { pool }
     }
 

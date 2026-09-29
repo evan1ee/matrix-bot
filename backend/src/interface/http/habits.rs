@@ -31,7 +31,7 @@ impl From<crate::domain::habits::Habit> for Habit {
     fn from(h: crate::domain::habits::Habit) -> Self {
         Self {
             id: h.id,
-            owner_id: h.owner_id.into_inner(),
+            owner_id: h.owner_id.to_string(),
             name: h.name,
             description: h.description,
             frequency: h.frequency,

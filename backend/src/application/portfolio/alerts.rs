@@ -17,7 +17,7 @@ impl PortfolioService {
     ) -> Result<PriceAlert, AppError> {
         let alert = repo::create(
             &self.pool,
-            owner.as_str(),
+            owner,
             symbol,
             target_price_minor,
             currency,
@@ -36,17 +36,17 @@ impl PortfolioService {
         owner: &AccountId,
         id: i64,
     ) -> Result<Option<PriceAlert>, AppError> {
-        let alert = repo::find_by_id(&self.pool, id, owner.as_str()).await?;
+        let alert = repo::find_by_id(&self.pool, id, owner).await?;
         Ok(alert)
     }
 
     pub async fn list_alerts(&self, owner: &AccountId) -> Result<Vec<PriceAlert>, AppError> {
-        let list = repo::list_for_owner(&self.pool, owner.as_str()).await?;
+        let list = repo::list_for_owner(&self.pool, owner).await?;
         Ok(list)
     }
 
     pub async fn delete_alert(&self, owner: &AccountId, id: i64) -> Result<bool, AppError> {
-        let deleted = repo::delete(&self.pool, id, owner.as_str()).await?;
+        let deleted = repo::delete(&self.pool, id, owner).await?;
         if deleted {
             self.events.send(SystemEvent::PortfolioAlertDeleted {
                 id,

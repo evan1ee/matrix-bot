@@ -10,6 +10,8 @@ pub mod prompt;
 
 pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 
+use crate::domain::accounts::AccountId;
+
 /// Processes an incoming Matrix image attachment:
 /// 1. POSTs the decrypted image bytes to the inference server's `/ocr` and
 ///    gets back detection and recognition results.
@@ -23,7 +25,7 @@ pub async fn process_image_event(
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
     room: &Room,
-    owner_id: &str,
+    owner_id: &AccountId,
     caption: Option<&str>,
     image_bytes: &[u8],
     ocr: &crate::infrastructure::inference::ocr::OcrClient,

@@ -24,7 +24,7 @@ impl PortfolioService {
     ) -> Result<(), AppError> {
         history_repo::record_snapshot(
             &self.pool,
-            owner.as_str(),
+            owner,
             snapshot_date,
             currency,
             currency_exponent,
@@ -39,7 +39,7 @@ impl PortfolioService {
         &self,
         owner: &AccountId,
     ) -> Result<(), AppError> {
-        history_repo::capture_current_snapshot_for_owner(&self.pool, owner.as_str()).await?;
+        history_repo::capture_current_snapshot_for_owner(&self.pool, owner).await?;
         Ok(())
     }
 
@@ -63,11 +63,10 @@ impl PortfolioService {
         let cutoff_date = (now - Duration::days(days)).format("%Y-%m-%d").to_string();
 
         let mut snapshots =
-            history_repo::get_snapshots(&self.pool, owner.as_str(), &norm_currency, &cutoff_date)
-                .await?;
+            history_repo::get_snapshots(&self.pool, owner, &norm_currency, &cutoff_date).await?;
 
-        let holdings = holdings_repo::list(&self.pool, owner.as_str()).await?;
-        let cash_list = cash_repo::list_cash(&self.pool, owner.as_str()).await?;
+        let holdings = holdings_repo::list(&self.pool, owner).await?;
+        let cash_list = cash_repo::list_cash(&self.pool, owner).await?;
 
         let mut live_holdings_value = 0i64;
         let mut currency_exponent = 2i64;
@@ -152,7 +151,7 @@ impl PortfolioService {
 
                 let _ = history_repo::record_snapshot(
                     &self.pool,
-                    owner.as_str(),
+                    owner,
                     &date,
                     &norm_currency,
                     currency_exponent,
@@ -181,12 +180,9 @@ impl PortfolioService {
                 .collect();
 
             if points.is_empty() {
-                if let Some((created, amount_minor)) = audit_repo::first_audit_entry_for_currency(
-                    &self.pool,
-                    owner.as_str(),
-                    &norm_currency,
-                )
-                .await?
+                if let Some((created, amount_minor)) =
+                    audit_repo::first_audit_entry_for_currency(&self.pool, owner, &norm_currency)
+                        .await?
                 {
                     let first_date = created.format("%Y-%m-%d").to_string();
                     if first_date != today_str {

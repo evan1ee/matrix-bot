@@ -9,7 +9,7 @@ use crate::domain::portfolio::models::{CashBalance, WithdrawOutcome};
 use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::cash as repo;
 
-pub fn cash_event(owner_id: &str, cash: &CashBalance) -> SystemEvent {
+pub fn cash_event(owner_id: &AccountId, cash: &CashBalance) -> SystemEvent {
     SystemEvent::PortfolioCashUpdated {
         owner_id: owner_id.to_string(),
         currency: cash.currency.clone(),
@@ -24,13 +24,12 @@ impl PortfolioService {
         currency: &str,
         currency_exponent: i64,
     ) -> Result<CashBalance, AppError> {
-        let cash =
-            repo::get_cash_or_zero(&self.pool, owner.as_str(), currency, currency_exponent).await?;
+        let cash = repo::get_cash_or_zero(&self.pool, owner, currency, currency_exponent).await?;
         Ok(cash)
     }
 
     pub async fn list_cash(&self, owner: &AccountId) -> Result<Vec<CashBalance>, AppError> {
-        let list = repo::list_cash(&self.pool, owner.as_str()).await?;
+        let list = repo::list_cash(&self.pool, owner).await?;
         Ok(list)
     }
 
@@ -44,7 +43,7 @@ impl PortfolioService {
     ) -> Result<CashBalance, AppError> {
         let cash = repo::deposit_cash_at(
             &self.pool,
-            owner.as_str(),
+            owner,
             currency,
             currency_exponent,
             amount_minor,
@@ -52,7 +51,7 @@ impl PortfolioService {
         )
         .await?;
 
-        self.events.send(cash_event(owner.as_str(), &cash));
+        self.events.send(cash_event(owner, &cash));
 
         self.record_portfolio_cash_transaction(
             owner,
@@ -76,17 +75,11 @@ impl PortfolioService {
         amount_minor: i64,
         executed_at: Option<DateTime<Utc>>,
     ) -> Result<WithdrawOutcome, AppError> {
-        let outcome = repo::withdraw_cash_at(
-            &self.pool,
-            owner.as_str(),
-            currency,
-            amount_minor,
-            executed_at,
-        )
-        .await?;
+        let outcome =
+            repo::withdraw_cash_at(&self.pool, owner, currency, amount_minor, executed_at).await?;
 
         if let WithdrawOutcome::Ok(ref cash) = outcome {
-            self.events.send(cash_event(owner.as_str(), cash));
+            self.events.send(cash_event(owner, cash));
 
             self.record_portfolio_cash_transaction(
                 owner,

@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "reminders",
@@ -138,7 +138,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Text",
         "Int8",
         "Int8"

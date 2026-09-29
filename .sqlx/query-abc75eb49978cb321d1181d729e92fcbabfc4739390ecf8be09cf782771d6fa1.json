@@ -94,7 +94,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Text",
         "Timestamptz",
         "Int8"

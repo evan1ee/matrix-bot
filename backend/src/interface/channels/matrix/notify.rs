@@ -21,12 +21,13 @@ use tracing::{error, warn};
 
 use crate::accounts::{AccountRepository, SecurityEventKind, SecurityEventRepository};
 use crate::db::Database;
+use crate::domain::accounts::AccountId;
 
 /// Records an event and announces it to every linked Matrix identity.
 pub async fn notify_account(
     client: Option<&Client>,
     db: &Database,
-    account_id: &str,
+    account_id: &AccountId,
     kind: SecurityEventKind,
     detail: Option<&str>,
 ) {
@@ -163,17 +164,18 @@ mod tests {
         let account = AccountRepository::create(&db.pool, "evan", STATUS_ACTIVE)
             .await
             .unwrap();
+        let acct_id = AccountId::from(account.as_str());
 
         notify_account(
             None,
             &db,
-            &account,
+            &acct_id,
             SecurityEventKind::RecoveryRequested,
             Some("from @evan:mbm.one"),
         )
         .await;
 
-        let events = SecurityEventRepository::list(&db.pool, &account, 10)
+        let events = SecurityEventRepository::list(&db.pool, &acct_id, 10)
             .await
             .unwrap();
         assert_eq!(events.len(), 1);
@@ -186,13 +188,7 @@ mod tests {
     #[tokio::test]
     async fn test_notifying_a_missing_account_is_harmless() {
         let db = db().await;
-        notify_account(
-            None,
-            &db,
-            "acct_gone",
-            SecurityEventKind::PasskeyRemoved,
-            None,
-        )
-        .await;
+        let acct_id = AccountId::from("acct_gone");
+        notify_account(None, &db, &acct_id, SecurityEventKind::PasskeyRemoved, None).await;
     }
 }

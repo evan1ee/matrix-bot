@@ -1,15 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT account_id FROM security_events WHERE kind = 'matrix_unlinked' AND detail = $1 ORDER BY id DESC LIMIT 1",
+  "query": "SELECT account_id AS \"account_id: uuid::Uuid\" FROM matrix_links WHERE mxid = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "account_id",
-        "type_info": "Text",
+        "name": "account_id: uuid::Uuid",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "security_events",
+            "table": "matrix_links",
             "name": "account_id"
           }
         }
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "04cc6209c355afb75d9fbe420ce37d8474355b00f2766fe8529e280298445b40"
+  "hash": "f8ea4fe0290d1927c07d883d7aec962834bd30aedd185dcd981495afa3e98192"
 }

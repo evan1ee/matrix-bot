@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use super::audit::record_audit_entry_tx;
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::models::{
     cost_of, realized_pl_minor, weighted_avg_cost_minor, BuyOutcome, CashBalance, Holding,
     SellOutcome,
@@ -10,7 +11,7 @@ use crate::domain::portfolio::models::{
 #[allow(clippy::too_many_arguments)]
 pub async fn buy_at(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
     price_minor: i64,
@@ -30,7 +31,7 @@ pub async fn buy_at(
         WHERE owner_id = $1 AND symbol = $2
         FOR UPDATE
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .fetch_optional(&mut *tx)
@@ -52,7 +53,7 @@ pub async fn buy_at(
         WHERE owner_id = $1 AND currency = $2
         FOR UPDATE
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         currency
     )
     .fetch_optional(&mut *tx)
@@ -100,7 +101,7 @@ pub async fn buy_at(
 
     let cash = CashBalance {
         id: cash_record.id,
-        owner_id: cash_record.owner_id,
+        owner_id: AccountId::from_uuid(cash_record.owner_id),
         currency: cash_record.currency,
         currency_exponent: cash_record.currency_exponent,
         balance_minor: cash_record.balance_minor,
@@ -119,7 +120,7 @@ pub async fn buy_at(
                           currency_exponent, current_price_minor, price_updated_at, note,
                           created_at, updated_at
                 "#,
-                owner_id,
+                owner_id.as_uuid(),
                 symbol,
                 quantity_minor,
                 price_minor,
@@ -133,7 +134,7 @@ pub async fn buy_at(
 
             Holding {
                 id: row.id,
-                owner_id: row.owner_id,
+                owner_id: AccountId::from_uuid(row.owner_id),
                 symbol: row.symbol,
                 quantity_minor: row.quantity_minor,
                 avg_cost_minor: row.avg_cost_minor,
@@ -174,7 +175,7 @@ pub async fn buy_at(
 
             Holding {
                 id: row.id,
-                owner_id: row.owner_id,
+                owner_id: AccountId::from_uuid(row.owner_id),
                 symbol: row.symbol,
                 quantity_minor: row.quantity_minor,
                 avg_cost_minor: row.avg_cost_minor,
@@ -212,7 +213,7 @@ pub async fn buy_at(
 
 pub async fn sell_at(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
     sell_price_minor: i64,
@@ -229,7 +230,7 @@ pub async fn sell_at(
         WHERE owner_id = $1 AND symbol = $2
         FOR UPDATE
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .fetch_optional(&mut *tx)
@@ -257,7 +258,7 @@ pub async fn sell_at(
             balance_minor = portfolio_cash_balances.balance_minor + excluded.balance_minor,
             updated_at = CURRENT_TIMESTAMP
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         existing.currency,
         existing.currency_exponent,
         proceeds
@@ -271,7 +272,7 @@ pub async fn sell_at(
         FROM portfolio_cash_balances
         WHERE owner_id = $1 AND currency = $2
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         existing.currency
     )
     .fetch_one(&mut *tx)
@@ -279,7 +280,7 @@ pub async fn sell_at(
 
     let cash = CashBalance {
         id: cash_record.id,
-        owner_id: cash_record.owner_id,
+        owner_id: AccountId::from_uuid(cash_record.owner_id),
         currency: cash_record.currency,
         currency_exponent: cash_record.currency_exponent,
         balance_minor: cash_record.balance_minor,
@@ -313,7 +314,7 @@ pub async fn sell_at(
 
         let holding = Holding {
             id: row.id,
-            owner_id: row.owner_id,
+            owner_id: AccountId::from_uuid(row.owner_id),
             symbol: row.symbol,
             quantity_minor: row.quantity_minor,
             avg_cost_minor: row.avg_cost_minor,
@@ -357,7 +358,7 @@ pub async fn sell_at(
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding_action(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
     price_minor: i64,
@@ -378,7 +379,7 @@ pub async fn record_holding_action(
         WHERE owner_id = $1 AND symbol = $2
         FOR UPDATE
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         symbol
     )
     .fetch_optional(&mut *tx)
@@ -404,7 +405,7 @@ pub async fn record_holding_action(
                           currency_exponent, current_price_minor, price_updated_at, note,
                           created_at, updated_at
                 "#,
-                owner_id,
+                owner_id.as_uuid(),
                 symbol,
                 quantity_minor,
                 price_minor,
@@ -418,7 +419,7 @@ pub async fn record_holding_action(
 
             Holding {
                 id: row.id,
-                owner_id: row.owner_id,
+                owner_id: AccountId::from_uuid(row.owner_id),
                 symbol: row.symbol,
                 quantity_minor: row.quantity_minor,
                 avg_cost_minor: row.avg_cost_minor,
@@ -459,7 +460,7 @@ pub async fn record_holding_action(
 
             Holding {
                 id: row.id,
-                owner_id: row.owner_id,
+                owner_id: AccountId::from_uuid(row.owner_id),
                 symbol: row.symbol,
                 quantity_minor: row.quantity_minor,
                 avg_cost_minor: row.avg_cost_minor,

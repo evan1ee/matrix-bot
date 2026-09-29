@@ -147,7 +147,7 @@ pub async fn execute_tool(
 
         "get_weekly_retrospective" => Some(
             async {
-                let retro = generate_weekly_retrospective(pool, &services.settings, owner_id)
+                let retro = generate_weekly_retrospective(pool, &services.settings, &acct)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&retro).map_err(|e| e.to_string())

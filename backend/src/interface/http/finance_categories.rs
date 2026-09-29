@@ -23,7 +23,7 @@ impl From<crate::domain::finance::Category> for Category {
     fn from(c: crate::domain::finance::Category) -> Self {
         Self {
             id: c.id,
-            owner_id: c.owner_id.into_inner(),
+            owner_id: c.owner_id.to_string(),
             name: c.name,
             created_at: c.created_at,
         }
@@ -131,6 +131,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

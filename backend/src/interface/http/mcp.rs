@@ -73,12 +73,11 @@ pub async fn mcp_message_handler(
     Query(_query): Query<McpQuery>,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let owner_id = user.owner_id();
     let service = McpService::new(
         &state.services,
         &state.db.pool,
         Some(&state.broadcaster),
-        &owner_id,
+        &user.account_id,
     );
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
@@ -94,12 +93,11 @@ pub async fn mcp_direct_handler(
     user: AuthUser,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let owner_id = user.owner_id();
     let service = McpService::new(
         &state.services,
         &state.db.pool,
         Some(&state.broadcaster),
-        &owner_id,
+        &user.account_id,
     );
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
@@ -228,7 +226,8 @@ mod tests {
     async fn test_direct_handler_ping() {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
-        let service = McpService::new(&services, &pool, None, "test_owner");
+        let owner = crate::domain::accounts::AccountId::from_seed("test_owner");
+        let service = McpService::new(&services, &pool, None, &owner);
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -247,27 +246,28 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
+        let owner = crate::domain::accounts::AccountId::from_seed("test");
         crate::accounts::AccountRepository::create_with_id(
             &pool,
-            "acct_test",
+            &owner,
             "Tester",
             crate::accounts::STATUS_ACTIVE,
         )
         .await
         .unwrap();
 
-        let (raw, token) = McpTokenRepository::create(&pool, "acct_test", "API Test", None)
+        let (raw, token) = McpTokenRepository::create(&pool, &owner, "API Test", None)
             .await
             .unwrap();
         assert!(raw.starts_with("mb_mcp_"));
 
-        let list = McpTokenRepository::list_for_account(&pool, "acct_test")
+        let list = McpTokenRepository::list_for_account(&pool, &owner)
             .await
             .unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, token.id);
 
-        let deleted = McpTokenRepository::delete(&pool, "acct_test", &token.id)
+        let deleted = McpTokenRepository::delete(&pool, &owner, &token.id)
             .await
             .unwrap();
         assert!(deleted);

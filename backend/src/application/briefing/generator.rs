@@ -25,7 +25,7 @@ pub fn format_briefing_header(now_utc: DateTime<Utc>, settings: &UserSettings) -
 /// Gathers all productivity and market data to construct the Morning Briefing.
 pub async fn generate_briefing(
     pool: &DbPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     settings: &UserSettings,
 ) -> Result<BriefingPayload> {
     let now_utc = Utc::now();
@@ -39,20 +39,19 @@ pub async fn generate_briefing(
         .unwrap_or_default();
     let tickers: Vec<TickerPerformance> = fetch_all_tickers_performance(&holdings).await;
 
-    let acct = AccountId::new(owner_id);
-
     // 2. Pending tasks
-    let todos = todos_repo::list_all_user(pool, &acct, Some(false), 50, 0)
+    let todos = todos_repo::list_all_user(pool, owner_id, Some(false), 50, 0)
         .await
         .unwrap_or_default();
 
     // 3. Today's habits
-    let habits: Vec<HabitWithStatus> = habits_repo::find_all_with_status(pool, &acct, &today_str)
-        .await
-        .unwrap_or_default();
+    let habits: Vec<HabitWithStatus> =
+        habits_repo::find_all_with_status(pool, owner_id, &today_str)
+            .await
+            .unwrap_or_default();
 
     // 4. Upcoming bills due in the next 3 days
-    let bills = bills_repo::list_by_owner(pool, &acct)
+    let bills = bills_repo::list_by_owner(pool, owner_id)
         .await
         .unwrap_or_default();
 

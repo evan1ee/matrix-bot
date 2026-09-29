@@ -43,7 +43,7 @@ impl From<crate::domain::portfolio::Holding> for Holding {
     fn from(h: crate::domain::portfolio::Holding) -> Self {
         Self {
             id: h.id,
-            owner_id: h.owner_id,
+            owner_id: h.owner_id.to_string(),
             symbol: h.symbol,
             quantity_minor: h.quantity_minor,
             avg_cost_minor: h.avg_cost_minor,
@@ -78,7 +78,7 @@ impl From<crate::domain::portfolio::CashBalance> for CashBalance {
     fn from(c: crate::domain::portfolio::CashBalance) -> Self {
         Self {
             id: c.id,
-            owner_id: c.owner_id,
+            owner_id: c.owner_id.to_string(),
             currency: c.currency,
             currency_exponent: c.currency_exponent,
             balance_minor: c.balance_minor,
@@ -467,6 +467,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

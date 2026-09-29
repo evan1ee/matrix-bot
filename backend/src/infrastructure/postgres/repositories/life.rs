@@ -14,13 +14,13 @@ pub async fn get_profile(
         FROM life_profiles
         WHERE owner_id = $1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|r| LifeProfile {
-        owner_id: AccountId::new(r.owner_id),
+        owner_id: AccountId::from_uuid(r.owner_id),
         birth_date: r.birth_date,
         expected_lifespan_years: r.expected_lifespan_years,
         created_at: r.created_at,
@@ -44,7 +44,7 @@ pub async fn upsert_profile(
             updated_at = NOW()::text
         RETURNING owner_id, birth_date, expected_lifespan_years, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         birth_date,
         expected_lifespan_years
     )
@@ -52,7 +52,7 @@ pub async fn upsert_profile(
     .await?;
 
     Ok(LifeProfile {
-        owner_id: AccountId::new(row.owner_id),
+        owner_id: AccountId::from_uuid(row.owner_id),
         birth_date: row.birth_date,
         expected_lifespan_years: row.expected_lifespan_years,
         created_at: row.created_at,
@@ -71,7 +71,7 @@ pub async fn get_day_log(
         FROM life_day_logs
         WHERE owner_id = $1 AND log_date = $2
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         log_date
     )
     .fetch_optional(pool)
@@ -79,7 +79,7 @@ pub async fn get_day_log(
 
     Ok(row.map(|r| LifeDayLog {
         id: r.id,
-        owner_id: AccountId::new(r.owner_id),
+        owner_id: AccountId::from_uuid(r.owner_id),
         log_date: r.log_date,
         mood: r.mood,
         weather: r.weather,
@@ -114,7 +114,7 @@ pub async fn upsert_day_log(
             updated_at = NOW()::text
         RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         log_date,
         mood,
         weather,
@@ -127,7 +127,7 @@ pub async fn upsert_day_log(
 
     Ok(LifeDayLog {
         id: row.id,
-        owner_id: AccountId::new(row.owner_id),
+        owner_id: AccountId::from_uuid(row.owner_id),
         log_date: row.log_date,
         mood: row.mood,
         weather: row.weather,
@@ -154,7 +154,7 @@ pub async fn update_time_allocation(
             updated_at = NOW()::text
         RETURNING id, owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         log_date,
         time_allocation
     )
@@ -163,7 +163,7 @@ pub async fn update_time_allocation(
 
     Ok(LifeDayLog {
         id: row.id,
-        owner_id: AccountId::new(row.owner_id),
+        owner_id: AccountId::from_uuid(row.owner_id),
         log_date: row.log_date,
         mood: row.mood,
         weather: row.weather,
@@ -185,7 +185,7 @@ pub async fn delete_day_log(
         DELETE FROM life_day_logs
         WHERE owner_id = $1 AND log_date = $2
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         log_date
     )
     .execute(pool)
@@ -207,7 +207,7 @@ pub async fn get_year_view(
         WHERE owner_id = $1 AND log_date LIKE $2
         ORDER BY log_date ASC
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         prefix
     )
     .fetch_all(pool)
@@ -218,7 +218,7 @@ pub async fn get_year_view(
         .into_iter()
         .map(|r| LifeDayLog {
             id: r.id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             log_date: r.log_date,
             mood: r.mood,
             weather: r.weather,
@@ -250,7 +250,7 @@ pub async fn get_stats(
         FROM life_day_logs
         WHERE owner_id = $1 AND mood != ''
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_one(pool)
     .await?;
@@ -265,7 +265,7 @@ pub async fn get_stats(
         ORDER BY COUNT(*) DESC
         LIMIT 1
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -278,7 +278,7 @@ pub async fn get_stats(
         FROM life_day_logs
         WHERE owner_id = $1 AND time_allocation IS NOT NULL
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;

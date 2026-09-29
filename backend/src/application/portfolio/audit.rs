@@ -11,7 +11,7 @@ impl PortfolioService {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<PortfolioAuditEntry>, AppError> {
-        let list = repo::list_audit_entries(&self.pool, owner.as_str(), limit, offset).await?;
+        let list = repo::list_audit_entries(&self.pool, owner, limit, offset).await?;
         Ok(list)
     }
 
@@ -19,7 +19,7 @@ impl PortfolioService {
         &self,
         owner: &AccountId,
     ) -> Result<AuditVerificationResult, AppError> {
-        let res = repo::verify_audit_chain(&self.pool, owner.as_str()).await?;
+        let res = repo::verify_audit_chain(&self.pool, owner).await?;
         Ok(res)
     }
 }

@@ -10,7 +10,7 @@ use crate::domain::todos::{NewTodo, TodoItem, TodoPatch, TodoPriority};
 struct TodoRow {
     id: i64,
     room_id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     sender_name: String,
     text: String,
     priority: String,
@@ -25,7 +25,7 @@ impl From<TodoRow> for TodoItem {
         Self {
             id: r.id,
             room_id: r.room_id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             sender_name: r.sender_name,
             text: r.text,
             priority: TodoPriority::from_str_or_default(&r.priority),
@@ -52,7 +52,7 @@ pub async fn create<'e>(
         RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at
         "#,
         input.room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         input.sender_name,
         input.text,
         priority_str,
@@ -94,7 +94,7 @@ pub async fn find_owned<'e>(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -119,7 +119,7 @@ pub async fn list_all_user<'e>(
         ORDER BY completed ASC, id ASC
         LIMIT $3 OFFSET $4
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         completed,
         limit,
         offset
@@ -142,7 +142,7 @@ pub async fn count_all_user<'e>(
         WHERE owner_id = $1
           AND ($2::boolean IS NULL OR completed = $2)
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         completed
     )
     .fetch_one(conn)
@@ -170,7 +170,7 @@ pub async fn list_room_user<'e>(
         LIMIT $4 OFFSET $5
         "#,
         room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         completed,
         limit,
         offset
@@ -195,7 +195,7 @@ pub async fn count_room_user<'e>(
           AND ($3::boolean IS NULL OR completed = $3)
         "#,
         room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         completed
     )
     .fetch_one(conn)
@@ -278,7 +278,7 @@ pub async fn update<'e>(
         has_remind,
         remind_val,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -327,7 +327,7 @@ pub async fn list_completed_user<'e>(
         FROM todos
         WHERE owner_id = $1 AND completed = TRUE
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(conn)
     .await?;
@@ -360,7 +360,7 @@ pub async fn clear_completed_user<'e>(
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
         r#"DELETE FROM todos WHERE owner_id = $1 AND completed = TRUE"#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -396,6 +396,14 @@ mod tests {
     async fn test_todos_repository_crud() {
         let pool = setup_test_db().await;
         let owner = AccountId::new("acct_bob");
+
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'bob', 'active')",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let input = NewTodo {
             room_id: "!room:todos".to_string(),

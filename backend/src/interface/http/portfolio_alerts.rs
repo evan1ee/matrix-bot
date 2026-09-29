@@ -55,7 +55,7 @@ impl From<crate::domain::portfolio::PriceAlert> for PriceAlert {
     fn from(a: crate::domain::portfolio::PriceAlert) -> Self {
         Self {
             id: a.id,
-            owner_id: a.owner_id,
+            owner_id: a.owner_id.to_string(),
             symbol: a.symbol,
             target_price_minor: a.target_price_minor,
             currency: a.currency,
@@ -186,6 +186,7 @@ mod tests {
     async fn setup_state() -> (ApiState, AuthUser) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["user_test"]).await;
         let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
             crate::db::Database { pool },

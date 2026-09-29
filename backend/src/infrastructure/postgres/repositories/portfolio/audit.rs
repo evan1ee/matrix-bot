@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgPool};
 
+use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::audit::{
     compute_entry_hash, AuditVerificationResult, PortfolioAuditEntry, GENESIS_HASH,
 };
@@ -8,7 +9,7 @@ use crate::domain::portfolio::audit::{
 #[allow(clippy::too_many_arguments)]
 pub async fn record_audit_entry_tx(
     conn: &mut PgConnection,
-    owner_id: &str,
+    owner_id: &AccountId,
     action: &str,
     symbol: Option<&str>,
     quantity_minor: Option<i64>,
@@ -31,7 +32,7 @@ pub async fn record_audit_entry_tx(
         ORDER BY id DESC
         LIMIT 1
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(&mut *conn)
     .await?;
@@ -42,7 +43,7 @@ pub async fn record_audit_entry_tx(
 
     let entry_hash = compute_entry_hash(
         &prev_hash,
-        owner_id,
+        &owner_id.to_string(),
         action,
         symbol,
         quantity_minor,
@@ -65,7 +66,7 @@ pub async fn record_audit_entry_tx(
                   amount_minor, currency, currency_exponent, realized_pl_minor,
                   note, prev_hash, entry_hash, created_at
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         action,
         symbol,
         quantity_minor,
@@ -84,7 +85,7 @@ pub async fn record_audit_entry_tx(
 
     Ok(PortfolioAuditEntry {
         id: row.id,
-        owner_id: row.owner_id,
+        owner_id: AccountId::from_uuid(row.owner_id),
         action: row.action,
         symbol: row.symbol,
         quantity_minor: row.quantity_minor,
@@ -103,7 +104,7 @@ pub async fn record_audit_entry_tx(
 #[allow(clippy::too_many_arguments)]
 pub async fn record_audit_entry(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     action: &str,
     symbol: Option<&str>,
     quantity_minor: Option<i64>,
@@ -135,7 +136,7 @@ pub async fn record_audit_entry(
 
 pub async fn list_audit_entries(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<PortfolioAuditEntry>, sqlx::Error> {
@@ -152,7 +153,7 @@ pub async fn list_audit_entries(
         ORDER BY id DESC
         LIMIT $2 OFFSET $3
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         limit,
         offset
     )
@@ -163,7 +164,7 @@ pub async fn list_audit_entries(
         .into_iter()
         .map(|row| PortfolioAuditEntry {
             id: row.id,
-            owner_id: row.owner_id,
+            owner_id: AccountId::from_uuid(row.owner_id),
             action: row.action,
             symbol: row.symbol,
             quantity_minor: row.quantity_minor,
@@ -182,7 +183,7 @@ pub async fn list_audit_entries(
 
 pub async fn verify_audit_chain(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<AuditVerificationResult, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
@@ -193,7 +194,7 @@ pub async fn verify_audit_chain(
         WHERE owner_id = $1
         ORDER BY id ASC
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -213,7 +214,7 @@ pub async fn verify_audit_chain(
         .into_iter()
         .map(|row| PortfolioAuditEntry {
             id: row.id,
-            owner_id: row.owner_id,
+            owner_id: AccountId::from_uuid(row.owner_id),
             action: row.action,
             symbol: row.symbol,
             quantity_minor: row.quantity_minor,
@@ -249,7 +250,7 @@ pub async fn verify_audit_chain(
         let epoch_ms = entry.created_at.map(|t| t.timestamp_millis()).unwrap_or(0);
         let computed = compute_entry_hash(
             &entry.prev_hash,
-            &entry.owner_id,
+            &entry.owner_id.to_string(),
             &entry.action,
             entry.symbol.as_deref(),
             entry.quantity_minor,
@@ -294,12 +295,12 @@ pub async fn verify_audit_chain(
 
 pub async fn absorb_ledger(
     conn: &mut PgConnection,
-    from: &str,
-    into: &str,
+    from: &AccountId,
+    into: &AccountId,
 ) -> Result<i64, sqlx::Error> {
     let moved: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = $1",
-        from
+        from.as_uuid()
     )
     .fetch_one(&mut *conn)
     .await?
@@ -317,8 +318,8 @@ pub async fn absorb_ledger(
 
     sqlx::query!(
         "UPDATE portfolio_audit_log SET owner_id = $1 WHERE owner_id = $2",
-        into,
-        from
+        into.as_uuid(),
+        from.as_uuid()
     )
     .execute(&mut *conn)
     .await?;
@@ -332,7 +333,7 @@ pub async fn absorb_ledger(
           currency_exponent, realized_pl_minor, note, prev_hash, entry_hash, created_at)
         VALUES ($1, 'merge', NULL, NULL, NULL, 0, '', 2, NULL, $2, $3, '', $4)
         "#,
-        into,
+        into.as_uuid(),
         note_text,
         GENESIS_HASH,
         now
@@ -349,17 +350,18 @@ pub async fn absorb_ledger(
         WHERE owner_id = $1
         ORDER BY id ASC
         "#,
-        into
+        into.as_uuid()
     )
     .fetch_all(&mut *conn)
     .await?;
 
+    let into_str = into.to_string();
     let mut prev = GENESIS_HASH.to_string();
     for row in rows {
         let epoch_ms = row.created_at.map(|t| t.timestamp_millis()).unwrap_or(0);
         let entry_hash = compute_entry_hash(
             &prev,
-            into,
+            &into_str,
             &row.action,
             row.symbol.as_deref(),
             row.quantity_minor,
@@ -401,7 +403,7 @@ pub async fn absorb_ledger(
 
 pub async fn first_audit_entry_for_currency(
     pool: &PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     currency: &str,
 ) -> Result<Option<(DateTime<Utc>, i64)>, sqlx::Error> {
     let row = sqlx::query!(
@@ -412,7 +414,7 @@ pub async fn first_audit_entry_for_currency(
         ORDER BY created_at ASC
         LIMIT 1
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         currency
     )
     .fetch_optional(pool)

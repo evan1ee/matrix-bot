@@ -96,7 +96,7 @@ backend/src/
 | 4 | Compile-checked query pipeline, hardening, documentation | ✅ | `0bd18c0` `9c2865f` `e9fe149` `a52b984` `1af27e8` `4975039` `b502e2a` `e85d89b` `71ec65e` `1d139eb` `c6d304b` |
 | 5 | Layer skeleton (+ fix wave) | ✅ | `e208254` `fbd5252` `3b53386` `85c2dbc` `e4f1aab` `778585e` `45020fe` `ac816e5` `be24444` |
 | 6 | Feature layering (Tasks 1–14 below) | ✅ | Tasks 1–14 + review & fix wave |
-| 7 | Account UUID (`0002_account_uuid`) | ☐ needs a plan | — |
+| 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | see git log |
 | 8 | Job queue (`0003_jobs`), then move the reminder, briefing, portfolio and bills loops onto it | ☐ needs a plan | — |
 | 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`) | ☐ needs a plan | — |
 | 10 | Docs: `AGENTS.md` (remove the macro and portability rules; add layer and migration rules) and `docs/ARCHITECTURE.md` | ☐ | — |
@@ -123,7 +123,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run: **803 passed / 0 failed / 13 ignored**.
+The last full test run (step 7): **`cargo test -p matrix-bot --all-targets` 714 lib tests passed / 0 failed / 7 ignored, plus the architecture suite; inference 71 passed**.
 
 ## 5. How to work
 
@@ -192,20 +192,11 @@ The tests create a schema per test and never drop it, which is why the container
 
 ## 7. Next actions (in order)
 
-1. **Finish Task 2 (settings).** Review the fix diff `227c95c..ecef800` against these rulings:
-   - every `UserSettings` write is validated in `SettingsService`, and the AI tool `update_my_settings` returns validation errors to the model;
-   - `AppServices::new` (the constructor without events) is `#[cfg(test)]`, and production uses `AppServices::with_events`;
-   - `SettingsService::modify` does `SELECT … FOR UPDATE` in one transaction, propagates read errors, publishes after commit, and every read-then-save caller uses it.
-
-   Check for new defects: events published inside the transaction, lock ordering, validation that changes valid inputs, empty tests. Then mark Task 2 ✅ in §4.
-2. **Task 3: accounts core + `AccountId`.**
-   - Repoint `RoomService::linked_mxids` at the accounts service.
-   - Thread `AccountId` through the rooms and settings services.
-   - In the report, list every `AGENTS.md` Security Rule and the test that proves it.
-3. Tasks 4–14 in plan order, then the whole-branch review and one fix wave.
-4. Design, plan and implement steps 7 (UUID), 8 (jobs), 9 (outbox) and 10 (docs). Each design needs the user's approval.
-5. Hand the user the merge gates (§10). Merge only on their instruction.
-6. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
+1. **Step 8: job queue (`0003_jobs`).** Write the design, get the user's approval, then the plan (`docs/plan_eliminate_spec_gaps.md` and `SPEC.md` §5.1 outline it): `jobs` table with `dedupe_key`, `SKIP LOCKED` dequeue, heartbeat reaper, advisory-lock scheduler; then move the reminder, briefing, portfolio-price and bills loops onto it.
+2. **Step 9: outbox (`0004_outbox`)**, then **Step 10: docs** (`AGENTS.md`, `docs/ARCHITECTURE.md`).
+3. Follow-up debt from step 7 (R15): retype the `&str` account-id facades (`accounts/*`, `llm/tools/*`) to `AccountId`, then delete the nil-UUID fallback.
+4. Hand the user the merge gates (§10). Merge only on their instruction.
+5. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
 
@@ -286,6 +277,13 @@ Each feature task also:
   - `UserSettings` keeps `pub` fields, but its only persistence path validates.
   - The constructor without events is test-only.
   - Read-modify-write goes through `SettingsService::modify`.
+
+### Account UUID (step 7)
+
+- **R14:** `AccountId` wraps `uuid::Uuid` and serialises/displays as `acct_<32 hex>`, so the HTTP contract and the portfolio audit hash are unchanged. A pinned literal digest test (`test_compute_entry_hash_matches_pre_migration_pinned_digest`) guards historical chains.
+- **R15:** string-to-`AccountId` `From` impls stay only for legacy facades that carry ids this crate formatted itself. An unparseable string maps to the nil UUID (matches no account, fails closed); tests seed a deterministic id instead. Untrusted input (HTTP bodies, `--owner`) goes through `FromStr` and is rejected. Cost if wrong: a facade bug reads as "not found" instead of a compile error; the real fix is retyping the `&str` facades (`accounts/*`, `llm/tools/*`) to `AccountId`.
+- **R16:** `0002` is one transaction with a guard that names the offending table/column/value and rolls everything back. Tests cover a legacy TEXT database upgraded in place, the guard's rollback, and a catalog check that every `owner_id`/`account_id` column is UUID with an FK. It still needs the production-copy rehearsal (§10) before release.
+- Test fixtures create their owners with `db::pool::seed_account(s)`; a fixture that writes as an id with no `accounts` row now fails on the FK, as production would.
 
 ## 10. User gates before merging sub-project 1
 

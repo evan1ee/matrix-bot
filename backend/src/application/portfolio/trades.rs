@@ -49,13 +49,13 @@ impl PortfolioService {
         let note = validate_note(req.note)?;
         let parsed = parse_trade(&req)?;
 
-        let already_held = holdings_repo::find(&self.pool, owner.as_str(), &parsed.symbol)
+        let already_held = holdings_repo::find(&self.pool, owner, &parsed.symbol)
             .await?
             .is_some();
 
         let outcome = trades_repo::buy_at(
             &self.pool,
-            owner.as_str(),
+            owner,
             &parsed.symbol,
             parsed.quantity_minor,
             parsed.price_minor,
@@ -76,7 +76,7 @@ impl PortfolioService {
             } else {
                 SystemEvent::PortfolioHoldingCreated(holding.clone())
             });
-            self.events.send(cash_event(owner.as_str(), cash));
+            self.events.send(cash_event(owner, cash));
         }
 
         Ok(outcome)
@@ -92,7 +92,7 @@ impl PortfolioService {
     ) -> Result<SellOutcome, AppError> {
         let symbol = normalise_symbol(symbol).map_err(PortfolioError::Invalid)?;
 
-        let existing = holdings_repo::find(&self.pool, owner.as_str(), &symbol).await?;
+        let existing = holdings_repo::find(&self.pool, owner, &symbol).await?;
         let Some(existing) = existing else {
             return Ok(SellOutcome::NotFound);
         };
@@ -105,7 +105,7 @@ impl PortfolioService {
 
         let outcome = trades_repo::sell_at(
             &self.pool,
-            owner.as_str(),
+            owner,
             &symbol,
             quantity_minor,
             price_minor,
@@ -119,12 +119,12 @@ impl PortfolioService {
                     id: existing.id,
                     owner_id: owner.to_string(),
                 });
-                self.events.send(cash_event(owner.as_str(), cash));
+                self.events.send(cash_event(owner, cash));
             }
             SellOutcome::Reduced { holding, cash, .. } => {
                 self.events
                     .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-                self.events.send(cash_event(owner.as_str(), cash));
+                self.events.send(cash_event(owner, cash));
             }
             SellOutcome::NotFound | SellOutcome::ExceedsHolding { .. } => {}
         }
@@ -140,13 +140,13 @@ impl PortfolioService {
         let note = validate_note(req.note)?;
         let parsed = parse_trade(&req)?;
 
-        let already_held = holdings_repo::find(&self.pool, owner.as_str(), &parsed.symbol)
+        let already_held = holdings_repo::find(&self.pool, owner, &parsed.symbol)
             .await?
             .is_some();
 
         let res = trades_repo::record_holding_action(
             &self.pool,
-            owner.as_str(),
+            owner,
             &parsed.symbol,
             parsed.quantity_minor,
             parsed.price_minor,

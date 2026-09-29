@@ -1,10 +1,11 @@
 use uuid::Uuid;
 
+use crate::domain::accounts::AccountId;
 use crate::domain::llm::{AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput};
 
 pub async fn get_user_config(
     conn: impl sqlx::PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<AiUserConfig>, sqlx::Error> {
     let row = sqlx::query!(
         r#"
@@ -12,7 +13,7 @@ pub async fn get_user_config(
         FROM ai_user_configs
         WHERE owner_id = $1
         "#,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -24,7 +25,7 @@ pub async fn get_user_config(
             .map(|k| !k.trim().is_empty())
             .unwrap_or(false);
         AiUserConfig {
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id).to_string(),
             api_base_url: r.api_base_url,
             api_key: r.api_key,
             model_name: r.model_name,
@@ -40,7 +41,7 @@ pub async fn get_user_config(
 
 pub async fn upsert_user_config(
     pool: &sqlx::PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     input: &UpdateAiConfigInput,
 ) -> Result<AiUserConfig, sqlx::Error> {
     sqlx::query!(
@@ -62,7 +63,7 @@ pub async fn upsert_user_config(
             max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),
             updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         input.api_base_url,
         input.api_key,
         input.model_name,
@@ -80,7 +81,7 @@ pub async fn upsert_user_config(
 
 pub async fn get_or_create_conversation(
     pool: &sqlx::PgPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     max_age_seconds: i64,
 ) -> Result<AiConversation, sqlx::Error> {
@@ -96,7 +97,7 @@ pub async fn get_or_create_conversation(
         ORDER BY updated_at DESC
         LIMIT 1
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         room_id,
         cutoff
     )
@@ -106,7 +107,7 @@ pub async fn get_or_create_conversation(
     if let Some(r) = existing {
         return Ok(AiConversation {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id).to_string(),
             room_id: r.room_id,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -120,7 +121,7 @@ pub async fn get_or_create_conversation(
         VALUES ($1, $2, $3, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
         "#,
         id,
-        owner_id,
+        owner_id.as_uuid(),
         room_id
     )
     .execute(pool)
@@ -134,7 +135,7 @@ pub async fn get_or_create_conversation(
 pub async fn get_conversation(
     conn: impl sqlx::PgExecutor<'_>,
     id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<Option<AiConversation>, sqlx::Error> {
     let row = sqlx::query!(
         r#"
@@ -143,14 +144,14 @@ pub async fn get_conversation(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
 
     Ok(row.map(|r| AiConversation {
         id: r.id,
-        owner_id: r.owner_id,
+        owner_id: AccountId::from_uuid(r.owner_id).to_string(),
         room_id: r.room_id,
         created_at: r.created_at,
         updated_at: r.updated_at,
@@ -159,7 +160,7 @@ pub async fn get_conversation(
 
 pub async fn list_conversations(
     conn: impl sqlx::PgExecutor<'_>,
-    owner_id: &str,
+    owner_id: &AccountId,
     limit: i64,
 ) -> Result<Vec<AiConversation>, sqlx::Error> {
     let rows = sqlx::query!(
@@ -170,7 +171,7 @@ pub async fn list_conversations(
         ORDER BY updated_at DESC
         LIMIT $2
         "#,
-        owner_id,
+        owner_id.as_uuid(),
         limit
     )
     .fetch_all(conn)
@@ -180,7 +181,7 @@ pub async fn list_conversations(
         .into_iter()
         .map(|r| AiConversation {
             id: r.id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id).to_string(),
             room_id: r.room_id,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -191,7 +192,7 @@ pub async fn list_conversations(
 pub async fn delete_conversation(
     conn: impl sqlx::PgExecutor<'_>,
     id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query!(
         r#"
@@ -199,7 +200,7 @@ pub async fn delete_conversation(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner_id
+        owner_id.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -313,14 +314,14 @@ pub struct AiRepository;
 impl AiRepository {
     pub async fn get_user_config(
         pool: &sqlx::PgPool,
-        owner_id: &str,
+        owner_id: &AccountId,
     ) -> Result<Option<AiUserConfig>, sqlx::Error> {
         get_user_config(pool, owner_id).await
     }
 
     pub async fn upsert_user_config(
         pool: &sqlx::PgPool,
-        owner_id: &str,
+        owner_id: &AccountId,
         input: &UpdateAiConfigInput,
     ) -> Result<AiUserConfig, sqlx::Error> {
         upsert_user_config(pool, owner_id, input).await
@@ -328,7 +329,7 @@ impl AiRepository {
 
     pub async fn get_or_create_conversation(
         pool: &sqlx::PgPool,
-        owner_id: &str,
+        owner_id: &AccountId,
         room_id: &str,
         max_age_seconds: i64,
     ) -> Result<AiConversation, sqlx::Error> {
@@ -338,14 +339,14 @@ impl AiRepository {
     pub async fn get_conversation(
         pool: &sqlx::PgPool,
         id: &str,
-        owner_id: &str,
+        owner_id: &AccountId,
     ) -> Result<Option<AiConversation>, sqlx::Error> {
         get_conversation(pool, id, owner_id).await
     }
 
     pub async fn list_conversations(
         pool: &sqlx::PgPool,
-        owner_id: &str,
+        owner_id: &AccountId,
         limit: i64,
     ) -> Result<Vec<AiConversation>, sqlx::Error> {
         list_conversations(pool, owner_id, limit).await
@@ -354,7 +355,7 @@ impl AiRepository {
     pub async fn delete_conversation(
         pool: &sqlx::PgPool,
         id: &str,
-        owner_id: &str,
+        owner_id: &AccountId,
     ) -> Result<bool, sqlx::Error> {
         delete_conversation(pool, id, owner_id).await
     }
@@ -400,10 +401,11 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let owner =
+        let owner_str =
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@tester:mbm.one")
                 .await
                 .unwrap();
+        let owner = AccountId::from(owner_str.as_str());
 
         let initial = get_user_config(&pool, &owner).await.unwrap();
         assert!(initial.is_none());
@@ -419,14 +421,14 @@ mod tests {
         };
 
         let saved = upsert_user_config(&pool, &owner, &input).await.unwrap();
-        assert_eq!(saved.owner_id, owner);
+        assert_eq!(saved.owner_id, owner.to_string());
         assert_eq!(saved.model_name.as_deref(), Some("gpt-4o"));
         assert!(saved.has_api_key);
 
         let conv = get_or_create_conversation(&pool, &owner, "!room:test", 3600)
             .await
             .unwrap();
-        assert_eq!(conv.owner_id, owner);
+        assert_eq!(conv.owner_id, owner.to_string());
 
         let msg = add_message(&pool, &conv.id, "user", "Hello bot!", None, None)
             .await

@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::accounts::AccountId;
+
 /// An MCP personal access token for an account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpToken {
     pub id: String,
-    pub account_id: String,
+    pub account_id: AccountId,
     pub name: String,
     pub token_hash: String,
     pub prefix: String,
@@ -31,7 +33,7 @@ mod tests {
         let now = Utc::now();
         let token = McpToken {
             id: "tok_1".to_string(),
-            account_id: "acct_1".to_string(),
+            account_id: AccountId::from_seed("test_mcp"),
             name: "test".to_string(),
             token_hash: "hash".to_string(),
             prefix: "pref".to_string(),

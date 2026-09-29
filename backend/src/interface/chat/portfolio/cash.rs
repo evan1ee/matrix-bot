@@ -169,6 +169,7 @@ mod tests {
     async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         let broadcaster = EventBroadcaster::default();
         let mut rx = broadcaster.subscribe();
         let services = crate::application::AppServices::with_events(&pool, &broadcaster);

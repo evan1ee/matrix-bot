@@ -1,12 +1,12 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT DISTINCT owner_id\n        FROM portfolio_holdings\n        ",
+  "query": "\n        SELECT DISTINCT owner_id AS \"owner_id: uuid::Uuid\"\n        FROM portfolio_holdings\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "owner_id",
-        "type_info": "Text",
+        "name": "owner_id: uuid::Uuid",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "portfolio_holdings",
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "5d89c0c97e0784d830d7dd70a796c6abba14b13af16dd1b29d1161ce3d585047"
+  "hash": "1bffefc5f6c72b81feaed36eb35fb9f1e3c5c550b4890116ebab4df83699ddeb"
 }

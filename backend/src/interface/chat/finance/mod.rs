@@ -115,6 +115,7 @@ mod tests {
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         Database { pool }
     }
 

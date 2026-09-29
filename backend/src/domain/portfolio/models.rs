@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::accounts::AccountId;
+
 /// Decimal places quantity is stored at — enough for a fractional share and for
 /// satoshi-level crypto precision. Quantity goes through the same integer-minor-
 /// unit technique as money (`finance::money`) for the same reason: no value can
@@ -34,7 +36,7 @@ pub fn normalise_symbol(raw: &str) -> Result<String, String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Holding {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub symbol: String,
     pub quantity_minor: i64,
     pub avg_cost_minor: i64,
@@ -121,7 +123,7 @@ pub struct PortfolioCurrencySummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CashBalance {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub currency: String,
     pub currency_exponent: i64,
     pub balance_minor: i64,
@@ -233,7 +235,7 @@ mod tests {
     ) -> Holding {
         Holding {
             id: 1,
-            owner_id: "alice".to_string(),
+            owner_id: AccountId::from("alice"),
             symbol: symbol.to_string(),
             quantity_minor: qty,
             avg_cost_minor: avg_cost,
@@ -280,7 +282,7 @@ mod tests {
         let h1 = sample_holding("AAPL", qty, 150_00, Some(170_00), "USD");
         let cash = CashBalance {
             id: 1,
-            owner_id: "alice".to_string(),
+            owner_id: AccountId::from("alice"),
             currency: "USD".to_string(),
             currency_exponent: 2,
             balance_minor: 500_00,

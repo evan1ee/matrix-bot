@@ -23,7 +23,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Text",
         "Int8",
         "Timestamptz",

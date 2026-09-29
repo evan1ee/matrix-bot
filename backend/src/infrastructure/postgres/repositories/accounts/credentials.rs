@@ -6,7 +6,7 @@ use crate::domain::accounts::{AccountId, DeleteOutcome, StoredCredential};
 
 struct StoredCredentialRow {
     id: String,
-    account_id: String,
+    account_id: uuid::Uuid,
     passkey_json: String,
     label: String,
     created_at: Option<DateTime<Utc>>,
@@ -37,7 +37,7 @@ pub async fn add(
         "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
          VALUES ($1, $2, $3, $4)",
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
         passkey_json,
         label,
     )
@@ -54,7 +54,7 @@ pub async fn list_for_account(
         StoredCredentialRow,
         "SELECT id, account_id, passkey_json, label, created_at, last_used_at \
          FROM webauthn_credentials WHERE account_id = $1 ORDER BY created_at",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_all(conn)
     .await?;
@@ -102,7 +102,7 @@ pub async fn rename(
         "UPDATE webauthn_credentials SET label = $1 WHERE id = $2 AND account_id = $3",
         label,
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?
@@ -116,7 +116,7 @@ pub async fn count_for_account(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM webauthn_credentials WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(conn)
     .await?;
@@ -133,7 +133,7 @@ pub async fn delete(
     // If only one passkey remains and no Matrix link exists, prevent self-lockout
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM webauthn_credentials WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -141,7 +141,7 @@ pub async fn delete(
     if count <= 1 {
         let has_matrix_link = sqlx::query_scalar!(
             r#"SELECT COUNT(*) AS "count!" FROM matrix_links WHERE account_id = $1"#,
-            account_id.as_str(),
+            account_id.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await?
@@ -155,7 +155,7 @@ pub async fn delete(
     let affected = sqlx::query!(
         "DELETE FROM webauthn_credentials WHERE id = $1 AND account_id = $2",
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(&mut *tx)
     .await?
@@ -183,7 +183,7 @@ pub async fn issue_enrollment_token(
         "INSERT INTO passkey_enrollment_tokens (token, account_id, created_at, expires_at) \
          VALUES ($1, $2, $3, $4)",
         token,
-        account_id.as_str(),
+        account_id.as_uuid(),
         now,
         expires_at,
     )
@@ -211,7 +211,7 @@ pub async fn validate_and_consume_enrollment_token(
     .fetch_optional(conn)
     .await?;
 
-    Ok(account_id.map(AccountId::new))
+    Ok(account_id.map(AccountId::from_uuid))
 }
 
 #[cfg(test)]
@@ -221,7 +221,7 @@ pub async fn count_enrollment_tokens(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM passkey_enrollment_tokens WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(conn)
     .await?;

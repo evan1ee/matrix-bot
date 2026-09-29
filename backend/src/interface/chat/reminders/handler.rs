@@ -306,6 +306,7 @@ mod tests {
     async fn setup_services() -> (ReminderService, SettingsService) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@bob:1"]).await;
         let events = EventBroadcaster::default();
         let reminders = ReminderService::new(pool.clone(), events.clone());
         let settings = SettingsService::new(pool, events);

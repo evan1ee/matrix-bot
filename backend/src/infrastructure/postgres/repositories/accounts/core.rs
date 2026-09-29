@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use crate::domain::accounts::{display_name_for_mxid, Account, AccountId, STATUS_UNCLAIMED};
 
 struct AccountRow {
-    id: String,
+    id: uuid::Uuid,
     display_name: String,
     status: String,
     created_at: Option<DateTime<Utc>>,
@@ -29,8 +29,8 @@ pub async fn create(
     display_name: &str,
     status: &str,
 ) -> Result<AccountId, sqlx::Error> {
-    let id = crate::utils::random::new_account_id();
-    let row = sqlx::query_scalar!(
+    let id = uuid::Uuid::new_v4();
+    let row: uuid::Uuid = sqlx::query_scalar!(
         "INSERT INTO accounts (id, display_name, status) VALUES ($1, $2, $3) RETURNING id",
         id,
         display_name,
@@ -50,7 +50,7 @@ pub async fn create_with_id(
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "INSERT INTO accounts (id, display_name, status) VALUES ($1, $2, $3)",
-        account_id.as_str(),
+        account_id.as_uuid(),
         display_name,
         status,
     )
@@ -68,7 +68,7 @@ pub async fn activate_or_create(
     sqlx::query!(
         "INSERT INTO accounts (id, display_name, status) VALUES ($1, $2, 'active') \
          ON CONFLICT (id) DO UPDATE SET status = 'active'",
-        account_id.as_str(),
+        account_id.as_uuid(),
         display_name,
     )
     .execute(conn)
@@ -84,7 +84,7 @@ pub async fn find(
     let row = sqlx::query_as!(
         AccountRow,
         "SELECT id, display_name, status, created_at FROM accounts WHERE id = $1",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
@@ -96,9 +96,12 @@ pub async fn find_by_mxid(
     conn: impl sqlx::PgExecutor<'_>,
     mxid: &str,
 ) -> Result<Option<AccountId>, sqlx::Error> {
-    let row = sqlx::query_scalar!("SELECT account_id FROM matrix_links WHERE mxid = $1", mxid,)
-        .fetch_optional(conn)
-        .await?;
+    let row = sqlx::query_scalar!(
+        r#"SELECT account_id AS "account_id: uuid::Uuid" FROM matrix_links WHERE mxid = $1"#,
+        mxid,
+    )
+    .fetch_optional(conn)
+    .await?;
     Ok(row.map(AccountId::new))
 }
 
@@ -109,7 +112,7 @@ pub async fn linked_mxids(
 ) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar!(
         "SELECT mxid FROM matrix_links WHERE account_id = $1 ORDER BY linked_at",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_all(conn)
     .await
@@ -127,9 +130,11 @@ pub async fn count(conn: impl sqlx::PgExecutor<'_>) -> Result<i64, sqlx::Error> 
 pub async fn list_active_ids(
     conn: impl sqlx::PgExecutor<'_>,
 ) -> Result<Vec<AccountId>, sqlx::Error> {
-    let rows = sqlx::query_scalar!("SELECT id FROM accounts WHERE status = 'active'")
-        .fetch_all(conn)
-        .await?;
+    let rows: Vec<uuid::Uuid> = sqlx::query_scalar!(
+        r#"SELECT id AS "id: uuid::Uuid" FROM accounts WHERE status = 'active'"#
+    )
+    .fetch_all(conn)
+    .await?;
     Ok(rows.into_iter().map(AccountId::new).collect())
 }
 
@@ -138,7 +143,7 @@ pub async fn delete(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query!("DELETE FROM accounts WHERE id = $1", account_id.as_str(),)
+    sqlx::query!("DELETE FROM accounts WHERE id = $1", account_id.as_uuid())
         .execute(conn)
         .await?;
     Ok(())
@@ -155,7 +160,7 @@ pub async fn resolve_or_provision(pool: &PgPool, mxid: &str) -> Result<AccountId
     let inserted = sqlx::query!(
         "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         mxid,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(pool)
     .await?

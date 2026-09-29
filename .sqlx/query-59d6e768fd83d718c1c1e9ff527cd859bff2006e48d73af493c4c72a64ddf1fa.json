@@ -7,7 +7,7 @@
       "Left": [
         "Timestamptz",
         "Timestamptz",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": []

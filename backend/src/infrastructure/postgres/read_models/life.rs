@@ -101,7 +101,7 @@ pub async fn get_horizon_days(
         WHERE all_dates.d_date IS NOT NULL AND all_dates.d_date != ''
         ORDER BY all_dates.d_date ASC
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -134,7 +134,7 @@ pub async fn collect_day_activity(
         FROM todos
         WHERE owner_id = $1 AND date(created_at)::text = $2
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -173,7 +173,7 @@ pub async fn collect_day_activity(
         FROM todos
         WHERE owner_id = $1 AND date(due_at)::text = $2 AND (created_at IS NULL OR date(created_at)::text != $2)
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -207,7 +207,7 @@ pub async fn collect_day_activity(
         WHERE t.owner_id = $1 AND date(t.occurred_at)::text = $2
         ORDER BY t.occurred_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -259,7 +259,7 @@ pub async fn collect_day_activity(
         WHERE owner_id = $1 AND date(created_at)::text = $2
         ORDER BY created_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -311,7 +311,7 @@ pub async fn collect_day_activity(
         WHERE hl.owner_id = $1 AND hl.log_date = $2
         ORDER BY hl.created_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -339,7 +339,7 @@ pub async fn collect_day_activity(
         WHERE owner_id = $1 AND date(trigger_at)::text = $2
         ORDER BY trigger_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -372,7 +372,7 @@ pub async fn collect_day_activity(
         WHERE owner_id = $1 AND date(created_at)::text = $2
         ORDER BY created_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -400,7 +400,7 @@ pub async fn collect_day_activity(
         WHERE owner_id = $1 AND arrival_date = $2
         ORDER BY created_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         date
     )
     .fetch_all(pool)
@@ -456,7 +456,7 @@ mod tests {
     async fn test_empty_day_returns_zero_events() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let acct = AccountId::new("user_act_1");
+        let acct = AccountId::from_seed("user_act_1");
         let resp = collect_day_activity(&pool, &acct, "2026-09-06").await;
         assert_eq!(resp.date, "2026-09-06");
         assert_eq!(resp.events.len(), 0);
@@ -467,14 +467,21 @@ mod tests {
     async fn test_todo_created_on_date_appears_in_feed() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let acct = AccountId::new("user_act_2");
+        let acct = AccountId::from_seed("user_act_2");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'Alice', 'active') ON CONFLICT DO NOTHING",
+            acct.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         sqlx::query!(
             r#"
             INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at)
             VALUES ('!r', $1, 'Alice', 'Buy groceries', 'high', FALSE, '2026-09-06 09:15:00'::timestamptz)
             "#,
-            acct.as_str()
+            acct.as_uuid()
         )
         .execute(&pool)
         .await
@@ -492,14 +499,21 @@ mod tests {
     async fn test_finance_transaction_appears_in_feed() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let acct = AccountId::new("user_act_3");
+        let acct = AccountId::from_seed("user_act_3");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'Alice', 'active') ON CONFLICT DO NOTHING",
+            acct.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         sqlx::query!(
             r#"
             INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, occurred_at)
             VALUES ('!r', $1, 'Alice', 'expense', 4250, 'USD', 2, '2026-09-06 10:30:00'::timestamptz)
             "#,
-            acct.as_str()
+            acct.as_uuid()
         )
         .execute(&pool)
         .await
@@ -514,14 +528,21 @@ mod tests {
     async fn test_footprints_only_appear_on_arrival_date() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let acct = AccountId::new("user_act_4");
+        let acct = AccountId::from_seed("user_act_4");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'Alice', 'active') ON CONFLICT DO NOTHING",
+            acct.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         sqlx::query!(
             r#"
             INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at)
             VALUES ($1, 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57'::timestamptz)
             "#,
-            acct.as_str()
+            acct.as_uuid()
         )
         .execute(&pool)
         .await

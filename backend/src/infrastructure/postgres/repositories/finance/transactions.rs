@@ -10,7 +10,7 @@ use crate::domain::finance::{
 struct TransactionRow {
     id: i64,
     room_id: String,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     sender_name: String,
     direction: String,
     amount_minor: i64,
@@ -30,7 +30,7 @@ impl From<TransactionRow> for Transaction {
         Self {
             id: r.id,
             room_id: r.room_id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             sender_name: r.sender_name,
             direction: Direction::parse(&r.direction).unwrap_or(Direction::Expense),
             amount_minor: r.amount_minor,
@@ -67,7 +67,7 @@ pub async fn create_transaction(
         RETURNING id
         "#,
         input.room_id,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         input.sender_name,
         input.direction.as_str(),
         input.amount_minor,
@@ -138,7 +138,7 @@ pub async fn find_owned(
         WHERE t.id = $1 AND t.owner_id = $2
         "#,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(pool)
     .await?;
@@ -174,7 +174,7 @@ pub async fn update(
         note,
         occurred_at,
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(pool)
     .await?
@@ -200,7 +200,7 @@ pub async fn delete(
     sqlx::query!(
         "DELETE FROM transactions WHERE id = $1 AND owner_id = $2",
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(pool)
     .await?;
@@ -235,7 +235,7 @@ pub async fn list(
         ORDER BY t.occurred_at DESC, t.id DESC
         LIMIT $7 OFFSET $8
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         direction_str,
         filter.category_id,
         filter.since,
@@ -262,7 +262,7 @@ pub async fn count(
         FROM transactions
         WHERE owner_id = $1 AND ($2::text IS NULL OR direction = $2)
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         dir_str
     )
     .fetch_one(pool)
@@ -296,7 +296,7 @@ pub async fn summary(
         GROUP BY t.currency, t.currency_exponent, c.name, t.direction
         ORDER BY t.currency ASC
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         from,
         to
     )
@@ -386,7 +386,7 @@ pub async fn get_category_summary(
           AND ($5::timestamptz IS NULL OR t.occurred_at <= $5)
         GROUP BY c.name
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         currency,
         category_id,
         since,

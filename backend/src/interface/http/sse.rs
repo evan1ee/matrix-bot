@@ -104,6 +104,7 @@ mod tests {
     async fn test_the_stream_requires_a_session() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_mine", "acct_alice"]).await;
         let state = test_state(pool.clone());
 
         let account = AccountRepository::create(&pool, "evan", "active")
@@ -158,7 +159,10 @@ mod tests {
         let broadcaster = EventBroadcaster::default();
         let subscriber = AuthUser::named("evan", "acct_mine");
         let owner_id = subscriber.owner_id();
-        assert_eq!(owner_id, "acct_mine");
+        assert_eq!(
+            owner_id,
+            crate::domain::accounts::AccountId::from("acct_mine").to_string()
+        );
 
         let stream = owned_events(&broadcaster, owner_id.clone());
 
@@ -170,12 +174,12 @@ mod tests {
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 2,
             room_id: "!room:1".to_string(),
-            owner_id: "acct_theirs".to_string(),
+            owner_id: AccountId::from("acct_theirs").to_string(),
         });
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 3,
             room_id: "web".to_string(),
-            owner_id: "acct_mine".to_string(),
+            owner_id: AccountId::from("acct_mine").to_string(),
         });
         drop(broadcaster);
 
@@ -186,7 +190,7 @@ mod tests {
             2,
             "expected exactly the subscriber's own events"
         );
-        assert!(delivered.iter().all(|e| e.owner_id() == "acct_mine"));
+        assert!(delivered.iter().all(|e| e.owner_id() == owner_id));
         match &delivered[0] {
             SystemEvent::TodoCreated(item) => assert_eq!(item.text, "mine"),
             other => panic!("unexpected first event: {:?}", other),

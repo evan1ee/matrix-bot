@@ -1,12 +1,12 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT owner_id FROM todos WHERE text = $1",
+  "query": "SELECT owner_id AS \"owner_id: uuid::Uuid\" FROM todos WHERE text = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "owner_id",
-        "type_info": "Text",
+        "name": "owner_id: uuid::Uuid",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "todos",
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "fc0bf4cc6532ecc402f4951a35468f63b9bebb7e02a4241b27705f5ef719955c"
+  "hash": "38f2f7a5fae32606e7d79f9b3ab53c0fbf1a19c7ae40e38d07a46e48bbca8c69"
 }

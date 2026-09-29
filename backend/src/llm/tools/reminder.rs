@@ -281,6 +281,7 @@ mod tests {
     async fn test_set_reminder_with_local_time() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
 
         // Dated relative to the run: the service rejects a trigger time that has
 
@@ -318,6 +319,7 @@ mod tests {
     async fn test_set_reminder_with_z_suffix() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
 
         // When an LLM sends a local time formatted as ISO-8601 with Z
         // Dated relative to the run: the service rejects a trigger time that has
@@ -351,6 +353,7 @@ mod tests {
     async fn test_set_reminder_resolves_account_display_name() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
 
         let acct_id = crate::accounts::AccountRepository::create(
             &pool,

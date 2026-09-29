@@ -99,7 +99,7 @@ impl From<crate::domain::finance::Transaction> for Transaction {
         Self {
             id: t.id,
             room_id: t.room_id,
-            owner_id: t.owner_id.into_inner(),
+            owner_id: t.owner_id.to_string(),
             sender_name: t.sender_name,
             direction: t.direction.as_str().to_string(),
             amount_minor: t.amount_minor,
@@ -433,6 +433,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

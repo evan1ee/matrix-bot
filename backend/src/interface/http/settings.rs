@@ -175,6 +175,7 @@ mod tests {
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_@evan:mbm.one", "acct_evan"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
@@ -304,7 +305,10 @@ mod tests {
         .unwrap();
 
         let event = rx.try_recv().unwrap();
-        assert_eq!(event.owner_id(), "acct_@evan:mbm.one");
+        assert_eq!(
+            event.owner_id(),
+            crate::domain::accounts::AccountId::from("acct_@evan:mbm.one").to_string()
+        );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 

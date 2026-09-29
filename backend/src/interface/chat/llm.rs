@@ -112,7 +112,7 @@ pub async fn handle_ai_command(
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     room_id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
     sender_name: &str,
     command: &str,
     raw_args: &str,
@@ -149,7 +149,7 @@ pub async fn handle_ai_command_with_stage(
     broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     room_id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
     _sender_name: &str,
     command: &str,
     raw_args: &str,
@@ -260,7 +260,7 @@ pub async fn handle_ai_subcommand(
     settings: &SettingsService,
     ai: &crate::config::AiEnvConfig,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     trimmed: &str,
 ) -> Option<String> {
@@ -307,14 +307,13 @@ pub async fn handle_show_config(
     pool: &DbPool,
     settings: &SettingsService,
     ai: &crate::config::AiEnvConfig,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> String {
     let user_config = llm_repo::get_user_config(pool, owner_id)
         .await
         .unwrap_or(None);
     let resolved = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
-    let acct = AccountId::from(owner_id);
-    let settings = settings.get_or_default(&acct).await;
+    let settings = settings.get_or_default(owner_id).await;
 
     let key_status = if resolved.api_key.is_some() {
         "Configured (Hidden)"
@@ -339,7 +338,7 @@ pub async fn handle_show_config(
 
 pub async fn handle_set_history(
     settings: &SettingsService,
-    owner_id: &str,
+    owner_id: &AccountId,
     turns_str: &str,
 ) -> String {
     let turns: i64 = match turns_str.parse() {
@@ -347,9 +346,8 @@ pub async fn handle_set_history(
         _ => return format_error("Max history turns must be an integer between 1 and 100."),
     };
 
-    let acct = AccountId::from(owner_id);
     match settings
-        .modify(&acct, |current| {
+        .modify(owner_id, |current| {
             current.max_history_turns = turns;
             Ok(())
         })
@@ -369,7 +367,7 @@ pub async fn handle_set_history(
 pub async fn handle_set_model(
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     model_name: &str,
 ) -> String {
     let input = crate::domain::llm::UpdateAiConfigInput {
@@ -401,7 +399,7 @@ pub async fn handle_set_model(
 pub async fn handle_reset(
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
 ) -> String {
     if let Ok(conv) = llm_repo::get_or_create_conversation(pool, owner_id, room_id, 1800).await {
@@ -421,7 +419,7 @@ pub async fn handle_reset(
 mod tests {
     use super::*;
 
-    async fn setup_test() -> (Database, String) {
+    async fn setup_test() -> (Database, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
@@ -429,7 +427,7 @@ mod tests {
             crate::accounts::AccountRepository::resolve_or_provision(&db.pool, "@user:mbm.one")
                 .await
                 .unwrap();
-        (db, owner)
+        (db, AccountId::from(owner.as_str()))
     }
 
     #[tokio::test]
@@ -519,7 +517,7 @@ mod tests {
         let conv = llm_repo::get_or_create_conversation(&db.pool, &owner, "!room:mbm.one", 1800)
             .await
             .unwrap();
-        assert_eq!(conv.owner_id, owner);
+        assert_eq!(conv.owner_id, owner.to_string());
 
         let reset_reply = handle_ai_command(
             &crate::application::AppServices::new(&db.pool),

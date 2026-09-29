@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::accounts::AccountId;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DailySnapshot {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: AccountId,
     pub snapshot_date: String,
     pub currency: String,
     pub currency_exponent: i64,

@@ -6,7 +6,7 @@ use crate::domain::accounts::{hash_token, AccountId, Session};
 
 struct SessionRow {
     id_hash: String,
-    account_id: String,
+    account_id: uuid::Uuid,
     created_at: DateTime<Utc>,
     last_seen_at: DateTime<Utc>,
     last_verified_at: DateTime<Utc>,
@@ -20,7 +20,7 @@ impl From<SessionRow> for Session {
     fn from(row: SessionRow) -> Self {
         Session {
             id_hash: row.id_hash,
-            account_id: AccountId::new(row.account_id),
+            account_id: AccountId::from_uuid(row.account_id),
             created_at: row.created_at,
             last_seen_at: row.last_seen_at,
             last_verified_at: row.last_verified_at,
@@ -49,7 +49,7 @@ pub async fn create(
           restricted_until, user_agent, ip) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         hashed,
-        account_id.as_str(),
+        account_id.as_uuid(),
         now,
         now,
         now,
@@ -134,7 +134,7 @@ pub async fn revoke_all_for_account(
         "UPDATE sessions SET revoked_at = $1 \
          WHERE account_id = $2 AND revoked_at IS NULL AND id_hash IS DISTINCT FROM $3",
         Utc::now(),
-        account_id.as_str(),
+        account_id.as_uuid(),
         except,
     )
     .execute(conn)
@@ -154,7 +154,7 @@ pub async fn list_for_account(
                 restricted_until, user_agent, ip, revoked_at \
          FROM sessions WHERE account_id = $1 AND revoked_at IS NULL \
          ORDER BY last_seen_at DESC",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_all(conn)
     .await?;
@@ -175,7 +175,7 @@ pub async fn update_last_verified_at(
     sqlx::query!(
         "UPDATE sessions SET last_verified_at = $1 WHERE account_id = $2",
         verified_at,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?;

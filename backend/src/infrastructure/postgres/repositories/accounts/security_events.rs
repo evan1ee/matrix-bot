@@ -6,7 +6,7 @@ use crate::domain::accounts::{AccountId, SecurityEvent, SecurityEventKind};
 
 struct SecurityEventRow {
     id: i64,
-    account_id: String,
+    account_id: uuid::Uuid,
     kind: String,
     detail: Option<String>,
     created_at: Option<DateTime<Utc>>,
@@ -16,7 +16,7 @@ impl From<SecurityEventRow> for SecurityEvent {
     fn from(row: SecurityEventRow) -> Self {
         SecurityEvent {
             id: row.id,
-            account_id: AccountId::new(row.account_id),
+            account_id: AccountId::from_uuid(row.account_id),
             kind: row.kind,
             detail: row.detail,
             created_at: row.created_at,
@@ -32,7 +32,7 @@ pub async fn record(
 ) {
     let result = sqlx::query!(
         "INSERT INTO security_events (account_id, kind, detail) VALUES ($1, $2, $3)",
-        account_id.as_str(),
+        account_id.as_uuid(),
         kind.as_str(),
         detail,
     )
@@ -58,7 +58,7 @@ pub async fn list(
         SecurityEventRow,
         "SELECT id, account_id, kind, detail, created_at FROM security_events \
          WHERE account_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
-        account_id.as_str(),
+        account_id.as_uuid(),
         limit,
     )
     .fetch_all(conn)

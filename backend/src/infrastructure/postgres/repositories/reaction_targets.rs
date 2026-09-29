@@ -1,5 +1,6 @@
 //! PostgreSQL repository for Matrix bot message targets linked to domain entities (todos, reminders).
 
+use crate::domain::accounts::AccountId;
 use crate::domain::chat::BotMessageTarget;
 
 struct BotMessageTargetRow {
@@ -7,7 +8,7 @@ struct BotMessageTargetRow {
     room_id: String,
     entity_type: String,
     entity_id: i64,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     title: String,
 }
 
@@ -18,7 +19,7 @@ impl From<BotMessageTargetRow> for BotMessageTarget {
             room_id: r.room_id,
             entity_type: r.entity_type,
             entity_id: r.entity_id,
-            owner_id: r.owner_id,
+            owner_id: AccountId::from_uuid(r.owner_id),
             title: r.title,
         }
     }
@@ -30,7 +31,7 @@ pub async fn record_target(
     room_id: &str,
     entity_type: &str,
     entity_id: i64,
-    owner_id: &str,
+    owner_id: &AccountId,
     title: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
@@ -48,7 +49,7 @@ pub async fn record_target(
         room_id,
         entity_type,
         entity_id,
-        owner_id,
+        owner_id.as_uuid(),
         title
     )
     .execute(conn)
@@ -132,10 +133,19 @@ mod tests {
             crate::accounts::AccountRepository::resolve_or_provision(&pool, "@target_user:mbm.one")
                 .await
                 .unwrap();
+        let owner_id = AccountId::from(owner.as_str());
 
-        record_target(&pool, "$ev_1", "!room:a", "todo", 42, &owner, "Test task")
-            .await
-            .unwrap();
+        record_target(
+            &pool,
+            "$ev_1",
+            "!room:a",
+            "todo",
+            42,
+            &owner_id,
+            "Test task",
+        )
+        .await
+        .unwrap();
 
         let target = get_target(&pool, "$ev_1").await.unwrap().unwrap();
         assert_eq!(target.event_id, "$ev_1");

@@ -17,7 +17,7 @@
       {
         "ordinal": 1,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "ai_conversations",
@@ -61,7 +61,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Text",
         "Text"
       ]

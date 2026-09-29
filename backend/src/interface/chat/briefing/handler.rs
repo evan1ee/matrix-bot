@@ -1,11 +1,12 @@
 use crate::application::AppServices;
+use crate::domain::accounts::AccountId;
 use crate::domain::settings::parse_briefing_time;
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::utils::html_escape;
 
 pub async fn handle_briefing_command(
     services: &AppServices,
-    owner_id: &str,
+    owner_id: &AccountId,
     clean_body: &str,
     broadcaster: Option<&EventBroadcaster>,
 ) -> Option<String> {
@@ -47,11 +48,10 @@ fn strip_command<'a>(lower: &str, body: &'a str) -> Option<&'a str> {
 
 async fn generate_now(
     services: &AppServices,
-    owner_id: &str,
+    owner_id: &AccountId,
     broadcaster: Option<&EventBroadcaster>,
 ) -> String {
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
-    let settings = services.settings.get_or_default(&acct).await;
+    let settings = services.settings.get_or_default(owner_id).await;
     match services
         .briefing
         .generate_briefing(owner_id, &settings)
@@ -79,7 +79,7 @@ async fn generate_now(
     }
 }
 
-async fn set_time(services: &AppServices, owner_id: &str, raw_time: &str) -> String {
+async fn set_time(services: &AppServices, owner_id: &AccountId, raw_time: &str) -> String {
     if raw_time.is_empty() {
         return "⚠️ 请提供24小时制时间，例如: <code>!briefing time 07:30</code>".to_string();
     }
@@ -92,10 +92,9 @@ async fn set_time(services: &AppServices, owner_id: &str, raw_time: &str) -> Str
     }
 
     let briefing_time = raw_time.trim().to_string();
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
     match services
         .settings
-        .modify(&acct, |current| {
+        .modify(owner_id, |current| {
             current.briefing_time = briefing_time;
             Ok(())
         })
@@ -110,11 +109,10 @@ async fn set_time(services: &AppServices, owner_id: &str, raw_time: &str) -> Str
     }
 }
 
-async fn toggle(services: &AppServices, owner_id: &str, enabled: bool) -> String {
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
+async fn toggle(services: &AppServices, owner_id: &AccountId, enabled: bool) -> String {
     match services
         .settings
-        .modify(&acct, |current| {
+        .modify(owner_id, |current| {
             current.briefing_enabled = enabled;
             Ok(())
         })
@@ -136,12 +134,11 @@ async fn toggle(services: &AppServices, owner_id: &str, enabled: bool) -> String
     }
 }
 
-async fn show_status(services: &AppServices, owner_id: &str) -> String {
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
-    let settings = services.settings.get_or_default(&acct).await;
+async fn show_status(services: &AppServices, owner_id: &AccountId) -> String {
+    let settings = services.settings.get_or_default(owner_id).await;
     let last_date = services
         .settings
-        .get_last_briefing_date(&acct)
+        .get_last_briefing_date(owner_id)
         .await
         .unwrap_or_else(|| "尚未发送过".to_string());
 
@@ -181,6 +178,7 @@ mod tests {
     async fn pool_and_services() -> (DbPool, AppServices) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["briefing_test"]).await;
         let services = AppServices::new(&pool);
         (pool, services)
     }
@@ -199,20 +197,20 @@ mod tests {
     #[tokio::test]
     async fn test_briefing_status_and_time_commands() {
         let (_pool, services) = pool_and_services().await;
-        let owner = "@alice:example.org";
+        let owner = AccountId::from_seed("briefing_test");
 
-        let res = handle_briefing_command(&services, owner, "!briefing status", None)
+        let res = handle_briefing_command(&services, &owner, "!briefing status", None)
             .await
             .unwrap();
         assert!(res.contains("早安简报设置状态"));
         assert!(res.contains("07:00"));
 
-        let res_time = handle_briefing_command(&services, owner, "!briefing time 08:30", None)
+        let res_time = handle_briefing_command(&services, &owner, "!briefing time 08:30", None)
             .await
             .unwrap();
         assert!(res_time.contains("08:30"));
 
-        let res_off = handle_briefing_command(&services, owner, "!briefing off", None)
+        let res_off = handle_briefing_command(&services, &owner, "!briefing off", None)
             .await
             .unwrap();
         assert!(res_off.contains("关闭"));

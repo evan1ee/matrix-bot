@@ -75,14 +75,16 @@ pub async fn pending_merge(
         .pending_merges
         .read()
         .await
-        .get(user.account_id.as_str())
+        .get(&user.account_id.to_string())
         .cloned();
 
     let Some(from_account) = pending else {
         return Ok(Json(None));
     };
 
-    let from_id = AccountId::new(from_account.clone());
+    let from_id: AccountId = from_account
+        .parse()
+        .map_err(|_| ApiError::internal("pending merge holds a malformed account id"))?;
     let domain_preview = state
         .services
         .accounts
@@ -115,14 +117,17 @@ pub async fn confirm_merge(
         .pending_merges
         .read()
         .await
-        .get(user.account_id.as_str())
+        .get(&user.account_id.to_string())
         .is_some_and(|from| *from == payload.from_account);
 
     if !authorised {
         return Err(ApiError::not_found("No merge is waiting for confirmation"));
     }
 
-    let from_id = AccountId::new(payload.from_account);
+    let from_id: AccountId = payload
+        .from_account
+        .parse()
+        .map_err(|_| ApiError::bad_request("from_account is not a valid account id"))?;
     let outcome = state
         .services
         .accounts
@@ -134,7 +139,7 @@ pub async fn confirm_merge(
         .pending_merges
         .write()
         .await
-        .remove(user.account_id.as_str());
+        .remove(&user.account_id.to_string());
 
     state
         .services

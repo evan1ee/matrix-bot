@@ -191,7 +191,7 @@ mod tests {
         assert!(reply.contains("Nothing has been changed"));
 
         assert_eq!(
-            pending.read().await.get(new.as_str()),
+            pending.read().await.get(&new.to_string()),
             Some(&old.to_string())
         );
 

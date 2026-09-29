@@ -57,7 +57,7 @@ impl From<crate::domain::todos::TodoItem> for TodoItem {
         Self {
             id: item.id,
             room_id: item.room_id,
-            owner_id: item.owner_id.into_inner(),
+            owner_id: item.owner_id.to_string(),
             sender_name: item.sender_name,
             text: item.text,
             priority: item.priority.as_str().to_string(),
@@ -313,6 +313,16 @@ mod tests {
     async fn test_completed_filter_narrows_both_items_and_total() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -395,6 +405,16 @@ mod tests {
     async fn test_todo_api_crud_and_isolation() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -469,6 +489,16 @@ mod tests {
     async fn test_completion_can_be_toggled_back_off() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -548,6 +578,16 @@ mod tests {
     async fn test_local_account_cannot_reach_matrix_user_data() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),
@@ -657,6 +697,16 @@ mod tests {
     async fn due_reminder_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         ApiState::new(
             crate::db::Database { pool: pool },
             EventBroadcaster::default(),

@@ -15,40 +15,42 @@ impl AccountRepository {
             status,
         )
         .await
-        .map(|id| id.into_inner())
+        .map(|id| id.to_string())
     }
 
     pub async fn create_with_id(
         pool: &DbPool,
-        account_id: &str,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
         display_name: &str,
         status: &str,
     ) -> Result<(), sqlx::Error> {
+        let id = account_id.into();
         crate::infrastructure::postgres::repositories::accounts::core::create_with_id(
             pool,
-            &crate::domain::accounts::AccountId::new(account_id),
+            &id,
             display_name,
             status,
         )
         .await
     }
 
-    pub async fn delete(pool: &DbPool, account_id: &str) -> Result<(), sqlx::Error> {
-        crate::infrastructure::postgres::repositories::accounts::core::delete(
-            pool,
-            &crate::domain::accounts::AccountId::new(account_id),
-        )
-        .await
+    pub async fn delete(
+        pool: &DbPool,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
+    ) -> Result<(), sqlx::Error> {
+        let id = account_id.into();
+        crate::infrastructure::postgres::repositories::accounts::core::delete(pool, &id).await
     }
 
-    pub async fn find(pool: &DbPool, account_id: &str) -> Result<Option<Account>, sqlx::Error> {
-        let domain_opt = crate::infrastructure::postgres::repositories::accounts::core::find(
-            pool,
-            &crate::domain::accounts::AccountId::new(account_id),
-        )
-        .await?;
+    pub async fn find(
+        pool: &DbPool,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
+    ) -> Result<Option<Account>, sqlx::Error> {
+        let id = account_id.into();
+        let domain_opt =
+            crate::infrastructure::postgres::repositories::accounts::core::find(pool, &id).await?;
         Ok(domain_opt.map(|a| Account {
-            id: a.id.into_inner(),
+            id: a.id.to_string(),
             display_name: a.display_name,
             status: a.status,
             created_at: a.created_at,
@@ -59,15 +61,15 @@ impl AccountRepository {
         let opt =
             crate::infrastructure::postgres::repositories::accounts::core::find_by_mxid(pool, mxid)
                 .await?;
-        Ok(opt.map(|id| id.into_inner()))
+        Ok(opt.map(|id| id.to_string()))
     }
 
-    pub async fn linked_mxids(pool: &DbPool, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
-        crate::infrastructure::postgres::repositories::accounts::core::linked_mxids(
-            pool,
-            &crate::domain::accounts::AccountId::new(account_id),
-        )
-        .await
+    pub async fn linked_mxids(
+        pool: &DbPool,
+        account_id: impl Into<crate::domain::accounts::AccountId>,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let id = account_id.into();
+        crate::infrastructure::postgres::repositories::accounts::core::linked_mxids(pool, &id).await
     }
 
     pub async fn resolve_or_provision(pool: &DbPool, mxid: &str) -> Result<String, sqlx::Error> {
@@ -75,7 +77,7 @@ impl AccountRepository {
             pool, mxid,
         )
         .await
-        .map(|id| id.into_inner())
+        .map(|id| id.to_string())
     }
 }
 
@@ -195,10 +197,11 @@ mod tests {
             .await
             .unwrap();
 
+        let acct_id = crate::domain::accounts::AccountId::from(account.as_str());
         sqlx::query!(
             "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
             "@evan:work.org",
-            &account
+            acct_id.as_uuid()
         )
         .execute(&pool)
         .await
@@ -224,10 +227,11 @@ mod tests {
             .unwrap();
         assert_ne!(first, other);
 
+        let other_id = crate::domain::accounts::AccountId::from(other.as_str());
         let duplicate = sqlx::query!(
             "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
             "@evan:mbm.one",
-            &other
+            other_id.as_uuid()
         )
         .execute(&pool)
         .await;

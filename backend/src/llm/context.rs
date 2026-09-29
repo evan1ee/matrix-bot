@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use crate::events::EventBroadcaster;
 
 /// Runtime context for an LLM turn.
@@ -10,7 +11,7 @@ pub struct LlmTurnContext<'a> {
     pub pool: &'a DbPool,
     pub config: &'a crate::config::AiEnvConfig,
     pub broadcaster: Option<&'a EventBroadcaster>,
-    pub owner_id: &'a str,
+    pub owner_id: &'a AccountId,
     pub room_id: &'a str,
     pub stage_reporter: Option<&'a crate::interface::channels::matrix::stage::StageReporter>,
 }
@@ -21,7 +22,7 @@ impl<'a> LlmTurnContext<'a> {
         pool: &'a DbPool,
         config: &'a crate::config::AiEnvConfig,
         broadcaster: Option<&'a EventBroadcaster>,
-        owner_id: &'a str,
+        owner_id: &'a AccountId,
         room_id: &'a str,
         stage_reporter: Option<&'a crate::interface::channels::matrix::stage::StageReporter>,
     ) -> Self {

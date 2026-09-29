@@ -7,7 +7,7 @@ use crate::domain::finance::Category;
 #[derive(Debug, sqlx::FromRow)]
 struct CategoryRow {
     id: i64,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     name: String,
     created_at: Option<DateTime<Utc>>,
 }
@@ -16,7 +16,7 @@ impl From<CategoryRow> for Category {
     fn from(r: CategoryRow) -> Self {
         Self {
             id: r.id,
-            owner_id: AccountId::new(r.owner_id),
+            owner_id: AccountId::from_uuid(r.owner_id),
             name: r.name,
             created_at: r.created_at,
         }
@@ -47,7 +47,7 @@ pub async fn create_category(
         ON CONFLICT (owner_id, name) DO NOTHING
         RETURNING id, owner_id, name, created_at
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         name
     )
     .fetch_optional(pool)
@@ -68,7 +68,7 @@ pub async fn list_categories(
         WHERE owner_id = $1
         ORDER BY LOWER(name) ASC
         "#,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -88,7 +88,7 @@ pub async fn find_category_by_name(
         FROM finance_categories
         WHERE owner_id = $1 AND LOWER(name) = LOWER($2)
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         name
     )
     .fetch_optional(pool)
@@ -109,7 +109,7 @@ pub async fn find_category_by_id(
         FROM finance_categories
         WHERE owner_id = $1 AND id = $2
         "#,
-        owner_id.as_str(),
+        owner_id.as_uuid(),
         id
     )
     .fetch_optional(pool)
@@ -128,7 +128,7 @@ pub async fn delete_category(
     let owns = sqlx::query_scalar!(
         "SELECT id FROM finance_categories WHERE id = $1 AND owner_id = $2 FOR UPDATE",
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .fetch_optional(&mut *tx)
     .await?;
@@ -140,7 +140,7 @@ pub async fn delete_category(
     let orphaned = sqlx::query!(
         "UPDATE transactions SET category_id = NULL WHERE category_id = $1 AND owner_id = $2",
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(&mut *tx)
     .await?
@@ -149,7 +149,7 @@ pub async fn delete_category(
     sqlx::query!(
         "DELETE FROM finance_categories WHERE id = $1 AND owner_id = $2",
         id,
-        owner_id.as_str()
+        owner_id.as_uuid()
     )
     .execute(&mut *tx)
     .await?;

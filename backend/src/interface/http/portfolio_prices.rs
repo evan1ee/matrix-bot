@@ -81,7 +81,7 @@ impl From<crate::domain::portfolio::audit::PortfolioAuditEntry> for PortfolioAud
     fn from(e: crate::domain::portfolio::audit::PortfolioAuditEntry) -> Self {
         Self {
             id: e.id,
-            owner_id: e.owner_id,
+            owner_id: e.owner_id.to_string(),
             action: e.action,
             symbol: e.symbol,
             quantity_minor: e.quantity_minor,
@@ -386,6 +386,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),

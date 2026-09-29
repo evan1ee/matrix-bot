@@ -3,7 +3,6 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info};
 
 use crate::accounts::AccountRepository;
-use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::infrastructure::web::portfolio_feed::{fetch_latest_price, price_to_minor};
 use crate::interface::channels::matrix::notify::send_dm_html;
@@ -150,8 +149,7 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                     .unwrap_or_default();
 
                 for owner in &owners {
-                    let acct = AccountId::new(owner);
-                    let summary = ctx.services.portfolio.refresh_all_for_owner(&acct).await;
+                    let summary = ctx.services.portfolio.refresh_all_for_owner(owner).await;
 
                     if !summary.updated.is_empty() {
                         debug!(
@@ -165,7 +163,7 @@ pub fn start_portfolio_price_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
                     let _ = ctx
                         .services
                         .portfolio
-                        .capture_current_snapshot_for_owner(&acct)
+                        .capture_current_snapshot_for_owner(owner)
                         .await;
                 }
             }

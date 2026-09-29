@@ -50,9 +50,7 @@ impl SettingsService {
     /// The caller's settings, or the documented defaults if they have never
     /// saved any (AGENTS.md: a missing row means defaults, never an error).
     pub async fn get(&self, owner_id: &AccountId) -> Result<UserSettings, AppError> {
-        Ok(repo::get(&self.pool, owner_id.as_str())
-            .await?
-            .unwrap_or_default())
+        Ok(repo::get(&self.pool, owner_id).await?.unwrap_or_default())
     }
 
     /// Reads settings for a caller that cannot fail its own work over a
@@ -85,7 +83,7 @@ impl SettingsService {
         settings: UserSettings,
     ) -> Result<UserSettings, AppError> {
         validate(&settings)?;
-        repo::upsert(&self.pool, owner_id.as_str(), &settings).await?;
+        repo::upsert(&self.pool, owner_id, &settings).await?;
         self.events.send(SystemEvent::SettingsUpdated {
             owner_id: owner_id.to_string(),
             settings: settings.clone(),
@@ -113,12 +111,12 @@ impl SettingsService {
         F: FnOnce(&mut UserSettings) -> Result<(), SettingsError>,
     {
         let mut tx = self.pool.begin().await?;
-        let mut settings = repo::get_for_update(&mut *tx, owner_id.as_str())
+        let mut settings = repo::get_for_update(&mut *tx, owner_id)
             .await?
             .unwrap_or_default();
         f(&mut settings)?;
         validate(&settings)?;
-        repo::upsert(&mut *tx, owner_id.as_str(), &settings).await?;
+        repo::upsert(&mut *tx, owner_id, &settings).await?;
         tx.commit().await?;
         self.events.send(SystemEvent::SettingsUpdated {
             owner_id: owner_id.to_string(),
@@ -147,7 +145,7 @@ impl SettingsService {
     /// delivered today" rather than skipping every account because one read
     /// failed.
     pub async fn get_last_briefing_date(&self, owner_id: &AccountId) -> Option<String> {
-        repo::get_last_briefing_date(&self.pool, owner_id.as_str())
+        repo::get_last_briefing_date(&self.pool, owner_id)
             .await
             .unwrap_or_else(|err| {
                 tracing::warn!("Could not read last briefing date for {owner_id}: {err:?}");
@@ -160,7 +158,7 @@ impl SettingsService {
         owner_id: &AccountId,
         date_str: &str,
     ) -> Result<(), AppError> {
-        Ok(repo::update_last_briefing_date(&self.pool, owner_id.as_str(), date_str).await?)
+        Ok(repo::update_last_briefing_date(&self.pool, owner_id, date_str).await?)
     }
 
     /// Subscribes to the events this service publishes. Test-only: a
@@ -209,11 +207,22 @@ mod tests {
         ));
     }
 
+    async fn ensure_account(pool: &PgPool, owner: &AccountId) {
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn save_persists_and_broadcasts_to_the_owner() {
         let service = service().await;
         let mut rx = service.events.subscribe();
         let owner = AccountId::new("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
 
         let saved = service
             .save(
@@ -232,7 +241,7 @@ mod tests {
         assert_eq!(read_back, saved);
 
         let event = rx.try_recv().unwrap();
-        assert_eq!(event.owner_id(), "@evan:mbm.one");
+        assert_eq!(event.owner_id(), owner.to_string());
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 
@@ -240,6 +249,7 @@ mod tests {
     async fn update_validates_before_saving_anything() {
         let service = service().await;
         let owner = AccountId::new("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
@@ -277,6 +287,7 @@ mod tests {
     async fn update_merges_with_the_current_row() {
         let service = service().await;
         let owner = AccountId::new("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
@@ -314,6 +325,7 @@ mod tests {
     async fn last_briefing_date_round_trips() {
         let service = service().await;
         let owner = AccountId::new("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         assert_eq!(service.get_last_briefing_date(&owner).await, None);
 
         service
@@ -370,6 +382,7 @@ mod tests {
     async fn concurrent_modifies_do_not_lose_an_update() {
         let service = service().await;
         let owner = AccountId::new("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
