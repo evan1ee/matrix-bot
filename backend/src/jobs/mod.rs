@@ -6,6 +6,7 @@
 //! in its bounded shutdown. Holds no SQL (`tests/architecture.rs`): every
 //! query is in `infrastructure/postgres/repositories/jobs.rs`.
 
+pub(crate) mod reaper;
 pub mod registry;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -173,6 +174,11 @@ impl JobRuntime {
             self.pool.clone(),
             wake.clone(),
             Duration::from_secs(30),
+            shutdown.clone(),
+        ));
+        tasks.spawn(reaper::run(
+            self.pool.clone(),
+            self.config.clone(),
             shutdown.clone(),
         ));
         for _ in 0..self.config.workers {
