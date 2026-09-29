@@ -261,6 +261,40 @@ pub async fn purge_finished(exec: impl PgExecutor<'_>, older_than: Duration) -> 
     Ok(r.rows_affected())
 }
 
+/// Status of the job holding a dedupe key, if any. Lets a use case tell
+/// "already queued" from "queued and already failed".
+pub async fn status_by_key(
+    exec: impl PgExecutor<'_>,
+    job_type: &str,
+    dedupe_key: &str,
+) -> sqlx::Result<Option<crate::domain::jobs::JobStatus>> {
+    let status = sqlx::query_scalar!(
+        "SELECT status FROM jobs WHERE job_type = $1 AND dedupe_key = $2",
+        job_type,
+        dedupe_key
+    )
+    .fetch_optional(exec)
+    .await?;
+    Ok(status.map(|s| crate::domain::jobs::JobStatus::parse(&s).expect("status CHECK")))
+}
+
+/// Forces a keyed job to `failed`, as a timeout or the reaper would.
+#[cfg(test)]
+pub async fn force_failed(
+    exec: impl PgExecutor<'_>,
+    job_type: &str,
+    dedupe_key: &str,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE jobs SET status = 'failed', completed_at = NOW() \
+         WHERE job_type = $1 AND dedupe_key = $2",
+        job_type,
+        dedupe_key
+    )
+    .execute(exec)
+    .await?;
+    Ok(())
+}
 /// A full `jobs` row as tests assert on it.
 #[cfg(test)]
 pub struct JobRecord {

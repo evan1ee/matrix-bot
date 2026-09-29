@@ -2,10 +2,11 @@
 //! scheduler tick need from the reminder store.
 
 use chrono::{DateTime, Utc};
+use tracing::warn;
 
 use super::ReminderService;
 use crate::application::AppError;
-use crate::domain::jobs::NewJob;
+use crate::domain::jobs::{JobStatus, NewJob};
 use crate::domain::reminders::{next_occurrence, Reminder};
 use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories;
@@ -23,9 +24,33 @@ impl ReminderService {
                 .is_some()
             {
                 enqueued += 1;
+            } else {
+                self.fail_if_job_failed(&job, r).await?;
             }
         }
         Ok(enqueued)
+    }
+
+    /// The dedupe key blocks a re-enqueue, so a job that ended `failed`
+    /// without its handler marking the reminder (timeout, database error,
+    /// reaper) would leave it pending at a past trigger until the job is
+    /// purged. Exhausted attempts mean failed, as the old loop had it; the
+    /// guard keeps a snoozed reminder (a different key) untouched.
+    async fn fail_if_job_failed(&self, job: &NewJob, r: &Reminder) -> Result<(), AppError> {
+        let Some(key) = job.dedupe_key() else {
+            return Ok(());
+        };
+        let status =
+            repositories::jobs::status_by_key(&self.pool, job.job_type().as_str(), key).await?;
+        if status == Some(JobStatus::Failed)
+            && repositories::reminders::mark_failed_at(&self.pool, r.id, r.trigger_at).await?
+        {
+            warn!(
+                reminder_id = r.id,
+                "Reminder job failed unhandled; marked failed"
+            );
+        }
+        Ok(())
     }
 
     /// Loads a reminder by the system-generated id a job carries.
@@ -72,6 +97,12 @@ impl ReminderService {
 
     pub async fn mark_failed(&self, id: i64) -> Result<(), AppError> {
         repositories::reminders::mark_failed(&self.pool, id).await?;
+        Ok(())
+    }
+
+    /// Fails the reminder only if it is still pending at `trigger_at`.
+    pub async fn mark_failed_at(&self, id: i64, trigger_at: DateTime<Utc>) -> Result<(), AppError> {
+        repositories::reminders::mark_failed_at(&self.pool, id, trigger_at).await?;
         Ok(())
     }
 
@@ -225,5 +256,78 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(done.status, ReminderStatus::Triggered);
+    }
+
+    fn fire_key(r: &Reminder) -> (&'static str, String) {
+        let job = NewJob::reminder_fire(r.owner_id, r.id, r.trigger_at);
+        (
+            job.job_type().as_str(),
+            job.dedupe_key().expect("keyed").to_string(),
+        )
+    }
+
+    async fn force_job_failed(services: &AppServices, r: &Reminder, pool: &sqlx::PgPool) {
+        let _ = services;
+        let (t, k) = fire_key(r);
+        repositories::jobs::force_failed(pool, t, &k).await.unwrap();
+    }
+
+    /// Given a due reminder whose job ended failed without the handler
+    /// marking it (timeout, DB error, reaper), When enqueue_due runs, Then the
+    /// reminder becomes failed and no new job is created.
+    #[tokio::test]
+    async fn a_reminder_whose_job_failed_is_marked_failed() {
+        let (services, owner, reminder, now) =
+            services_with_reminder("acct_stranded", RecurrencePattern::None, None).await;
+        let due = now + Duration::minutes(2);
+        assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
+        force_job_failed(&services, &reminder, &services.reminders.pool).await;
+
+        assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 0);
+
+        let after = services
+            .reminders
+            .find_owned(&owner, reminder.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, ReminderStatus::Failed);
+        let count = repositories::jobs::count_with_type(&services.reminders.pool, "reminder.fire")
+            .await
+            .unwrap();
+        assert!(count >= 1);
+        assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 0);
+    }
+
+    /// Given a reminder snoozed after its old job failed, When enqueue_due
+    /// runs, Then it is not marked failed and gets a job for the new trigger.
+    #[tokio::test]
+    async fn a_snoozed_reminder_is_not_failed_by_its_old_job() {
+        let (services, owner, reminder, now) =
+            services_with_reminder("acct_snoozed_failed", RecurrencePattern::None, None).await;
+        let due = now + Duration::minutes(10);
+        assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
+        force_job_failed(&services, &reminder, &services.reminders.pool).await;
+        services
+            .reminders
+            .update_pending(
+                &owner,
+                reminder.id,
+                &reminder.message,
+                now + Duration::minutes(5),
+                RecurrencePattern::None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
+
+        let after = services
+            .reminders
+            .find_owned(&owner, reminder.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, ReminderStatus::Pending);
     }
 }

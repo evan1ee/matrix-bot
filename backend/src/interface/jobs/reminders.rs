@@ -65,6 +65,28 @@ impl JobHandler for ReminderFireHandler {
 
     async fn run(&self, ctx: &JobContext, payload: serde_json::Value) -> Result<(), JobError> {
         let p: ReminderFirePayload = parse_payload(payload)?;
+        match self.fire(ctx, &p).await {
+            // Defence in depth: the final attempt must not leave the reminder
+            // pending behind a failed job (e.g. a database error above).
+            Err(JobError::Retryable(err)) if ctx.is_last_attempt() => {
+                error!(reminder_id = p.reminder_id, error = %err, "Last attempt failed; marking the reminder failed");
+                if let Err(mark_err) = self
+                    .services
+                    .reminders
+                    .mark_failed_at(p.reminder_id, p.trigger_at)
+                    .await
+                {
+                    warn!(reminder_id = p.reminder_id, error = %mark_err, "Could not mark the reminder failed");
+                }
+                Err(JobError::Permanent(err))
+            }
+            other => other,
+        }
+    }
+}
+
+impl ReminderFireHandler {
+    async fn fire(&self, ctx: &JobContext, p: &ReminderFirePayload) -> Result<(), JobError> {
         if !self.delivery.is_connected() {
             return Err(JobError::Unavailable(MATRIX_RETRY));
         }
@@ -167,7 +189,9 @@ mod tests {
     use super::*;
     use crate::domain::accounts::AccountId;
     use crate::domain::jobs::JobId;
-    use crate::domain::reminders::{NewReminder, RecurrencePattern, ReminderStatus};
+    use crate::domain::reminders::{
+        NewReminder, RecurrencePattern, ReminderSource, ReminderStatus,
+    };
     use crate::events::{EventBroadcaster, SystemEvent};
     use crate::interface::channels::matrix::reaction_targets::get_target;
     use crate::interface::jobs::fake::FakeDelivery;
@@ -204,6 +228,14 @@ mod tests {
     }
 
     async fn fixture(owner: &str, recurrence: RecurrencePattern) -> Fixture {
+        fixture_from(owner, recurrence, None).await
+    }
+
+    async fn fixture_from(
+        owner: &str,
+        recurrence: RecurrencePattern,
+        source: Option<(ReminderSource, i64)>,
+    ) -> Fixture {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::new(owner);
@@ -221,7 +253,7 @@ mod tests {
                     room_id: "!room:test".to_string(),
                     owner_name: "alice".to_string(),
                     recurrence,
-                    source: None,
+                    source,
                 },
             )
             .await
@@ -344,8 +376,17 @@ mod tests {
     #[tokio::test]
     async fn the_last_failed_attempt_marks_the_reminder_failed() {
         let f = fixture("acct_fire_last", RecurrencePattern::None).await;
-        let handler =
-            ReminderFireHandler::new(f.services.clone(), FakeDelivery::failing_once("boom"));
+        let fake = FakeDelivery::failing_once("boom");
+        fake.room_results
+            .lock()
+            .unwrap()
+            .push_back(Err(DeliveryError::Failed("boom".to_string())));
+        let handler = ReminderFireHandler::new(f.services.clone(), fake);
+        let trigger = f.reminder.trigger_at;
+        let fourth = handler
+            .run(&ctx(&f.owner, 4), payload(&f.reminder, trigger))
+            .await;
+        assert!(matches!(fourth, Err(JobError::Retryable(_))), "{fourth:?}");
 
         let out = handler
             .run(
@@ -355,7 +396,12 @@ mod tests {
             .await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
-        assert_eq!(current(&f).await.status, ReminderStatus::Failed);
+        let after = current(&f).await;
+        assert_eq!(after.status, ReminderStatus::Failed);
+        assert_eq!(
+            after.retry_count, 4,
+            "the last attempt keeps the mirrored count"
+        );
     }
 
     #[tokio::test]
@@ -391,5 +437,28 @@ mod tests {
             .await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+    }
+
+    #[tokio::test]
+    async fn a_todo_reminder_records_its_todo_as_the_target() {
+        let f = fixture_from(
+            "acct_fire_todo",
+            RecurrencePattern::None,
+            Some((ReminderSource::Todo, 42)),
+        )
+        .await;
+        let handler = ReminderFireHandler::new(f.services.clone(), FakeDelivery::connected());
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let target = get_target(&f.pool, "$evt").await.unwrap().unwrap();
+        assert_eq!(target.entity_type, "todo");
+        assert_eq!(target.entity_id, 42);
     }
 }

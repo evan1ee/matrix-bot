@@ -218,6 +218,25 @@ pub async fn mark_failed<'e>(conn: impl PgExecutor<'e>, id: i64) -> Result<bool,
     Ok(result.rows_affected() > 0)
 }
 
+/// Fails a reminder only while it is still pending at `trigger_at`, so a
+/// snoozed or advanced reminder is never failed by an old job.
+pub async fn mark_failed_at<'e>(
+    conn: impl PgExecutor<'e>,
+    id: i64,
+    trigger_at: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE reminders SET status = 'failed' \
+         WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+        id,
+        trigger_at
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 /// Unscoped: only for the `reminder.fire` handler, which resolves a
 /// system-generated row id. Never call with an id from a user.
 pub async fn find_by_id<'e>(
