@@ -19,7 +19,6 @@ pub(crate) struct FakeDelivery {
     pub dms: Mutex<Vec<(String, String, String)>>,
 }
 
-#[expect(dead_code, reason = "first handler tests (Task 8) use it; remove then")]
 impl FakeDelivery {
     pub fn connected() -> Arc<Self> {
         let fake = Self::default();

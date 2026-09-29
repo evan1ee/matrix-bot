@@ -18,7 +18,29 @@ pub struct Tick {
     pub fire: for<'a> fn(&'a AppServices, DateTime<Utc>) -> TickFuture<'a>,
 }
 
+fn reminders(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.reminders.enqueue_due(now))
+}
+
 pub fn default_ticks() -> Vec<Tick> {
-    // Tasks 8-10 add reminders (5 s), briefing (30 s), alerts (120 s), refresh (3600 s).
-    Vec::new()
+    // Tasks 9-10 add briefing (30 s), alerts (120 s), refresh (3600 s).
+    vec![Tick {
+        name: "reminders",
+        every: Duration::from_secs(5),
+        fire: reminders,
+    }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ticks_have_the_designed_cadences() {
+        let cadences: Vec<(&str, u64)> = default_ticks()
+            .iter()
+            .map(|t| (t.name, t.every.as_secs()))
+            .collect();
+        assert_eq!(cadences, [("reminders", 5)]);
+    }
 }

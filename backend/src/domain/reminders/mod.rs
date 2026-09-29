@@ -1,6 +1,6 @@
 //! Reminder domain entities, value objects and invariants.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Months, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
@@ -117,6 +117,47 @@ pub struct Reminder {
     pub source_kind: Option<ReminderSource>,
     pub source_id: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
+}
+
+impl Reminder {
+    /// True while the reminder is still waiting for exactly this trigger: a
+    /// job enqueued for an earlier trigger must not fire a snoozed, advanced
+    /// or finished reminder.
+    pub fn is_pending_at(&self, trigger_at: DateTime<Utc>) -> bool {
+        self.status == ReminderStatus::Pending && self.trigger_at == trigger_at
+    }
+
+    /// The entity a reaction on the delivered message acts on: the todo the
+    /// reminder came from, else the reminder itself.
+    pub fn reaction_target(&self) -> (&'static str, i64) {
+        match (self.source_kind, self.source_id) {
+            (Some(ReminderSource::Todo), Some(id)) => ("todo", id),
+            _ => ("reminder", self.id),
+        }
+    }
+}
+
+/// The next time a recurring reminder should fire, strictly after `now`.
+pub fn next_occurrence(
+    current: DateTime<Utc>,
+    recurrence: RecurrencePattern,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let step = |dt: DateTime<Utc>| -> Option<DateTime<Utc>> {
+        match recurrence {
+            RecurrencePattern::Daily => Some(dt + Duration::days(1)),
+            RecurrencePattern::Weekly => Some(dt + Duration::weeks(1)),
+            RecurrencePattern::Monthly => dt.checked_add_months(Months::new(1)),
+            RecurrencePattern::Yearly => dt.checked_add_months(Months::new(12)),
+            RecurrencePattern::None => None,
+        }
+    };
+
+    let mut next = step(current)?;
+    while next <= now {
+        next = step(next)?;
+    }
+    Some(next)
 }
 
 /// Input data for creating a new reminder.
@@ -289,5 +330,107 @@ mod tests {
 
         assert!(validate_trigger_at(now - chrono::Duration::seconds(1), now).is_err());
         assert!(validate_trigger_at(now + chrono::Duration::seconds(10), now).is_ok());
+    }
+
+    fn utc(y: i32, m: u32, d: u32, h: u32) -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(y, m, d, h, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn test_non_recurring_has_no_next_occurrence() {
+        let t = utc(2026, 1, 10, 9);
+        assert_eq!(next_occurrence(t, RecurrencePattern::None, t), None);
+    }
+
+    #[test]
+    fn test_daily_and_weekly_step() {
+        let t = utc(2026, 1, 10, 9);
+        assert_eq!(
+            next_occurrence(t, RecurrencePattern::Daily, t).unwrap(),
+            utc(2026, 1, 11, 9)
+        );
+        assert_eq!(
+            next_occurrence(t, RecurrencePattern::Weekly, t).unwrap(),
+            utc(2026, 1, 17, 9)
+        );
+    }
+
+    #[test]
+    fn test_monthly_follows_the_calendar_not_30_days() {
+        let t = utc(2026, 1, 1, 9);
+        assert_eq!(
+            next_occurrence(t, RecurrencePattern::Monthly, t).unwrap(),
+            utc(2026, 2, 1, 9)
+        );
+
+        let end_of_jan = utc(2026, 1, 31, 9);
+        assert_eq!(
+            next_occurrence(end_of_jan, RecurrencePattern::Monthly, end_of_jan).unwrap(),
+            utc(2026, 2, 28, 9)
+        );
+    }
+
+    #[test]
+    fn test_yearly_follows_the_calendar_not_365_days() {
+        let t = utc(2027, 3, 1, 9);
+        assert_eq!(
+            next_occurrence(t, RecurrencePattern::Yearly, t).unwrap(),
+            utc(2028, 3, 1, 9)
+        );
+    }
+
+    #[test]
+    fn test_catches_up_past_missed_occurrences_while_down() {
+        let scheduled = utc(2026, 1, 10, 9);
+        let now = utc(2026, 1, 13, 10);
+        let next = next_occurrence(scheduled, RecurrencePattern::Daily, now).unwrap();
+        assert!(next > now);
+        assert_eq!(next, utc(2026, 1, 14, 9));
+    }
+
+    fn fixture(trigger_at: DateTime<Utc>) -> Reminder {
+        Reminder {
+            id: 7,
+            room_id: "!room:test".to_string(),
+            owner_id: AccountId::new("acct_alice"),
+            sender_name: "alice".to_string(),
+            message: "stretch".to_string(),
+            trigger_at,
+            recurrence: RecurrencePattern::None,
+            status: ReminderStatus::Pending,
+            retry_count: 0,
+            source_kind: Some(ReminderSource::Todo),
+            source_id: Some(3),
+            created_at: None,
+        }
+    }
+
+    #[test]
+    fn a_reminder_is_pending_only_at_its_own_trigger() {
+        let t = utc(2026, 1, 10, 9);
+        let r = fixture(t);
+        assert!(r.is_pending_at(t));
+        assert!(
+            !r.is_pending_at(t + Duration::minutes(5)),
+            "snoozed/advanced"
+        );
+        let cancelled = Reminder {
+            status: ReminderStatus::Cancelled,
+            ..r
+        };
+        assert!(!cancelled.is_pending_at(t));
+    }
+
+    #[test]
+    fn a_todo_reminder_reacts_on_its_todo() {
+        let r = fixture(utc(2026, 1, 10, 9));
+        assert_eq!(r.reaction_target(), ("todo", 3));
+        let plain = Reminder {
+            source_kind: None,
+            source_id: None,
+            ..r
+        };
+        assert_eq!(plain.reaction_target(), ("reminder", 7));
     }
 }

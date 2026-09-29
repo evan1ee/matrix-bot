@@ -1,5 +1,7 @@
 //! Reminder application service.
 
+mod delivery;
+
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
@@ -280,40 +282,6 @@ impl ReminderService {
         let item =
             repositories::reminders::find_pending_for_source(&self.pool, source, source_id).await?;
         Ok(item)
-    }
-
-    // Delivery scheduler methods
-    pub async fn get_due_reminders(&self, now: DateTime<Utc>) -> Result<Vec<Reminder>, AppError> {
-        let items = repositories::reminders::get_due_reminders(&self.pool, now).await?;
-        Ok(items)
-    }
-
-    pub async fn mark_delivered(&self, id: i64) -> Result<(), AppError> {
-        repositories::reminders::mark_triggered(&self.pool, id).await?;
-        Ok(())
-    }
-
-    pub async fn mark_failed(&self, id: i64) -> Result<(), AppError> {
-        repositories::reminders::mark_failed(&self.pool, id).await?;
-        Ok(())
-    }
-
-    pub async fn increment_retry(
-        &self,
-        id: i64,
-        next_trigger: DateTime<Utc>,
-    ) -> Result<(), AppError> {
-        repositories::reminders::increment_retry(&self.pool, id, next_trigger).await?;
-        Ok(())
-    }
-
-    pub async fn reschedule_delivery(
-        &self,
-        id: i64,
-        next_trigger: DateTime<Utc>,
-    ) -> Result<(), AppError> {
-        repositories::reminders::reschedule(&self.pool, id, next_trigger).await?;
-        Ok(())
     }
 
     fn broadcast_created(&self, r: &Reminder) {

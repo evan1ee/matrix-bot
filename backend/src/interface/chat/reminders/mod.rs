@@ -4,10 +4,9 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
-pub mod scheduler;
 
 pub struct ReminderModule;
 
@@ -58,13 +57,6 @@ impl BotModule for ReminderModule {
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_reminder_command(&services.reminders, &services.settings, ctx).await
-    }
-
-    async fn spawn_background_workers(
-        &self,
-        ctx: &ModuleContext,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
-        vec![scheduler::start_reminder_scheduler(ctx.clone())]
     }
 }
 

@@ -218,22 +218,50 @@ pub async fn mark_failed<'e>(conn: impl PgExecutor<'e>, id: i64) -> Result<bool,
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn increment_retry<'e>(
+/// Unscoped: only for the `reminder.fire` handler, which resolves a
+/// system-generated row id. Never call with an id from a user.
+pub async fn find_by_id<'e>(
     conn: impl PgExecutor<'e>,
     id: i64,
-    new_trigger_at: DateTime<Utc>,
-) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
-        r#"UPDATE reminders SET retry_count = retry_count + 1, trigger_at = $1 WHERE id = $2"#,
-        new_trigger_at,
+) -> Result<Option<Reminder>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        ReminderRow,
+        r#"
+        SELECT
+            id, room_id, owner_id, sender_name, message, trigger_at,
+            recurrence, status, retry_count, source_kind, source_id, created_at
+        FROM reminders
+        WHERE id = $1
+        "#,
         id
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(row.map(Into::into))
+}
+
+pub async fn record_failed_attempt<'e>(
+    conn: impl PgExecutor<'e>,
+    id: i64,
+    trigger_at: DateTime<Utc>,
+    attempts: i64,
+) -> Result<bool, sqlx::Error> {
+    // retry_count mirrors the job's attempt number. trigger_at stays put: the
+    // job row owns the backoff (R21), and the dedupe key <id>:<trigger_at>
+    // must not change mid-retry.
+    let result = sqlx::query!(
+        "UPDATE reminders SET retry_count = $3 \
+         WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+        id,
+        trigger_at,
+        attempts
     )
     .execute(conn)
     .await?;
 
     Ok(result.rows_affected() > 0)
 }
-
 pub async fn reschedule<'e>(
     conn: impl PgExecutor<'e>,
     id: i64,
@@ -514,5 +542,66 @@ mod tests {
             .await
             .unwrap();
         assert!(deleted);
+    }
+
+    fn new_reminder(now: DateTime<Utc>) -> NewReminder {
+        NewReminder {
+            message: "stretch".to_string(),
+            trigger_at: now + Duration::hours(1),
+            room_id: "!room:test".to_string(),
+            owner_name: "alice".to_string(),
+            recurrence: RecurrencePattern::None,
+            source: None,
+        }
+    }
+
+    /// Given a pending reminder, When a failed attempt is recorded for its
+    /// trigger, Then retry_count = attempts and trigger_at is unchanged;
+    /// for a different trigger_at nothing changes.
+    #[tokio::test]
+    async fn record_failed_attempt_keeps_the_trigger() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::new("acct_retry_owner");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let created = create(&pool, &owner, &new_reminder(now_at_storage_precision()))
+            .await
+            .unwrap();
+
+        assert!(
+            record_failed_attempt(&pool, created.id, created.trigger_at, 2)
+                .await
+                .unwrap()
+        );
+        let after = find_owned(&pool, &owner, created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.retry_count, 2);
+        assert_eq!(after.trigger_at, created.trigger_at);
+        assert_eq!(after.status, ReminderStatus::Pending);
+
+        let stale = created.trigger_at + Duration::minutes(5);
+        assert!(!record_failed_attempt(&pool, created.id, stale, 4)
+            .await
+            .unwrap());
+        let unchanged = find_owned(&pool, &owner, created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.retry_count, 2);
+    }
+
+    #[tokio::test]
+    async fn find_by_id_ignores_ownership() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::new("acct_find_owner");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let created = create(&pool, &owner, &new_reminder(now_at_storage_precision()))
+            .await
+            .unwrap();
+
+        let found = find_by_id(&pool, created.id).await.unwrap().unwrap();
+        assert_eq!(found.owner_id, owner);
+        assert!(find_by_id(&pool, i64::MAX).await.unwrap().is_none());
     }
 }
