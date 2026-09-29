@@ -26,6 +26,15 @@ impl AlertCondition {
         }
     }
 
+    /// Whether a price at `price_minor` satisfies this condition against the
+    /// target; both comparisons include the target itself.
+    pub fn is_met(self, price_minor: i64, target_minor: i64) -> bool {
+        match self {
+            AlertCondition::Above => price_minor >= target_minor,
+            AlertCondition::Below => price_minor <= target_minor,
+        }
+    }
+
     pub fn symbol_str(&self) -> &'static str {
         match self {
             AlertCondition::Above => "≥",
@@ -73,5 +82,15 @@ mod tests {
         assert_eq!(AlertCondition::parse("below"), Some(AlertCondition::Below));
         assert_eq!(AlertCondition::parse("<="), Some(AlertCondition::Below));
         assert_eq!(AlertCondition::parse("invalid"), None);
+    }
+
+    #[test]
+    fn above_and_below_include_the_target() {
+        assert!(AlertCondition::Above.is_met(100, 100));
+        assert!(AlertCondition::Above.is_met(101, 100));
+        assert!(!AlertCondition::Above.is_met(99, 100));
+        assert!(AlertCondition::Below.is_met(100, 100));
+        assert!(AlertCondition::Below.is_met(99, 100));
+        assert!(!AlertCondition::Below.is_met(101, 100));
     }
 }

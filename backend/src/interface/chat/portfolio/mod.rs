@@ -4,12 +4,11 @@ use async_trait::async_trait;
 
 use crate::db::Database;
 use crate::events::EventBroadcaster;
-use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod alerts_handler;
 pub mod cash;
 pub mod handler;
-pub mod scheduler;
 pub mod trade_cmd;
 pub mod view;
 
@@ -114,13 +113,6 @@ impl BotModule for PortfolioModule {
         _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_portfolio_command(services, &ctx.owner_id, &ctx.full_body).await
-    }
-
-    async fn spawn_background_workers(
-        &self,
-        ctx: &ModuleContext,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
-        vec![scheduler::start_portfolio_price_scheduler(ctx.clone())]
     }
 }
 

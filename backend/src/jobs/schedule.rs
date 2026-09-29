@@ -26,8 +26,15 @@ fn briefing(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
     Box::pin(s.briefing.enqueue_due(now))
 }
 
+fn portfolio_alerts(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.portfolio.enqueue_alert_check(now))
+}
+
+fn portfolio_refresh(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.portfolio.enqueue_price_refresh(now))
+}
+
 pub fn default_ticks() -> Vec<Tick> {
-    // Task 10 adds alerts (120 s) and refresh (3600 s).
     vec![
         Tick {
             name: "reminders",
@@ -38,6 +45,16 @@ pub fn default_ticks() -> Vec<Tick> {
             name: "briefing",
             every: Duration::from_secs(30),
             fire: briefing,
+        },
+        Tick {
+            name: "portfolio_alerts",
+            every: Duration::from_secs(120),
+            fire: portfolio_alerts,
+        },
+        Tick {
+            name: "portfolio_refresh",
+            every: Duration::from_secs(3_600),
+            fire: portfolio_refresh,
         },
     ]
 }
@@ -52,6 +69,14 @@ mod tests {
             .iter()
             .map(|t| (t.name, t.every.as_secs()))
             .collect();
-        assert_eq!(cadences, [("reminders", 5), ("briefing", 30)]);
+        assert_eq!(
+            cadences,
+            [
+                ("reminders", 5),
+                ("briefing", 30),
+                ("portfolio_alerts", 120),
+                ("portfolio_refresh", 3_600)
+            ]
+        );
     }
 }

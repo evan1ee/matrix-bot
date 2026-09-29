@@ -12,6 +12,7 @@ use crate::application::AppServices;
 use crate::jobs::{JobError, JobHandler};
 
 pub mod briefing;
+pub mod portfolio;
 pub mod reminders;
 
 #[cfg(test)]
@@ -43,7 +44,7 @@ pub trait Delivery: Send + Sync {
     async fn send_dm(&self, mxid: &str, plain: &str, html: &str) -> Result<(), DeliveryError>;
 }
 
-/// Every job handler; task 10 registers the rest here.
+/// Every job handler.
 pub fn handlers(services: &AppServices, delivery: Arc<dyn Delivery>) -> Vec<Arc<dyn JobHandler>> {
     vec![
         Arc::new(reminders::ReminderFireHandler::new(
@@ -52,8 +53,13 @@ pub fn handlers(services: &AppServices, delivery: Arc<dyn Delivery>) -> Vec<Arc<
         )),
         Arc::new(briefing::BriefingSendHandler::new(
             services.clone(),
+            delivery.clone(),
+        )),
+        Arc::new(portfolio::CheckAlertsHandler::new(
+            services.clone(),
             delivery,
         )),
+        Arc::new(portfolio::RefreshPricesHandler::new(services.clone())),
     ]
 }
 

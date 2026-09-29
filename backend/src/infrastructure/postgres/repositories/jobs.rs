@@ -278,6 +278,19 @@ pub async fn status_by_key(
     Ok(status.map(|s| crate::domain::jobs::JobStatus::parse(&s).expect("status CHECK")))
 }
 
+/// Whether a job of `job_type` is still queued or running. Lets a recurring
+/// tick skip enqueuing work that an unfinished job will already cover.
+pub async fn has_open(exec: impl PgExecutor<'_>, job_type: &str) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM jobs WHERE job_type = $1 AND status IN ('pending', 'running')
+           ) AS "open!""#,
+        job_type
+    )
+    .fetch_one(exec)
+    .await
+}
+
 /// Forces a keyed job to `failed`, as a timeout or the reaper would.
 #[cfg(test)]
 pub async fn force_failed(

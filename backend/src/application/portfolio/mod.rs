@@ -4,6 +4,7 @@ pub mod cash;
 pub mod history;
 pub mod holdings;
 pub mod prices;
+pub mod scheduling;
 pub mod trades;
 
 use sqlx::PgPool;
@@ -12,6 +13,7 @@ use crate::application::AppError;
 use crate::domain::portfolio::PortfolioError;
 use crate::events::EventBroadcaster;
 
+pub use alerts::TriggeredAlert;
 pub use prices::RefreshSummary;
 
 #[derive(Clone)]
