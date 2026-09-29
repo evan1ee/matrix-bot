@@ -27,11 +27,9 @@
 
 pub mod credentials;
 pub mod linking;
-pub mod principal;
 pub mod recovery;
 pub mod repository;
 pub mod security_events;
-pub mod session;
 
 pub use crate::application::accounts::merge::MergeService as MergeRepository;
 pub use crate::domain::accounts::{
@@ -41,11 +39,9 @@ pub use crate::domain::accounts::{
 };
 pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
-pub use principal::{resolve as resolve_credential, Credential};
 pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;
 pub use security_events::{SecurityEventKind, SecurityEventRepository};
-pub use session::{Session, SessionRepository};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

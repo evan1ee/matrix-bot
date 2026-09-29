@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 pub mod merge;
+mod principal;
 pub use merge::MergeService;
 
 use crate::application::AppError;
@@ -218,6 +219,15 @@ impl AccountService {
 
     pub async fn mark_session_verified(&self, id_hash: &str) -> Result<(), AppError> {
         Ok(sessions::mark_verified(&self.pool, id_hash).await?)
+    }
+
+    /// Stamps every session of the account as freshly verified. Records nothing.
+    pub async fn update_last_verified_at(
+        &self,
+        account_id: &AccountId,
+        verified_at: DateTime<Utc>,
+    ) -> Result<(), AppError> {
+        Ok(sessions::update_last_verified_at(&self.pool, account_id, verified_at).await?)
     }
 
     pub async fn revoke_session(

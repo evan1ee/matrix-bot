@@ -66,7 +66,7 @@ pub async fn sse_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{AccountRepository, SessionRepository};
+    use crate::domain::accounts::Credential;
     use crate::events::EventBroadcaster;
 
     #[tokio::test]
@@ -107,30 +107,31 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_mine", "acct_alice"]).await;
         let state = test_state(pool.clone());
 
-        let account = AccountRepository::create(&pool, "evan", "active")
-            .await
-            .unwrap();
-        let token = SessionRepository::create(&pool, &account, None, None, None)
+        let accounts = &state.services.accounts;
+        let account = accounts.create("evan", "active").await.unwrap();
+        let token = accounts
+            .create_session(&account, None, None, None)
             .await
             .unwrap();
 
         // A live cookie resolves to the owning account.
-        let session = SessionRepository::resolve(&pool, &token)
+        let principal = accounts
+            .resolve_credential(&Credential::Cookie(&token))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(session.account_id, account);
+        assert_eq!(principal.account_id, account);
 
         // A revoked one does not, so the stream closes to it on reconnect.
-        SessionRepository::revoke(&pool, &session.id_hash)
+        accounts
+            .end_session(&principal.session_id_hash)
             .await
             .unwrap();
-        assert!(SessionRepository::resolve(&pool, &token)
+        assert!(accounts
+            .resolve_credential(&Credential::Cookie(&token))
             .await
             .unwrap()
             .is_none());
-
-        let _ = state;
     }
 
     /// The broadcast channel carries every user's events; a subscriber must only

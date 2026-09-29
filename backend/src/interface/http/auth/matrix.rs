@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::accounts::{AccountRepository, SessionRepository};
+use crate::accounts::AccountRepository;
 use crate::error::ApiError;
 #[allow(unused_imports)]
 use crate::error::ApiErrorResponse;
@@ -233,15 +233,17 @@ pub async fn issue_matrix_session(
         .map(|a| a.display_name)
         .unwrap_or_else(|| mxid.to_string());
 
-    let session_token = SessionRepository::create(
-        &state.db.pool,
-        &account_id,
-        user_agent.or(Some("ElementX-iOS")),
-        None,
-        None,
-    )
-    .await
-    .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
+    let session_token = state
+        .services
+        .accounts
+        .create_session(
+            &crate::domain::accounts::AccountId::new(&account_id),
+            user_agent.or(Some("ElementX-iOS")),
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
 
     let body = Json(MatrixLoginResponse {
         session_token: session_token.clone(),

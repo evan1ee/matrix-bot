@@ -86,6 +86,18 @@ impl AuthUser {
     }
 }
 
+impl From<crate::domain::accounts::Principal> for AuthUser {
+    fn from(principal: crate::domain::accounts::Principal) -> Self {
+        Self {
+            account_id: principal.account_id,
+            display_name: principal.display_name,
+            session_id_hash: principal.session_id_hash,
+            last_verified_at: principal.last_verified_at,
+            restricted_until: principal.restricted_until,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Database,

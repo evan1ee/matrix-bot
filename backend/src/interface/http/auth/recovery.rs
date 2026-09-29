@@ -138,7 +138,7 @@ pub async fn redeem_recovery(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) = crate::accounts::principal::cookie_value(cookies, COOKIE_NAME) {
+        if let Some(old_token) = crate::domain::accounts::cookie_value(cookies, COOKIE_NAME) {
             let old_id_hash = hash_token(old_token);
             let _ = state
                 .services

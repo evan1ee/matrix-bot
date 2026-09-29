@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::accounts::{AccountRepository, SessionRepository};
+use crate::accounts::AccountRepository;
 use crate::error::ApiError;
 use crate::interface::http::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
 use crate::interface::http::auth::types::{
@@ -24,7 +24,10 @@ pub async fn logout(
     // Revoked server-side as well as cleared client-side. Clearing the cookie
     // alone would leave a token that still resolves, so anyone holding a copy
     // would stay signed in — which is exactly the gap a stateless JWT had.
-    SessionRepository::revoke(&state.db.pool, &user.session_id_hash)
+    state
+        .services
+        .accounts
+        .end_session(&user.session_id_hash)
         .await
         .map_err(|err| ApiError::internal(format!("could not sign out: {err}")))?;
 

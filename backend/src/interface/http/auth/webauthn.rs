@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
-use crate::accounts::{
-    handle_to_account_id, AccountRepository, CredentialRepository, SessionRepository,
+use crate::accounts::{handle_to_account_id, AccountRepository, CredentialRepository};
+use crate::domain::accounts::{
+    cookie_value, hash_token, AccountId, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME,
 };
-use crate::domain::accounts::{hash_token, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME};
 use crate::error::ApiError;
 use crate::interface::http::auth::types::{ApiState, Ceremony};
 
@@ -421,13 +421,16 @@ async fn issue_session(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) = crate::accounts::principal::cookie_value(cookies, COOKIE_NAME) {
+        if let Some(old_token) = cookie_value(cookies, COOKIE_NAME) {
             let old_id_hash = hash_token(old_token);
-            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
+            let _ = state.services.accounts.end_session(&old_id_hash).await;
         }
     }
 
-    let token = SessionRepository::create(&state.db.pool, account_id, user_agent, None, None)
+    let token = state
+        .services
+        .accounts
+        .create_session(&AccountId::new(account_id), user_agent, None, None)
         .await
         .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;
 

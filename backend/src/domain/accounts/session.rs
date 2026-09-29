@@ -11,10 +11,18 @@ use sha2::{Digest, Sha256};
 
 /// The cookie a browser presents to prove who it is.
 pub const COOKIE_NAME: &str = "mb_session";
+
+/// How long a session survives without being used.
 pub const IDLE_TIMEOUT_DAYS: i64 = 30;
+
+/// How long a session survives at all, however active.
 pub const ABSOLUTE_TIMEOUT_DAYS: i64 = 90;
-/// How recent a passkey assertion must be for a sensitive action: five
-/// minutes, the "sudo mode" convention users already know.
+
+/// How recent a passkey assertion must be for a sensitive action.
+///
+/// Five minutes, matching the "sudo mode" convention users already know from
+/// GitHub. Long enough to link an account without re-tapping a key mid-flow,
+/// short enough that a walked-away-from laptop is not an unlocked one.
 pub const STEP_UP_WINDOW_MINUTES: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

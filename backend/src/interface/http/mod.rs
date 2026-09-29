@@ -183,7 +183,7 @@ pub fn start_api_server(
 #[cfg(test)]
 mod step_up_tests {
     use super::*;
-    use crate::accounts::{AccountRepository, SessionRepository, STATUS_ACTIVE};
+    use crate::domain::accounts::STATUS_ACTIVE;
     use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -225,21 +225,6 @@ mod step_up_tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
-            .await
-            .unwrap();
-        let token = SessionRepository::create(&pool, &account, None, None, None)
-            .await
-            .unwrap();
-
-        SessionRepository::update_last_verified_at(
-            &pool,
-            &account,
-            chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
-        )
-        .await
-        .unwrap();
-
         let state = auth::ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
@@ -247,6 +232,21 @@ mod step_up_tests {
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
         );
+
+        let accounts = &state.services.accounts;
+        let account = accounts.create("evan", STATUS_ACTIVE).await.unwrap();
+        let token = accounts
+            .create_session(&account, None, None, None)
+            .await
+            .unwrap();
+
+        accounts
+            .update_last_verified_at(
+                &account,
+                chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
+            )
+            .await
+            .unwrap();
 
         let app = Router::new()
             .nest("/api/v1", api_routes())
