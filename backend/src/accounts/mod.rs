@@ -25,7 +25,6 @@
 //! It has no credential, so there is nothing to authenticate as, and nothing to
 //! steal by guessing its id.
 
-pub mod credentials;
 pub mod linking;
 pub mod recovery;
 pub mod repository;
@@ -37,7 +36,6 @@ pub use crate::domain::accounts::{
     ACCOUNT_ID_UNTOUCHED, OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY, STATUS_ACTIVE,
     STATUS_UNCLAIMED,
 };
-pub use credentials::{CredentialRepository, EnrollmentRepository};
 pub use linking::{LinkOutcome, LinkRepository};
 pub use recovery::{MaturedRecovery, RecoveryRepository, RECOVERY_RESTRICTION_HOURS};
 pub use repository::AccountRepository;

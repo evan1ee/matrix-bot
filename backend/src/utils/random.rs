@@ -44,7 +44,7 @@ pub fn random_bytes(bytes: usize) -> Vec<u8> {
 
 /// An `accounts.id`: `acct_` followed by 32 hex characters.
 ///
-/// The shape is load-bearing beyond readability — `accounts::account_id_to_handle`
+/// The shape is load-bearing beyond readability — `AccountId::to_handle`
 /// relies on those 32 hex characters being exactly a UUID's simple form, which
 /// is what lets a WebAuthn user handle round-trip without a second column.
 pub fn new_account_id() -> String {

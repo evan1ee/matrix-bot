@@ -170,7 +170,7 @@ pub enum Ceremony {
     /// handle and has to be inside the challenge, but the row is not written
     /// until `finish` — so an abandoned registration leaves nothing behind.
     Registration {
-        account_id: String,
+        account_id: crate::domain::accounts::AccountId,
         display_name: String,
         state: webauthn_rs::prelude::PasskeyRegistration,
     },

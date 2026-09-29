@@ -4,17 +4,18 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 pub mod merge;
+mod passkeys;
 mod principal;
 pub use merge::MergeService;
 
 use crate::application::AppError;
 use crate::domain::accounts::{
-    Account, AccountId, AccountsError, DeleteOutcome, LinkOutcome, MaturedRecovery, MergeOutcome,
-    MergePreview, SecurityEvent, SecurityEventKind, Session, StoredCredential,
+    Account, AccountId, AccountsError, LinkOutcome, MaturedRecovery, MergeOutcome, MergePreview,
+    SecurityEvent, SecurityEventKind, Session,
 };
 use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::accounts::{
-    core, credentials, linking, recovery, security_events, sessions,
+    core, linking, recovery, security_events, sessions,
 };
 
 impl From<AccountsError> for AppError {
@@ -110,93 +111,6 @@ impl AccountService {
 
     pub async fn delete(&self, account_id: &AccountId) -> Result<(), AppError> {
         Ok(core::delete(&self.pool, account_id).await?)
-    }
-
-    // --- Credentials & Passkeys ---
-
-    pub async fn list_passkeys(
-        &self,
-        account_id: &AccountId,
-    ) -> Result<Vec<StoredCredential>, AppError> {
-        Ok(credentials::list_for_account(&self.pool, account_id).await?)
-    }
-
-    pub async fn find_passkey(
-        &self,
-        credential_id: &str,
-    ) -> Result<Option<StoredCredential>, AppError> {
-        Ok(credentials::find(&self.pool, credential_id).await?)
-    }
-
-    pub async fn add_passkey(
-        &self,
-        account_id: &AccountId,
-        credential_id: &str,
-        passkey_json: &str,
-        label: &str,
-    ) -> Result<(), AppError> {
-        credentials::add(&self.pool, account_id, credential_id, passkey_json, label).await?;
-        self.record_security_event(account_id, SecurityEventKind::PasskeyAdded, Some(label))
-            .await;
-        Ok(())
-    }
-
-    pub async fn record_passkey_use(
-        &self,
-        credential_id: &str,
-        passkey_json: &str,
-    ) -> Result<(), AppError> {
-        Ok(credentials::record_use(&self.pool, credential_id, passkey_json).await?)
-    }
-
-    pub async fn rename_passkey(
-        &self,
-        account_id: &AccountId,
-        credential_id: &str,
-        label: &str,
-    ) -> Result<bool, AppError> {
-        let ok = credentials::rename(&self.pool, account_id, credential_id, label).await?;
-        if ok {
-            self.record_security_event(account_id, SecurityEventKind::PasskeyRenamed, Some(label))
-                .await;
-        }
-        Ok(ok)
-    }
-
-    pub async fn delete_passkey(
-        &self,
-        account_id: &AccountId,
-        credential_id: &str,
-    ) -> Result<DeleteOutcome, AppError> {
-        let outcome = credentials::delete(&self.pool, account_id, credential_id).await?;
-        if outcome == DeleteOutcome::Removed {
-            self.record_security_event(
-                account_id,
-                SecurityEventKind::PasskeyRemoved,
-                Some(credential_id),
-            )
-            .await;
-        }
-        Ok(outcome)
-    }
-
-    pub async fn count_passkeys(&self, account_id: &AccountId) -> Result<i64, AppError> {
-        Ok(credentials::count_for_account(&self.pool, account_id).await?)
-    }
-
-    pub async fn issue_enrollment_token(
-        &self,
-        account_id: &AccountId,
-        ttl_minutes: i64,
-    ) -> Result<String, AppError> {
-        Ok(credentials::issue_enrollment_token(&self.pool, account_id, ttl_minutes).await?)
-    }
-
-    pub async fn validate_and_consume_enrollment_token(
-        &self,
-        token: &str,
-    ) -> Result<Option<AccountId>, AppError> {
-        Ok(credentials::validate_and_consume_enrollment_token(&self.pool, token).await?)
     }
 
     // --- Sessions ---

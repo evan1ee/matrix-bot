@@ -32,6 +32,8 @@ impl From<SessionRow> for Session {
     }
 }
 
+/// Opens a session and returns the cookie value, which is the only time it
+/// exists anywhere outside the browser: only its SHA-256 is stored.
 pub async fn create(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,
