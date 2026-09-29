@@ -5,11 +5,8 @@ use sqlx::PgExecutor;
 
 use crate::domain::accounts::AccountId;
 use crate::domain::reminders::{
-    NewReminder, RecurrencePattern, Reminder, ReminderSource, ReminderStatus,
+    NewReminder, RecurrencePattern, Reminder, ReminderSource, ReminderStatus, MAX_DELIVERY_ATTEMPTS,
 };
-
-/// Maximum delivery attempts allowed before a reminder is marked failed.
-pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
 
 #[derive(Debug, sqlx::FromRow)]
 struct ReminderRow {

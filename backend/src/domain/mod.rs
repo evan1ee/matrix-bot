@@ -9,6 +9,7 @@ pub mod chat;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod jobs;
 pub mod life;
 pub mod llm;
 pub mod mcp;

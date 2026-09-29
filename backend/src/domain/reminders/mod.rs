@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
 
+/// Maximum delivery attempts allowed before a reminder is marked failed.
+pub const MAX_DELIVERY_ATTEMPTS: i64 = 5;
+
 /// Maximum allowed length for a reminder message.
 pub const MAX_MESSAGE_LEN: usize = 500;
 

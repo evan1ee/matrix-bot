@@ -6,7 +6,7 @@ use std::time::Duration as StdDuration;
 use tracing::{error, info, warn};
 
 use crate::domain::reminders::Reminder;
-use crate::infrastructure::postgres::repositories::reminders::MAX_DELIVERY_ATTEMPTS;
+use crate::domain::reminders::MAX_DELIVERY_ATTEMPTS;
 use crate::interface::chat::ModuleContext;
 use crate::utils::{html_escape, strip_html};
 
