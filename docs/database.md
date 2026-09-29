@@ -91,7 +91,7 @@ The full cutover procedure for the PostgreSQL foundation branch (pre-boot backup
 Tests need a throwaway PostgreSQL server, never a real one:
 
 ```bash
-docker run -d --name pg18-test --shm-size=1g -p 55433:5432 -e POSTGRES_PASSWORD=bot postgres:18
+docker run -d --name pg18-test -p 55433:5432 -e POSTGRES_PASSWORD=bot postgres:18
 export TEST_DATABASE_URL=postgres://postgres:bot@localhost:55433/postgres
 export PG_TEST_URL=$TEST_DATABASE_URL
 ```
@@ -103,7 +103,13 @@ export PG_TEST_URL=$TEST_DATABASE_URL
 | `DATABASE_URL` | `sqlx migrate run` and `cargo sqlx prepare` only |
 | `MIGRATE_TEST_DATABASE_URL` | the production-rehearsal test only: a restored copy, never production |
 
-`test_pool()` creates a fresh schema per test (`t<pid>_<n>`) and returns an **unmigrated** pool; tests call `run_migrations_unlocked` themselves. Schemas are deliberately never dropped so a failing test keeps its rows, which is why the container needs `--shm-size=1g`. Recreate the container between long sessions, or drop the leftovers:
+`test_pool()` creates a fresh schema per test (`t<pid>_<n>`) and returns an **unmigrated** pool; tests call `run_migrations_unlocked` themselves. The schema outlives the test, so a failing test keeps its rows for inspection, but not the next run: `db::test_schemas` does the cleanup.
+
+- On its first `test_pool()` call, each test process takes a session-level advisory lock keyed on its pid, on a dedicated connection that stays open until the process exits. PostgreSQL releases the lock however the process ends, even on a crash or Ctrl-C.
+- The process then drops, in the background, every `t<pid>_*` schema whose pid holds no such lock. Schemas from a concurrent `cargo test` stay, because that run still holds its lock.
+- `test_pool()` drops a same-named schema before creating one, in case a dead process with the same pid left it behind.
+
+So leftovers are bounded by one run's worth (a few hundred schemas), and the first run after an interrupted one reaps them. The partial-migration tests in `db/migrate.rs` use `test_pool()` too and are covered. The `#[ignore]`d live tests use named schemas (`boot_check`, `trigger_check`) that drop themselves. To inspect a failed test's rows, query its schema before starting another test process. To wipe everything by hand:
 
 ```bash
 psql "$TEST_DATABASE_URL" -Atc "SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace WHERE nspname ~ '^t[0-9]+_[0-9]+$'" | psql "$TEST_DATABASE_URL"
@@ -114,6 +120,6 @@ Fixtures create their owners with `db::pool::seed_account(s)`; a fixture that wr
 | Symptom | Fix |
 |---|---|
 | `TEST_DATABASE_URL must point at a PostgreSQL server` | export it and check `docker ps` shows `pg18-test` |
-| `could not resize shared memory segment` | too many leftover test schemas: recreate the container with `--shm-size=1g` |
+| `could not resize shared memory segment`, `PoolTimedOut`, or a very slow suite | leftover test schemas from before the reaper existed: run any test once to reap them, or use the manual drop above |
 | `no cached data for this query` at compile time | `.sqlx/` is stale: regenerate it (see *Adding a migration*) |
 | `migration … was previously applied but has been modified` | a migration file changed, often CRLF: restore it; line endings are pinned to LF |

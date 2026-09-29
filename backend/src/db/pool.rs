@@ -39,35 +39,42 @@ pub fn pg_test_url() -> String {
     std::env::var("PG_TEST_URL").expect("PG_TEST_URL must be set for the live PostgreSQL tests")
 }
 
+/// The PostgreSQL server every in-crate test runs against.
+#[cfg(test)]
+pub fn test_database_url() -> String {
+    std::env::var("TEST_DATABASE_URL").expect(
+        "TEST_DATABASE_URL must point at a PostgreSQL server, e.g. \
+         postgres://postgres:bot@localhost:5432/postgres (see AGENTS.md)",
+    )
+}
+
 /// The pool every in-crate test runs against.
 ///
 /// Each call gets its own PostgreSQL schema, because the suite runs in parallel
 /// and `search_path` is per connection, not per statement. The schema name
-/// carries the process id so concurrent `cargo test` runs cannot collide.
-/// Schemas are left behind: the server is a throwaway CI container, and a test
-/// that failed is more useful with its rows still in place.
+/// carries the process id so concurrent `cargo test` runs cannot collide, and
+/// is dropped first in case a dead process with the same pid left it behind.
+///
+/// Schemas outlive the test so a failure keeps its rows, but not the process:
+/// the next test process to start reaps them (see [`crate::db::test_schemas`]).
 ///
 /// The pool is returned **unmigrated**; callers run whichever schema they need.
 #[cfg(test)]
 pub async fn test_pool() -> crate::db::DbPool {
+    use crate::db::test_schemas;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
-    let base = std::env::var("TEST_DATABASE_URL").expect(
-        "TEST_DATABASE_URL must point at a PostgreSQL server, e.g. \
-         postgres://postgres:bot@localhost:5432/postgres (see AGENTS.md)",
-    );
-
-    let schema = format!(
-        "t{}_{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
+    let base = test_database_url();
+    test_schemas::hold_liveness_lock(&base);
+    let schema =
+        test_schemas::schema_name(std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
 
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
-    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA IF NOT EXISTS ")
+    test_schemas::drop_schema(&admin, &schema).await.unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA ")
         .push(&schema)
         .build()
         .execute(&admin)
