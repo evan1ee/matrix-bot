@@ -190,7 +190,7 @@ impl RecurringBillsService {
         let plan = ReminderPlan {
             source: ReminderSource::RecurringBill,
             source_id: bill.id,
-            owner_id: bill.owner_id.clone(),
+            owner_id: bill.owner_id,
             owner_name: bill.sender_name.clone(),
             room_id: room_id.to_string(),
             message: format!(

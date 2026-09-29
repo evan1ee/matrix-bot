@@ -93,7 +93,7 @@ cargo check -p matrix-bot --all-targets                  # must be warning-free
 cargo test  -p matrix-bot --all-targets                  # full suite (needs TEST_DATABASE_URL)
 cargo test  -p matrix-bot --test architecture            # layer/dependency rules (no DB needed)
 cargo test  -p matrix-bot live_postgres -- --ignored --test-threads=1   # needs PG_TEST_URL
-cargo clippy -p matrix-bot --all-targets                 # touched files must add no warnings (backlog is pre-existing)
+cargo clippy --workspace --all-targets -- -D warnings    # must be clean
 ```
 
 Narrow runs while iterating:

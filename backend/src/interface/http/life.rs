@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::life::DayLogInput;
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
@@ -358,11 +359,13 @@ pub async fn upsert_day(
         .upsert_day_log(
             &user.account_id,
             date_str,
-            &payload.mood,
-            payload.weather.as_deref(),
-            activities_json.as_deref(),
-            payload.note.as_deref(),
-            time_allocation_json.as_deref(),
+            DayLogInput {
+                mood: &payload.mood,
+                weather: payload.weather.as_deref(),
+                activities: activities_json.as_deref(),
+                note: payload.note.as_deref(),
+                time_allocation: time_allocation_json.as_deref(),
+            },
         )
         .await?;
 

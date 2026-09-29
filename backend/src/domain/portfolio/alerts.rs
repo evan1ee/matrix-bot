@@ -18,7 +18,7 @@ impl AlertCondition {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "above" | ">" | "gte" | ">=" => Some(AlertCondition::Above),
             "below" | "<" | "lte" | "<=" => Some(AlertCondition::Below),
@@ -50,7 +50,7 @@ pub struct PriceAlert {
 
 impl PriceAlert {
     pub fn parsed_condition(&self) -> AlertCondition {
-        AlertCondition::from_str(&self.condition).unwrap_or(AlertCondition::Above)
+        AlertCondition::parse(&self.condition).unwrap_or(AlertCondition::Above)
     }
 }
 
@@ -68,16 +68,10 @@ mod tests {
 
     #[test]
     fn test_alert_condition_parsing() {
-        assert_eq!(
-            AlertCondition::from_str("above"),
-            Some(AlertCondition::Above)
-        );
-        assert_eq!(AlertCondition::from_str(">="), Some(AlertCondition::Above));
-        assert_eq!(
-            AlertCondition::from_str("below"),
-            Some(AlertCondition::Below)
-        );
-        assert_eq!(AlertCondition::from_str("<="), Some(AlertCondition::Below));
-        assert_eq!(AlertCondition::from_str("invalid"), None);
+        assert_eq!(AlertCondition::parse("above"), Some(AlertCondition::Above));
+        assert_eq!(AlertCondition::parse(">="), Some(AlertCondition::Above));
+        assert_eq!(AlertCondition::parse("below"), Some(AlertCondition::Below));
+        assert_eq!(AlertCondition::parse("<="), Some(AlertCondition::Below));
+        assert_eq!(AlertCondition::parse("invalid"), None);
     }
 }

@@ -173,7 +173,7 @@ pub async fn compute_net_worth(
         });
     }
 
-    currencies.sort_by(|a, b| b.converted_minor.cmp(&a.converted_minor));
+    currencies.sort_by_key(|c| std::cmp::Reverse(c.converted_minor));
 
     Ok(NetWorthResponse {
         primary_currency: primary_curr,

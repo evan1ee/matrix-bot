@@ -153,7 +153,7 @@ mod tests {
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        Database { pool: pool }
+        Database { pool }
     }
 
     /// With no Matrix client the event must still be recorded. An account with

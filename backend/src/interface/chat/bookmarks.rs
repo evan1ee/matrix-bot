@@ -300,7 +300,7 @@ mod tests {
 
         let ctx = CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
+            owner_id: owner,
             sender_mxid: "@alice:mbm.one".to_string(),
             sender_name: "Alice".to_string(),
             command: "save".to_string(),
@@ -318,7 +318,7 @@ mod tests {
 
         let list_ctx = CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
+            owner_id: owner,
             sender_mxid: "@alice:mbm.one".to_string(),
             sender_name: "Alice".to_string(),
             command: "bookmarks".to_string(),
@@ -337,7 +337,7 @@ mod tests {
         // Toggle fav
         let fav_ctx = CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
+            owner_id: owner,
             sender_mxid: "@alice:mbm.one".to_string(),
             sender_name: "Alice".to_string(),
             command: "bookmark".to_string(),
@@ -354,7 +354,7 @@ mod tests {
         // Toggle archive
         let arch_ctx = CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
+            owner_id: owner,
             sender_mxid: "@alice:mbm.one".to_string(),
             sender_name: "Alice".to_string(),
             command: "bookmark".to_string(),

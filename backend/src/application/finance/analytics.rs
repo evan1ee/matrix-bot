@@ -215,7 +215,7 @@ impl FinanceService {
             .get_analytics_report(&share.owner_id, None, months_limit)
             .await?;
 
-        let days = (months_limit.clamp(1, 36) * 31) as i64;
+        let days = months_limit.clamp(1, 36) * 31;
         let cutoff = Utc::now() - chrono::Duration::days(days);
         let recent_transactions = repo::recent_public_transactions(
             &self.pool,

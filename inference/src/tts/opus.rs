@@ -272,7 +272,7 @@ mod tests {
             .map(|i| {
                 // Deterministic pseudo-noise: not a real PRNG dependency, just
                 // something with no periodic structure for Opus to exploit.
-                let x = (i as f32 * 12.9898).sin() * 43758.5453;
+                let x = (i as f32 * 12.9898).sin() * 43_758.547;
                 (x - x.floor()) * 2.0 - 1.0
             })
             .collect();

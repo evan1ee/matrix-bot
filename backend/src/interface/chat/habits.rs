@@ -91,7 +91,7 @@ impl BotModule for HabitsModule {
             .to_string();
 
         match sub.as_str() {
-            "list" | "" => Some(handle_list(services, &owner, &today_str).await),
+            "list" | "" => Some(handle_list(services, owner, &today_str).await),
             "done" | "check" => {
                 let target = args
                     .trim_start_matches("done")

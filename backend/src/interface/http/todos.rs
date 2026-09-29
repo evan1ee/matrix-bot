@@ -324,7 +324,7 @@ mod tests {
         )
         .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -416,7 +416,7 @@ mod tests {
         )
         .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -500,7 +500,7 @@ mod tests {
         )
         .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -589,7 +589,7 @@ mod tests {
         )
         .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -708,7 +708,7 @@ mod tests {
         )
         .await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

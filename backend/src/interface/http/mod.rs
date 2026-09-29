@@ -241,7 +241,7 @@ mod step_up_tests {
         .unwrap();
 
         let state = auth::ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),

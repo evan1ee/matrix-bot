@@ -4,6 +4,7 @@ use tracing::error;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::life::normalize_mood;
+use crate::domain::life::DayLogInput;
 use crate::interface::chat::CommandContext;
 use crate::utils::html::html_escape;
 
@@ -239,11 +240,13 @@ async fn handle_log(
         .upsert_day_log(
             owner_id,
             today_str,
-            normalized_mood,
-            weather_raw,
-            None,
-            note_raw,
-            None,
+            DayLogInput {
+                mood: normalized_mood,
+                weather: weather_raw,
+                activities: None,
+                note: note_raw,
+                time_allocation: None,
+            },
         )
         .await
     {
@@ -309,7 +312,7 @@ mod tests {
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@user:1".to_string(),
-            owner_id: owner.clone(),
+            owner_id: owner,
             sender_name: "Tester".to_string(),
             command: "journal".to_string(),
             raw_args: "help".to_string(),

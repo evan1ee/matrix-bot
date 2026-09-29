@@ -137,6 +137,32 @@ impl Database {
     }
 }
 
+/// Inserts the `accounts` row a test fixture's owner id refers to.
+///
+/// Every `owner_id` / `account_id` column is a foreign key to `accounts(id)`,
+/// so a fixture that writes as `AccountId::from("alice")` must create that
+/// account first. Idempotent, so a test can call it for each id it uses.
+#[cfg(test)]
+pub async fn seed_account(pool: &crate::db::DbPool, id: &crate::domain::accounts::AccountId) {
+    sqlx::query!(
+        "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') \
+         ON CONFLICT DO NOTHING",
+        id.as_uuid()
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// [`seed_account`] for several fixture owners, named the way the test names
+/// them (`"@alice:a"`, `"acct_alice"`).
+#[cfg(test)]
+pub async fn seed_accounts(pool: &crate::db::DbPool, names: &[&str]) {
+    for name in names {
+        seed_account(pool, &crate::domain::accounts::AccountId::from(*name)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,31 +277,5 @@ mod tests {
         assert_eq!(status, "unclaimed");
 
         crate::db::pool::drop_pg_schema("boot_check").await;
-    }
-}
-
-/// Inserts the `accounts` row a test fixture's owner id refers to.
-///
-/// Every `owner_id` / `account_id` column is a foreign key to `accounts(id)`,
-/// so a fixture that writes as `AccountId::from("alice")` must create that
-/// account first. Idempotent, so a test can call it for each id it uses.
-#[cfg(test)]
-pub async fn seed_account(pool: &crate::db::DbPool, id: &crate::domain::accounts::AccountId) {
-    sqlx::query!(
-        "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') \
-         ON CONFLICT DO NOTHING",
-        id.as_uuid()
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-}
-
-/// [`seed_account`] for several fixture owners, named the way the test names
-/// them (`"@alice:a"`, `"acct_alice"`).
-#[cfg(test)]
-pub async fn seed_accounts(pool: &crate::db::DbPool, names: &[&str]) {
-    for name in names {
-        seed_account(pool, &crate::domain::accounts::AccountId::from(*name)).await;
     }
 }

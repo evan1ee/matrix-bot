@@ -28,10 +28,7 @@ pub async fn run_briefing_tick(ctx: &ModuleContext) {
             continue;
         }
 
-        let (target_h, target_m) = match parse_briefing_time(&settings.briefing_time) {
-            Ok(t) => t,
-            Err(_) => (7, 0), // fallback to 07:00
-        };
+        let (target_h, target_m) = parse_briefing_time(&settings.briefing_time).unwrap_or((7, 0));
 
         let tz = settings.tz();
         let now_local = now_utc.with_timezone(&tz);

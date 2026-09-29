@@ -374,7 +374,7 @@ mod tests {
                 .unwrap();
         let owner = AccountId::from(owner_str.as_str());
         let state = ApiState::new(
-            Database { pool: pool },
+            Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -386,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_ai_config_api_redacts_api_key() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let update_input = UpdateAiConfigInput {
             api_base_url: Some("https://api.openai.com/v1".to_string()),
@@ -417,7 +417,7 @@ mod tests {
     #[tokio::test]
     async fn test_ai_config_api_validates_input_lengths() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let too_long_model = UpdateAiConfigInput {
             api_base_url: None,
@@ -452,7 +452,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_retrospective() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let retro_res = get_retrospective(State(state), user).await.unwrap();
         assert_eq!(retro_res.currency, "USD");
@@ -470,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_provider_failure_is_not_reported_as_a_bad_request() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let input = UpdateAiConfigInput {
             api_base_url: Some("http://127.0.0.1:1".to_string()),

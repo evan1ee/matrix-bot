@@ -133,7 +133,7 @@ pub struct CashBalance {
 #[derive(Debug, Clone)]
 pub enum BuyOutcome {
     Ok {
-        holding: Holding,
+        holding: Box<Holding>,
         cash: CashBalance,
     },
     CurrencyMismatch {
@@ -262,39 +262,39 @@ mod tests {
     #[test]
     fn test_cost_and_weighted_average() {
         let qty = 10 * 10i64.pow(QUANTITY_EXPONENT);
-        let price = 150_00; // $150.00
-        assert_eq!(cost_of(qty, price), 1500_00);
+        let price = 15_000; // $150.00
+        assert_eq!(cost_of(qty, price), 150_000);
 
-        let new_avg = weighted_avg_cost_minor(qty, 150_00, qty, 200_00);
-        assert_eq!(new_avg, 175_00);
+        let new_avg = weighted_avg_cost_minor(qty, 15_000, qty, 20_000);
+        assert_eq!(new_avg, 17_500);
     }
 
     #[test]
     fn test_realized_pl() {
         let qty = 5 * 10i64.pow(QUANTITY_EXPONENT);
-        let pl = realized_pl_minor(qty, 180_00, 150_00);
-        assert_eq!(pl, 150_00); // 5 * 30.00 = 150.00
+        let pl = realized_pl_minor(qty, 18_000, 15_000);
+        assert_eq!(pl, 15_000); // 5 * 30.00 = 150.00
     }
 
     #[test]
     fn test_summaries_combines_holdings_and_cash() {
         let qty = 10 * 10i64.pow(QUANTITY_EXPONENT);
-        let h1 = sample_holding("AAPL", qty, 150_00, Some(170_00), "USD");
+        let h1 = sample_holding("AAPL", qty, 15_000, Some(17_000), "USD");
         let cash = CashBalance {
             id: 1,
             owner_id: AccountId::from("alice"),
             currency: "USD".to_string(),
             currency_exponent: 2,
-            balance_minor: 500_00,
+            balance_minor: 50_000,
             updated_at: None,
         };
 
         let summaries = build_summaries(&[h1], &[cash]);
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].currency, "USD");
-        assert_eq!(summaries[0].cost_basis_minor, 1500_00);
-        assert_eq!(summaries[0].market_value_minor, 1700_00);
-        assert_eq!(summaries[0].unrealized_pl_minor, 200_00);
-        assert_eq!(summaries[0].cash_minor, 500_00);
+        assert_eq!(summaries[0].cost_basis_minor, 150_000);
+        assert_eq!(summaries[0].market_value_minor, 170_000);
+        assert_eq!(summaries[0].unrealized_pl_minor, 20_000);
+        assert_eq!(summaries[0].cash_minor, 50_000);
     }
 }

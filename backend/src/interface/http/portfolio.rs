@@ -231,7 +231,7 @@ pub async fn buy_holding(
         .await?;
 
     match outcome {
-        BuyOutcome::Ok { holding, .. } => Ok(Json(holding.into())),
+        BuyOutcome::Ok { holding, .. } => Ok(Json((*holding).into())),
         BuyOutcome::CurrencyMismatch { existing_currency } => Err(ApiError::bad_request(format!(
             "{} is already held in {}",
             symbol, existing_currency
@@ -528,7 +528,7 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(sold.realized_pl_minor, 150_00);
+        assert_eq!(sold.realized_pl_minor, 15_000);
         assert!(sold.holding.is_some());
     }
 

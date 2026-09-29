@@ -94,7 +94,7 @@ async fn handle_create_alert(services: &AppServices, owner: &AccountId, args: &s
         Err(err) => return format!("<p>Invalid symbol: {}</p>", html_escape(&err.to_string())),
     };
 
-    let condition = match AlertCondition::from_str(tokens[1]) {
+    let condition = match AlertCondition::parse(tokens[1]) {
         Some(c) => c,
         None => return format!("<p>Invalid condition '{}'. Use <code>&gt;</code> (above) or <code>&lt;</code> (below).</p>", html_escape(tokens[1])),
     };

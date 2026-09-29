@@ -200,7 +200,7 @@ pub fn parse_yahoo_chart_history_json(body: &str) -> Result<Vec<(String, f64)>, 
     let mut points: Vec<(String, f64)> = Vec::new();
     let mut last_valid_price: Option<f64> = None;
 
-    for (ts, maybe_close) in timestamps.into_iter().zip(closes.into_iter()) {
+    for (ts, maybe_close) in timestamps.into_iter().zip(closes) {
         let price = match maybe_close {
             Some(p) if p > 0.0 => {
                 last_valid_price = Some(p);

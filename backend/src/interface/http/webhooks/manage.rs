@@ -282,7 +282,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::new(32),
             None,
             "https://matrix.org".to_string(),
@@ -297,8 +297,8 @@ mod tests {
             .await
             .unwrap();
         let acct = AccountId::from(acct_str);
-        let user = AuthUser::for_account(acct.clone());
-        let verified = VerifiedUser(AuthUser::for_account(acct.clone()));
+        let user = AuthUser::for_account(acct);
+        let verified = VerifiedUser(AuthUser::for_account(acct));
 
         // 0. Ensure unauthorized room creation is rejected
         let unauth = create_webhook(

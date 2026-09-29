@@ -18,10 +18,10 @@ fn extract_time_from_str(s: &Option<String>) -> Option<String> {
             Some(naive.format("%H:%M:%S").to_string())
         } else if let Some(time_part) = raw.split_whitespace().nth(1) {
             Some(time_part[..8.min(time_part.len())].to_string())
-        } else if let Some(time_part) = raw.split('T').nth(1) {
-            Some(time_part[..8.min(time_part.len())].to_string())
         } else {
-            None
+            raw.split('T')
+                .nth(1)
+                .map(|time_part| time_part[..8.min(time_part.len())].to_string())
         }
     })
 }

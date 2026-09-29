@@ -70,14 +70,14 @@ impl BotModule for FootprintsModule {
         let trimmed = ctx.raw_args.trim();
 
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("list") {
-            Some(handle_list(services, &owner).await)
+            Some(handle_list(services, owner).await)
         } else if let Some(rest) = trimmed
             .strip_prefix("delete")
             .or_else(|| trimmed.strip_prefix("rm"))
         {
-            Some(handle_delete(services, &owner, rest.trim()).await)
+            Some(handle_delete(services, owner, rest.trim()).await)
         } else if let Some(rest) = trimmed.strip_prefix("add") {
-            Some(handle_add(services, &owner, rest.trim()).await)
+            Some(handle_add(services, owner, rest.trim()).await)
         } else {
             Some(format_help())
         }

@@ -9,6 +9,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::habits::{
     Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay, MAX_HABIT_NAME_LEN,
 };
+use crate::domain::habits::{HabitFields, HabitUpdate};
 use crate::events::{EventBroadcaster, SystemEvent};
 use crate::infrastructure::postgres::repositories;
 
@@ -89,13 +90,9 @@ impl HabitService {
         &self,
         owner: &AccountId,
         id: i64,
-        name: &str,
-        description: Option<&str>,
-        frequency: Option<&str>,
-        category: Option<&str>,
-        target_days_per_week: Option<i64>,
+        update: HabitUpdate<'_>,
     ) -> Result<Habit, AppError> {
-        let trimmed_name = name.trim();
+        let trimmed_name = update.name.trim();
         if trimmed_name.is_empty() {
             return Err(AppError::Validation(
                 "Habit name cannot be empty.".to_string(),
@@ -107,19 +104,17 @@ impl HabitService {
             ));
         }
 
-        let frequency = frequency.unwrap_or("daily");
-        let category = category.unwrap_or("wellness");
-        let target_days = target_days_per_week.unwrap_or(7).clamp(1, 7);
-
         let updated = repositories::habits::update_habit(
             &self.pool,
             id,
             owner,
-            trimmed_name,
-            description,
-            frequency,
-            category,
-            target_days,
+            HabitFields {
+                name: trimmed_name,
+                description: update.description,
+                frequency: update.frequency.unwrap_or("daily"),
+                category: update.category.unwrap_or("wellness"),
+                target_days_per_week: update.target_days_per_week.unwrap_or(7).clamp(1, 7),
+            },
         )
         .await?;
 

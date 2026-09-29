@@ -11,6 +11,24 @@ use crate::domain::accounts::AccountId;
 
 pub const MAX_HABIT_NAME_LEN: usize = 100;
 
+/// A request to change a habit; an omitted field takes its default.
+pub struct HabitUpdate<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub frequency: Option<&'a str>,
+    pub category: Option<&'a str>,
+    pub target_days_per_week: Option<i64>,
+}
+
+/// The validated, fully resolved fields of a habit, as written by one update.
+pub struct HabitFields<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub frequency: &'a str,
+    pub category: &'a str,
+    pub target_days_per_week: i64,
+}
+
 /// A configured habit tracking routine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Habit {
@@ -122,7 +140,7 @@ pub fn calculate_streaks(completed_dates: &[String], today_str: &str) -> (i64, i
 
     while date_set.contains(&check_date) {
         current_streak += 1;
-        check_date = check_date - Duration::days(1);
+        check_date -= Duration::days(1);
     }
 
     // 2. Longest streak

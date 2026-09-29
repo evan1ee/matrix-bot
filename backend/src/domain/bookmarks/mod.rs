@@ -10,6 +10,16 @@ pub mod html;
 pub use html::ExtractedMetadata;
 
 pub const MAX_URL_LEN: usize = 2048;
+
+/// The user-editable fields of a bookmark, already resolved (an omitted field
+/// replaced by its current value), as written by one update.
+pub struct BookmarkFields<'a> {
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub is_favorite: bool,
+    pub is_archived: bool,
+    pub tags: &'a str,
+}
 pub const MAX_TITLE_LEN: usize = 500;
 pub const MAX_DESCRIPTION_LEN: usize = 2000;
 pub const MAX_TAGS_COUNT: usize = 20;

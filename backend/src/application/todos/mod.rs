@@ -253,7 +253,7 @@ impl TodoService {
         let plan = ReminderPlan {
             source: ReminderSource::Todo,
             source_id: todo.id,
-            owner_id: todo.owner_id.clone(),
+            owner_id: todo.owner_id,
             owner_name: todo.sender_name.clone(),
             room_id,
             message: format!("Task #{} is due: {}", todo.id, todo.text),

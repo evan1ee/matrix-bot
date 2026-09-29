@@ -52,10 +52,10 @@ impl MergeService {
         let mut discarded = 0i64;
 
         for &table in OWNED_TABLES {
-            let updated = repo_merge::move_rows(&mut **tx, table, "owner_id", from, into).await?;
+            let updated = repo_merge::move_rows(tx, table, "owner_id", from, into).await?;
             moved.set(table, updated);
 
-            let leftover = repo_merge::delete_leftovers(&mut **tx, table, "owner_id", from).await?;
+            let leftover = repo_merge::delete_leftovers(tx, table, "owner_id", from).await?;
             discarded += leftover;
         }
 
@@ -64,25 +64,24 @@ impl MergeService {
         // that knows how to rebuild it.
         let ledger_rows =
             crate::infrastructure::postgres::repositories::portfolio::audit::absorb_ledger(
-                &mut **tx, from, into,
+                tx, from, into,
             )
             .await?;
         moved.set("portfolio_audit_log", ledger_rows);
 
         // Anything else pointing at the absorbed account follows it
         for &table in ACCOUNT_ID_FOLLOWS {
-            repo_merge::move_rows(&mut **tx, table, "account_id", from, into).await?;
-            let leftover =
-                repo_merge::delete_leftovers(&mut **tx, table, "account_id", from).await?;
+            repo_merge::move_rows(tx, table, "account_id", from, into).await?;
+            let leftover = repo_merge::delete_leftovers(tx, table, "account_id", from).await?;
             discarded += leftover;
         }
 
         // Credentials and ceremonies do NOT follow
         for &table in ACCOUNT_ID_DISCARDED {
-            repo_merge::discard_account_table(&mut **tx, table, from).await?;
+            repo_merge::discard_account_table(tx, table, from).await?;
         }
 
-        repo_merge::delete_account(&mut **tx, from).await?;
+        repo_merge::delete_account(tx, from).await?;
 
         Ok(MergeOutcome { moved, discarded })
     }
@@ -188,7 +187,7 @@ mod tests {
             repo_core::find_by_mxid(&pool, "@evan:mbm.one")
                 .await
                 .unwrap(),
-            Some(into.clone())
+            Some(into)
         );
         assert_eq!(
             repo_core::linked_mxids(&pool, &into).await.unwrap(),

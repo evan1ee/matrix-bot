@@ -6,6 +6,7 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::bookmarks::BookmarkFields;
 use crate::domain::bookmarks::{
     Bookmark, BookmarkError, BookmarkQuery, BookmarkStats, CreateBookmark, ExtractedMetadata,
     UpdateBookmark,
@@ -102,11 +103,13 @@ impl BookmarkService {
             &self.pool,
             id,
             owner,
-            title,
-            description,
-            is_favorite,
-            is_archived,
-            &tags_str,
+            BookmarkFields {
+                title,
+                description,
+                is_favorite,
+                is_archived,
+                tags: &tags_str,
+            },
         )
         .await?
         .ok_or_else(|| AppError::NotFound("Bookmark not found".to_string()))?;

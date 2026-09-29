@@ -72,9 +72,9 @@ impl PortfolioService {
         } = outcome
         {
             self.events.send(if already_held {
-                SystemEvent::PortfolioHoldingUpdated(holding.clone())
+                SystemEvent::PortfolioHoldingUpdated(Holding::clone(holding))
             } else {
-                SystemEvent::PortfolioHoldingCreated(holding.clone())
+                SystemEvent::PortfolioHoldingCreated(Holding::clone(holding))
             });
             self.events.send(cash_event(owner, cash));
         }

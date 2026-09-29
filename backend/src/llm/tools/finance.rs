@@ -105,7 +105,7 @@ pub async fn execute_tool(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                let acct = owner_acct.clone();
+                let acct = owner_acct;
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let target_cur = args
                     .get("currency")

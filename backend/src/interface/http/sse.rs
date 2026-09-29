@@ -73,7 +73,7 @@ mod tests {
     async fn test_sse_handler_creation() {
         let pool = crate::db::pool::test_pool().await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
@@ -86,7 +86,7 @@ mod tests {
 
     fn test_state(pool: crate::db::DbPool) -> ApiState {
         ApiState::new(
-            crate::db::Database { pool: pool },
+            crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),

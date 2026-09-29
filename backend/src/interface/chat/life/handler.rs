@@ -3,6 +3,7 @@ use tracing::error;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::life::normalize_mood;
+use crate::domain::life::DayLogInput;
 use crate::utils::html::html_escape;
 
 pub async fn handle_life_command(
@@ -173,11 +174,13 @@ async fn handle_log(
         .upsert_day_log(
             owner_id,
             today_str,
-            normalized_mood,
-            None,
-            None,
-            note_raw,
-            None,
+            DayLogInput {
+                mood: normalized_mood,
+                weather: None,
+                activities: None,
+                note: note_raw,
+                time_allocation: None,
+            },
         )
         .await
     {

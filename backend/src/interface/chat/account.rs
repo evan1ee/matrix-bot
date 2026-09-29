@@ -378,7 +378,7 @@ mod tests {
             } else {
                 "!public:x".into()
             },
-            owner_id: owner_id.clone(),
+            owner_id: *owner_id,
             sender_mxid: "@evan:mbm.one".to_string(),
             sender_name: "evan".to_string(),
             command: command.to_string(),

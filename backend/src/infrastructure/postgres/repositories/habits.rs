@@ -8,6 +8,7 @@ use sqlx::PgExecutor;
 use std::collections::HashSet;
 
 use crate::domain::accounts::AccountId;
+use crate::domain::habits::HabitFields;
 use crate::domain::habits::{calculate_streaks, DayStatus, Habit, HabitWithStatus, HeatmapDay};
 
 #[derive(Debug, sqlx::FromRow)]
@@ -201,12 +202,15 @@ pub async fn update_habit<'e>(
     conn: impl PgExecutor<'e>,
     id: i64,
     owner: &AccountId,
-    name: &str,
-    description: Option<&str>,
-    frequency: &str,
-    category: &str,
-    target_days_per_week: i64,
+    fields: HabitFields<'_>,
 ) -> Result<Option<Habit>, sqlx::Error> {
+    let HabitFields {
+        name,
+        description,
+        frequency,
+        category,
+        target_days_per_week,
+    } = fields;
     let row = sqlx::query_as!(
         HabitRow,
         r#"
@@ -393,11 +397,13 @@ mod tests {
             &pool,
             habit.id,
             &owner,
-            "Night Reading",
-            Some("Read 30 pages"),
-            "daily",
-            "learning",
-            7,
+            HabitFields {
+                name: "Night Reading",
+                description: Some("Read 30 pages"),
+                frequency: "daily",
+                category: "learning",
+                target_days_per_week: 7,
+            },
         )
         .await
         .unwrap()

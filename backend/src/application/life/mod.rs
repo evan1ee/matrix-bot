@@ -2,6 +2,7 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::life::DayLogInput;
 use crate::domain::life::{
     normalize_mood, validate_date_str, DayActivityResponse, LifeDayLog, LifeError, LifeHorizonDay,
     LifeProfile, LifeProfileStats, LifeYearView,
@@ -75,25 +76,17 @@ impl LifeService {
         &self,
         owner_id: &AccountId,
         log_date: &str,
-        raw_mood: &str,
-        weather: Option<&str>,
-        activities: Option<&str>,
-        note: Option<&str>,
-        time_allocation: Option<&str>,
+        input: DayLogInput<'_>,
     ) -> Result<LifeDayLog, AppError> {
         validate_date_str(log_date).map_err(|e| LifeError::InvalidDate(e.to_string()))?;
-        let mood =
-            normalize_mood(raw_mood).ok_or_else(|| LifeError::InvalidMood(raw_mood.to_string()))?;
+        let mood = normalize_mood(input.mood)
+            .ok_or_else(|| LifeError::InvalidMood(input.mood.to_string()))?;
 
         let log = life_repo::upsert_day_log(
             &self.pool,
             owner_id,
             log_date,
-            mood,
-            weather,
-            activities,
-            note,
-            time_allocation,
+            DayLogInput { mood, ..input },
         )
         .await?;
 

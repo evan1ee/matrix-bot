@@ -17,6 +17,15 @@ pub fn cash_event(owner_id: &AccountId, cash: &CashBalance) -> SystemEvent {
     }
 }
 
+/// The ledger side of one cash movement, mirrored into the finance ledger.
+struct CashMovement<'a> {
+    amount_minor: i64,
+    currency: &'a str,
+    exponent: i64,
+    cash_id: i64,
+    executed_at: Option<DateTime<Utc>>,
+}
+
 impl PortfolioService {
     pub async fn get_cash(
         &self,
@@ -56,11 +65,13 @@ impl PortfolioService {
         self.record_portfolio_cash_transaction(
             owner,
             "deposit",
-            amount_minor,
-            currency,
-            currency_exponent,
-            cash.id,
-            executed_at,
+            CashMovement {
+                amount_minor,
+                currency,
+                exponent: currency_exponent,
+                cash_id: cash.id,
+                executed_at,
+            },
         )
         .await;
 
@@ -84,11 +95,13 @@ impl PortfolioService {
             self.record_portfolio_cash_transaction(
                 owner,
                 "withdraw",
-                amount_minor,
-                currency,
-                currency_exponent,
-                cash.id,
-                executed_at,
+                CashMovement {
+                    amount_minor,
+                    currency,
+                    exponent: currency_exponent,
+                    cash_id: cash.id,
+                    executed_at,
+                },
             )
             .await;
         }
@@ -96,16 +109,19 @@ impl PortfolioService {
         Ok(outcome)
     }
 
-    pub async fn record_portfolio_cash_transaction(
+    async fn record_portfolio_cash_transaction(
         &self,
         owner: &AccountId,
         action: &str,
-        amount_minor: i64,
-        currency: &str,
-        exponent: i64,
-        cash_id: i64,
-        executed_at: Option<DateTime<Utc>>,
+        movement: CashMovement<'_>,
     ) -> Option<Transaction> {
+        let CashMovement {
+            amount_minor,
+            currency,
+            exponent,
+            cash_id,
+            executed_at,
+        } = movement;
         let (direction, note) = match action {
             "deposit" => (Direction::Expense, "Portfolio cash deposit"),
             "withdraw" => (Direction::Income, "Portfolio cash withdrawal"),

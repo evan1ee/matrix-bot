@@ -208,7 +208,10 @@ pub async fn buy_at(
 
     tx.commit().await?;
 
-    Ok(BuyOutcome::Ok { holding, cash })
+    Ok(BuyOutcome::Ok {
+        holding: Box::new(holding),
+        cash,
+    })
 }
 
 pub async fn sell_at(

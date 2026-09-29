@@ -159,7 +159,7 @@ cargo test  -p matrix-bot --test architecture
 cargo test  -p matrix-bot live_postgres -- --ignored --test-threads=1
 cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets   # needs DATABASE_URL to a migrated scratch DB
 cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json   # NO diff allowed
-cargo clippy -p matrix-bot --all-targets                 # touched files add no new warnings (102 pre-existing)
+cargo clippy --workspace --all-targets -- -D warnings    # must be clean (zero warnings since step 7)
 npm --prefix frontend run build                          # when anything frontend-facing changed
 ```
 
@@ -250,7 +250,7 @@ Each feature task also:
 - **R3/R4:** sqlx 0.9 forces matrix-sdk 0.18. Both upgrades landed in one commit, `c8576b6`, because neither builds alone.
 - **Task 3a:** implementers never boot against live Matrix; the first boot is a supervised user gate.
 - **Voice replies:** TTS replies become MSC3245 voice bubbles on matrix-sdk 0.18. Accepted, because it matches the documented invariant.
-- **R5:** the principles are folded into `AGENTS.md`. Clippy is stated as a rule but not enforced in CI (102-warning backlog).
+- **R5:** the principles are folded into `AGENTS.md`. Clippy is stated as a rule but not enforced in CI (the backlog was cleared in step 7; adding a CI step is now possible).
 - **CI:** `sqlx-cli` is cached in CI.
 - **R6:** the dotenv upward search is removed (security).
 - **R7:** `statement_timeout` is deferred and recorded in the spec; revisit it with the job queue.
@@ -295,7 +295,7 @@ These need the human. Prepare them; don't perform them.
 
 ## 11. Known deferred items
 
-- 102 pre-existing clippy warnings.
+- Clippy is not yet a CI job (workspace is at zero warnings).
 - `statement_timeout` is unset (R7).
 - The AI repository has a TTL timezone issue.
 - `SyncHealth`: if the timestamp fails to parse, it reads as "never synced" (theoretical).

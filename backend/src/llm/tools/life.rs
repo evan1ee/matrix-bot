@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::life::DayLogInput;
 use chrono::Utc;
 use serde_json::json;
 
@@ -80,11 +81,13 @@ pub async fn execute_tool(
                     .upsert_day_log(
                         &acct,
                         &date_str,
-                        mood,
-                        weather,
-                        activities_json.as_deref(),
-                        note,
-                        None,
+                        DayLogInput {
+                            mood,
+                            weather,
+                            activities: activities_json.as_deref(),
+                            note,
+                            time_allocation: None,
+                        },
                     )
                     .await
                     .map_err(|e| e.to_string())?;

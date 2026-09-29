@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use sqlx::PgPool;
 
 use crate::domain::accounts::AccountId;
+use crate::domain::life::DayLogInput;
 use crate::domain::life::{LifeDayLog, LifeProfile, LifeProfileStats, LifeYearView};
 
 pub async fn get_profile(
@@ -95,12 +96,15 @@ pub async fn upsert_day_log(
     pool: &PgPool,
     owner_id: &AccountId,
     log_date: &str,
-    mood: &str,
-    weather: Option<&str>,
-    activities: Option<&str>,
-    note: Option<&str>,
-    time_allocation: Option<&str>,
+    input: DayLogInput<'_>,
 ) -> Result<LifeDayLog, sqlx::Error> {
+    let DayLogInput {
+        mood,
+        weather,
+        activities,
+        note,
+        time_allocation,
+    } = input;
     let row = sqlx::query!(
         r#"
         INSERT INTO life_day_logs (owner_id, log_date, mood, weather, activities, note, time_allocation, created_at, updated_at)
@@ -292,13 +296,11 @@ pub async fn get_stats(
             if let Ok(blocks) = serde_json::from_str::<Vec<Option<String>>>(alloc_json) {
                 let block_hours = if blocks.len() <= 96 { 0.25 } else { 5.0 / 60.0 };
                 let mut day_sleep_hours: f64 = 0.0;
-                for b in blocks {
-                    if let Some(cat) = b {
-                        if cat == "deep_work" {
-                            total_deep_work_hours_acc += block_hours;
-                        } else if cat == "sleep" {
-                            day_sleep_hours += block_hours;
-                        }
+                for cat in blocks.into_iter().flatten() {
+                    if cat == "deep_work" {
+                        total_deep_work_hours_acc += block_hours;
+                    } else if cat == "sleep" {
+                        day_sleep_hours += block_hours;
                     }
                 }
                 if day_sleep_hours > 0.0 {

@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(
             outcome,
             LinkOutcome::Linked {
-                account_id: user.account_id.clone()
+                account_id: user.account_id
             }
         );
 

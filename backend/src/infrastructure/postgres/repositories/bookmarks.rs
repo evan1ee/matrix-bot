@@ -6,6 +6,7 @@
 use sqlx::{PgExecutor, PgPool};
 
 use crate::domain::accounts::AccountId;
+use crate::domain::bookmarks::BookmarkFields;
 use crate::domain::bookmarks::{
     Bookmark, BookmarkQuery, BookmarkStats, CreateBookmark, DomainCount,
 };
@@ -220,12 +221,15 @@ pub async fn update_fields(
     conn: impl PgExecutor<'_>,
     id: i64,
     owner: &AccountId,
-    title: &str,
-    description: Option<&str>,
-    is_favorite: bool,
-    is_archived: bool,
-    tags: &str,
+    fields: BookmarkFields<'_>,
 ) -> Result<Option<Bookmark>, sqlx::Error> {
+    let BookmarkFields {
+        title,
+        description,
+        is_favorite,
+        is_archived,
+        tags,
+    } = fields;
     let row = sqlx::query_as!(
         BookmarkRow,
         r#"

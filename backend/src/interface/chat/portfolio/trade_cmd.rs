@@ -320,14 +320,14 @@ mod tests {
         let p = parse_buy("AAPL 10 @ 150.00 USD core position", "EUR").unwrap();
         assert_eq!(p.symbol, "AAPL");
         assert_eq!(p.quantity_minor, 10 * 10i64.pow(8));
-        assert_eq!(p.price_minor, 150_00);
+        assert_eq!(p.price_minor, 15_000);
         assert_eq!(p.currency, "USD");
         assert_eq!(p.note.as_deref(), Some("core position"));
 
         let p2 = parse_buy("BTC 0.5 @ 60000", "USD").unwrap();
         assert_eq!(p2.symbol, "BTC");
         assert_eq!(p2.quantity_minor, 50_000_000);
-        assert_eq!(p2.price_minor, 60000_00);
+        assert_eq!(p2.price_minor, 6_000_000);
         assert_eq!(p2.currency, "USD");
         assert_eq!(p2.note, None);
     }
@@ -337,6 +337,6 @@ mod tests {
         let p = parse_sell("AAPL 5 @ 180.00", |_| Some(2)).unwrap();
         assert_eq!(p.symbol, "AAPL");
         assert_eq!(p.quantity_minor, 5 * 10i64.pow(8));
-        assert_eq!(p.price_minor, 180_00);
+        assert_eq!(p.price_minor, 18_000);
     }
 }
