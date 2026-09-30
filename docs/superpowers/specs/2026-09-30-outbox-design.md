@@ -161,12 +161,12 @@ while it was down is gone.
 - The hub keeps `AccountId → Vec<Subscriber>`. Each subscriber has a bounded `mpsc` channel with capacity 64. `subscribe(account)` returns a stream and a guard; the entry is removed when the guard drops.
 - On a notification, the hub loads the event through `OutboxService::load` **only if** the account has a local subscriber, then `try_send`s it to each of that account's subscribers. A subscriber whose channel is full is dropped; the browser's `onerror` reconnect and refetch recover it.
 - The ownership filter is structural: a subscriber is only ever registered under its own authenticated account.
-- **Replay.** The hub records the highest event id it has pushed. On a listener reconnect it calls `load_since(accounts with subscribers, last_seen − 100, 500)`. The window of 100 covers identity ids that commit out of order. Duplicates are harmless: the frontend handlers invalidate caches and nothing more.
+- **Replay.** The hub records the highest event id it has been notified of or pushed (seeded from the outbox's max id at the process's first connect). On a listener reconnect it calls `load_since(accounts with subscribers, last_seen − 100, 500)`, which returns the newest 500 rows, ascending. The listener reads `try_recv`, so a silent sqlx reconnect also triggers it. The window of 100 covers identity ids that commit out of order. Duplicates are harmless: the frontend handlers invalidate caches and nothing more.
 
 **Dispatcher.**
 - It is one task. It wakes on the listener, with a 1 s poll as a fallback.
 - It claims batches of 20 with a 60 s lease, and loops while a batch is full.
-- For each claimed delivery it calls `DeliverySink::deliver` under a 30 s `tokio::time::timeout` (`EventsConfig::deliver_timeout`, below the 60 s lease so a hung send never overlaps a re-claim; a timeout is a failed attempt, C8), then `record_delivered` or `record_failure`.
+- For each claimed delivery it calls `DeliverySink::deliver` under a 30 s `tokio::time::timeout` (`EventsConfig::deliver_timeout`, below the 60 s lease so a hung send never overlaps a re-claim; a timeout is a failed attempt, C8), then `record_delivered` or `record_failure`. Marks are fenced by the claimed `attempts`; the timeout is capped by the remaining `lease − lease_margin` (5 s) budget; unsent claims (budget spent, shutdown) are released with their attempt restored.
 - If a crash lands between the send and the mark, the lease expires and the row is retried. Matrix transaction-id idempotency (below) absorbs the resend within the session.
 
 ```rust

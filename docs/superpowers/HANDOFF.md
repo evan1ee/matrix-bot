@@ -105,7 +105,7 @@ backend/src/
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
 | 8 | Job queue (`0003_jobs`); the reminder, briefing and portfolio loops replaced by jobs (there was no bills loop, R20). Design `specs/2026-09-29-job-queue-design.md`, plan `plans/2026-09-29-job-queue.md` | ✅ (branch `refactor/job-queue`) | `950e043..cade37c` |
 | 8b | `backend/src/accounts/` retired (user request, part of the step 8 plan; Tasks 12–18) | ✅ | `d91baf7..5d6fc1d` |
-| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox`, plan `plans/2026-09-30-outbox.md` (Tasks 1–12, clarifications C1–C9) | ✅ Tasks 1–11 done; Task 12 (whole-branch review) pending. Final verification: see Task 12 | `437345f..d143d1a` + the docs commit (`docs: step 9 outbox`) |
+| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox`, plan `plans/2026-09-30-outbox.md` (Tasks 1–12, clarifications C1–C9) | ✅ Tasks 1–11 done; Task 12 review fix wave (F1–F6, F9) done; final verification: see Task 12 | `437345f..d143d1a` + docs commit + Task 12 fix wave (`4aca5b9..`, see `git log`) |
 | 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | `4bf5bc7` |
 
 ### Step 6: feature layering (`docs/superpowers/plans/2026-09-25-feature-layering.md`)
@@ -346,12 +346,19 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 - **R59:** webhook counters move only when the delivery row actually changed state, so a late duplicate record after a lease re-claim cannot count twice; `enqueue_alert` with no delivery row (impossible: one destination) returns an opaque `AppError::Database`; `list_webhook_logs` keeps the old `limit.clamp(1, 100)` / `offset.max(0)` — cost: none.
 - **R60:** `only_application_publishes_to_the_outbox` checks production code only; the hub's tests seed rows through `repositories::outbox::publish` — the rule guards runtime paths — cost: a test could publish outside a service (tests only).
 - **R61:** `tokio-stream` is removed from `backend/Cargo.toml` (its only use was `BroadcastStream`) — cost: none.
+- **R62:** F1 — deleting a webhook fails its pending deliveries in the delete's transaction — restores the pre-outbox ON DELETE CASCADE semantics — cost: none.
+- **R63:** F2 — the listener uses `try_recv`; `Ok(None)` (sqlx's silent eager reconnect) triggers replay + wake — sqlx 0.9 hides IO-level losses from `recv()` — cost: none; the jobs listener keeps `recv()` (covered by its poll), noted in §11.
+- **R64:** F3/F4 — delivery marks are fenced by the claimed `attempts`; each delivery's timeout is capped by the remaining lease budget (`lease - lease_margin`, margin 5 s); unsent claims (budget exhausted or shutdown) are released with their attempt restored; `mark_retry` uses the database clock — a late mark can never overwrite a re-claim — cost: none.
+- **R65:** F5 — the hub tracks the highest notified id even without a local subscriber, seeds it at process start (first successful LISTEN), and replays the NEWEST missed events — cost: none.
+- **R66:** F8 not fixed — every committed event wakes the dispatcher (one indexed `claim_due` per commit, on top of the 1 s poll) — narrowing it needs a new migration or a wider NOTIFY payload; single-user scale makes it negligible — cost: one cheap UPDATE per commit; revisit with the omnichannel sub-project.
+- **R67:** F9 — 0005 drops `webhook_outbox` including undelivered rows; the cutover runbook checks and drains them first — cost: alerts pending at cutover are lost if the step is skipped.
+- **R68:** F11 accepted — webhook logs show `attempts` including an in-flight claim and `next_attempt_at` = lease end while a delivery is in flight; `last_error` is truncated like job errors — cost: cosmetic.
 
 ## 10. User gates before merging sub-project 1
 
 These need the human. Prepare them; don't perform them.
 
-1. **Production rehearsal:** restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/superpowers/runbooks/postgres-foundation-cutover.md`).
+1. **Production rehearsal:** first check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'` on production and drain or accept it (0005 drops that table; runbook §1). Then restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/superpowers/runbooks/postgres-foundation-cutover.md`).
 2. **Supervised first boot on matrix-sdk 0.18** against a **copy** of `data/`, following the watch list in the runbook.
 3. **Stray device:** the user checks the bot account for a stray device from about 2026-09-25 00:24 local time.
 
@@ -381,7 +388,8 @@ These need the human. Prepare them; don't perform them.
 - The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
 - Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
 - `JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS` (too many workers can starve the pool).
-- Hub replay after a listener reconnect uses `load_since(accounts, last_seen − 100, 500)` ascending; before any event has been forwarded (`last_seen = 0`) a reconnect replays the oldest 500 events of connected accounts, not the newest (the orchestrator may fix it in Task 12 and then strike this).
+- ~~Hub replay uses the oldest 500 events when `last_seen = 0`~~ — resolved by R65 (newest rows, seeded floor).
+- The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`, which hides a silent sqlx reconnect (R63); workers stay correct through their poll, so a missed wake only costs latency.
 - `ReminderService::enqueue_due` is unbounded (one pass enqueues every due reminder).
 
 ## 12. Document map
