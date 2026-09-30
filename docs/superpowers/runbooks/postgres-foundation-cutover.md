@@ -18,6 +18,11 @@ protects.
    precondition, not automatic — see
    `docs/database.md`'s Migrations section for why
    `0001` omits the backfill and rename it depends on already having run.
+   On the old bot, also check the legacy webhook queue (migration `0005`
+   drops `webhook_outbox`, undelivered rows included):
+   `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`. If it is
+   non-zero, let the old bot drain it (re-run until 0) or accept losing
+   those alerts before you continue.
 2. **Stop the bot.**
 3. Back up the whole `data/` directory — `bot_store/`, `matrix_session.json`,
    `matrix_token.json`, `verified_users.json`, and anything else it holds —
