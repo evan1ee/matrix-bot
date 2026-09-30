@@ -76,7 +76,9 @@ interface/chat/              BotModule command handlers per feature
 interface/channels/matrix/   matrix-sdk client, sync loop, E2EE, verification
 interface/mcp/               MCP protocol adapters
 interface/jobs/              job handlers (payload → service → delivery)
+interface/events/            outbox delivery sinks (Matrix room)
 jobs/                        job runtime: workers, reaper, leader-elected scheduler (no SQL)
+events/                      events runtime: outbox listener, SSE hub, delivery dispatcher, purge (no SQL)
 llm/                         prompts, tool loop, tool registry (llm/tools/)
 infrastructure/postgres/     repositories/<f>.rs, read_models/, merge.rs, ping
 infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
@@ -91,12 +93,13 @@ db/                          pool, migration runner, test pools and the schema c
 | `application` | use cases, transactions | axum, matrix-sdk, reqwest, utoipa, `interface` |
 | `interface`, `llm` | protocol translation, AI orchestration | SQL of any kind outside `#[cfg(test)]` (the architecture test enforces this for `interface/` and `application/`; keep `llm/` to it too) |
 | `jobs` | worker runtime, scheduler | axum, matrix-sdk, reqwest, utoipa, `interface`; SQL of any kind, tests included (the architecture test enforces it) |
+| `events` | outbox listener, SSE hub, delivery dispatcher | axum, matrix-sdk, reqwest, utoipa, `interface`; SQL of any kind, tests included; imported by no lower layer (`domain`, `application`, `infrastructure`) |
 | `infrastructure` | external capabilities | `application`, `interface` |
 
 - Before adding a module, check whether an existing one already owns the responsibility. Do not create new top-level layers without a clear reason and an ADR.
 - **Interface layer** parses input, authenticates, resolves the caller's scope, validates protocol-level shape, calls a service, formats the reply. **Application layer** orchestrates, owns transaction boundaries, coordinates repositories and external services. **Domain** holds pure rules; if a feature is simple CRUD with no meaningful rules, keep the design simple rather than inventing domain abstractions. **Infrastructure** implements how PostgreSQL, Matrix and external services are reached.
 - Keep transport models (DTOs), validated input, application commands, domain models and persistence rows distinct. Never pass a database row or HTTP DTO through the whole application unchanged; every boundary crossing validates, normalizes, authorizes, converts and maps errors. A wire type and a domain type that share fields stay separate, with a `From` impl.
-- `AppServices` is built once per process by a composition root and passed to adapters as a parameter (`ApiState.services`, `ModuleContext.services`, `handle_command(ctx, services, …)`, the AI turn). No adapter constructs a service.
+- `AppServices` is built once per process by a composition root and passed to adapters as a parameter (`ApiState.services`, `handle_command(ctx, services, …)`, the AI turn). No adapter constructs a service.
 - `infrastructure/` never imports from `interface/` or `application/`.
 
 ### 3.2 Avoid premature abstraction
@@ -131,7 +134,7 @@ Rooms is the canonical pattern: read `domain/rooms`, `application/rooms`, `infra
 1. **Domain** `domain/<f>/mod.rs` — entities, validated commands, business rules as synchronous functions unit-tested in the same file. Private fields behind constructors that enforce invariants. No `sqlx::FromRow`, no `utoipa::ToSchema`. A feature error enum (`thiserror`) with `From<…> for AppError` (→ `Validation`) in `application/<f>`. A rule once expressed as SQL becomes a pure function over rows the service fetched (small bounded inputs only); keep tie-breaks exact (first wins, strict `>`, never `max_by`).
 2. **Migration** if the schema changes ([`docs/database.md`](docs/database.md)); owner-keyed tables go into `OWNED_TABLES`.
 3. **Repository** `infrastructure/postgres/repositories/<f>.rs` — `pub async fn`s over `impl sqlx::PgExecutor<'_>`, compile-checked macros only, private `…Row` structs converted at the edge, round-trip and owner-isolation tests.
-4. **Service** `application/<f>/mod.rs` — `<F>Service { pool, events }`, `Clone`, returns `Result<_, AppError>`; opens a transaction only where an invariant needs atomicity; publishes its `SystemEvent` after commit; tests cover mid-transaction failure and events.
+4. **Service** `application/<f>/mod.rs` — `<F>Service { pool }`, `Clone`, returns `Result<_, AppError>`; opens a transaction wherever it publishes and writes the event with `repositories::outbox::publish(&mut tx, …)` next to the state change, never after commit; tests cover mid-transaction failure and events.
 5. **Wiring** — add the service to `AppServices` and build it in `AppServices::new`.
 6. **HTTP** `interface/http/<f>.rs` — handlers returning `Result<_, ApiError>`, DTOs with `From<&domain>`; register in `routes.rs::api_routes()`; a sensitive route also needs `VerifiedUser` **and** a `SENSITIVE` entry (§7).
 7. **Chat** `interface/chat/<f>.rs` — the `BotModule`; cap inputs at 500 chars, call `services.<f>`, reply with `text_html`, turn failures into replies only via `interface::chat::error_reply`. LLM and MCP tools touching `<f>` call `services.<f>` in the same change.
@@ -160,7 +163,7 @@ Handlers follow `Request → parse/validate → service → response DTO`. Full 
 
 - Endpoints live in `interface/http/`, aggregated by `api_routes()`. Return `ApiError` (`{ "error": "...", "code": 400 }`) for every response; map `AppError` through `app_error.rs`; `Database`/`External` become an opaque 500 with the detail logged.
 - Cap API payload strings at 500 characters. Apply rate limiting to new unauthenticated or expensive endpoints.
-- **Every mutation publishes a `SystemEvent` and every variant returns a meaningful `owner_id()`.** The broadcast channel is process-wide; a variant without an owner leaks across users or is never delivered.
+- **Every mutation publishes a `SystemEvent` and every variant returns a meaningful `owner_id()`.** Events are stored in the transactional outbox and only `application/` publishes; a variant without an owner cannot be stored or scoped to a subscriber.
 - A change that must not alter the contract must not change `backend/openapi.json`: keep DTO names, fields, optionality, enums, status codes and error strings.
 
 ### 5.2 Matrix

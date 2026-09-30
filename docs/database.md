@@ -16,7 +16,7 @@ application/<f>   ──►  infrastructure/postgres/repositories/<f>.rs   ─�
 ```
 
 - A repository is a set of `pub async fn`s taking `conn: impl sqlx::PgExecutor<'_>`, so a service passes either the pool or `&mut *tx`. Rows land in private `…Row` structs and leave as domain types (`TryFrom<Row>` when a row can violate an invariant or needs parsing, `From<Row>` only when every row is valid). A SQLx row type never escapes the repository.
-- A service method is the unit of transaction. It opens `pool.begin()` only where an invariant needs atomicity and publishes its `SystemEvent` after commit.
+- A service method is the unit of transaction. It opens `pool.begin()` only where an invariant needs atomicity and publishes its `SystemEvent` inside that transaction with `repositories::outbox::publish`, so the event commits or rolls back with the state change ([Outbox](#outbox)).
 - Cross-feature reads (a daily activity timeline, net worth) go through `infrastructure/postgres/read_models`, never through another feature's repository.
 - `interface/` and `application/` run no SQL. `AssertSqlSafe` is allowed only in `infrastructure/postgres/merge.rs`, where table names come from an allow-list and every value is bound.
 - **Never put a value into SQL text.** Bind it, even in `sqlx::QueryBuilder`. Optional filters use `($1::text IS NULL OR col = $1)` inside `query!`.
@@ -68,6 +68,23 @@ Partial indexes serve the three hot queries: `idx_jobs_dequeue` (`priority DESC,
 - **Account merge.** `jobs` is in `ACCOUNT_ID_FOLLOWS` (`domain/accounts`): pending work moves to the surviving account, and handlers resolve their subject from the job row.
 - **Retention.** Finished jobs are purged after 7 days; the `failed` ones are the operator's record of what did not deliver until then.
 - **Connections.** `JOB_WORKERS` workers, one `LISTEN` connection and the HTTP handlers must fit within `DATABASE_MAX_CONNECTIONS`. The scheduler's advisory-lock connection is detached from the pool (the pool opens a replacement) and does not count against it.
+
+## Outbox
+
+Migration `0004_outbox` adds the transactional outbox ([`architecture.md`](architecture.md#events-and-the-outbox)). Only `infrastructure/postgres/repositories/outbox.rs` (and its `LISTEN` helper `outbox_notifications.rs`) touches it.
+
+| Table | Meaning |
+|---|---|
+| `outbox_events` | one row per `SystemEvent`: `id` `BIGINT` identity, `account_id` `UUID` FK to `accounts` `ON DELETE CASCADE`, `event_type` (the variant name), `payload` `JSONB` (the wire `{type, payload}`), `created_at` |
+| `outbox_deliveries` | one row per durable destination: `event_id` FK (`ON DELETE CASCADE`), `destination` (`matrix:<room id>`), `status` (`pending`, `delivered`, `failed`; CHECK), `attempts`, `max_attempts` (default 10), `available_at`, `delivered_at`, `last_error`; `UNIQUE (event_id, destination)` |
+
+Indexes: `idx_outbox_events_account_type_created` (`account_id, event_type, created_at DESC`), `idx_outbox_events_created` (`created_at`, for retention), `idx_outbox_deliveries_pending` (`available_at`) on `status = 'pending'`, `idx_outbox_deliveries_event` (`event_id`).
+
+- **Wake-ups.** The `outbox_notify` trigger (`AFTER INSERT ON outbox_events FOR EACH ROW`) runs `pg_notify('outbox', '<id>:<account uuid>')`. Like `jobs_notify`, it fires only for real inserts and is delivered at commit. The payload carries no event body: the listener loads the row.
+- **Claiming.** `claim_due` is one statement with `FOR UPDATE SKIP LOCKED` that increments `attempts` and moves `available_at` 60 s ahead (the lease); a claim that is never recorded reappears after the lease.
+- **Retention.** The hourly purge deletes events older than 30 days that have no `pending` delivery; their deliveries go with them (cascade). A pending delivery is never purged, however old, so an outage cannot silently discard an alert. Webhook logs are read from these rows and therefore cover 30 days.
+- **Account merge.** `outbox_events` is in `ACCOUNT_ID_FOLLOWS` (like `jobs`): history moves to the surviving account. Deliveries reach it through the event and need no entry of their own.
+- **0005 drops `webhook_outbox`.** `0005_drop_webhook_outbox` is a plain `DROP TABLE`; its history is deliberately not migrated (spec O2). Alerts still queued in it at cutover are lost, so drain it (no `pending` rows) before releasing; the rehearsal on a production copy covers 0004 and 0005.
 
 ## Migrations
 
@@ -140,7 +157,7 @@ So leftovers are bounded by one run's worth (a few hundred schemas), and the fir
 psql "$TEST_DATABASE_URL" -Atc "SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace WHERE nspname ~ '^t[0-9]+_[0-9]+$'" | psql "$TEST_DATABASE_URL"
 ```
 
-Fixtures create their owners with `db::pool::seed_account(s)`; a fixture that writes as an id with no `accounts` row fails on the foreign key, exactly as production would. Repository tests cover round-trips and owner isolation; service tests cover transaction atomicity (a NUL byte in a `TEXT` field forces a mid-transaction failure), degradation on a closed pool, and events emitted only after commit.
+Fixtures create their owners with `db::pool::seed_account(s)`; a fixture that writes as an id with no `accounts` row fails on the foreign key, exactly as production would. Repository tests cover round-trips and owner isolation; service tests cover transaction atomicity (a NUL byte in a `TEXT` field forces a mid-transaction failure), degradation on a closed pool, and events written in the same transaction (`repositories::outbox::event_types_for` reads them back; a rolled-back change leaves none).
 
 | Symptom | Fix |
 |---|---|

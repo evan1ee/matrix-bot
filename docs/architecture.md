@@ -40,38 +40,64 @@ Interfaces parse, authenticate, resolve the caller's scope, call a service, and 
 | Layer | Path (under `backend/src/`) | Owns | May import |
 |---|---|---|---|
 | Domain | `domain/<f>/` | entities, value objects, invariants, domain errors; synchronous and I/O-free | `std`, `chrono`, `uuid`, `serde`, `thiserror` only |
-| Application | `application/<f>/` | `<F>Service` use cases, transaction boundaries, event publication after commit | `domain`, `infrastructure` |
-| Interface | `interface/{http,chat,channels,mcp}/` | protocol translation: Axum handlers and DTOs, `BotModule` handlers, the Matrix channel, MCP | `application`, `domain` |
+| Application | `application/<f>/` | `<F>Service` use cases, transaction boundaries, event publication inside the transaction (via the outbox) | `domain`, `infrastructure` |
+| Interface | `interface/{http,chat,channels,mcp,events,jobs}/` | protocol translation: Axum handlers and DTOs, `BotModule` handlers, the Matrix channel, MCP, delivery sinks (`interface/events/`) | `application`, `domain` |
+| Events runtime | `events/` | SSE hub, the `LISTEN outbox` loop, the delivery dispatcher, retention; no SQL, no transport crates | `application`, `domain` |
 | LLM | `llm/` | prompts, the tool-calling loop, conversation context ([`llm.md`](llm.md)) | `application`, `domain` |
 | Infrastructure | `infrastructure/{postgres,inference,web}/` | repositories, HTTP clients for inference, LLM and web feeds | `domain`; never `application` or `interface` |
 
 `backend/tests/architecture.rs` enforces the rules mechanically: layer imports, pure domain modules, zero SQL in `interface/` and `application/`, `AssertSqlSafe` confined to `infrastructure/postgres/merge.rs`, no `dotenvy::dotenv`.
 
-`AppServices` (`application/mod.rs`) is built once per process by a composition root (`app.rs` for the server, `main.rs` for the stdio MCP server) and reaches every adapter as a parameter: `ApiState.services`, `ModuleContext.services`, the `services` argument of `BotModule::handle_command`, and the AI turn. No adapter constructs a service itself.
+`AppServices` (`application/mod.rs`) is built once per process by a composition root (`app.rs` for the server, `main.rs` for the stdio MCP server) and reaches every adapter as a parameter: `ApiState.services`, the `services` argument of `BotModule::handle_command`, and the AI turn. No adapter constructs a service itself.
 
 The per-feature template and the settled rulings live in [`superpowers/HANDOFF.md`](superpowers/HANDOFF.md) §8–9; the realised layout design is `superpowers/specs/2026-09-24-postgres-foundation-design.md` §3.
 
 ## Single process: two front doors and the job runtime
 
-`backend/src/app.rs` is the composition root. `main.rs` only loads `./.env`, sets up tracing, handles the `mcp` stdio mode, installs the signal handler, and calls `app::run(config, token)`. `app::run` builds one shared `Database`, one `EventBroadcaster`, one `BotHandles` and the job runtime, then starts:
+`backend/src/app.rs` is the composition root. `main.rs` only loads `./.env`, sets up tracing, handles the `mcp` stdio mode, installs the signal handler, and calls `app::run(config, token)`. `app::run` builds one shared `Database`, one `BotHandles`, the SSE hub, the job runtime and the events runtime, then starts:
 
 1. The Axum API server (`interface::http::start_api_server`), on a listener `app::run` binds first (`interface::http::bind`) so a bind failure stops boot rather than leaving a bot with no API and no health probes. It returns the server's `JoinHandle`.
 2. The Matrix sync loop (`interface/channels/matrix/sync_loop.rs::run_bot_loop`), a reconnect loop with 5 s → 300 s backoff, receiving the same `BotHandles` via `MatrixBot::new_full`. `BotHandles` is built once and cloned into every reconnect generation, so `SyncHealth` and pending merges survive a reconnect.
-3. The job runtime (`jobs::JobRuntime::run`, see *Background jobs* below), spawned last, once the API server is up and nothing fallible remains before supervision: a runtime spawned earlier and then orphaned by a bind error would leave claimed jobs locked until the reaper found them.
+3. The job runtime (`jobs::JobRuntime::run`, see *Background jobs* below), spawned once the API server is up and nothing fallible remains before supervision: a runtime spawned earlier and then orphaned by a bind error would leave claimed jobs locked until the reaper found them.
+4. The events runtime (`events::EventsRuntime::run`, see *Events and the outbox*), spawned right after the job runtime, so SSE subscribers can exist before events flow.
 
 `BotHandles` (bot access token, Matrix SDK client, pending merges, sync health) is the coupling point, in both directions: the REST layer borrows the *bot's* Matrix credentials to serve endpoints like `/rooms` and `/auth/media` that need homeserver access, and the bot writes into `pending_merges` so a link begun in a Matrix DM can be finished in the web UI.
 
-**Shutdown is one `CancellationToken` tree, bounded at 15 s** (`app::SHUTDOWN_GRACE`, spec §5.3). `main.rs` owns the root and cancels it on SIGINT/SIGTERM (the handler is installed before boot, and boot's database connect is itself cancellable). The API server, the Matrix loop and the job runtime each get a `child_token()`:
+**Shutdown is one `CancellationToken` tree, bounded at 15 s** (`app::SHUTDOWN_GRACE`, spec §5.3). `main.rs` owns the root and cancels it on SIGINT/SIGTERM (the handler is installed before boot, and boot's database connect is itself cancellable). The API server, the Matrix loop, the job runtime and the events runtime each get a `child_token()`:
 
 - The API server stops through axum's graceful shutdown. SSE responses never end on their own, so `sse_handler` ends its stream on the same token (`ApiState::shutdown`) — otherwise every open browser tab would hold the drain open until the deadline.
-- The Matrix loop has every long await (client build, sync, backoff) inside a `select!` against `shutdown.cancelled()`. That structure is a deliberate fix: an earlier version awaited `bot.run()` inside a select *branch body*, where Ctrl-C could not reach it. Returning drops the running generation, and with it its `BackgroundWorkers` guard, which now owns only the webhook worker (replaced by outbox deliveries in step 9); the reminder, briefing and portfolio work no longer belongs to a sync generation.
+- The Matrix loop has every long await (client build, sync, backoff) inside a `select!` against `shutdown.cancelled()`. That structure is a deliberate fix: an earlier version awaited `bot.run()` inside a select *branch body*, where Ctrl-C could not reach it. Returning drops the running generation; no background work belongs to a sync generation any more (scheduled work is jobs, webhook delivery is the events runtime's dispatcher).
 - The job runtime cancels its workers, gives in-flight handlers a 10 s grace, then hands the jobs they still hold back to the queue. It is stopped first, because releasing jobs needs the pool.
 
-After cancellation `app::stop_by` waits for the three tasks against one deadline (signal + 15 s); any task still running then is named in a `warn!` and aborted — not detached, so its drop guards run, and not awaited again, since a task stuck outside an await point would hold the process past the bound. `db.pool.close()` gets whatever remains of the same deadline. Finally `main.rs` drops the runtime with `shutdown_background()`, because an ordinary runtime drop waits without limit for in-flight blocking-pool work.
+After cancellation `app::stop_by` waits for the four tasks against one deadline (signal + 15 s); any task still running then is named in a `warn!` and aborted — not detached, so its drop guards run, and not awaited again, since a task stuck outside an await point would hold the process past the bound. `db.pool.close()` gets whatever remains of the same deadline. Finally `main.rs` drops the runtime with `shutdown_background()`, because an ordinary runtime drop waits without limit for in-flight blocking-pool work.
 
 The `mcp` stdio mode is not part of the tree: it is a separate process invocation that ends at stdin EOF and starts neither front door.
 
 `BotHandles` (`interface/channels/matrix/handles.rs`) also carries `sync_health: SyncHealth` — a lock-free `Arc<AtomicI64>` of the last completed sync's unix millis, written by the sync loop's `sync_with_callback` after every successful response and read by `/health/ready`. `sync_with_callback`, not plain `sync`, is the point of the change: it is the only hook that fires once per completed response rather than once for the whole (otherwise-infinite) sync loop, so it is the one place "a sync completed" can be observed and recorded.
+
+## Events and the outbox
+
+Every `SystemEvent` is stored before anything reads it. **The publish rule:** a service writes its state change and calls `repositories::outbox::publish(&mut tx, &event)` in the same transaction, then commits. `publish` takes a `Transaction`, so an event cannot exist without its state change, and a rollback leaves neither. Only `application/` publishes (`only_application_publishes_to_the_outbox` in `tests/architecture.rs`); the transaction scope is one state change, so a cross-service follow-up (reminder sync after a todo write, finance mirroring after a bill payment) commits its own events separately.
+
+`publish` inserts one `outbox_events` row (`{type, payload}` as JSONB, keyed by `owner_id()`), plus one `outbox_deliveries` row per durable destination (`Destination`; today only `WebhookTriggered` has one, `matrix:<room id>`). A trigger on `outbox_events` (0004) sends `NOTIFY outbox, '<event id>:<account uuid>'`, which PostgreSQL delivers at commit only.
+
+```text
+service tx ── outbox_events (+ outbox_deliveries) ── COMMIT ──► NOTIFY outbox
+                                                                    │
+                events::listener   (one LISTEN per process)  ◄──────┘
+                    ├──► events::hub          ──► SSE subscriptions (this instance, per account)
+                    └──► wake events::dispatcher ──► DeliverySink ──► Matrix room
+events::purge (hourly) ── deletes events older than 30 days with no pending delivery
+```
+
+`events/` (`EventsRuntime`, built in `app::run`) is SQL-free and reaches the outbox only through `OutboxService`; `EventsConfig` holds every interval and bound. Its three tasks run under one child token, and a task ending before shutdown stops the runtime.
+
+- **Hub and SSE.** The hub keeps this instance's subscriptions keyed by the account that authenticated them, so ownership is structural: a line is pushed only to its own account's subscribers. Each subscriber has a bounded channel (64); a full one is dropped, never awaited, and its browser's `EventSource` reconnects and refetches. The hub sends the stored JSON verbatim, and on a notification for an account with no subscriber it does not even load the event. Hubs are per instance: another process's browsers are served by that process's own listener.
+- **Replay window.** Event ids commit out of order under concurrency, and a NOTIFY sent while the listener was down is gone. After every (re)connect the listener replays `load_since(connected accounts, last_seen - 100, 500)` to the hub and wakes the dispatcher once. Duplicates are harmless: the frontend treats each event as a cache invalidation.
+- **Listener outage.** If `LISTEN` fails, SSE pauses and the listener retries every 30 s; nothing is lost from the database, and the reconnect replay closes the gap. The dispatcher does not depend on NOTIFY: it also polls every second.
+- **Lease claiming.** The dispatcher claims due pending deliveries with `FOR UPDATE SKIP LOCKED` and, in the same statement, increments `attempts` and pushes `available_at` 60 s ahead. A crashed or timed-out claim therefore reappears on its own, and several processes never take the same row. Each send has a 30 s timeout (shorter than the lease). A failure is recorded with `retry_delay` backoff up to `max_attempts` (10), then the delivery is `failed`.
+- **Matrix sink and idempotency.** `interface/events/matrix_room.rs` implements `events::DeliverySink` for `matrix:<room>` deliveries: it rebuilds the `WebhookAlert`, checks the bot is joined and the webhook owner is authorized for the room at delivery time, and sends with the transaction id `outbox-<delivery id>`. A resend after a crash inside one Matrix session is therefore deduplicated by the homeserver; across a crypto-store reset it is at-least-once.
+- **Matrix disconnected.** While the sink is not ready (`MatrixHandle` has no client) the dispatcher claims nothing, so an outage burns no attempts; deliveries wait as `pending` and are never purged.
 
 ## Background jobs
 
@@ -99,7 +125,7 @@ Adding a job type: add a `JobType` variant and a `NewJob` constructor in `domain
 
 `BotModule` (`interface/chat/mod.rs`) is the extension point for Matrix commands. `ModuleRegistry::dispatch` walks modules in registration order and returns the first `Some(html_reply)`; registration happens in `interface/channels/matrix/mod.rs::new_full` and **order matters** (the TTS module must be registered before the AI module's direct-message catch-all, and a test pins that). `CoreModule` receives an `Arc<RwLock<Option<Arc<ModuleRegistry>>>>` back-reference so `!help` can enumerate all modules — a deliberate cycle-breaking indirection; keep it if you touch help generation.
 
-`spawn_background_workers(&ModuleContext)` is used only by the webhook worker until step 9; scheduled work (reminders, briefings, portfolio) is jobs, see *Background jobs*. `interface/channels/matrix/dispatcher.rs` accepts a message either when it starts with `!` or when the bot is mentioned, strips the HTML mention pill, and yields a `CommandContext`.
+A module only handles commands; scheduled work (reminders, briefings, portfolio) is jobs, see *Background jobs*, and event delivery is the outbox, see *Events and the outbox*. `interface/channels/matrix/dispatcher.rs` accepts a message either when it starts with `!` or when the bot is mentioned, strips the HTML mention pill, and yields a `CommandContext`.
 
 Room caching and target-room resolution belong to `application/rooms` (rules in `domain/rooms`, Matrix-side discovery in `interface/chat/rooms.rs`). `interface/http/rooms.rs::list_rooms` is a *room picker* feed, not a room dump: it drops spaces, DMs, rooms not in `RoomState::Joined`, rooms lacking a name or canonical alias, and any room where the bot is not joined or *none* of the caller's linked MXIDs is. An account can have several Matrix identities, so "the caller" is a set; an account with no link gets an empty list, which is the honest answer rather than an error.
 
@@ -145,7 +171,7 @@ The merge (`application/accounts/merge.rs`, with its allow-listed dynamic SQL in
 Settings is a layered feature (`domain::settings`, `application::settings::SettingsService`, `infrastructure/postgres/repositories/settings.rs`, `interface/chat/settings.rs`'s `SettingsModule`) whose data every *other* feature reads — todo and reminder format timestamps against the sender's zone, finance and portfolio default an amount's currency to it — and which `interface/http/settings.rs` exposes to the web UI. Rows in `user_settings` are keyed by `owner_id`, the same account key every other table uses, and a user has no row until they change something: this is a domain rule (`UserSettings::default()`, UTC/USD), not something baked into SQL — the repository returns `None` for a missing row, and `SettingsService::get`/`get_or_default` apply the default. `get_or_default` additionally swallows a database error into the defaults for a read that must not fail the caller's own work (a command reply, another feature's read path) — a settings lookup must never be the reason a `!todo list` reply is lost.
 
 
-Every write goes through `SettingsService`, which validates `timezone`/`currency` before persisting regardless of what built the row (`save`), or reads-modifies-writes one field at a time in a single transaction with the row locked (`modify`, `SELECT ... FOR UPDATE`) so two concurrent changes for the same owner cannot interleave and lose one side's update. `SettingsModule::handle_command` broadcasts `SettingsUpdated` (via the service, after commit) on a successful save and on nothing else — a read or a rejected value announces no change. Portfolio follows the same discipline (below).
+Every write goes through `SettingsService`, which validates `timezone`/`currency` before persisting regardless of what built the row (`save`), or reads-modifies-writes one field at a time in a single transaction with the row locked (`modify`, `SELECT ... FOR UPDATE`) so two concurrent changes for the same owner cannot interleave and lose one side's update. `SettingsService` publishes `SettingsUpdated` (through the outbox, in the save's transaction) on a successful save and on nothing else — a read or a rejected value announces no change. Portfolio follows the same discipline (below).
 
 
 `utils::format_datetime` takes a `chrono_tz::Tz` rather than assuming UTC, and `todo`/`reminder` handlers resolve the sender's zone once, *after* the command is claimed, so an unrelated room message costs no query. The finance handler's `DEFAULT_CURRENCY` constant is gone: `parse_entry` takes the sender's saved currency, so `!expense add 9.99 coffee` books in what they actually spend. An explicit code in the command still wins.

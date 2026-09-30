@@ -48,7 +48,7 @@ One capability is implemented once and reached through every interface:
 
 - **Two ways in.** Matrix events arrive as `!commands` (parsed deterministically, no LLM, zero token cost) or as natural language routed to the LLM, which calls tools. The embedded Axum server serves `/api/v1/*` and a live SSE stream at `/api/v1/events` for the web UI.
 - **One implementation.** Chat commands, REST handlers, MCP and AI tools all call the same application services over `domain/` rules, so validation, ownership isolation and events are never duplicated.
-- **Live updates.** Every mutation publishes a typed `SystemEvent`, delivered per owner over SSE.
+- **Live updates.** Every mutation publishes a typed `SystemEvent` through the transactional outbox, delivered per owner over SSE.
 - **Modular monolith.** No queues or microservices. Optional local OCR, speech-to-text and text-to-speech run in a separate `inference` server the bot reaches over HTTP; a missing one disables only that feature.
 
 The reasoning behind the design is in [`docs/architecture.md`](docs/architecture.md).

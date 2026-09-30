@@ -29,9 +29,11 @@ npm --prefix frontend run generate-api                                          
 
 ## Event flow (SSE)
 
-`GET /api/v1/events` streams `SystemEvent`s. Every state mutation, from every interface (Matrix, REST, MCP, AI tools), must publish one after commit. `SystemEvent` is serialised `#[serde(tag = "type", content = "payload")]` and sent as an **unnamed** SSE message, so the frontend reads `EventSource.onmessage` and dispatches on `type`, the variant name verbatim (`TodoCreated`, not snake_case).
+`GET /api/v1/events` streams `SystemEvent`s. Every state mutation, from every interface (Matrix, REST, MCP, AI tools), must publish one **inside the transaction of its state change** (`repositories::outbox::publish`, see [`architecture.md`](architecture.md#events-and-the-outbox)). `SystemEvent` is serialised `#[serde(tag = "type", content = "payload")]` and sent as an **unnamed** SSE message, so the frontend reads `EventSource.onmessage` and dispatches on `type`, the variant name verbatim (`TodoCreated`, not snake_case).
 
-The broadcast channel is process-wide. `sse::owned_events` narrows it to one owner via `SystemEvent::owner_id()`, so a client sees only its own rows. **Every variant must return a meaningful `owner_id()`**; deletion variants carry an explicit `owner_id` field because their row is already gone. A mutation with no event silently breaks the live UI; a variant with no owner leaks across users or is never delivered. The stream ends on the process shutdown token so open tabs never hold the drain open.
+The stream is fed by the outbox: one `LISTEN outbox` per process pushes each committed event to that instance's SSE hub, which sends it only to subscriptions of the owning account (`SystemEvent::owner_id()`, the `outbox_events.account_id` column). Hubs are per instance; there is no cross-instance fan-out beyond every instance listening. **Every variant must return a meaningful `owner_id()`**; deletion variants carry an explicit `owner_id` field because their row is already gone. A mutation with no event silently breaks the live UI; a variant with no owner cannot be stored. The stream ends on the process shutdown token so open tabs never hold the drain open.
+
+Reconnects. If the server's listener connection drops, the hub replays recent events of connected accounts when it returns (a duplicate only re-invalidates a client cache). A subscriber that cannot keep up is dropped and the browser's own `EventSource` reconnect applies, unchanged: the client refetches its state and the stream carries no history of its own.
 
 ## Authentication
 
@@ -92,7 +94,7 @@ External senders (Alertmanager, Grafana, Uptime Kuma, Sentry, cron, CI) post int
 Management is also available from chat: `!webhook list | create <name> [room] | test <id> | revoke <id>`. Design rules:
 
 - The raw token (`whk_<hex>`, CSPRNG) is shown once; only its SHA-256 is stored.
-- A request returns `202 Accepted` once its delivery is written to the transactional queue (`webhook_outbox`); a background worker delivers with exponential backoff on homeserver rate limits and outages. Every attempt is logged (`GET /account/webhooks/:id/logs`). The queue moves onto the general job queue/outbox in design steps 8–9 (`superpowers/HANDOFF.md`).
+- A request returns `202 Accepted` once its alert is written to the outbox (`WebhookTriggered` plus one `matrix:<room>` delivery, committed together with the webhook's `last_triggered_at`). The events runtime delivers it: up to 10 attempts, waiting `retry_delay` after each failure (1 s, doubling, capped at 512 s), each send bounded to 30 s. `failure_count` rises on every failed attempt and `total_delivered_count` on delivery, each only when the delivery row actually changed state. `GET /account/webhooks/:id/logs` reads the outbox deliveries, so history is kept 30 days; the `outbox_id` in the accepted response and the `id` of each log entry are delivery ids. The `WebhookTriggered` SSE payload carries `id`, `owner_id`, `room_id`, `severity`, `title`, `html_body` and `plain_body`, and no outbox id. See [`architecture.md`](architecture.md#events-and-the-outbox).
 - A sliding-window limiter allows 60 requests per minute per token.
 
 ## Testing passkey auth locally

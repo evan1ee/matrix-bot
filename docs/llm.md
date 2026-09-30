@@ -38,7 +38,7 @@ MCP client ──────────┴────────────
 
 ## The turn
 
-`llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, room, optional broadcaster and `StageReporter`) and a prompt:
+`llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, room and `StageReporter`) and a prompt:
 
 1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`.
 2. **Context.** The active conversation for `(owner, room)` is loaded; one idle longer than `SESSION_TTL_SECONDS` (1 h) is replaced by a fresh one, and `!ai reset` clears it. Immediate retries are deduped by checking the conversation's tail message before inserting.
@@ -59,7 +59,7 @@ Adding a tool:
 2. The executor calls the domain's **service** (`services.<f>`), never SQL and never a repository through a pass-through layer.
 3. Resolve the owner from the turn's authenticated account; ignore any owner, account or resource-ownership value the model supplies.
 4. Validate arguments as untrusted input (types, ranges, the 500-character cap) and return a structured error string the model can act on.
-5. A mutation publishes its `SystemEvent` through the service, exactly like a chat command or REST call. A destructive operation needs explicit confirmation semantics where appropriate.
+5. A mutation publishes its `SystemEvent` through the service (in its transaction, via the outbox), exactly like a chat command or REST call. A destructive operation needs explicit confirmation semantics where appropriate.
 6. Test malformed arguments, an unknown tool name, tool failure and duplicate calls, and assert the owner scope.
 
 Well-formed model output is still not authoritative. Tool results are fed back as JSON, prompts state the boundaries, and nothing the model says grants access.
@@ -83,7 +83,7 @@ A built-in Model Context Protocol server (protocol `2024-11-05`, `interface/mcp/
 
 - **`--owner` is required** and must parse as an account id (`acct_<uuid>`). MCP mode never falls back to "the oldest account": that would make an authorisation decision by accident. In stdio mode tracing goes to `stderr` so stdout stays a clean protocol channel; the process starts neither front door and ends at stdin EOF.
 - **Tokens** (`mb_mcp_…`) are created with `!mcp token [name]` (DM only) or in the web UI (Settings → MCP; `GET/POST /api/v1/mcp/tokens`, `DELETE /api/v1/mcp/tokens/:id`), listed with `!mcp list` and revoked with `!mcp revoke <id_or_prefix>`. A token is scoped to its account and may carry an expiry. **An MCP token never satisfies step-up** (`VerifiedUser`): it is a machine credential, not a passkey assertion.
-- **Tools** are the shared registry, so every tool is owner-scoped and every mutation broadcasts its `SystemEvent`, updating Matrix and web clients live.
+- **Tools** are the shared registry, so every tool is owner-scoped and every mutation publishes its `SystemEvent` through the service, updating Matrix and web clients live.
 - **Resources** (`resources/list`, `resources/read`) give read-only JSON without spending tool calls: `matrixbot://todos/pending`, `matrixbot://finance/recent`, `matrixbot://portfolio/summary`, `matrixbot://habits/today`, `matrixbot://life/profile`.
 - **Prompts** (`prompts/list`, `prompts/get`): `daily-briefing`, `weekly-retrospective`, `portfolio-review`.
 

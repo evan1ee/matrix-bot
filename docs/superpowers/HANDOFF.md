@@ -50,7 +50,7 @@ backend/src/
   app.rs             composition root: config, pool, migrations, AppServices, front doors,
                      one CancellationToken tree, 15 s bounded shutdown, supervision
   domain/<f>/        pure types + invariants (std/chrono/uuid/serde/thiserror only)
-  application/<f>/   <F>Service: use cases, transactions, publishes events after commit
+  application/<f>/   <F>Service: use cases, transactions, publishes events in the transaction via the outbox
                      application/mod.rs: AppError, AppServices
   infrastructure/
     postgres/        pool, ping, repositories/<f>.rs (sqlx::query! only), read_models/, merge.rs
@@ -59,10 +59,12 @@ backend/src/
     http/            axum handlers + DTOs (the OpenAPI types), health probes
     chat/            BotModule command handlers per feature, error_reply
     jobs/            job handlers: reminder.fire, briefing.send, portfolio.* (payload → service → Delivery)
+    events/          outbox delivery sinks: MatrixRoomSink (webhook alerts → Matrix room)
     channels/matrix/ matrix-sdk client, sync loop, E2EE, verification
   jobs/              job runtime: workers, reaper, purge, leader-elected scheduler (no SQL)
+  events/            events runtime: LISTEN outbox loop, SSE hub, delivery dispatcher, hourly purge (no SQL)
   llm/               prompts, tool loop, tool registry
-  error.rs events.rs at the crate root for now (§11); events/ is added by design step 9
+  error.rs           at the crate root for now (§11)
 ```
 
 **Dependency rule** (enforced by `backend/tests/architecture.rs`):
@@ -73,6 +75,7 @@ backend/src/
 | `application` | axum, matrix-sdk, reqwest, utoipa, `interface` |
 | `infrastructure` | `application`, `interface` |
 | `jobs` | axum, matrix-sdk, utoipa, reqwest, `interface`; no SQL, tests included |
+| `events` | axum, matrix-sdk, utoipa, reqwest, `interface`; no SQL, tests included; no lower layer imports it |
 
 ## 3. Settled user decisions
 
@@ -102,7 +105,7 @@ backend/src/
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
 | 8 | Job queue (`0003_jobs`); the reminder, briefing and portfolio loops replaced by jobs (there was no bills loop, R20). Design `specs/2026-09-29-job-queue-design.md`, plan `plans/2026-09-29-job-queue.md` | ✅ (branch `refactor/job-queue`) | `950e043..cade37c` |
 | 8b | `backend/src/accounts/` retired (user request, part of the step 8 plan; Tasks 12–18) | ✅ | `d91baf7..5d6fc1d` |
-| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox`, plan `plans/2026-09-30-outbox.md` (Tasks 1–12, clarifications C1–C9) | ◐ implementation in progress: Tasks 1–10 of 12 done | — |
+| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox`, plan `plans/2026-09-30-outbox.md` (Tasks 1–12, clarifications C1–C9) | ✅ Tasks 1–11 done; Task 12 (whole-branch review) pending. Final verification: see Task 12 | `437345f..d143d1a` + the docs commit (`docs: step 9 outbox`) |
 | 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | `4bf5bc7` |
 
 ### Step 6: feature layering (`docs/superpowers/plans/2026-09-25-feature-layering.md`)
@@ -196,9 +199,9 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Step 9: outbox (`0004_outbox`).** The design is approved (`docs/superpowers/specs/2026-09-30-outbox-design.md`, branch `refactor/outbox`) and the plan is `docs/superpowers/plans/2026-09-30-outbox.md`; implement it task by task (Sonnet implements, Opus reviews each task). Original brief: write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
+1. **Task 12: whole-branch review of step 9** (`BASE=65236b5..HEAD`, plan `plans/2026-09-30-outbox.md`), if not yet done; fix its findings.
 2. Clear the §11 items that touch the test suite first.
-3. Hand the user the merge gates (§10). Merge only on their instruction.
+3. Hand the user the merge gates (§10). The production rehearsal now covers migrations 0004 and 0005 (0005 drops `webhook_outbox` without history; drain it before release). Merge only on their instruction.
 4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
@@ -215,7 +218,7 @@ Read the committed rooms code before starting any feature:
 | Layer | Path | Rules |
 |---|---|---|
 | Domain | `domain/<f>/mod.rs` | Pure entities, validated commands, invariants as functions. No `FromRow`, no `ToSchema`, no sqlx, no I/O. Its own `thiserror` error enum. |
-| Service | `application/<f>/mod.rs` | `<F>Service { pool, events }` owns transactions (only where an invariant needs atomicity; keep the boundaries listed in the survey) and **publishes events after commit**. `From<FError> for AppError` (→ `Validation`). |
+| Service | `application/<f>/mod.rs` | `<F>Service { pool }` owns transactions (keep the boundaries listed in the survey) and **publishes each event inside the transaction of its state change** with `repositories::outbox::publish(&mut tx, &event)`. `From<FError> for AppError` (→ `Validation`). |
 | Repository | `infrastructure/postgres/repositories/<f>.rs` | Free functions over `impl sqlx::PgExecutor<'_>`, `query!` only, private `Row` structs with `From`/`TryFrom` into domain types. |
 | HTTP | `interface/http/<f>.rs` | DTOs with the exact current schema names and fields, built from domain types. `AppError` maps to the same status codes and messages as before. |
 | Chat | `interface/chat/<f>.rs` | The `BotModule` implementation. `handle_command(ctx, services, …)` calls the service. Errors go through `interface::chat::error_reply`; failures of external services use `AppError::External { service, source }`. |
@@ -231,7 +234,7 @@ Each feature task also:
 ### Patterns and rulings to reuse
 
 - **Service parameter:** on `handle_command` it comes after `ctx`; on AI, tool and MCP functions it is the first parameter. Moved code reaches services only through these parameters.
-- **Wiring `AppServices`:** production builds it with the event broadcaster (`AppServices::with_events`). The constructor without events is test-only. Never let production silently drop events.
+- **Wiring `AppServices`:** one constructor, `AppServices::new(pool)`, in production and tests. Events need no wiring: they are rows in the service's own transaction, so nothing can silently drop them.
 - **Many parameters:** prefer a small context struct over `#[allow(clippy::too_many_arguments)]`. `run_ai_turn`'s `#[allow]` becomes `AiTurnContext` in Task 13.
 - **Tie-breaks:** among equal timestamps, the first item in picker order wins. Use a strict `>`; **never `max_by`**, which returns the *last* of equal maxima.
 - **Behaviour is frozen.** If you find an existing bug, keep the behaviour and report it. If it is a security or data-correctness bug, fix it, test it, and disclose it in the commit body. Rooms did this for literal `%`/`_` matching; settings did it for validated writes.
@@ -240,7 +243,7 @@ Each feature task also:
 - **Testing:**
   - Domain: plain `#[test]`.
   - Repository: `test_pool()` + `run_migrations_unlocked`.
-  - Service: transaction atomicity (a NUL byte in a TEXT field forces a failure mid-transaction), degradation (a closed pool), events emitted only after commit.
+  - Service: transaction atomicity (a NUL byte in a TEXT field forces a failure mid-transaction), degradation (a closed pool), events written in the same transaction (read them back with `repositories::outbox::event_types_for`; a rolled-back change leaves none).
   - Handler tests move with their handlers.
 - **Dynamic SQL:** optional filters use `($1::text IS NULL OR col = $1)` inside `query!`. Never build SQL from strings. The only exception is `infrastructure/postgres/merge.rs` (D-A).
 
@@ -322,6 +325,28 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 - **R39:** the `accounts/` retirement was added to the step 8 plan at the user's request with no separate design — the target layout was already settled by `AGENTS.md` §3.1 — cost if wrong: a security-sensitive refactor without a design doc.
 - **R42:** `AccountService::revoke_session` is account-scoped (`AND account_id`) and audits (`sessions_revoked`) only when a row changed. The DELETE endpoint keeps its 404/200 contract (it checks ownership first); only a concurrent-revoke race returns 200 without an audit row. HTTP recovery revokes the presented cookie with `revoke_session` first and falls back to `end_session` (unscoped, unaudited) when that returns `false`, so any presented session, including another account's, is still killed; a foreign or dead cookie no longer writes the old spurious audit row (disclosed improvement) — cost if wrong: a foreign-cookie revoke on recovery is no longer audited.
 
+### Outbox (step 9)
+
+- **R43:** history is dropped, not migrated (O2) — user decision — cost: webhook logs are empty after cutover.
+- **R44:** retention is 30 days for all finished events (O6) — SPEC §6.1 — cost: webhook logs no longer show alerts older than 30 days.
+- **R45:** `max_attempts` defaults to 10 — frozen webhook behaviour — cost: none.
+- **R46:** the migration is split into 0004 (DDL) and 0005 (drop) — each commit green, migrations never edited — cost: one extra migration file.
+- **R47:** lease claiming instead of a `running` status and a reaper (O4) — cost: a crashed delivery waits up to 60 s.
+- **R48:** NOTIFY carries `<id>:<account>` (O5) — cost: none.
+- **R49:** `WebhookTriggered` carries the alert bodies and drops `outbox_id` — the event is the single record of the alert — cost: a larger SSE payload.
+- **R50:** the inbound and test-alert responses' `outbox_id` becomes the delivery id — cost: a client that parsed the `outbox_` prefix breaks (none known).
+- **R51:** the dispatcher idles while Matrix is disconnected — cost: none; attempts are no longer burned.
+- **R52:** a temporary broadcaster→hub bridge during Tasks 3–9, deleted in Task 10 — keeps each commit green — cost: none after Task 10.
+- **R53:** the plan clarifications C1–C9 supersede the spec text where they differ (counters on every failed attempt, `StoredEvent` as JSON, `WebhookTriggered(WebhookAlert)`, atomicity per state change, repositories taking `&mut PgConnection`, no publisher outside services, retry delay, 30 s delivery timeout, `events/` as a directory module); the spec is amended (`> Amended after implementation`) — the plan is the more detailed and later document — cost: none.
+- **R54:** the baseline Gate was red under clippy 1.94 (`unnecessary_cast` in `llm/turn.rs`), fixed in its own chore commit `437345f` before step 9 — toolchain drift, not a behaviour change — cost: none.
+- **R55:** the `sse_handler` `///` doc text still describes the old broadcast filter because it is the frozen OpenAPI description; a `//` note marks it — `openapi.json` must stay byte-identical — cost: a stale API description until the contract is next revised.
+- **R56 (C4 consequence):** an event commits with its own state change before cross-service follow-ups (reminder sync after a todo/bill write, finance mirroring after a bill payment or cash move), so a failed follow-up leaves the event in place — atomicity is per state change, transaction boundaries frozen — cost: a browser may refetch state whose follow-up failed.
+- **R57:** disclosed atomicity improvements — `withdraw_cash_at` now writes the debit and its audit entry in one transaction; the assistant message and `AiConversationUpdated` are atomic (a failed insert publishes nothing); the `!briefing now` announce always publishes (it depended on an optional broadcaster) — cost: none observable beyond the fixes.
+- **R58:** the bookmark AI tool goes through `BookmarkService` (C6); database errors returned to the model now read `database error: …` (`AppError` display); not-found and validation texts are unchanged — cost: a slightly different error string to the model.
+- **R59:** webhook counters move only when the delivery row actually changed state, so a late duplicate record after a lease re-claim cannot count twice; `enqueue_alert` with no delivery row (impossible: one destination) returns an opaque `AppError::Database`; `list_webhook_logs` keeps the old `limit.clamp(1, 100)` / `offset.max(0)` — cost: none.
+- **R60:** `only_application_publishes_to_the_outbox` checks production code only; the hub's tests seed rows through `repositories::outbox::publish` — the rule guards runtime paths — cost: a test could publish outside a service (tests only).
+- **R61:** `tokio-stream` is removed from `backend/Cargo.toml` (its only use was `BroadcastStream`) — cost: none.
+
 ## 10. User gates before merging sub-project 1
 
 These need the human. Prepare them; don't perform them.
@@ -343,12 +368,12 @@ These need the human. Prepare them; don't perform them.
 - No handler test pins the portfolio snapshot capture call (R38): deleting `capture_current_snapshot_for_owner` from `RefreshPricesHandler` would pass the handler tests; only the application-layer test covers the write.
 - ~~Test-pool schema leaks~~ — resolved by `5469098` (`db::test_schemas` reaps schemas of dead test processes), merged into this branch.
 - Resolved in the final fix wave: the two flaky timing tests (`the_runtime_runs_jobs_and_stops_on_cancel` now waits `shutdown_grace` plus a margin and the reaper races each query against shutdown; the wake-up test waits for the listener's catch-up wake instead of sleeping, and the worker registers for wake-ups before it claims).
-- `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.
+- `error.rs` still sits at the crate root, outside the layer layout (the user flagged this as a file-structure issue) and needs a home. ~~`events.rs`~~ moved to `events/` in step 9.
 - (Resolved: `AccountId::from_seed` is now `#[cfg(test)]`.)
 - Portfolio price refreshes now run concurrently across workers (one `portfolio.refresh_prices` job per holding owner); the old loop refreshed owners one after another, so Yahoo load is no longer serialized across owners.
 - The briefing window does not wrap the hour (`07:58` is due only at :58–:59). Frozen behaviour, kept.
-- `!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).
-- `BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.
+- ~~`!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).~~ — resolved by step 9.
+- ~~`BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.~~ — resolved by step 9.
 - Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.
 - `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
 - `domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).
@@ -356,6 +381,7 @@ These need the human. Prepare them; don't perform them.
 - The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
 - Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
 - `JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS` (too many workers can starve the pool).
+- Hub replay after a listener reconnect uses `load_since(accounts, last_seen − 100, 500)` ascending; before any event has been forwarded (`last_seen = 0`) a reconnect replays the oldest 500 events of connected accounts, not the newest (the orchestrator may fix it in Task 12 and then strike this).
 - `ReminderService::enqueue_due` is unbounded (one pass enqueues every due reminder).
 
 ## 12. Document map
@@ -370,6 +396,8 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-09-25-feature-survey.md` | Per-feature facts: sizes, tables, coupling, transactions, adapters |
 | `docs/superpowers/specs/2026-09-29-job-queue-design.md` | Step 8 design (job queue), amended to match the code |
 | `docs/superpowers/plans/2026-09-29-job-queue.md` | Step 8 plan: Part A job queue, Part B accounts/ retirement |
+| `docs/superpowers/specs/2026-09-30-outbox-design.md` | Step 9 design (transactional outbox), amended to match the code (R53) |
+| `docs/superpowers/plans/2026-09-30-outbox.md` | Step 9 plan: Tasks 1–12, clarifications C1–C9 |
 | `docs/superpowers/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |

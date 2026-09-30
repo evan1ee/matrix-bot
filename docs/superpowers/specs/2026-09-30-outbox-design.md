@@ -3,6 +3,7 @@
 > Sub-project 1, design step 9. Binding parent: `2026-09-24-postgres-foundation-design.md` §5.2 (D9).
 > Roadmap: `SPEC.md` §6. Approved by the user section by section on 2026-09-30.
 > Branch: `refactor/outbox` (from `refactor/postgres-layered` at `65236b5`).
+> Amended after implementation (HANDOFF R53): §5.3 and §5.4 follow the plan clarifications C1–C9 and the code.
 
 ## 1. Goal
 
@@ -127,13 +128,16 @@ Free functions, `query!` only, private `Row` structs.
 ### 5.3 Application
 
 - **Every service mutation** becomes `begin → state write(s) → repositories::outbox::publish → commit`. Services that already hold a transaction publish inside it. The `events` field and `EventBroadcaster` import leave every service.
-- `AppServices::with_events` and the test-only constructor without events are replaced by one `AppServices::new(pool, …)`. No build can silently drop events.
+- `AppServices::with_events` and the test-only constructor without events are replaced by one `AppServices::new(pool)`. No build can silently drop events.
+- **Atomicity is per state change (C4).** A state change and its own event share one transaction. Cross-service compositions (reminder sync after a todo or bill write, finance mirroring after a bill payment or cash move) keep their separate transactions, so a failed follow-up leaves the event in place. One multi-row change that used to be non-atomic (`TodoService::clear_completed`, `withdraw_cash_at`) becomes one transaction. Repositories that opened their own transaction (`finance/categories`, `portfolio/cash`, `portfolio/trades`) take `&mut PgConnection` and the service owns it (C5). No `interface/` or `llm/` code publishes; those paths go through `LlmService`, `BookmarkService` and `BriefingService::announce_manual` (C6).
+- **`SystemEvent::WebhookTriggered(WebhookAlert)` (C3).** `WebhookAlert { id, owner_id, room_id, severity, title, html_body, plain_body }` derives `Serialize`/`Deserialize`; the adjacently tagged newtype yields the same `payload` object as the former struct variant.
+- **Events travel as JSON once stored (C2).** `StoredEvent` carries the serialised `{type, payload}` as `serde_json::Value`; the hub forwards it verbatim.
 - `!briefing now`'s `MorningBriefingSent` moves from `interface/chat/briefing/handler.rs` into a `BriefingService` method (closes a HANDOFF §11 item).
 - **`application/outbox/OutboxService`** holds `{ pool }`:
   - `load`, `load_since`, `claim_due` and `purge` for the runtime;
-  - `record_delivered(claimed)` and `record_failure(claimed, error)`. Each updates the delivery **and**, when the event is a `WebhookTriggered`, the webhook's `total_delivered_count` / `failure_count` in one transaction. `record_failure` chooses between retry at `now() + domain::webhooks::retry_delay(attempts)` and `failed` when `attempts >= max_attempts`.
+  - `record_delivered(claimed)` and `record_failure(claimed, error)`. Each updates the delivery **and**, when the event is a `WebhookTriggered`, the webhook's `total_delivered_count` / `failure_count` in one transaction, and only when the delivery row actually changed state (C1). `failure_count` rises on **every** failed attempt, retry or final, exactly as `mark_outbox_retry`/`mark_outbox_failed` did. `attempts` is incremented at claim (C7), so `record_failure` retries at `now() + domain::webhooks::retry_delay(attempts - 1)` and marks the delivery `failed` when `attempts >= max_attempts`.
 - **`WebhookService`**:
-  - `enqueue_alert` publishes `WebhookTriggered` in a transaction and returns the delivery id;
+  - `enqueue_alert` publishes `WebhookTriggered` and stamps `webhooks.last_triggered_at` in one transaction (C1) and returns the delivery id;
   - `list_logs` reads through the new repository functions;
   - `Notify`, `fetch_pending_outbox` and `mark_outbox_*` are deleted.
 
@@ -142,7 +146,7 @@ Free functions, `query!` only, private `Row` structs.
 SQL-free and protocol-free, like `jobs/`; the architecture test enforces both.
 
 ```
-events/mod.rs         spawn(services, sink, config, shutdown) → JoinHandle; one child CancellationToken
+events/mod.rs         EventsRuntime::new(pool, services, hub, sink, EventsConfig).run(shutdown); EventsConfig holds every interval and bound (C9: a directory module)
 events/listener.rs    one LISTEN per process; reconnect with backoff; fans out to hub and dispatcher
 events/hub.rs         SSE hub
 events/dispatcher.rs  durable deliveries
@@ -162,7 +166,7 @@ while it was down is gone.
 **Dispatcher.**
 - It is one task. It wakes on the listener, with a 1 s poll as a fallback.
 - It claims batches of 20 with a 60 s lease, and loops while a batch is full.
-- For each claimed delivery it calls `DeliverySink::deliver`, then `record_delivered` or `record_failure`.
+- For each claimed delivery it calls `DeliverySink::deliver` under a 30 s `tokio::time::timeout` (`EventsConfig::deliver_timeout`, below the 60 s lease so a hung send never overlaps a re-claim; a timeout is a failed attempt, C8), then `record_delivered` or `record_failure`.
 - If a crash lands between the send and the mark, the lease expires and the row is retried. Matrix transaction-id idempotency (below) absorbs the resend within the session.
 
 ```rust
@@ -170,9 +174,11 @@ while it was down is gone.
 pub trait DeliverySink: Send + Sync {
     /// False while the channel is down: the dispatcher idles instead of burning attempts.
     fn is_ready(&self) -> bool;
-    async fn deliver(&self, delivery: &ClaimedDelivery, event: &SystemEvent) -> Result<(), String>;
+    async fn deliver(&self, delivery: &ClaimedDelivery) -> Result<(), String>;
 }
 ```
+
+`ClaimedDelivery` carries its `StoredEvent`; the Matrix sink reads the alert from the event JSON as a `WebhookAlert` (C2, C3).
 
 **Matrix sink.** `interface/events/matrix_room.rs` implements `DeliverySink` for `Destination::MatrixRoom`. It keeps
 today's checks unchanged, and every error stays retryable, as today:
