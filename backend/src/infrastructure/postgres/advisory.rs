@@ -25,9 +25,21 @@ impl LeaderLock {
     /// `Some` while this session holds `pg_try_advisory_lock(key)`.
     pub async fn try_acquire(pool: &PgPool, key: i64) -> sqlx::Result<Option<Self>> {
         let mut conn = pool.acquire().await?.detach();
-        let locked = sqlx::query_scalar!(r#"SELECT pg_try_advisory_lock($1) AS "locked!""#, key)
-            .fetch_one(&mut conn)
-            .await;
+        // Bounded like the other lock I/O: on a half-open connection the
+        // query could otherwise hang the scheduler loop for minutes. On
+        // timeout `conn` is dropped, which closes the socket.
+        let locked = tokio::time::timeout(
+            LOCK_IO_TIMEOUT,
+            sqlx::query_scalar!(r#"SELECT pg_try_advisory_lock($1) AS "locked!""#, key)
+                .fetch_one(&mut conn),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(sqlx::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "advisory lock query timed out",
+            )))
+        });
         match locked {
             Ok(true) => Ok(Some(Self { conn, key })),
             Ok(false) => {
@@ -35,7 +47,8 @@ impl LeaderLock {
                 Ok(None)
             }
             Err(err) => {
-                let _ = conn.close().await;
+                // May be a dead connection: bound the goodbye, then drop.
+                let _ = tokio::time::timeout(LOCK_IO_TIMEOUT, conn.close()).await;
                 Err(err)
             }
         }

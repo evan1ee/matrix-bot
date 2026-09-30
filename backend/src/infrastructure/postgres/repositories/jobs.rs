@@ -275,7 +275,14 @@ pub async fn status_by_key(
     )
     .fetch_optional(exec)
     .await?;
-    Ok(status.map(|s| crate::domain::jobs::JobStatus::parse(&s).expect("status CHECK")))
+    status
+        .map(|s| {
+            // The status CHECK makes this unreachable; still a decode error,
+            // not a panic, if the schema and the enum ever drift apart.
+            crate::domain::jobs::JobStatus::parse(&s)
+                .ok_or_else(|| sqlx::Error::Decode(format!("unknown job status {s:?}").into()))
+        })
+        .transpose()
 }
 
 /// Whether a job of `job_type` is still queued or running. Lets a recurring

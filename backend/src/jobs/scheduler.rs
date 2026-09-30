@@ -2,6 +2,7 @@
 //! session advisory lock) fires the recurring ticks that enqueue jobs.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use sqlx::PgPool;
@@ -12,6 +13,11 @@ use super::schedule::Tick;
 use super::JobsConfig;
 use crate::application::AppServices;
 use crate::infrastructure::postgres::advisory::LeaderLock;
+
+/// Upper bound on one tick's work. A tick only enqueues rows, so this is far
+/// above its normal cost; it exists so a hung query cannot stall every other
+/// tick (and the leadership liveness check) forever.
+const TICK_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) async fn run(
     pool: PgPool,
@@ -77,10 +83,15 @@ async fn lead(
                 continue;
             }
             *at = now + tick.every;
-            match (tick.fire)(services, Utc::now()).await {
-                Ok(0) => {}
-                Ok(n) => debug!(tick = tick.name, enqueued = n, "Scheduler tick"),
-                Err(err) => warn!(tick = tick.name, error = %err, "Scheduler tick failed"),
+            match tokio::time::timeout(TICK_TIMEOUT, (tick.fire)(services, Utc::now())).await {
+                Ok(Ok(0)) => {}
+                Ok(Ok(n)) => debug!(tick = tick.name, enqueued = n, "Scheduler tick"),
+                Ok(Err(err)) => warn!(tick = tick.name, error = %err, "Scheduler tick failed"),
+                Err(_) => warn!(
+                    tick = tick.name,
+                    timeout = ?TICK_TIMEOUT,
+                    "Scheduler tick timed out; abandoned until its next run"
+                ),
             }
         }
     }

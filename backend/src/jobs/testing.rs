@@ -29,6 +29,7 @@ pub(crate) enum Behaviour {
     Sleep(Duration),
     IgnoreCancel,
     UntilCancelled,
+    Panic,
 }
 
 #[derive(Clone)]
@@ -86,6 +87,7 @@ impl JobHandler for Scripted {
                 ctx.cancel.cancelled().await;
                 Ok(())
             }
+            Behaviour::Panic => panic!("scripted panic"),
         }
     }
 }

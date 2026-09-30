@@ -37,6 +37,10 @@ pub(crate) async fn run(
 /// Forwards notifications until the listener fails; never returns `Ok`.
 async fn listen(pool: &PgPool, wake: &Notify) -> sqlx::Result<std::convert::Infallible> {
     let mut listener = JobNotifications::connect(pool).await?;
+    // A NOTIFY sent while the listener was down is gone, so every (re)connect
+    // wakes the workers once to re-check the queue. It also tells a test that
+    // the subscription is live.
+    wake.notify_waiters();
     loop {
         listener.next().await?;
         wake.notify_waiters();

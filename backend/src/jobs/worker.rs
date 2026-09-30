@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use sqlx::PgPool;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -34,12 +35,18 @@ pub(crate) async fn run(worker: Worker, shutdown: CancellationToken) {
         if shutdown.is_cancelled() {
             return;
         }
+        // Registered before the claim: a NOTIFY that lands between an empty
+        // claim and the wait below would otherwise be lost (notify_waiters
+        // stores no permit) and cost a whole poll interval.
+        let notified = worker.wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         match repo::claim(&worker.pool, &worker.id, &types).await {
             Ok(Some(job)) => worker.run_one(job, &shutdown).await,
             Ok(None) => {
                 tokio::select! {
                     _ = shutdown.cancelled() => return,
-                    _ = worker.wake.notified() => {}
+                    _ = notified => {}
                     _ = tokio::time::sleep(worker.config.poll_interval) => {}
                 }
             }
@@ -113,7 +120,21 @@ impl Worker {
             cancel: cancel.clone(),
         };
         let limit = handler.timeout();
-        let run = tokio::time::timeout(limit, handler.run(&ctx, job.payload.clone()));
+        // A panicking handler must cost one attempt, not the worker task (and
+        // with it the whole runtime, which treats any task exit as fatal).
+        let guarded = async {
+            match std::panic::AssertUnwindSafe(handler.run(&ctx, job.payload.clone()))
+                .catch_unwind()
+                .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    error!("Job handler panicked");
+                    Err(JobError::Retryable(anyhow::anyhow!("handler panicked")))
+                }
+            }
+        };
+        let run = tokio::time::timeout(limit, guarded);
         tokio::pin!(run);
         let period = self.config.heartbeat_interval;
         let mut beat = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
@@ -256,6 +277,25 @@ mod tests {
         stop.shutdown().await;
     }
 
+    /// Given a handler that panics, When a worker runs the job, Then the
+    /// panic counts as a retryable failure (the job is retried, then fails
+    /// with the reason recorded) and the worker itself survives.
+    #[tokio::test]
+    async fn a_panicking_handler_is_retried_and_the_worker_survives() {
+        let h = Harness::new().await;
+        let id = h
+            .enqueue(NewJob::test_job(TEST_TYPE, Some("boom")).with_policy(2, 0))
+            .await;
+        let handler = Scripted::new(Behaviour::Panic);
+        let stop = h.spawn_worker(handler.clone(), JobsConfig::for_tests());
+        let rec = h.wait_for_status(id, JobStatus::Failed).await;
+        assert_eq!(rec.attempts, 2, "the panic was retried once");
+        assert_eq!(handler.runs(), 2);
+        assert!(rec.error.unwrap().contains("handler panicked"));
+        assert!(!stop.handle.is_finished(), "the worker outlived the panic");
+        stop.shutdown().await;
+    }
+
     /// Given a job allowed three attempts and a permanent failure, When a
     /// worker runs, Then it fails at once without a retry.
     #[tokio::test]
@@ -317,16 +357,16 @@ mod tests {
     async fn heartbeats_keep_a_long_job_from_being_reaped() {
         let h = Harness::new().await;
         let id = h.enqueue(NewJob::test_job(TEST_TYPE, Some("hb"))).await;
-        let handler = Scripted::new(Behaviour::Sleep(Duration::from_secs(3)));
+        let handler = Scripted::new(Behaviour::Sleep(Duration::from_secs(5)));
         let mut config = JobsConfig::for_tests();
-        config.stale_after = Duration::from_secs(1);
+        config.stale_after = Duration::from_secs(3);
         config.heartbeat_interval = Duration::from_millis(200);
         let stop = h.spawn_worker(handler.clone(), config);
 
         let pool = h.pool.clone();
         let reaper = tokio::spawn(async move {
             loop {
-                let _ = repo::reap_stale(&pool, Duration::from_secs(1)).await;
+                let _ = repo::reap_stale(&pool, Duration::from_secs(3)).await;
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         });
@@ -387,14 +427,20 @@ mod tests {
         let mut config = JobsConfig::for_tests();
         config.poll_interval = Duration::from_secs(30);
         let stop = h.spawn_worker(handler.clone(), config);
+        // The listener wakes waiters once it is subscribed; observe that
+        // instead of sleeping. The worker registers for wake-ups before it
+        // claims, so it cannot miss the NOTIFY whatever it is doing.
+        let mut subscribed = Box::pin(stop.wake.notified());
+        subscribed.as_mut().enable();
         let listener = tokio::spawn(wakeup::run(
             h.pool.clone(),
             stop.wake.clone(),
             Duration::from_millis(100),
             stop.token.clone(),
         ));
-        // Let the worker find the queue empty and the listener subscribe.
-        tokio::time::sleep(Duration::from_millis(700)).await;
+        tokio::time::timeout(Duration::from_secs(10), subscribed)
+            .await
+            .expect("listener subscribes");
         let id = h.enqueue(NewJob::test_job(TEST_TYPE, Some("w"))).await;
         tokio::time::timeout(
             Duration::from_secs(5),

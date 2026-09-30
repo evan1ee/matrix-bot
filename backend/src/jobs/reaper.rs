@@ -18,17 +18,33 @@ pub(crate) async fn run(pool: PgPool, config: Arc<JobsConfig>, shutdown: Cancell
     reap.set_missed_tick_behavior(MissedTickBehavior::Delay);
     purge.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
+        // `biased` so a cancelled token always wins over a due tick; each
+        // query is raced against shutdown so a slow statement cannot delay
+        // the runtime's exit.
         tokio::select! {
+            biased;
             _ = shutdown.cancelled() => return,
-            _ = reap.tick() => match repo::reap_stale(&pool, config.stale_after).await {
-                Ok(0) => {}
-                Ok(n) => warn!(reaped = n, "Requeued jobs whose worker stopped heart-beating"),
-                Err(err) => warn!(error = %err, "Reaping stale jobs failed"),
-            },
-            _ = purge.tick() => match repo::purge_finished(&pool, config.purge_after).await {
-                Ok(n) => debug!(purged = n, "Purged finished jobs"),
-                Err(err) => warn!(error = %err, "Purging finished jobs failed"),
-            },
+            _ = reap.tick() => {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => return,
+                    result = repo::reap_stale(&pool, config.stale_after) => match result {
+                        Ok(0) => {}
+                        Ok(n) => warn!(reaped = n, "Requeued jobs whose worker stopped heart-beating"),
+                        Err(err) => warn!(error = %err, "Reaping stale jobs failed"),
+                    },
+                }
+            }
+            _ = purge.tick() => {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => return,
+                    result = repo::purge_finished(&pool, config.purge_after) => match result {
+                        Ok(n) => debug!(purged = n, "Purged finished jobs"),
+                        Err(err) => warn!(error = %err, "Purging finished jobs failed"),
+                    },
+                }
+            }
         }
     }
 }

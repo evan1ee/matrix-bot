@@ -282,7 +282,7 @@ mod tests {
 
     /// Given a runtime with one scripted handler and no ticks, When a job is
     /// enqueued, Then it completes; When shutdown fires, Then run returns
-    /// within 2 s.
+    /// within the shutdown grace plus a margin.
     #[tokio::test]
     async fn the_runtime_runs_jobs_and_stops_on_cancel() {
         let h = testing::Harness::new().await;
@@ -304,9 +304,12 @@ mod tests {
             .await;
         h.wait_for_status(id, JobStatus::Completed).await;
         token.cancel();
-        tokio::time::timeout(Duration::from_secs(2), task)
+        // Housekeeping loops may be mid-query when shutdown fires; bound the
+        // wait by the worker grace plus a margin, not by a bare guess.
+        let bound = JobsConfig::for_tests().shutdown_grace + Duration::from_secs(5);
+        tokio::time::timeout(bound, task)
             .await
-            .unwrap()
+            .expect("runtime stops within the grace period plus a margin")
             .unwrap();
     }
 }
