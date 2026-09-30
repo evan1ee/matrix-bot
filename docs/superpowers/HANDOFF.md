@@ -127,7 +127,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run (step 8 final fix wave, `cargo test -p matrix-bot --all-targets --no-fail-fast`, no `--skip`): **lib 854 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 18 passed**. Inference: 71 passed at step 7 (crate unchanged, not re-run).
+The last full test run (step 8 final fix wave, `cargo test -p matrix-bot --all-targets --no-fail-fast`, no `--skip`): **lib 857 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 18 passed**. Inference: 71 passed at step 7 (crate unchanged, not re-run).
 
 ## 5. How to work
 
@@ -320,6 +320,7 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 - **R30:** credential parsing is split: `domain::accounts::{Credential, cookie_value, Principal}` (pure), `interface/http/auth/credential.rs::parse_credential` (headers), `AccountService::resolve_credential` (lookups). The MCP `touch_last_used` stays a fire-and-forget spawn (frozen) — cost if wrong: a last-used stamp lost on shutdown.
 - **R37:** the backup-code path writes its `recovery_completed` row when the code is consumed (before the session is created), matching the matured-request path — "completed" means the code was consumed — cost if wrong: a completed row with no session if session creation fails afterwards.
 - **R39:** the `accounts/` retirement was added to the step 8 plan at the user's request with no separate design — the target layout was already settled by `AGENTS.md` §3.1 — cost if wrong: a security-sensitive refactor without a design doc.
+- **R42:** `AccountService::revoke_session` is account-scoped (`AND account_id`) and audits (`sessions_revoked`) only when a row changed. The DELETE endpoint keeps its 404/200 contract (it checks ownership first); only a concurrent-revoke race returns 200 without an audit row. HTTP recovery revokes the presented cookie with `revoke_session` first and falls back to `end_session` (unscoped, unaudited) when that returns `false`, so any presented session, including another account's, is still killed; a foreign or dead cookie no longer writes the old spurious audit row (disclosed improvement) — cost if wrong: a foreign-cookie revoke on recovery is no longer audited.
 
 ## 10. User gates before merging sub-project 1
 
@@ -344,7 +345,7 @@ These need the human. Prepare them; don't perform them.
 - Resolved in the final fix wave: the two flaky timing tests (`the_runtime_runs_jobs_and_stops_on_cancel` now waits `shutdown_grace` plus a margin and the reaper races each query against shutdown; the wake-up test waits for the listener's catch-up wake instead of sleeping, and the worker registers for wake-ups before it claims).
 - `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.
 - (Resolved: `AccountId::from_seed` is now `#[cfg(test)]`.)
-- Portfolio price refreshes now run concurrently across workers (one `portfolio.refresh_prices` job per holding owner); the old loop refreshed owners one after another.
+- Portfolio price refreshes now run concurrently across workers (one `portfolio.refresh_prices` job per holding owner); the old loop refreshed owners one after another, so Yahoo load is no longer serialized across owners.
 - The briefing window does not wrap the hour (`07:58` is due only at :58–:59). Frozen behaviour, kept.
 - `!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).
 - `BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.
@@ -352,7 +353,6 @@ These need the human. Prepare them; don't perform them.
 - `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
 - `domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).
 - A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
-- Portfolio refreshes run concurrently across workers (one job per owner), so Yahoo load is no longer serialized.
 - The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
 - Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
 - `JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS` (too many workers can starve the pool).
