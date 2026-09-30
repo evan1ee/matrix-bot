@@ -190,26 +190,39 @@ pub async fn claim_due(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn mark_delivered(ex: impl PgExecutor<'_>, id: DeliveryId) -> sqlx::Result<bool> {
+// Every mark below is fenced by the `attempts` the claim returned: a claim
+// that outlived its lease (and was re-claimed, which bumps `attempts`)
+// changes nothing. `false` means the lease was lost.
+
+pub async fn mark_delivered(
+    ex: impl PgExecutor<'_>,
+    id: DeliveryId,
+    claimed_attempts: i32,
+) -> sqlx::Result<bool> {
     let r = sqlx::query!(
-        "UPDATE outbox_deliveries SET status = 'delivered', delivered_at = NOW() WHERE id = $1 AND status = 'pending'",
-        id.0
+        "UPDATE outbox_deliveries SET status = 'delivered', delivered_at = NOW() WHERE id = $1 AND status = 'pending' AND attempts = $2",
+        id.0,
+        claimed_attempts
     )
     .execute(ex)
     .await?;
     Ok(r.rows_affected() == 1)
 }
 
+/// Schedules the next attempt `delay` from now on the database clock, the
+/// same one `claim_due` compares against.
 pub async fn mark_retry(
     ex: impl PgExecutor<'_>,
     id: DeliveryId,
-    available_at: DateTime<Utc>,
+    claimed_attempts: i32,
+    delay: Duration,
     error: &str,
 ) -> sqlx::Result<bool> {
     let r = sqlx::query!(
-        "UPDATE outbox_deliveries SET available_at = $2, last_error = $3 WHERE id = $1 AND status = 'pending'",
+        "UPDATE outbox_deliveries SET available_at = NOW() + make_interval(secs => $3), last_error = $4 WHERE id = $1 AND status = 'pending' AND attempts = $2",
         id.0,
-        available_at,
+        claimed_attempts,
+        secs(delay),
         truncate_error(error)
     )
     .execute(ex)
@@ -220,12 +233,31 @@ pub async fn mark_retry(
 pub async fn mark_failed(
     ex: impl PgExecutor<'_>,
     id: DeliveryId,
+    claimed_attempts: i32,
     error: &str,
 ) -> sqlx::Result<bool> {
     let r = sqlx::query!(
-        "UPDATE outbox_deliveries SET status = 'failed', last_error = $2 WHERE id = $1 AND status = 'pending'",
+        "UPDATE outbox_deliveries SET status = 'failed', last_error = $3 WHERE id = $1 AND status = 'pending' AND attempts = $2",
         id.0,
+        claimed_attempts,
         truncate_error(error)
+    )
+    .execute(ex)
+    .await?;
+    Ok(r.rows_affected() == 1)
+}
+
+/// Gives back a claim that was never sent (batch budget spent, shutdown):
+/// the attempt is not burned and the row is due at once.
+pub async fn release(
+    ex: impl PgExecutor<'_>,
+    id: DeliveryId,
+    claimed_attempts: i32,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query!(
+        "UPDATE outbox_deliveries SET attempts = attempts - 1, available_at = NOW() WHERE id = $1 AND status = 'pending' AND attempts = $2",
+        id.0,
+        claimed_attempts
     )
     .execute(ex)
     .await?;
@@ -389,6 +421,27 @@ pub async fn delivery_statuses_for(
     .await
 }
 
+/// Test-only: `(status, attempts, available_at > now)` of each of one
+/// account's deliveries, oldest first.
+#[cfg(test)]
+pub async fn delivery_probe_for(
+    ex: impl PgExecutor<'_>,
+    account: &AccountId,
+) -> sqlx::Result<Vec<(String, i32, bool)>> {
+    let rows = sqlx::query!(
+        r#"SELECT d.status, d.attempts, (d.available_at > NOW()) AS "later!"
+           FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id
+           WHERE e.account_id = $1 ORDER BY d.id"#,
+        account.as_uuid()
+    )
+    .fetch_all(ex)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.status, r.attempts, r.later))
+        .collect())
+}
+
 #[cfg(test)]
 pub async fn event_types_for(
     ex: impl PgExecutor<'_>,
@@ -405,8 +458,6 @@ pub async fn event_types_for(
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-
-    use chrono::Utc;
 
     use super::*;
     use crate::db::migrate::run_migrations_unlocked;
@@ -534,21 +585,48 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(mark_delivered(&pool, claimed[0].id).await.unwrap());
-        assert!(mark_failed(&pool, claimed[1].id, "boom").await.unwrap());
-        assert!(mark_retry(
-            &pool,
-            claimed[2].id,
-            Utc::now() - chrono::Duration::seconds(1),
-            "later"
-        )
-        .await
-        .unwrap());
+        assert!(mark_delivered(&pool, claimed[0].id, 1).await.unwrap());
+        assert!(mark_failed(&pool, claimed[1].id, 1, "boom").await.unwrap());
+        assert!(mark_retry(&pool, claimed[2].id, 1, Duration::ZERO, "later")
+            .await
+            .unwrap());
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         let next = claim_due(&pool, 10, Duration::from_secs(60)).await.unwrap();
         assert_eq!(next.len(), 1, "only the retried delivery is due");
         assert_eq!(next[0].id, claimed[2].id);
+    }
+
+    /// A mark carrying an older claim's attempt count is refused; a release
+    /// restores the attempt and makes the row due again.
+    #[tokio::test]
+    async fn marks_are_fenced_by_the_claimed_attempts() {
+        let (pool, ids) = pool_with(&["acct_a"]).await;
+        let mut tx = pool.begin().await.unwrap();
+        publish(&mut tx, &alert(ids[0], "!r:1")).await.unwrap();
+        tx.commit().await.unwrap();
+        let first = claim_due(&pool, 10, Duration::ZERO).await.unwrap();
+        let second = claim_due(&pool, 10, Duration::from_secs(60)).await.unwrap();
+        assert_eq!((first[0].attempts, second[0].attempts), (1, 2));
+        let id = first[0].id;
+
+        assert!(!mark_delivered(&pool, id, 1).await.unwrap());
+        assert!(!mark_failed(&pool, id, 1, "x").await.unwrap());
+        assert!(!mark_retry(&pool, id, 1, Duration::ZERO, "x").await.unwrap());
+        assert!(!release(&pool, id, 1).await.unwrap());
+        assert_eq!(
+            delivery_probe_for(&pool, &ids[0]).await.unwrap(),
+            vec![("pending".to_string(), 2, true)]
+        );
+
+        assert!(release(&pool, id, 2).await.unwrap());
+        assert_eq!(
+            delivery_probe_for(&pool, &ids[0]).await.unwrap(),
+            vec![("pending".to_string(), 1, false)],
+            "the released attempt was restored and the row is due"
+        );
+        let again = claim_due(&pool, 10, Duration::from_secs(60)).await.unwrap();
+        assert_eq!(again[0].attempts, 2);
     }
 
     /// Retention deletes old finished events but never one still pending.

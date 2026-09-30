@@ -37,6 +37,10 @@ pub struct EventsConfig {
     /// Per-delivery send timeout; must stay below `lease` (C8) so a hung
     /// send can never overlap a re-claim of the same delivery.
     pub deliver_timeout: Duration,
+    /// Safety margin kept free at the end of the lease: a delivery is never
+    /// started, and its timeout never runs, past `lease - lease_margin` of the
+    /// claim, so a mark is written while the claim is still ours.
+    pub lease_margin: Duration,
 }
 
 impl EventsConfig {
@@ -52,6 +56,7 @@ impl EventsConfig {
             lease: Duration::from_secs(60),
             batch: 20,
             deliver_timeout: Duration::from_secs(30),
+            lease_margin: Duration::from_secs(5),
         }
     }
 
@@ -62,6 +67,7 @@ impl EventsConfig {
             poll_interval: Duration::from_millis(100),
             lease: Duration::from_secs(1),
             deliver_timeout: Duration::from_millis(500),
+            lease_margin: Duration::from_millis(100),
             ..Self::production()
         }
     }
@@ -135,6 +141,8 @@ mod tests {
     fn the_delivery_timeout_is_shorter_than_the_lease() {
         for config in [EventsConfig::production(), EventsConfig::for_tests()] {
             assert!(config.deliver_timeout < config.lease);
+            // The first delivery of a batch always gets its full timeout.
+            assert!(config.deliver_timeout + config.lease_margin < config.lease);
         }
         assert_eq!(EventsConfig::production().lease, Duration::from_secs(60));
         assert_eq!(

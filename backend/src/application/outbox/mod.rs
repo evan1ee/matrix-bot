@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use chrono::Utc;
 use sqlx::PgPool;
 
 use crate::application::AppError;
@@ -63,32 +62,39 @@ impl OutboxService {
         Ok(repo::claim_due(&self.pool, limit, lease).await?)
     }
 
-    pub async fn record_delivered(&self, delivery: &ClaimedDelivery) -> Result<(), AppError> {
+    /// Returns whether this call made the transition; `false` means the lease
+    /// was lost (the delivery was re-claimed or finished meanwhile) and
+    /// nothing, counters included, changed.
+    pub async fn record_delivered(&self, delivery: &ClaimedDelivery) -> Result<bool, AppError> {
         let mut tx = self.pool.begin().await?;
-        // Counted only when this call made the transition, so a late duplicate
-        // record (after a lease re-claim) cannot count a delivery twice.
-        if repo::mark_delivered(&mut *tx, delivery.id).await? {
+        let recorded = repo::mark_delivered(&mut *tx, delivery.id, delivery.attempts).await?;
+        if recorded {
             if let Some(webhook_id) = webhook_id(delivery) {
                 webhooks_repo::increment_delivered(&mut *tx, &webhook_id).await?;
             }
         }
         tx.commit().await?;
-        Ok(())
+        Ok(recorded)
     }
 
     /// Schedules the next attempt, or fails the delivery after its last one.
+    /// `None` means the lease was lost and nothing changed.
     pub async fn record_failure(
         &self,
         delivery: &ClaimedDelivery,
         error: &str,
-    ) -> Result<DeliveryStep, AppError> {
+    ) -> Result<Option<DeliveryStep>, AppError> {
         let step = next_delivery_step(delivery.attempts, delivery.max_attempts);
         let mut tx = self.pool.begin().await?;
         let recorded = match step {
             DeliveryStep::RetryAfterAttempts(n) => {
-                repo::mark_retry(&mut *tx, delivery.id, Utc::now() + retry_delay(n), error).await?
+                let delay =
+                    Duration::from_secs(u64::try_from(retry_delay(n).num_seconds()).unwrap_or(0));
+                repo::mark_retry(&mut *tx, delivery.id, delivery.attempts, delay, error).await?
             }
-            DeliveryStep::Fail => repo::mark_failed(&mut *tx, delivery.id, error).await?,
+            DeliveryStep::Fail => {
+                repo::mark_failed(&mut *tx, delivery.id, delivery.attempts, error).await?
+            }
         };
         // C1: every failed attempt counts, retry or final.
         if recorded {
@@ -97,7 +103,13 @@ impl OutboxService {
             }
         }
         tx.commit().await?;
-        Ok(step)
+        Ok(recorded.then_some(step))
+    }
+
+    /// Gives back a claim that was never sent, restoring its attempt.
+    /// `false`: the lease was already lost.
+    pub async fn release(&self, delivery: &ClaimedDelivery) -> Result<bool, AppError> {
+        Ok(repo::release(&self.pool, delivery.id, delivery.attempts).await?)
     }
 
     pub async fn purge(&self, older_than: Duration) -> Result<u64, AppError> {
@@ -143,23 +155,77 @@ mod tests {
         let (svc, _pool) = service_with_alert("acct_retry").await;
         let claimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
         let step = svc.record_failure(&claimed[0], "down").await.unwrap();
-        assert_eq!(step, DeliveryStep::RetryAfterAttempts(0));
+        assert_eq!(step, Some(DeliveryStep::RetryAfterAttempts(0)));
     }
 
     #[tokio::test]
     async fn a_failure_on_the_last_attempt_fails_the_delivery() {
         let (svc, _pool) = service_with_alert("acct_fail").await;
-        let mut claimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
-        claimed[0].attempts = claimed[0].max_attempts; // as if this was the 10th claim
+        let mut claimed = Vec::new();
+        for _ in 0..10 {
+            // A zero lease makes the row due again at once: the 10th claim.
+            claimed = svc.claim_due(10, Duration::ZERO).await.unwrap();
+        }
+        assert_eq!(claimed[0].attempts, claimed[0].max_attempts);
         assert_eq!(
             svc.record_failure(&claimed[0], "down").await.unwrap(),
-            DeliveryStep::Fail
+            Some(DeliveryStep::Fail)
         );
         assert!(svc
             .claim_due(10, Duration::from_secs(0))
             .await
             .unwrap()
             .is_empty());
+    }
+
+    /// Given a delivery whose lease expired and was re-claimed, When the first
+    /// claimer records its outcome late, Then nothing changes: no state
+    /// transition, no webhook counter.
+    #[tokio::test]
+    async fn a_stale_claim_cannot_overwrite_a_reclaim() {
+        let pool = crate::db::pool::test_pool_sized(3).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("acct_stale");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = crate::application::AppServices::new(&pool);
+        let (hook, _) = services
+            .webhooks
+            .create(&owner, "ci", "!r:1")
+            .await
+            .unwrap();
+        services
+            .webhooks
+            .enqueue_alert(
+                &hook,
+                "!r:1",
+                None,
+                "h",
+                "h",
+                crate::domain::webhooks::WebhookSeverity::Info,
+            )
+            .await
+            .unwrap();
+        let svc = &services.outbox;
+        let first = svc.claim_due(10, Duration::from_millis(100)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let second = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
+        assert_eq!(second[0].attempts, 2);
+
+        let _ = svc.record_failure(&first[0], "late").await;
+        let _ = svc.record_delivered(&first[0]).await;
+
+        assert_eq!(
+            repo::delivery_probe_for(&pool, &owner).await.unwrap(),
+            vec![("pending".to_string(), 2, true)],
+            "still pending, still leased to the second claimer"
+        );
+        let hook = services.webhooks.get(&owner, &hook.id).await.unwrap();
+        assert_eq!(hook.failure_count, 0);
+        assert_eq!(hook.total_delivered_count, 0);
+        // The live claimer can still finish it.
+        svc.record_delivered(&second[0]).await.unwrap();
+        let hook = services.webhooks.get(&owner, &hook.id).await.unwrap();
+        assert_eq!(hook.total_delivered_count, 1);
     }
 
     #[tokio::test]
