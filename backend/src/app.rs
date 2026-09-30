@@ -58,6 +58,7 @@ async fn supervise_front_doors(
     api: &mut JoinHandle<()>,
     matrix: &mut JoinHandle<()>,
     jobs: &mut JoinHandle<()>,
+    events: &mut JoinHandle<()>,
 ) -> Option<&'static str> {
     tokio::select! {
         _ = shutdown.cancelled() => None,
@@ -75,6 +76,11 @@ async fn supervise_front_doors(
             log_early_exit("Job runtime", result);
             shutdown.cancel();
             Some("Job runtime")
+        }
+        result = &mut *events => {
+            log_early_exit("Events runtime", result);
+            shutdown.cancel();
+            Some("Events runtime")
         }
     }
 }
@@ -132,12 +138,25 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         jobs::JobsConfig::production(config.job_workers, config.job_worker_host.clone()),
     );
 
+    let hub = crate::events::Hub::new(
+        services.outbox.clone(),
+        crate::events::EventsConfig::production().subscriber_capacity,
+    );
+    let events_runtime = crate::events::EventsRuntime::new(
+        db.pool.clone(),
+        services.clone(),
+        hub.clone(),
+        broadcaster.clone(),
+        crate::events::EventsConfig::production(),
+    );
+
     let listener = http::bind(&config).await?;
     let api = http::start_api_server(
         &config,
         db.clone(),
         services.clone(),
         broadcaster.clone(),
+        hub.clone(),
         handles.clone(),
         listener,
         shutdown.child_token(),
@@ -146,6 +165,8 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // Spawned only once nothing fallible remains before supervision: an earlier
     // `?` would leave it detached, its token never cancelled.
     let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
+    // After the API server is up (R35): SSE subscribers exist before events flow.
+    let mut events_task = tokio::spawn(events_runtime.run(shutdown.child_token()));
     let mut matrix = tokio::spawn(run_bot_loop(
         config,
         db.clone(),
@@ -155,16 +176,28 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         shutdown.child_token(),
     ));
 
-    let ended = supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs_task).await;
+    let ended = supervise_front_doors(
+        &shutdown,
+        &mut api,
+        &mut matrix,
+        &mut jobs_task,
+        &mut events_task,
+    )
+    .await;
     info!("Shutting down Matrix Bot & Web API server...");
     let deadline = Instant::now() + SHUTDOWN_GRACE;
 
-    // The runtime goes first: its shutdown releases running jobs, which needs
-    // the pool open. All three share the one deadline.
+    // The job runtime goes first: its shutdown releases running jobs, which
+    // needs the pool open. The events runtime follows it, then the API server
+    // (whose SSE streams end on their own token). All share the one deadline.
     let tasks = vec![
         OwnedTask {
             name: "Job runtime",
             handle: jobs_task,
+        },
+        OwnedTask {
+            name: "Events runtime",
+            handle: events_task,
         },
         OwnedTask {
             name: "REST API server",
@@ -310,6 +343,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_front_door_ending_early_cancels_shutdown() {
         let shutdown = CancellationToken::new();
+        let mut events = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
         let mut api = tokio::spawn(async {}); // ends immediately, unrequested
         let mut matrix = tokio::spawn({
             let shutdown = shutdown.clone();
@@ -321,7 +358,7 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
 
         assert!(
             shutdown.is_cancelled(),
@@ -338,6 +375,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_panicking_front_door_also_cancels_shutdown() {
         let shutdown = CancellationToken::new();
+        let mut events = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
         let mut api = tokio::spawn(async { panic!("boom") });
         let mut matrix = tokio::spawn({
             let shutdown = shutdown.clone();
@@ -349,7 +390,7 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
 
         assert!(shutdown.is_cancelled());
     }
@@ -357,6 +398,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_requested_shutdown_is_not_treated_as_an_early_exit() {
         let shutdown = CancellationToken::new();
+        let mut events = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
         let mut api = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
@@ -376,7 +421,7 @@ mod tests {
         // branch under test).
         tokio::time::timeout(
             Duration::from_secs(1),
-            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs),
+            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events),
         )
         .await
         .expect("must return promptly once shutdown was already requested");
@@ -385,12 +430,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_job_runtime_ending_early_cancels_shutdown() {
         let shutdown = CancellationToken::new();
+        let mut events = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        });
         let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
         let mut api = waiter(shutdown.clone());
         let mut matrix = waiter(shutdown.clone());
         let mut jobs = tokio::spawn(async {}); // ends immediately, unrequested
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
 
         assert!(
             shutdown.is_cancelled(),
@@ -399,15 +448,36 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn an_events_runtime_ending_early_cancels_shutdown() {
+        let shutdown = CancellationToken::new();
+        let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+        let mut api = waiter(shutdown.clone());
+        let mut matrix = waiter(shutdown.clone());
+        let mut jobs = waiter(shutdown.clone());
+        let mut events = tokio::spawn(async {}); // ends immediately, unrequested
+
+        let ended =
+            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
+
+        assert_eq!(ended, Some("Events runtime"));
+        assert!(shutdown.is_cancelled());
+    }
+
     fn tasks_of(
         api: JoinHandle<()>,
         matrix: JoinHandle<()>,
         jobs: JoinHandle<()>,
+        events: JoinHandle<()>,
     ) -> Vec<OwnedTask> {
         vec![
             OwnedTask {
                 name: "Job runtime",
                 handle: jobs,
+            },
+            OwnedTask {
+                name: "Events runtime",
+                handle: events,
             },
             OwnedTask {
                 name: "REST API server",
@@ -424,7 +494,7 @@ mod tests {
     /// consumed handle is not awaited again (that panics) and nothing lags.
     #[tokio::test(start_paused = true)]
     async fn stopping_after_an_early_exit_does_not_rejoin_the_ended_task() {
-        for ended_name in ["Job runtime", "REST API server"] {
+        for ended_name in ["Job runtime", "REST API server", "Events runtime"] {
             let shutdown = CancellationToken::new();
             let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
             let early = |name: &str| {
@@ -437,14 +507,17 @@ mod tests {
             let mut api = early("REST API server");
             let mut matrix = waiter(shutdown.clone());
             let mut jobs = early("Job runtime");
+            let mut events = early("Events runtime");
 
-            let ended = supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs).await;
+            let ended =
+                supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events)
+                    .await;
             assert_eq!(ended, Some(ended_name));
 
             let started = Instant::now();
             let laggards = stop_remaining(
                 started + Duration::from_secs(15),
-                tasks_of(api, matrix, jobs),
+                tasks_of(api, matrix, jobs, events),
                 ended,
             )
             .await;

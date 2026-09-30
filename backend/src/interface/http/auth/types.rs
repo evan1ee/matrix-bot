@@ -119,6 +119,8 @@ pub struct ApiState {
     /// instead of reaching repositories or the pool.
     pub services: crate::application::AppServices,
     pub broadcaster: crate::events::EventBroadcaster,
+    /// This instance's SSE subscribers; the only path events take to a browser.
+    pub hub: crate::events::Hub,
     pub registration_secret: Option<String>,
     pub registration_open: bool,
     pub homeserver: String,
@@ -216,8 +218,10 @@ impl ApiState {
         homeserver: String,
         http_client: reqwest::Client,
     ) -> Self {
+        let services = crate::application::AppServices::with_events(&db.pool, &broadcaster);
         Self {
-            services: crate::application::AppServices::with_events(&db.pool, &broadcaster),
+            hub: crate::events::Hub::new(services.outbox.clone(), 64),
+            services,
             db,
             broadcaster,
             registration_secret,
@@ -257,11 +261,16 @@ impl ApiState {
     /// `localhost` Relying Party — that a caller then had to remember to
     /// override. Deriving every one of those from `Config` here means a missed
     /// builder call is no longer a way to ship them.
+    // Why: the temporary legacy `broadcaster` and the new `hub` are both
+    // parameters until step 9 Task 10 deletes the broadcaster, which brings
+    // this back to seven arguments. Scope: this function only; remove then.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_config(
         config: &crate::config::Config,
         db: Database,
         services: crate::application::AppServices,
         broadcaster: crate::events::EventBroadcaster,
+        hub: crate::events::Hub,
         handles: crate::interface::channels::matrix::handles::BotHandles,
         shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<Self> {
@@ -287,6 +296,7 @@ impl ApiState {
             db,
             services,
             broadcaster,
+            hub,
             registration_secret: config.registration_secret.clone(),
             registration_open: config.registration_open,
             homeserver: config.homeserver.clone(),
@@ -519,6 +529,7 @@ mod tests {
             crate::db::Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
             crate::events::EventBroadcaster::default(),
+            crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
         )
@@ -567,6 +578,7 @@ mod tests {
             crate::db::Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
             crate::events::EventBroadcaster::default(),
+            crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8,),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
         )

@@ -638,3 +638,43 @@ fn account_ids_are_never_built_from_strings_implicitly() {
         v.join("\n")
     );
 }
+
+#[test]
+fn events_runtime_knows_no_transport_and_runs_no_sql() {
+    let v = violations(
+        "events",
+        &[
+            "axum",
+            "matrix_sdk",
+            "utoipa",
+            "reqwest",
+            "crate::interface",
+            "sqlx::query",
+            "query!",
+            "query_as!",
+            "query_scalar!",
+            "QueryBuilder",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "events/ may use services only:\n{}",
+        v.join("\n")
+    );
+}
+
+#[test]
+fn lower_layers_do_not_import_the_events_runtime() {
+    for dir in ["domain", "application", "infrastructure"] {
+        let v: Vec<String> = violations(dir, &["crate::events::"])
+            .into_iter()
+            // TEMPORARY: removed with the broadcaster in Task 10
+            .filter(|l| !l.contains("EventBroadcaster"))
+            .collect();
+        assert!(
+            v.is_empty(),
+            "{dir}/ must not depend on crate::events:\n{}",
+            v.join("\n")
+        );
+    }
+}
