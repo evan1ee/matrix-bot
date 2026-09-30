@@ -58,9 +58,11 @@ backend/src/
   interface/
     http/            axum handlers + DTOs (the OpenAPI types), health probes
     chat/            BotModule command handlers per feature, error_reply
+    jobs/            job handlers: reminder.fire, briefing.send, portfolio.* (payload → service → Delivery)
     channels/matrix/ matrix-sdk client, sync loop, E2EE, verification
-  llm/ jobs/ events/ added by Task 13 and design steps 8–9
-  modules/  db/executor.rs  db/dialect.rs   ← interim; deleted in Task 14
+  jobs/              job runtime: workers, reaper, purge, leader-elected scheduler (no SQL)
+  llm/               prompts, tool loop, tool registry
+  error.rs events.rs at the crate root for now (§11); events/ is added by design step 9
 ```
 
 **Dependency rule** (enforced by `backend/tests/architecture.rs`):
@@ -97,7 +99,8 @@ backend/src/
 | 5 | Layer skeleton (+ fix wave) | ✅ | `e208254` `fbd5252` `3b53386` `85c2dbc` `e4f1aab` `778585e` `45020fe` `ac816e5` `be24444` |
 | 6 | Feature layering (Tasks 1–14 below) | ✅ | Tasks 1–14 + review & fix wave |
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
-| 8 | Job queue (`0003_jobs`), then move the reminder, briefing, portfolio and bills loops onto it | ☐ needs a plan | — |
+| 8 | Job queue (`0003_jobs`); the reminder, briefing and portfolio loops replaced by jobs (there was no bills loop, R20). Design `specs/2026-09-29-job-queue-design.md`, plan `plans/2026-09-29-job-queue.md` | ✅ (branch `refactor/job-queue`) | `950e043..cade37c` |
+| 8b | `backend/src/accounts/` retired (user request, part of the step 8 plan; Tasks 12–18) | ✅ | `d91baf7..5d6fc1d` |
 | 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`) | ☐ needs a plan | — |
 | 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | `4bf5bc7` |
 
@@ -123,7 +126,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run (step 7): **`cargo test -p matrix-bot --all-targets` 714 lib tests passed / 0 failed / 7 ignored, plus the architecture suite; inference 71 passed**.
+The last full test run (step 8): **`cargo test -p matrix-bot --all-targets` 846 lib tests passed / 0 failed / 7 ignored, architecture suite 18 passed; inference 71 passed (crate unchanged since step 7)**. Two `interface::http::auth::matrix` tests are `--skip`ped in local runs (§11).
 
 ## 5. How to work
 
@@ -192,11 +195,10 @@ The tests create a schema per test and never drop it, which is why the container
 
 ## 7. Next actions (in order)
 
-1. **Step 8: job queue (`0003_jobs`).** Write the design, get the user's approval, then the plan (`docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` and `SPEC.md` §5.1 outline it): `jobs` table with `dedupe_key`, `SKIP LOCKED` dequeue, heartbeat reaper, advisory-lock scheduler; then move the reminder, briefing, portfolio-price and bills loops onto it.
-2. **Step 9: outbox (`0004_outbox`)**. When steps 8–9 land, update `docs/architecture.md`, `docs/api.md` (webhook queue) and `docs/database.md` in the same commits.
-3. Follow-up debt from step 7 (R15): retype the `&str` account-id facades (`accounts/*`, `llm/tools/*`) to `AccountId`, then delete the nil-UUID fallback.
-4. Hand the user the merge gates (§10). Merge only on their instruction.
-5. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
+1. **Step 9: outbox (`0004_outbox`).** Write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
+2. Clear the §11 items that touch the test suite first: the two `mbm.one` tests and the test-schema leaks.
+3. Hand the user the merge gates (§10). Merge only on their instruction.
+4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
 
@@ -281,9 +283,40 @@ Each feature task also:
 ### Account UUID (step 7)
 
 - **R14:** `AccountId` wraps `uuid::Uuid` and serialises/displays as `acct_<32 hex>`, so the HTTP contract and the portfolio audit hash are unchanged. A pinned literal digest test (`test_compute_entry_hash_matches_pre_migration_pinned_digest`) guards historical chains.
-- **R15:** string-to-`AccountId` `From` impls stay only for legacy facades that carry ids this crate formatted itself. An unparseable string maps to the nil UUID (matches no account, fails closed); tests seed a deterministic id instead. Untrusted input (HTTP bodies, `--owner`) goes through `FromStr` and is rejected. Cost if wrong: a facade bug reads as "not found" instead of a compile error; the real fix is retyping the `&str` facades (`accounts/*`, `llm/tools/*`) to `AccountId`.
+- **R15 — closed:** ids are typed `AccountId` end to end; untrusted input (HTTP bodies, `--owner`) goes through `FromStr` and is rejected when malformed. Closed by the accounts/ retirement (Tasks 13–18): the `&str` facades are retyped or deleted, `From<&str>`/`From<String>`/`From<&String>` for `AccountId` are removed, fixtures use `AccountId::from_seed`, and `tests/architecture.rs::account_ids_are_never_built_from_strings_implicitly` keeps them out. (History: step 7 kept a nil-UUID fallback for the legacy facades.)
 - **R16:** `0002` is one transaction with a guard that names the offending table/column/value and rolls everything back. Tests cover a legacy TEXT database upgraded in place, the guard's rollback, and a catalog check that every `owner_id`/`account_id` column is UUID with an FK. It still needs the production-copy rehearsal (§10) before release.
 - Test fixtures create their owners with `db::pool::seed_account(s)`; a fixture that writes as an id with no `accounts` row now fails on the FK, as production would.
+
+### Job queue (step 8)
+
+Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31). Runtime: `docs/architecture.md` → *Background jobs*. Schema: `docs/database.md` → *Job queue*.
+
+- **R17:** `jobs.id` is `BIGINT` identity, not SPEC's UUID — settled "BIGINT row IDs" — cost if wrong: a later rename of one column type.
+- **R18:** the Matrix sync advisory lock is deferred to sub-project 2's channel refactor — one replica exists today and the scheduler lock already prevents double delivery of scheduled work — cost if wrong: a second replica would double-sync until then.
+- **R19:** reminders are enqueued by a scheduler sweep, not at creation — the `reminders` row stays the single source of truth and no create/snooze/cancel path changes — cost if wrong: up to 5 s extra latency, same as before.
+- **R20:** no `bills.post_due` job — no bills loop exists; bills deliver through due reminders — cost if wrong: none (behaviour frozen).
+- **R21:** reminder retry delay becomes exponential (30/60/120/240 s) instead of linear (30/60/90/120 s); `retry_count` keeps its contract meaning — cost if wrong: a disclosed behaviour change.
+- **R22:** portfolio keeps two cadences (alerts 2 min, refresh hourly) instead of evaluating alerts inside the refresh — behaviour frozen — cost if wrong: none.
+- **R23 (C1):** `jobs` is classified `ACCOUNT_ID_FOLLOWS`, not `OWNED_TABLES` — the column is `account_id` and the classification tests key on the column name — cost if wrong: none observable; both lists move rows on merge.
+- **R24 (C2/C3):** handlers take the subject account from the job row (`JobContext.account_id`), and a reminder retry no longer moves `trigger_at` (`record_failed_attempt` replaces `increment_retry`) — keeps merges and the `<id>:<trigger_at>` dedupe key coherent — cost if wrong: a merged account's pending briefing acts on the surviving account (intended).
+- **R25 (C5):** `NOTIFY jobs` comes from an `AFTER INSERT` row trigger rather than the enqueue statement — fires only for real inserts, at commit, and needs no `void` column in `query!` — cost if wrong: a bulk insert NOTIFYs per row (collapsed per transaction by PostgreSQL).
+- **R26 (C4):** backoff is computed in Rust (`domain::jobs::backoff_delay`) and passed to `retry` — one tested rule — cost if wrong: none.
+- **R27 (C7):** `Delivery` is the handlers' seam to Matrix; briefing room sends share the reminder join-and-retry fallback — cost if wrong: the briefing "delivered" log flag now reflects a failed post-join send.
+- **R31 (X12):** plan clarifications C1–C6 supersede the spec text; the spec's §3, §4, §4.1, §4.2 and §5 are amended to match the code (`ACCOUNT_ID_FOLLOWS` instead of `OWNED_TABLES`, `retry` takes a delay, NOTIFY from a trigger, `live_client.rs`, `JobContext.account_id`, `record_failed_attempt`) — each is code-forced and keeps the approved intent — cost if wrong: spec and code diverge.
+- **R32:** `ReminderService::enqueue_due` marks a reminder failed when the job for its exact dedupe key ended `failed` (`fail_if_job_failed`), and the handler also marks it failed on its last attempt — the dedupe key blocks a re-enqueue, so a job that failed by timeout, database error or reaping would strand the reminder pending at a past trigger until the job is purged; exhausted attempts meant failed in the old loop — cost if wrong: one extra status lookup per due-and-conflicting reminder each 5 s tick.
+- **R33:** the `briefing.send` handler drops a job (Ok; no send, no record, no event) whose `local_date` is not the recipient's current local date, and a `record_sent` failure after a send attempt is `Permanent` — bounds lateness after a Matrix outage and never resends — cost if wrong: a briefing missed on a day Matrix was down for the whole window (the old loop missed it too), or a date left unrecorded (the window closes within 5 min anyway).
+- **R34:** portfolio alert DMs are sent per symbol right after that symbol's marks, and `enqueue_alert_check` skips a tick while an earlier `portfolio.check_alerts` job is still open (`repositories::jobs::has_open`) — restores the old mark-then-DM locality, bounds loss on timeout or shutdown, and stops a backlog of checks building while Matrix is down — cost if wrong: none; the check-then-enqueue is not transactional and the minute-bucket dedupe key backstops an overlap.
+- **R35:** `app::run` spawns the job runtime after the API server has started, once nothing fallible remains before supervision, not before `http::bind` — a runtime detached by a bind error would leave claimed jobs locked until the reaper — cost if wrong: none observable.
+- **R36:** `jobs/` stays SQL-free including its tests (the `pg_terminate_backend` test helper lives in `infrastructure::postgres::advisory` under `#[cfg(test)]`), and `test_all_account_and_owner_id_columns_are_uuid` is scoped to `current_schema()` because leaked scratch schemas made every later full-suite run flaky — cost if wrong: none.
+
+### accounts/ retirement
+
+Added to the step 8 plan at the user's request, with no separate design: the target layout was already settled by `AGENTS.md` §3.1.
+
+- **R28 (C8):** `domain::accounts::COOKIE_NAME` / `STEP_UP_WINDOW_MINUTES` were corrected to the live `"mb_session"` / 5 before any caller switched to them, and are pinned by `live_security_constants_are_pinned` — the domain copies had drifted and were unused — cost if wrong: every browser logged out, or a 15-minute step-up window.
+- **R29:** audit-row parity — where an `AccountService` method records a security event the replaced facade did not, the handler's duplicate manual record is deleted, or a non-recording service method is used (logout: `end_session`); each flow has a test pinning its `security_events` rows. Services are the only audit writers: `tests/architecture.rs::interface_never_writes_security_events` forbids the write calls in `interface/` and `llm/` production code. Disclosed data-correctness fixes: the doubled `recovery_completed` row (the chat and HTTP handlers each wrote one on top of `redeem_recovery_request`'s) is gone; `recovery_requested` is written once, by the service; `matrix_linked` is written once, by the service, with the raw mxid as detail (production stored only the handler's HTML-escaped copy; the UI and DM render detail as text, so the two differ only for mxids containing `&<>"'`) — cost if wrong: a missing or doubled audit line, or historical and new `matrix_linked` rows escaped differently.
+- **R37:** the backup-code path writes its `recovery_completed` row when the code is consumed (before the session is created), matching the matured-request path — "completed" means the code was consumed — cost if wrong: a completed row with no session if session creation fails afterwards.
+- **R30:** credential parsing is split: `domain::accounts::{Credential, cookie_value, Principal}` (pure), `interface/http/auth/credential.rs::parse_credential` (headers), `AccountService::resolve_credential` (lookups). The MCP `touch_last_used` stays a fire-and-forget spawn (frozen) — cost if wrong: a last-used stamp lost on shutdown.
 
 ## 10. User gates before merging sub-project 1
 
@@ -302,6 +335,17 @@ These need the human. Prepare them; don't perform them.
 - The AI tool `update_my_settings` advertises `dev_room_id` and `max_history_turns` but ignores them. This is an existing bug and needs a separate fix.
 - Historical plan and review docs still mention the removed `/api/v1/health`. This is intentional.
 - The architecture-test scanner cuts each line at `//`, so a URL literal hides the rest of the line. Task 14 makes it strip string literals.
+- **MUST FIX:** two `interface::http::auth::matrix` tests make a real GET to `https://mbm.one` with no timeout. That breaks the AGENTS.md rule against contacting external services from tests; they are `--skip`ped in local runs. Replace the fetch with a local fake and bound it with a timeout.
+- Test-pool schema leaks: scratch schemas from `test_pool()` are not always reaped (separate task `task_e73c72d5` in progress; see also R36).
+- Flaky timing tests: `jobs::tests::the_runtime_runs_jobs_and_stops_on_cancel` (`jobs/mod.rs`) and `an_enqueue_wakes_an_idle_worker_before_the_poll_interval` (`jobs/worker.rs`, 700 ms sleep) depend on wall-clock timing and can fail on a loaded machine.
+- `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.
+- `AccountId::from_seed` is `pub` and not `#[cfg(test)]`, so production code could build a deterministic id; the architecture test only keeps implicit string conversions out.
+- Portfolio price refreshes now run concurrently across workers (one `portfolio.refresh_prices` job per holding owner); the old loop refreshed owners one after another.
+- The briefing window does not wrap the hour (`07:58` is due only at :58–:59). Frozen behaviour, kept.
+- `!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).
+- `BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.
+- Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.
+- `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
 
 ## 12. Document map
 
@@ -313,6 +357,8 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-09-25-layer-skeleton.md` | Step 5 (done) |
 | `docs/superpowers/plans/2026-09-25-feature-layering.md` | Step 6: Tasks 1–14, decisions D-A…D-H, the Feature Migration Contract |
 | `docs/superpowers/plans/2026-09-25-feature-survey.md` | Per-feature facts: sizes, tables, coupling, transactions, adapters |
+| `docs/superpowers/specs/2026-09-29-job-queue-design.md` | Step 8 design (job queue), amended to match the code |
+| `docs/superpowers/plans/2026-09-29-job-queue.md` | Step 8 plan: Part A job queue, Part B accounts/ retirement |
 | `docs/superpowers/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |

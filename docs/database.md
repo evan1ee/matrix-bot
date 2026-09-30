@@ -40,9 +40,34 @@ Change column types one at a time, against the field that reads them; three roun
 
 ## Account ids
 
-`accounts.id`, every `owner_id` and every `account_id` column is a native `UUID` with a foreign key to `accounts` (migration `0002_account_uuid`: one transaction, with a guard that names the offending table, column and value and rolls back on any non-conforming row). In Rust the type is `domain::accounts::AccountId`; it serialises and displays as `acct_<32 hex>`, so the HTTP contract and the portfolio audit-hash chain are unchanged (a pinned-digest test guards historical chains). The string-to-`AccountId` conversions that remain exist only in legacy facades that carry ids this crate formatted itself; untrusted input (HTTP bodies, `--owner`) goes through `FromStr` and is rejected when malformed.
+`accounts.id`, every `owner_id` and every `account_id` column is a native `UUID` with a foreign key to `accounts` (migration `0002_account_uuid`: one transaction, with a guard that names the offending table, column and value and rolls back on any non-conforming row). In Rust the type is `domain::accounts::AccountId`; it serialises and displays as `acct_<32 hex>`, so the HTTP contract and the portfolio audit-hash chain are unchanged (a pinned-digest test guards historical chains). Ids are typed `AccountId` end to end and there is no implicit conversion from a string; untrusted text (HTTP bodies, `--owner`) goes through `FromStr` and is rejected when malformed. Fixtures use `AccountId::from_seed`.
 
-**Any new owner-keyed table must be added to `OWNED_TABLES`** (`domain/accounts/mod.rs`). An account merge rewrites exactly the tables that constant lists; a missing one is not a compile error, it is a silent data leak on the next merge. A catalog test asserts every `owner_id`/`account_id` column is `UUID` with a foreign key.
+**Any new owner-keyed table must be added to `OWNED_TABLES`** (`domain/accounts/mod.rs`). An account merge rewrites exactly the tables that constant lists; a missing one is not a compile error, it is a silent data leak on the next merge. A catalog test asserts every `owner_id`/`account_id` column is `UUID` with a foreign key. Tables keyed by `account_id` are classified in `ACCOUNT_ID_FOLLOWS` (rows move with the absorbed account), `ACCOUNT_ID_DISCARDED` or `ACCOUNT_ID_UNTOUCHED` instead.
+
+## Job queue
+
+Migration `0003_jobs` adds one table, `jobs`, that the job runtime in `backend/src/jobs/` uses ([`architecture.md`](architecture.md#background-jobs)). Only `infrastructure/postgres/repositories/jobs.rs` (and the leader lock and `LISTEN` helpers beside it) touch it.
+
+| Column | Meaning |
+|---|---|
+| `id` | `BIGINT` identity |
+| `account_id` | nullable `UUID` FK to `accounts`, `ON DELETE CASCADE`; `NULL` for global jobs such as `portfolio.check_alerts` |
+| `job_type`, `payload` | e.g. `reminder.fire`; `JSONB` carrying row ids and dates, never an owner to trust |
+| `status` | `pending`, `running`, `completed`, `failed`, `cancelled` (CHECK) |
+| `priority`, `available_at` | dequeue order: priority descending, then `available_at` ascending; a job is claimable once `available_at <= NOW()` |
+| `attempts`, `max_attempts`, `backoff_seconds` | `attempts` is incremented by `claim`; retry delay is `backoff_seconds · 2^(attempts-1)`, computed by `domain::jobs::backoff_delay` and capped at one day |
+| `locked_by`, `locked_at`, `heartbeat_at`, `started_at`, `completed_at` | ownership and liveness of a running job |
+| `dedupe_key` | with `job_type`, unique (`uq_jobs_dedupe`); enqueue is `ON CONFLICT DO NOTHING`, and a `NULL` key never conflicts |
+| `error` | last failure, truncated to 2,000 characters |
+
+Partial indexes serve the three hot queries: `idx_jobs_dequeue` (`priority DESC, available_at`) on `status = 'pending'`, `idx_jobs_running` (`heartbeat_at`) on `status = 'running'`, and `idx_jobs_finished` (`completed_at`) on the terminal statuses; `idx_jobs_account` covers the account merge.
+
+- **Claiming** is one `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`, so two workers, or two instances, never get the same job.
+- **Guarded transitions.** Every change after `claim` (`heartbeat`, `complete`, `retry`, `defer`, `fail`, `release`) has `WHERE locked_by = $worker AND status = 'running'` and returns whether it applied. A worker whose job the reaper already requeued therefore cannot overwrite the new owner's state.
+- **Wake-ups.** The `jobs_notify` trigger (`AFTER INSERT ... FOR EACH ROW`) runs `pg_notify('jobs', '')`. A trigger fires only for rows really inserted, so a deduplicated enqueue sends nothing, and PostgreSQL delivers it at commit, so a worker never wakes to an uncommitted job.
+- **Account merge.** `jobs` is in `ACCOUNT_ID_FOLLOWS` (`domain/accounts`): pending work moves to the surviving account, and handlers resolve their subject from the job row.
+- **Retention.** Finished jobs are purged after 7 days; the `failed` ones are the operator's record of what did not deliver until then.
+- **Connections.** `JOB_WORKERS` workers, one `LISTEN` connection and the HTTP handlers must fit within `DATABASE_MAX_CONNECTIONS`. The scheduler's advisory-lock connection is detached from the pool (the pool opens a replacement) and does not count against it.
 
 ## Migrations
 

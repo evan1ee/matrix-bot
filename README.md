@@ -397,14 +397,15 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     │   ├── http/             #   axum REST + SSE, DTOs, auth extractors
     │   ├── chat/             #   BotModule command handlers per feature
     │   ├── channels/matrix/  #   Matrix client, dispatcher, E2EE, verification, linking
+    │   ├── jobs/             #   job handlers (reminder, briefing, portfolio)
     │   └── mcp/              #   MCP protocol adapters
+    ├── jobs/                 # job runtime: workers, reaper, leader-elected scheduler
     ├── llm/                  # prompts, tool loop, tool registry (llm/tools/)
     ├── infrastructure/
     │   ├── postgres/         #   repositories, read models, account merge
     │   ├── inference/        #   llm, ocr, stt, tts clients
     │   └── web/              #   outbound feeds, SSRF guard
     ├── db/                   # pool, migration runner, test pools
-    ├── accounts/             # legacy account facades (being retired)
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
 │                              # models (OCR, STT and TTS), a separate binary and image

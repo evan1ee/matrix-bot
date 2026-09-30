@@ -75,13 +75,14 @@ interface/http/              Axum handlers + DTOs (OpenAPI types)
 interface/chat/              BotModule command handlers per feature
 interface/channels/matrix/   matrix-sdk client, sync loop, E2EE, verification
 interface/mcp/               MCP protocol adapters
+interface/jobs/              job handlers (payload → service → delivery)
+jobs/                        job runtime: workers, reaper, leader-elected scheduler (no SQL)
 llm/                         prompts, tool loop, tool registry (llm/tools/)
 infrastructure/postgres/     repositories/<f>.rs, read_models/, merge.rs, ping
 infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
 infrastructure/web/          outbound web feeds, SSRF guard
 app.rs / main.rs             composition roots
 db/                          pool, migration runner, test pools and the schema catalog test
-accounts/                    legacy facades over the accounts repositories (being retired; do not extend)
 ```
 
 | Layer | Owns | May not import |
