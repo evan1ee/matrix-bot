@@ -12,6 +12,7 @@ pub mod footprints;
 pub mod habits;
 pub mod life;
 pub mod llm;
+pub mod outbox;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
@@ -30,6 +31,7 @@ use self::footprints::FootprintService;
 use self::habits::HabitService;
 use self::life::LifeService;
 use self::llm::LlmService;
+use self::outbox::OutboxService;
 use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
 use self::reminders::ReminderService;
@@ -94,6 +96,7 @@ pub struct AppServices {
     pub habits: HabitService,
     pub life: LifeService,
     pub llm: LlmService,
+    pub outbox: OutboxService,
     pub portfolio: PortfolioService,
     pub recurring_bills: RecurringBillsService,
     pub reminders: ReminderService,
@@ -144,6 +147,7 @@ impl AppServices {
         );
         let webhooks = WebhookService::new(pool.clone(), events.clone());
         let portfolio = PortfolioService::new(pool.clone(), events.clone());
+        let outbox = OutboxService::new(pool.clone());
         Self {
             accounts,
             bookmarks,
@@ -153,6 +157,7 @@ impl AppServices {
             habits,
             life,
             llm,
+            outbox,
             portfolio,
             recurring_bills,
             reminders,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox_deliveries SET status = 'delivered', delivered_at = NOW() WHERE id = $1 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95bc2acc11ceb43a269cf58bebc6f7507ca6697d64791b66f5f950ce3e2aad06"
+}

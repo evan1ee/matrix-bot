@@ -206,6 +206,8 @@ pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
     "security_events",
     "account_rooms",
     "jobs",
+    // outbox history follows the account on merge (like jobs, R23)
+    "outbox_events",
 ];
 
 /// Tables keyed by `account_id` whose rows are destroyed rather than moved.

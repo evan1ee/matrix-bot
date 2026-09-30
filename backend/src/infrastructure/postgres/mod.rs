@@ -5,6 +5,7 @@
 pub mod advisory;
 pub mod job_notifications;
 pub mod merge;
+pub mod outbox_notifications;
 pub mod read_models;
 pub mod repositories;
 

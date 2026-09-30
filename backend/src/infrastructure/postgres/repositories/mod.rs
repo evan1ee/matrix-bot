@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod life;
 pub mod llm;
 pub mod mcp;
+pub mod outbox;
 pub mod portfolio;
 pub mod reaction_targets;
 pub mod recurring_bills;
