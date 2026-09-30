@@ -6,9 +6,9 @@ use tracing::warn;
 
 use super::ReminderService;
 use crate::application::AppError;
+use crate::domain::events::SystemEvent;
 use crate::domain::jobs::{JobStatus, NewJob};
 use crate::domain::reminders::{next_occurrence, Reminder};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories;
 
 impl ReminderService {

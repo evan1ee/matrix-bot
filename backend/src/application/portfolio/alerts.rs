@@ -3,8 +3,8 @@ use tracing::{debug, info, warn};
 use super::PortfolioService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::alerts as repo;
 use crate::infrastructure::web::portfolio_feed::{fetch_latest_price, price_to_minor};
 
@@ -60,7 +60,7 @@ impl PortfolioService {
         if deleted {
             self.events.send(SystemEvent::PortfolioAlertDeleted {
                 id,
-                owner_id: owner.to_string(),
+                owner_id: *owner,
             });
         }
         Ok(deleted)

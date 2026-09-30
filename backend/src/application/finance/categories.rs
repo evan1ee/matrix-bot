@@ -1,7 +1,7 @@
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Category, FinanceError, MAX_CATEGORY_LEN};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::finance as repo;
 
 use super::FinanceService;
@@ -42,7 +42,7 @@ impl FinanceService {
         if orphaned.is_some() {
             self.events.send(SystemEvent::CategoryDeleted {
                 id,
-                owner_id: owner.to_string(),
+                owner_id: *owner,
             });
         }
         Ok(orphaned)

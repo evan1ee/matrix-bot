@@ -3,8 +3,8 @@ use tracing::{error, info, warn};
 use super::PortfolioService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::models::Holding;
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as repo;
 use crate::infrastructure::web::portfolio_feed::{
     fetch_latest_price, price_to_minor, search_symbols, TickerSearchResult,

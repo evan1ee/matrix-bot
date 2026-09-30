@@ -11,10 +11,11 @@ use tokio::sync::Notify;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::{SystemEvent, WebhookAlert};
 use crate::domain::webhooks::{
     hash_token, Webhook, WebhookOutboxItem, WebhookSeverity, MAX_NAME_LEN,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 #[derive(Clone)]
@@ -166,7 +167,7 @@ impl WebhookService {
 
         self.events.send(SystemEvent::WebhookDeleted {
             id: id.to_string(),
-            owner_id: owner.to_string(),
+            owner_id: *owner,
         });
 
         Ok(())
@@ -198,13 +199,16 @@ impl WebhookService {
 
         self.notify_outbox();
 
-        self.events.send(SystemEvent::WebhookTriggered {
-            id: webhook.id.clone(),
-            owner_id: webhook.owner_id.to_string(),
-            outbox_id: outbox_item.id.clone(),
-            room_id: target_room.to_string(),
-            severity: severity.as_str().to_string(),
-        });
+        self.events
+            .send(SystemEvent::WebhookTriggered(WebhookAlert {
+                id: webhook.id.clone(),
+                owner_id: webhook.owner_id,
+                room_id: target_room.to_string(),
+                severity: severity.as_str().to_string(),
+                title: title.map(str::to_string),
+                html_body: html_body.to_string(),
+                plain_body: plain_body.to_string(),
+            }));
 
         Ok(outbox_item)
     }

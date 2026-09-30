@@ -7,11 +7,12 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::reminders::{
     NewReminder, RecurrencePattern, Reminder, ReminderPlan, ReminderSource, ReminderStatus,
     SyncOutcome,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 #[derive(Clone)]
@@ -63,7 +64,7 @@ impl ReminderService {
         self.events.send(SystemEvent::ReminderCancelled {
             id,
             room_id: existing.room_id.clone(),
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
         });
 
         Ok(existing)
@@ -81,7 +82,7 @@ impl ReminderService {
             self.events.send(SystemEvent::ReminderCancelled {
                 id,
                 room_id: room_id.to_string(),
-                owner_id: owner_id.to_string(),
+                owner_id: *owner_id,
             });
         }
         Ok(cancelled)
@@ -156,7 +157,7 @@ impl ReminderService {
         repositories::reminders::clear_user_history(&self.pool, owner_id).await?;
 
         self.events.send(SystemEvent::ReminderHistoryCleared {
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
         });
 
         Ok(())
@@ -175,7 +176,7 @@ impl ReminderService {
             self.events.send(SystemEvent::ReminderDeleted {
                 id,
                 room_id: existing.room_id,
-                owner_id: owner_id.to_string(),
+                owner_id: *owner_id,
             });
         }
 
@@ -268,7 +269,7 @@ impl ReminderService {
         self.events.send(SystemEvent::ReminderCancelled {
             id: cancelled.id,
             room_id: cancelled.room_id,
-            owner_id: cancelled.owner_id.to_string(),
+            owner_id: cancelled.owner_id,
         });
 
         Ok(SyncOutcome::Cancelled)

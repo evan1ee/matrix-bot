@@ -169,7 +169,8 @@ pub async fn update_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::domain::events::SystemEvent;
+    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     async fn state() -> ApiState {
@@ -307,7 +308,7 @@ mod tests {
         let event = rx.try_recv().unwrap();
         assert_eq!(
             event.owner_id(),
-            crate::domain::accounts::AccountId::from_seed("acct_@evan:mbm.one").to_string()
+            &crate::domain::accounts::AccountId::from_seed("acct_@evan:mbm.one")
         );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }

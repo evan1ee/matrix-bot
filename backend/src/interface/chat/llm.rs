@@ -8,7 +8,8 @@ use crate::application::settings::SettingsService;
 use crate::application::AppServices;
 use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::domain::events::SystemEvent;
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::llm::alert::{clear_ai_error_state, notify_dev_room_ai_error};
@@ -380,7 +381,7 @@ pub async fn handle_set_model(
             clear_ai_error_state();
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::AiConfigUpdated {
-                    owner_id: owner_id.to_string(),
+                    owner_id: *owner_id,
                 });
             }
             let model = cfg.model_name.unwrap_or_else(|| model_name.to_string());
@@ -407,7 +408,7 @@ pub async fn handle_reset(
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::AiConversationDeleted {
                     id: conv.id,
-                    owner_id: owner_id.to_string(),
+                    owner_id: *owner_id,
                 });
             }
         }

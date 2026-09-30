@@ -3,8 +3,8 @@ use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::events::SystemEvent;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
 /// Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.
@@ -118,7 +118,7 @@ pub async fn trigger_briefing(
     }
 
     state.broadcaster.send(SystemEvent::MorningBriefingSent {
-        owner_id: user.owner_id(),
+        owner_id: user.account_id,
         delivered_at: chrono::Utc::now().format("%Y-%m-%d").to_string(),
         summary: format!(
             "{} tasks, {} habits, {} bills, {} holdings",

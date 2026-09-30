@@ -1,7 +1,8 @@
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::settings::parse_briefing_time;
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::utils::html_escape;
 
 pub async fn handle_briefing_command(
@@ -60,7 +61,7 @@ async fn generate_now(
         Ok(payload) => {
             if let Some(b) = broadcaster {
                 b.send(SystemEvent::MorningBriefingSent {
-                    owner_id: owner_id.to_string(),
+                    owner_id: *owner_id,
                     delivered_at: chrono::Utc::now().format("%Y-%m-%d").to_string(),
                     summary: format!(
                         "{} tasks, {} habits, {} bills, {} holdings",

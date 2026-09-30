@@ -4,7 +4,7 @@ use super::context::{AiTurnResult, LlmTurnContext};
 use super::error::AiError;
 use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
-use crate::events::SystemEvent;
+use crate::domain::events::SystemEvent;
 use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 
@@ -390,7 +390,7 @@ pub async fn run_turn(
     if let Some(b) = ctx.broadcaster {
         b.send(SystemEvent::AiConversationUpdated {
             id: conversation.id.clone(),
-            owner_id: ctx.owner_id.to_string(),
+            owner_id: *ctx.owner_id,
         });
     }
 

@@ -188,11 +188,12 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::events::SystemEvent;
     use crate::domain::jobs::JobId;
     use crate::domain::reminders::{
         NewReminder, RecurrencePattern, ReminderSource, ReminderStatus,
     };
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::events::EventBroadcaster;
     use crate::interface::channels::matrix::reaction_targets::get_target;
     use crate::interface::jobs::fake::FakeDelivery;
 

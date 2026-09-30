@@ -478,6 +478,9 @@ mod tests {
         assert!(reply.contains("Added Task"));
 
         let event = rx.try_recv().expect("the add must broadcast an event");
-        assert!(matches!(event, crate::events::SystemEvent::TodoCreated(_)));
+        assert!(matches!(
+            event,
+            crate::domain::events::SystemEvent::TodoCreated(_)
+        ));
     }
 }

@@ -39,8 +39,8 @@ impl LlmService {
             .await
             .map_err(AppError::Database)?;
         self.broadcaster
-            .send(crate::events::SystemEvent::AiConfigUpdated {
-                owner_id: account_id.to_string(),
+            .send(crate::domain::events::SystemEvent::AiConfigUpdated {
+                owner_id: *account_id,
             });
         Ok(config)
     }
@@ -75,9 +75,9 @@ impl LlmService {
             .map_err(AppError::Database)?;
         if deleted {
             self.broadcaster
-                .send(crate::events::SystemEvent::AiConversationDeleted {
+                .send(crate::domain::events::SystemEvent::AiConversationDeleted {
                     id: id.to_string(),
-                    owner_id: account_id.to_string(),
+                    owner_id: *account_id,
                 });
         }
         Ok(deleted)

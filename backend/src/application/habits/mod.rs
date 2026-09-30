@@ -6,11 +6,12 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::habits::{
     Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay, MAX_HABIT_NAME_LEN,
 };
 use crate::domain::habits::{HabitFields, HabitUpdate};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 #[derive(Clone)]
@@ -130,7 +131,7 @@ impl HabitService {
         }
         self.events.send(SystemEvent::HabitDeleted {
             id,
-            owner_id: owner.to_string(),
+            owner_id: *owner,
         });
         Ok(())
     }
@@ -151,7 +152,7 @@ impl HabitService {
 
         self.events.send(SystemEvent::HabitLogToggled {
             habit_id: habit.id,
-            owner_id: owner.to_string(),
+            owner_id: *owner,
             log_date: log_date.to_string(),
             completed,
         });

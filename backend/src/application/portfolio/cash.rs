@@ -4,14 +4,14 @@ use tracing::error;
 use super::PortfolioService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::portfolio::models::{CashBalance, WithdrawOutcome};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::cash as repo;
 
 pub fn cash_event(owner_id: &AccountId, cash: &CashBalance) -> SystemEvent {
     SystemEvent::PortfolioCashUpdated {
-        owner_id: owner_id.to_string(),
+        owner_id: *owner_id,
         currency: cash.currency.clone(),
         balance_minor: cash.balance_minor,
     }

@@ -2,12 +2,13 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::life::DayLogInput;
 use crate::domain::life::{
     normalize_mood, validate_date_str, DayActivityResponse, LifeDayLog, LifeError, LifeHorizonDay,
     LifeProfile, LifeProfileStats, LifeYearView,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::read_models::life as life_read;
 use crate::infrastructure::postgres::repositories::life as life_repo;
 
@@ -57,7 +58,7 @@ impl LifeService {
                 .await?;
 
         self.events.send(SystemEvent::LifeProfileUpdated {
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
             profile: profile.clone(),
         });
         Ok(profile)
@@ -120,7 +121,7 @@ impl LifeService {
         let deleted = life_repo::delete_day_log(&self.pool, owner_id, log_date).await?;
         if deleted {
             self.events.send(SystemEvent::LifeDayCleared {
-                owner_id: owner_id.to_string(),
+                owner_id: *owner_id,
                 date: log_date.to_string(),
             });
         }

@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod bookmarks;
 pub mod chat;
+pub mod events;
 pub mod finance;
 pub mod footprints;
 pub mod habits;

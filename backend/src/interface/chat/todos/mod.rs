@@ -255,6 +255,9 @@ mod tests {
         let event = rx
             .try_recv()
             .expect("dispatching through the module must broadcast the creation");
-        assert!(matches!(event, crate::events::SystemEvent::TodoCreated(_)));
+        assert!(matches!(
+            event,
+            crate::domain::events::SystemEvent::TodoCreated(_)
+        ));
     }
 }

@@ -5,9 +5,10 @@ use sqlx::PgPool;
 use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
 use crate::domain::todos::{wanted_trigger, NewTodo, TodoItem, TodoPatch};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 #[derive(Clone)]
@@ -123,7 +124,7 @@ impl TodoService {
         self.events.send(SystemEvent::TodoDeleted {
             id,
             room_id: existing.room_id,
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
         });
 
         Ok(())
@@ -139,7 +140,7 @@ impl TodoService {
             self.events.send(SystemEvent::TodoDeleted {
                 id: item.id,
                 room_id: item.room_id.clone(),
-                owner_id: owner_id.to_string(),
+                owner_id: *owner_id,
             });
         }
 
@@ -157,7 +158,7 @@ impl TodoService {
             self.events.send(SystemEvent::TodoDeleted {
                 id: item.id,
                 room_id: item.room_id.clone(),
-                owner_id: item.owner_id.to_string(),
+                owner_id: item.owner_id,
             });
         }
 

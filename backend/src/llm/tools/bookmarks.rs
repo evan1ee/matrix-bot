@@ -3,7 +3,8 @@ use serde_json::json;
 
 use crate::domain::accounts::AccountId;
 use crate::domain::bookmarks::{BookmarkQuery, CreateBookmark};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::domain::events::SystemEvent;
+use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::infrastructure::postgres::repositories::bookmarks as repo;
 use crate::infrastructure::web::fetch_and_extract_metadata;
@@ -134,7 +135,7 @@ pub async fn execute_tool(
                 if let Some(b) = broadcaster {
                     b.send(SystemEvent::BookmarkDeleted {
                         id,
-                        owner_id: owner_id.to_string(),
+                        owner_id: *owner_id,
                     });
                 }
 

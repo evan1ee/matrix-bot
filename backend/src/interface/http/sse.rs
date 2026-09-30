@@ -7,8 +7,10 @@ use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
 
+use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::error::ApiError;
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
 /// The subset of the process-wide broadcast stream that `owner_id` may see.
@@ -18,14 +20,11 @@ use crate::interface::http::auth::{ApiState, AuthUser};
 /// updates and another user's screen.
 fn owned_events(
     broadcaster: &EventBroadcaster,
-    owner_id: String,
+    owner_id: AccountId,
 ) -> impl futures_util::stream::Stream<Item = SystemEvent> {
-    BroadcastStream::new(broadcaster.subscribe()).filter_map(move |item| {
-        let owner_id = owner_id.clone();
-        async move {
-            let msg = item.ok()?;
-            (msg.owner_id() == owner_id).then_some(msg)
-        }
+    BroadcastStream::new(broadcaster.subscribe()).filter_map(move |item| async move {
+        let msg = item.ok()?;
+        (msg.owner_id() == &owner_id).then_some(msg)
     })
 }
 
@@ -52,7 +51,7 @@ pub async fn sse_handler(
     // Ends when the server shuts down: an SSE response never finishes on its
     // own, so without this every open tab would hold graceful shutdown open
     // until the composition root's deadline aborted the server.
-    let stream = owned_events(&state.broadcaster, user.owner_id())
+    let stream = owned_events(&state.broadcaster, user.account_id)
         .take_until(state.shutdown.clone().cancelled_owned())
         .filter_map(|msg| async move {
             let json_str = serde_json::to_string(&msg).ok()?;
@@ -159,13 +158,10 @@ mod tests {
 
         let broadcaster = EventBroadcaster::default();
         let subscriber = AuthUser::named_seed("evan", "acct_mine");
-        let owner_id = subscriber.owner_id();
-        assert_eq!(
-            owner_id,
-            crate::domain::accounts::AccountId::from_seed("acct_mine").to_string()
-        );
+        let owner_id = subscriber.account_id;
+        assert_eq!(owner_id, AccountId::from_seed("acct_mine"));
 
-        let stream = owned_events(&broadcaster, owner_id.clone());
+        let stream = owned_events(&broadcaster, owner_id);
 
         // Another account's events, interleaved with the subscriber's own.
         // Both senders render as "evan" — a shared display name must not leak a
@@ -175,12 +171,12 @@ mod tests {
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 2,
             room_id: "!room:1".to_string(),
-            owner_id: AccountId::from_seed("acct_theirs").to_string(),
+            owner_id: AccountId::from_seed("acct_theirs"),
         });
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 3,
             room_id: "web".to_string(),
-            owner_id: AccountId::from_seed("acct_mine").to_string(),
+            owner_id: AccountId::from_seed("acct_mine"),
         });
         drop(broadcaster);
 
@@ -191,7 +187,7 @@ mod tests {
             2,
             "expected exactly the subscriber's own events"
         );
-        assert!(delivered.iter().all(|e| e.owner_id() == owner_id));
+        assert!(delivered.iter().all(|e| e.owner_id() == &owner_id));
         match &delivered[0] {
             SystemEvent::TodoCreated(item) => assert_eq!(item.text, "mine"),
             other => panic!("unexpected first event: {:?}", other),

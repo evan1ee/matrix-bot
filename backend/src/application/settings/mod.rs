@@ -12,10 +12,11 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::settings::{
     parse_currency, parse_timezone, RawSettingsUpdate, SettingsError, UserSettings,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::settings as repo;
 
 impl From<SettingsError> for AppError {
@@ -85,7 +86,7 @@ impl SettingsService {
         validate(&settings)?;
         repo::upsert(&self.pool, owner_id, &settings).await?;
         self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
             settings: settings.clone(),
         });
         Ok(settings)
@@ -119,7 +120,7 @@ impl SettingsService {
         repo::upsert(&mut *tx, owner_id, &settings).await?;
         tx.commit().await?;
         self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
             settings: settings.clone(),
         });
         Ok(settings)
@@ -250,7 +251,7 @@ mod tests {
         assert_eq!(read_back, saved);
 
         let event = rx.try_recv().unwrap();
-        assert_eq!(event.owner_id(), owner.to_string());
+        assert_eq!(event.owner_id(), &owner);
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 

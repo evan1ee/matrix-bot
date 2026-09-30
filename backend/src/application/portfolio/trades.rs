@@ -4,12 +4,12 @@ use super::cash::cash_event;
 use super::PortfolioService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::portfolio::models::{
     normalise_symbol, BuyOutcome, Holding, SellOutcome, QUANTITY_EXPONENT,
 };
 use crate::domain::portfolio::{validate_note, PortfolioError, TradeRequest};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as holdings_repo;
 use crate::infrastructure::postgres::repositories::portfolio::trades as trades_repo;
 
@@ -117,7 +117,7 @@ impl PortfolioService {
             SellOutcome::Closed { cash, .. } => {
                 self.events.send(SystemEvent::PortfolioHoldingDeleted {
                     id: existing.id,
-                    owner_id: owner.to_string(),
+                    owner_id: *owner,
                 });
                 self.events.send(cash_event(owner, cash));
             }

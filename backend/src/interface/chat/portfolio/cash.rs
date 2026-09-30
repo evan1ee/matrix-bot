@@ -142,7 +142,8 @@ async fn handle_cash_withdraw(services: &AppServices, owner: &AccountId, args: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::domain::events::SystemEvent;
+    use crate::events::EventBroadcaster;
 
     #[test]
     fn test_parse_cash_amount_grammar() {

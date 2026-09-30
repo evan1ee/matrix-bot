@@ -5,9 +5,10 @@ use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::db::DbPool;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::jobs::NewJob;
 use crate::domain::settings::{briefing_due_date, UserSettings};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 pub mod generator;
@@ -82,7 +83,7 @@ impl BriefingService {
             .update_last_briefing_date(owner, &date)
             .await?;
         self.events.send(SystemEvent::MorningBriefingSent {
-            owner_id: owner.to_string(),
+            owner_id: *owner,
             delivered_at: date,
             summary: format!(
                 "{} tasks, {} habits, {} bills, {} holdings",
@@ -223,7 +224,7 @@ mod tests {
         assert_eq!(
             got,
             Some((
-                f.owner.to_string(),
+                f.owner,
                 "2026-09-29".to_string(),
                 "3 tasks, 2 habits, 1 bills, 4 holdings".to_string()
             ))

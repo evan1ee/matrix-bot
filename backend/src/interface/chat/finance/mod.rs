@@ -283,7 +283,7 @@ mod tests {
             .expect("dispatching through the module must broadcast the creation");
         assert!(matches!(
             event,
-            crate::events::SystemEvent::TransactionCreated(_)
+            crate::domain::events::SystemEvent::TransactionCreated(_)
         ));
     }
 

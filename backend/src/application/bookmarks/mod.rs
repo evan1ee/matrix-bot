@@ -11,7 +11,8 @@ use crate::domain::bookmarks::{
     Bookmark, BookmarkError, BookmarkQuery, BookmarkStats, CreateBookmark, ExtractedMetadata,
     UpdateBookmark,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::domain::events::SystemEvent;
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 impl From<BookmarkError> for AppError {
@@ -153,7 +154,7 @@ impl BookmarkService {
 
         self.events.send(SystemEvent::BookmarkDeleted {
             id,
-            owner_id: owner.to_string(),
+            owner_id: *owner,
         });
 
         Ok(())
@@ -230,7 +231,7 @@ mod tests {
         match rx.recv().await.unwrap() {
             SystemEvent::BookmarkDeleted { id, owner_id } => {
                 assert_eq!(id, b.id);
-                assert_eq!(owner_id, owner.to_string());
+                assert_eq!(owner_id, owner);
             }
             other => panic!("Unexpected event: {other:?}"),
         }

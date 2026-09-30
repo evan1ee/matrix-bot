@@ -127,9 +127,10 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::events::SystemEvent;
     use crate::domain::jobs::JobId;
     use crate::domain::rooms::JoinedRoom;
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::events::EventBroadcaster;
     use crate::interface::jobs::fake::FakeDelivery;
 
     const ROOM: &str = "!briefing:test";

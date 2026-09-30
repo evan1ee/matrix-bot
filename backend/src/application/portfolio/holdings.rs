@@ -1,8 +1,8 @@
 use super::PortfolioService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::models::{Holding, PortfolioCurrencySummary};
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as repo;
 
 impl PortfolioService {
@@ -78,7 +78,7 @@ impl PortfolioService {
             if let Some(h) = existing {
                 self.events.send(SystemEvent::PortfolioHoldingDeleted {
                     id: h.id,
-                    owner_id: owner.to_string(),
+                    owner_id: *owner,
                 });
             }
         }

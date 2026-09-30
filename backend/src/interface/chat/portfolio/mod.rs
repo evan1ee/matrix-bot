@@ -345,11 +345,15 @@ mod tests {
         while let Ok(event) = rx.try_recv() {
             assert_eq!(
                 event.owner_id(),
-                crate::domain::accounts::AccountId::from_seed("@alice:a").to_string()
+                &crate::domain::accounts::AccountId::from_seed("@alice:a")
             );
             match event {
-                crate::events::SystemEvent::PortfolioHoldingCreated(_) => saw_holding = true,
-                crate::events::SystemEvent::PortfolioCashUpdated { balance_minor, .. } => {
+                crate::domain::events::SystemEvent::PortfolioHoldingCreated(_) => {
+                    saw_holding = true
+                }
+                crate::domain::events::SystemEvent::PortfolioCashUpdated {
+                    balance_minor, ..
+                } => {
                     saw_cash = true;
                     assert_eq!(balance_minor, 10_000_000 - 150_000);
                 }

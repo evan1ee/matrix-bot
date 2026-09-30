@@ -347,7 +347,8 @@ async fn modify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::domain::events::SystemEvent;
+    use crate::events::EventBroadcaster;
 
     async fn service() -> SettingsService {
         let pool = crate::db::pool::test_pool().await;
@@ -479,7 +480,7 @@ mod tests {
         let event = rx.try_recv().expect("a settings change must be broadcast");
         assert_eq!(
             event.owner_id(),
-            crate::domain::accounts::AccountId::from_seed("@alice:a").to_string()
+            &crate::domain::accounts::AccountId::from_seed("@alice:a")
         );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }

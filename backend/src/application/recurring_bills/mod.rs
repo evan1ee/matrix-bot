@@ -7,13 +7,14 @@ use crate::application::finance::FinanceService;
 use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::recurring_bills::{
     advance_due_date, reminder_room, wanted_trigger, NewRecurringBill, RecurringBill,
     RecurringBillPatch,
 };
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories;
 
 #[derive(Clone)]
@@ -110,7 +111,7 @@ impl RecurringBillsService {
 
         self.events.send(SystemEvent::RecurringBillDeleted {
             id,
-            owner_id: owner_id.to_string(),
+            owner_id: *owner_id,
         });
 
         Ok(())

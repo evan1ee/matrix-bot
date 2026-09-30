@@ -1,10 +1,10 @@
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::finance::{
     Direction, FinanceError, ListTransactionsFilter, NewTransaction, Transaction, TransactionPatch,
     MAX_CATEGORY_LEN, MAX_NOTE_LEN,
 };
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::finance as repo;
 
 use super::FinanceService;
@@ -139,7 +139,7 @@ impl FinanceService {
         self.events.send(SystemEvent::TransactionDeleted {
             id,
             room_id: deleted.room_id.clone(),
-            owner_id: owner.to_string(),
+            owner_id: *owner,
         });
 
         Ok(deleted)

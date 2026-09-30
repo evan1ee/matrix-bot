@@ -5,8 +5,8 @@ use axum::{
 };
 use tracing::error;
 
+use crate::domain::events::SystemEvent;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::llm::error::AiError;
@@ -162,7 +162,7 @@ pub async fn delete_conversation(
 
     state.broadcaster.send(SystemEvent::AiConversationDeleted {
         id,
-        owner_id: user.account_id.to_string(),
+        owner_id: user.account_id,
     });
 
     Ok(StatusCode::NO_CONTENT)
@@ -271,7 +271,7 @@ pub async fn update_ai_config(
         .map_err(ApiError::from)?;
 
     state.broadcaster.send(SystemEvent::AiConfigUpdated {
-        owner_id: user.account_id.to_string(),
+        owner_id: user.account_id,
     });
 
     let settings = state
