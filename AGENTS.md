@@ -90,7 +90,7 @@ db/                          pool, migration runner, test pools and the schema c
 | `domain` | rules and invariants | anything but `std`, `chrono`, `uuid`, `serde`, `thiserror`; no Axum, matrix-sdk, sqlx, reqwest, utoipa, React, MCP |
 | `application` | use cases, transactions | axum, matrix-sdk, reqwest, utoipa, `interface` |
 | `interface`, `llm` | protocol translation, AI orchestration | SQL of any kind outside `#[cfg(test)]` (the architecture test enforces this for `interface/` and `application/`; keep `llm/` to it too) |
-| `jobs` | worker runtime, scheduler | axum, matrix-sdk, utoipa, `interface`; SQL of any kind, tests included (the architecture test enforces it) |
+| `jobs` | worker runtime, scheduler | axum, matrix-sdk, reqwest, utoipa, `interface`; SQL of any kind, tests included (the architecture test enforces it) |
 | `infrastructure` | external capabilities | `application`, `interface` |
 
 - Before adding a module, check whether an existing one already owns the responsibility. Do not create new top-level layers without a clear reason and an ADR.
@@ -192,7 +192,7 @@ PostgreSQL is the production database; the reference is [`docs/database.md`](doc
 
 - Schema changes are forward-only SQL files `backend/migrations/NNNN_description.sql`, applied at boot by `sqlx::migrate!`. Never edit a committed migration and never change the schema outside one. A data- or type-rewriting migration starts with a guard that names offending rows, is separate from plain DDL, and is rehearsed on a production copy before release.
 - Database access is compile-checked `sqlx::query!`/`query_as!`/`query_scalar!` or `sqlx::QueryBuilder`. **Never put a value into SQL text; always bind it.** `AssertSqlSafe` is allowed only in `infrastructure/postgres/merge.rs`.
-- No SQL in `interface/`, `application/`, Matrix, MCP or React code — the architecture test enforces it. Convert rows into domain types at the repository edge.
+- No SQL in `interface/`, `application/`, `jobs/`, Matrix, MCP or React code — the architecture test enforces it. Convert rows into domain types at the repository edge.
 - Match column type to Rust type (`i64`↔`BIGINT`, `i32`↔`INTEGER`, `f64`↔`DOUBLE PRECISION`, `DateTime<Utc>`↔`TIMESTAMPTZ`, `AccountId`↔`UUID`); change types one at a time against the field that reads them. Build test timestamps with `utils::time::now_at_storage_precision`.
 - After changing a query or a migration, regenerate the `.sqlx/` cache against a migrated scratch database and commit it; CI fails on drift.
 - **Any new owner-keyed table must be added to `OWNED_TABLES`** (`domain/accounts/mod.rs`), or an account merge silently leaves its rows behind.

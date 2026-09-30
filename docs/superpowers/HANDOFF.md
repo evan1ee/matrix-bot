@@ -127,7 +127,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run (step 8, `cargo test -p matrix-bot --all-targets --no-fail-fast -- --skip interface::http::auth::matrix`): **lib 846 passed / 0 failed / 7 ignored (5 filtered out), `main.rs` 2 passed, architecture suite 18 passed**. The five `interface::http::auth::matrix` tests were skipped because two of them make a real, untimed GET to `https://mbm.one` (§11). Inference: 71 passed at step 7 (crate unchanged, not re-run).
+The last full test run (step 8 final fix wave, `cargo test -p matrix-bot --all-targets --no-fail-fast`, no `--skip`): **lib 854 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 18 passed**. Inference: 71 passed at step 7 (crate unchanged, not re-run).
 
 ## 5. How to work
 
@@ -197,7 +197,7 @@ The tests create a schema per test and never drop it, which is why the container
 ## 7. Next actions (in order)
 
 1. **Step 9: outbox (`0004_outbox`).** Write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
-2. Clear the §11 items that touch the test suite first: the two `mbm.one` tests and the test-schema leaks.
+2. Clear the §11 items that touch the test suite first: the test-schema leaks.
 3. Hand the user the merge gates (§10). Merge only on their instruction.
 4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
 
@@ -315,7 +315,6 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 
 ### accounts/ retirement
 
-
 - **R28 (C8):** `domain::accounts::COOKIE_NAME` / `STEP_UP_WINDOW_MINUTES` were corrected to the live `"mb_session"` / 5 before any caller switched to them, and are pinned by `live_security_constants_are_pinned` — the domain copies had drifted and were unused — cost if wrong: every browser logged out, or a 15-minute step-up window.
 - **R29:** audit-row parity — where an `AccountService` method records a security event the replaced facade did not, the handler's duplicate manual record is deleted, or a non-recording service method is used (logout: `end_session`); each flow has a test pinning its `security_events` rows. Services are the only audit writers: `tests/architecture.rs::interface_never_writes_security_events` forbids the write calls in `interface/` and `llm/` production code. Disclosed data-correctness fixes: the doubled `recovery_completed` row (the chat and HTTP handlers each wrote one on top of `redeem_recovery_request`'s) is gone; `recovery_requested` is written once, by the service; `matrix_linked` is written once, by the service, with the raw mxid as detail (production stored only the handler's HTML-escaped copy; the UI and DM render detail as text, so the two differ only for mxids containing `&<>"'`) — cost if wrong: a missing or doubled audit line, or historical and new `matrix_linked` rows escaped differently.
 - **R30:** credential parsing is split: `domain::accounts::{Credential, cookie_value, Principal}` (pure), `interface/http/auth/credential.rs::parse_credential` (headers), `AccountService::resolve_credential` (lookups). The MCP `touch_last_used` stays a fire-and-forget spawn (frozen) — cost if wrong: a last-used stamp lost on shutdown.
@@ -339,18 +338,25 @@ These need the human. Prepare them; don't perform them.
 - The AI tool `update_my_settings` advertises `dev_room_id` and `max_history_turns` but ignores them. This is an existing bug and needs a separate fix.
 - Historical plan and review docs still mention the removed `/api/v1/health`. This is intentional.
 - The architecture-test scanner cuts each line at `//`, so a URL literal hides the rest of the line. Task 14 makes it strip string literals.
-- **MUST FIX:** two `interface::http::auth::matrix` tests make a real GET to `https://mbm.one` with no timeout. That breaks the AGENTS.md rule against contacting external services from tests; they are `--skip`ped in local runs. Replace the fetch with a local fake and bound it with a timeout.
+- Resolved in the step 8 final fix wave: the `interface::http::auth::matrix` tests no longer reach the network (`test_state()` pre-fills `resolved_homeserver` with a closed loopback port and the client has a 500 ms timeout), so no test needs `--skip` any more.
 - No handler test pins the portfolio snapshot capture call (R38): deleting `capture_current_snapshot_for_owner` from `RefreshPricesHandler` would pass the handler tests; only the application-layer test covers the write.
 - Test-pool schema leaks: scratch schemas from `test_pool()` are not always reaped (separate task `task_e73c72d5` in progress; see also R36).
-- Flaky timing tests: `jobs::tests::the_runtime_runs_jobs_and_stops_on_cancel` (`jobs/mod.rs`) and `an_enqueue_wakes_an_idle_worker_before_the_poll_interval` (`jobs/worker.rs`, 700 ms sleep) depend on wall-clock timing and can fail on a loaded machine.
+- Resolved in the final fix wave: the two flaky timing tests (`the_runtime_runs_jobs_and_stops_on_cancel` now waits `shutdown_grace` plus a margin and the reaper races each query against shutdown; the wake-up test waits for the listener's catch-up wake instead of sleeping, and the worker registers for wake-ups before it claims).
 - `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.
-- `AccountId::from_seed` is `pub` and not `#[cfg(test)]`, so production code could build a deterministic id; the architecture test only keeps implicit string conversions out.
+- (Resolved: `AccountId::from_seed` is now `#[cfg(test)]`.)
 - Portfolio price refreshes now run concurrently across workers (one `portfolio.refresh_prices` job per holding owner); the old loop refreshed owners one after another.
 - The briefing window does not wrap the hour (`07:58` is due only at :58–:59). Frozen behaviour, kept.
 - `!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).
 - `BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.
 - Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.
 - `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
+- `domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).
+- A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
+- Portfolio refreshes run concurrently across workers (one job per owner), so Yahoo load is no longer serialized.
+- The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
+- Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
+- `JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS` (too many workers can starve the pool).
+- `ReminderService::enqueue_due` is unbounded (one pass enqueues every due reminder).
 
 ## 12. Document map
 
