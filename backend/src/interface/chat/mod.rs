@@ -28,8 +28,6 @@ pub mod webhooks;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use matrix_sdk::Client;
-use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::application::AppError;
@@ -128,19 +126,6 @@ pub struct CommandContext {
     pub stage_reporter: Option<crate::interface::channels::matrix::stage::StageReporter>,
 }
 
-/// Shared runtime context available to modules for background workers.
-#[derive(Clone)]
-pub struct ModuleContext {
-    /// The Matrix SDK client for sending messages.
-    pub client: Client,
-    /// The shared database connection pool.
-    pub db: Database,
-    /// Application services, built once in `app.rs`.
-    pub services: crate::application::AppServices,
-    /// Optional event broadcaster for real-time SSE streaming.
-    pub broadcaster: Option<crate::events::EventBroadcaster>,
-}
-
 /// Describes a single command's usage and purpose for help generation.
 #[derive(Clone, Debug)]
 pub struct CommandHelp {
@@ -152,8 +137,8 @@ pub struct CommandHelp {
 
 /// Trait that all feature modules must implement to be registered in the bot.
 ///
-/// Each module handles a set of commands and can optionally spawn background workers
-/// (e.g. the reminder scheduler) and run database migrations for its own tables.
+/// Each module handles a set of commands; background work belongs to the job
+/// and events runtimes, not to a module.
 #[async_trait]
 pub trait BotModule: Send + Sync {
     /// Returns the module's display name (e.g. "Core", "To-Do", "Reminder").
@@ -179,16 +164,6 @@ pub trait BotModule: Send + Sync {
         db: &Database,
         broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String>;
-
-    /// Spawns any background tasks (e.g. scheduler loops).
-    ///
-    /// Returns their handles so the caller can stop them. A worker holds the
-    /// `ModuleContext` it was given — including that generation's Matrix client
-    /// — so it must not outlive the sync session that produced it; see
-    /// [`BackgroundWorkers`].
-    async fn spawn_background_workers(&self, _ctx: &ModuleContext) -> Vec<JoinHandle<()>> {
-        Vec::new()
-    }
 }
 
 /// Central registry holding all registered `BotModule` instances.
@@ -226,59 +201,12 @@ impl ModuleRegistry {
         None
     }
 
-    /// Spawns background workers for all registered modules.
-    ///
-    /// The returned guard owns them: drop it and they stop.
-    pub async fn spawn_all_background_workers(&self, ctx: &ModuleContext) -> BackgroundWorkers {
-        let mut handles = Vec::new();
-        for module in &self.modules {
-            handles.extend(module.spawn_background_workers(ctx).await);
-        }
-        BackgroundWorkers { handles }
-    }
-
     /// Returns help text for all modules, grouped by module name.
     pub fn get_all_help(&self) -> Vec<(String, Vec<CommandHelp>)> {
         self.modules
             .iter()
             .map(|m| (m.name().to_string(), m.commands()))
             .collect()
-    }
-}
-
-/// Owns a generation of background workers and stops them when dropped.
-///
-/// The Matrix sync loop reconnects, and each reconnect builds a fresh client and
-/// calls `run()` again. Spawning detached workers there leaked one scheduler per
-/// reconnect: every surviving copy kept polling the same `reminders` table, so a
-/// single due reminder was delivered once per accumulated worker — the bug where
-/// one reminder arrived three times, then four after another reconnect.
-///
-/// Tying the workers to a guard makes the lifetime explicit: they belong to the
-/// sync session that spawned them, and they hold that session's client, so they
-/// must not outlive it. Aborting mid-delivery is safe — the row stays `pending`
-/// and the next generation redelivers it, which is the same at-least-once
-/// behaviour a crash already implied.
-pub struct BackgroundWorkers {
-    handles: Vec<JoinHandle<()>>,
-}
-
-impl BackgroundWorkers {
-    /// How many workers this guard owns.
-    pub fn len(&self) -> usize {
-        self.handles.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.handles.is_empty()
-    }
-}
-
-impl Drop for BackgroundWorkers {
-    fn drop(&mut self) {
-        for handle in &self.handles {
-            handle.abort();
-        }
     }
 }
 
@@ -313,7 +241,6 @@ const INTERNAL_REPLY: &str = "⚠️ Something went wrong on our side. Please tr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn user_facing_errors_show_their_escaped_message() {
@@ -336,43 +263,6 @@ mod tests {
         });
         assert_eq!(db, INTERNAL_REPLY);
         assert_eq!(ext, INTERNAL_REPLY);
-    }
-
-    /// Dropping the guard must actually stop the workers it owns.
-    #[tokio::test]
-    async fn test_dropping_the_guard_stops_its_workers() {
-        static TICKS: AtomicUsize = AtomicUsize::new(0);
-
-        let spawn_ticker = || {
-            tokio::spawn(async {
-                loop {
-                    TICKS.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                }
-            })
-        };
-
-        let workers = BackgroundWorkers {
-            handles: vec![spawn_ticker(), spawn_ticker()],
-        };
-        assert_eq!(workers.len(), 2);
-
-        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-        assert!(
-            TICKS.load(Ordering::SeqCst) > 0,
-            "the workers should be running before the guard is dropped"
-        );
-
-        drop(workers);
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        let after_abort = TICKS.load(Ordering::SeqCst);
-
-        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
-        assert_eq!(
-            TICKS.load(Ordering::SeqCst),
-            after_abort,
-            "a dropped guard must leave no worker still ticking"
-        );
     }
 
     /// Dispatch returns the *first* module that claims a message, so a command

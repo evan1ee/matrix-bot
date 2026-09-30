@@ -50,14 +50,14 @@ pub(crate) async fn queue_and_broadcast(
         format,
     );
 
-    let outbox_item = state
+    let delivery_id = state
         .services
         .webhooks
         .enqueue_alert(webhook, &target_room, title, &html, &plain, domain_severity)
         .await
         .map_err(ApiError::from)?;
 
-    Ok(outbox_item.id)
+    Ok(delivery_id.to_string())
 }
 
 #[utoipa::path(

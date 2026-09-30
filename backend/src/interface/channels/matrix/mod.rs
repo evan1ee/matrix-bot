@@ -27,7 +27,7 @@ use crate::interface::chat::reminders::ReminderModule;
 use crate::interface::chat::settings::SettingsModule;
 use crate::interface::chat::todos::TodoModule;
 use crate::interface::chat::webhooks::WebhookModule;
-use crate::interface::chat::{ModuleContext, ModuleRegistry};
+use crate::interface::chat::ModuleRegistry;
 
 pub mod attachments;
 pub mod client;
@@ -144,13 +144,6 @@ impl MatrixBot {
     }
 
     pub async fn run(self) -> Result<()> {
-        let module_ctx = ModuleContext {
-            client: self.client.clone(),
-            db: self.db.clone(),
-            services: self.services.clone(),
-            broadcaster: self.broadcaster.clone(),
-        };
-
         // Register Matrix event handlers
         register_handlers(
             &self.client,
@@ -161,16 +154,6 @@ impl MatrixBot {
             self.broadcaster.clone(),
             Some(self.handles.pending_merges.clone()),
         );
-
-        // Start background workers for all modules (e.g., reminder scheduler).
-        // The guard stops them when this function returns, by any path: they
-        // hold this generation's client, and the caller reconnects in a loop, so
-        // leaving them detached accumulated one scheduler per reconnect and
-        // delivered every reminder once per copy.
-        let _workers = self
-            .registry
-            .spawn_all_background_workers(&module_ctx)
-            .await;
 
         // Job handlers send through this generation's client while it syncs;
         // dropping the guard (any return path, including cancellation of this

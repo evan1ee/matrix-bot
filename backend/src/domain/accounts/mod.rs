@@ -191,7 +191,6 @@ pub const OWNED_TABLES: &[&str] = &[
     "ai_conversations",
     "ai_user_configs",
     "webhooks",
-    "webhook_outbox",
     "bot_message_targets",
 ];
 

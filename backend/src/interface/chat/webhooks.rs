@@ -1,21 +1,14 @@
-//! Matrix chat command handler and background delivery worker for webhooks.
-
-use std::time::Duration as StdDuration;
+//! Matrix chat command handler for webhooks (delivery is `interface::events`).
 
 use async_trait::async_trait;
-use chrono::Utc;
-use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
-use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::error;
 
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
-use crate::domain::webhooks::{
-    renderer::render_alert_message, retry_delay, WebhookOutboxItem, WebhookSeverity,
-};
+use crate::domain::webhooks::{renderer::render_alert_message, WebhookSeverity};
 use crate::events::EventBroadcaster;
-use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct WebhookModule;
@@ -110,13 +103,6 @@ impl BotModule for WebhookModule {
                     .to_string(),
             ),
         }
-    }
-
-    async fn spawn_background_workers(
-        &self,
-        ctx: &ModuleContext,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
-        vec![start_webhook_scheduler(ctx.clone())]
     }
 }
 
@@ -250,119 +236,4 @@ async fn handle_test(services: &AppServices, owner_id: &AccountId, id: &str) -> 
             Some("❌ Database error retrieving webhook.".to_string())
         }
     }
-}
-
-/// Attempts delivery of an outbox item to Matrix.
-async fn deliver_outbox_item(ctx: &ModuleContext, item: &WebhookOutboxItem) -> Result<(), String> {
-    let room_id = <&RoomId>::try_from(item.room_id.as_str())
-        .map_err(|_| format!("Invalid Matrix room ID: {}", item.room_id))?;
-
-    let room = ctx
-        .client
-        .get_room(room_id)
-        .ok_or_else(|| format!("Bot is not joined to room: {}", item.room_id))?;
-
-    // Verify that the webhook owner is authorized for this room before delivery
-    let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
-        &ctx.services.rooms,
-        Some(&ctx.client),
-        &item.owner_id,
-        &item.room_id,
-    )
-    .await;
-    if !is_auth {
-        return Err(format!(
-            "Delivery rejected: owner {} is not joined to room {}",
-            item.owner_id, item.room_id
-        ));
-    }
-
-    let content = RoomMessageEventContent::text_html(&item.plain_body, &item.html_body);
-
-    room.send(content)
-        .await
-        .map_err(|err| format!("Matrix homeserver delivery failed: {err:?}"))?;
-
-    Ok(())
-}
-
-/// Starts the background Tokio worker task draining the webhook outbox.
-pub fn start_webhook_scheduler(ctx: ModuleContext) -> JoinHandle<()> {
-    let notify = ctx.services.webhooks.get_outbox_notify();
-
-    tokio::spawn(async move {
-        info!("Starting Webhook Outbox Delivery Worker");
-        let sweep_interval = StdDuration::from_secs(3);
-
-        loop {
-            // Drain all available pending items in batches
-            loop {
-                let pending = match ctx.services.webhooks.fetch_pending_outbox(20).await {
-                    Ok(batch) => batch,
-                    Err(err) => {
-                        error!("Failed reading webhook outbox batch: {:?}", err);
-                        break;
-                    }
-                };
-
-                if pending.is_empty() {
-                    break;
-                }
-
-                for item in pending {
-                    match deliver_outbox_item(&ctx, &item).await {
-                        Ok(_) => {
-                            info!("Delivered webhook alert {} to {}", item.id, item.room_id);
-                            if let Err(err) = ctx
-                                .services
-                                .webhooks
-                                .mark_outbox_delivered(&item.id, &item.webhook_id)
-                                .await
-                            {
-                                error!("Failed to mark outbox item as delivered: {:?}", err);
-                            }
-                        }
-                        Err(err_msg) => {
-                            let next_attempts = item.attempts + 1;
-                            if next_attempts >= item.max_attempts {
-                                warn!(
-                                    "Webhook outbox item {} reached max attempts. Marking failed: {}",
-                                    item.id, err_msg
-                                );
-                                let _ = ctx
-                                    .services
-                                    .webhooks
-                                    .mark_outbox_failed(&item.id, &item.webhook_id, &err_msg)
-                                    .await;
-                            } else {
-                                let backoff = retry_delay(item.attempts);
-                                let next_attempt_at = Utc::now() + backoff;
-                                warn!(
-                                    "Webhook delivery failed (attempt {}/{}), retrying in {:?}: {}",
-                                    next_attempts, item.max_attempts, backoff, err_msg
-                                );
-                                let _ = ctx
-                                    .services
-                                    .webhooks
-                                    .mark_outbox_retry(
-                                        &item.id,
-                                        &item.webhook_id,
-                                        next_attempts,
-                                        next_attempt_at,
-                                        &err_msg,
-                                    )
-                                    .await;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Sleep until either signaled by an incoming alert or sweep timeout
-            tokio::select! {
-                _ = notify.notified() => {}
-                _ = tokio::time::sleep(sweep_interval) => {}
-            }
-        }
-    })
 }

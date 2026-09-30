@@ -11,8 +11,9 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgExecutor, Postgres, Transaction};
 
 use crate::domain::accounts::AccountId;
-use crate::domain::events::{DeliveryId, EventId, SystemEvent};
+use crate::domain::events::{DeliveryId, Destination, EventId, SystemEvent, WebhookAlert};
 use crate::domain::jobs::truncate_error;
+use crate::domain::webhooks::WebhookOutboxItem;
 
 /// The channel the 0004 trigger NOTIFYs with `<event id>:<account uuid>`.
 pub const OUTBOX_CHANNEL: &str = "outbox";
@@ -245,6 +246,104 @@ pub async fn purge(ex: impl PgExecutor<'_>, older_than: Duration) -> sqlx::Resul
     .execute(ex)
     .await?;
     Ok(r.rows_affected())
+}
+
+struct WebhookLogRow {
+    id: i64,
+    account_id: uuid::Uuid,
+    payload: serde_json::Value,
+    destination: String,
+    status: String,
+    attempts: i32,
+    max_attempts: i32,
+    available_at: DateTime<Utc>,
+    last_error: Option<String>,
+    created_at: DateTime<Utc>,
+    delivered_at: Option<DateTime<Utc>>,
+}
+
+impl TryFrom<WebhookLogRow> for WebhookOutboxItem {
+    type Error = sqlx::Error;
+
+    /// A payload that is not a `WebhookAlert` is a decode error, not a panic.
+    fn try_from(r: WebhookLogRow) -> sqlx::Result<Self> {
+        let alert: WebhookAlert = serde_json::from_value(r.payload["payload"].clone())
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        let room_id = match Destination::parse(&r.destination) {
+            Some(Destination::MatrixRoom(room)) => room,
+            None => alert.room_id.clone(),
+        };
+        Ok(Self {
+            id: r.id.to_string(),
+            webhook_id: alert.id,
+            owner_id: AccountId::from_uuid(r.account_id),
+            room_id,
+            severity: alert.severity,
+            title: alert.title,
+            html_body: alert.html_body,
+            plain_body: alert.plain_body,
+            status: r.status,
+            attempts: i64::from(r.attempts),
+            max_attempts: i64::from(r.max_attempts),
+            next_attempt_at: r.available_at,
+            last_error: r.last_error,
+            created_at: r.created_at,
+            delivered_at: r.delivered_at,
+        })
+    }
+}
+
+/// The delivery log of one webhook, newest first: the alert (from its event)
+/// joined with its delivery state. Bounds match the log reads this replaced.
+pub async fn list_webhook_logs(
+    ex: impl PgExecutor<'_>,
+    owner: &AccountId,
+    webhook_id: &str,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<WebhookOutboxItem>> {
+    let rows = sqlx::query_as!(
+        WebhookLogRow,
+        r#"
+        SELECT d.id, e.account_id, e.payload, d.destination, d.status, d.attempts,
+               d.max_attempts, d.available_at, d.last_error, e.created_at, d.delivered_at
+        FROM outbox_events e
+        JOIN outbox_deliveries d ON d.event_id = e.id
+        WHERE e.account_id = $1
+          AND e.event_type = 'WebhookTriggered'
+          AND e.payload -> 'payload' ->> 'id' = $2
+        ORDER BY e.created_at DESC, d.id DESC
+        LIMIT $3 OFFSET $4
+        "#,
+        owner.as_uuid(),
+        webhook_id,
+        limit.clamp(1, 100),
+        offset.max(0)
+    )
+    .fetch_all(ex)
+    .await?;
+    rows.into_iter().map(WebhookOutboxItem::try_from).collect()
+}
+
+pub async fn count_webhook_logs(
+    ex: impl PgExecutor<'_>,
+    owner: &AccountId,
+    webhook_id: &str,
+) -> sqlx::Result<i64> {
+    let count = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) FROM outbox_events e
+        JOIN outbox_deliveries d ON d.event_id = e.id
+        WHERE e.account_id = $1
+          AND e.event_type = 'WebhookTriggered'
+          AND e.payload -> 'payload' ->> 'id' = $2
+        "#,
+        owner.as_uuid(),
+        webhook_id
+    )
+    .fetch_one(ex)
+    .await?;
+    Ok(count.unwrap_or(0))
 }
 
 #[cfg(test)]

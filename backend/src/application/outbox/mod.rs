@@ -13,6 +13,18 @@ use crate::domain::events::{next_delivery_step, DeliveryStep, EventId};
 use crate::domain::webhooks::retry_delay;
 use crate::infrastructure::postgres::repositories::outbox as repo;
 pub use crate::infrastructure::postgres::repositories::outbox::{ClaimedDelivery, StoredEvent};
+use crate::infrastructure::postgres::repositories::webhooks as webhooks_repo;
+
+/// The webhook a `WebhookTriggered` delivery belongs to, whose counters
+/// follow the delivery's outcome (C1).
+fn webhook_id(delivery: &ClaimedDelivery) -> Option<String> {
+    if delivery.event.event_type != "WebhookTriggered" {
+        return None;
+    }
+    delivery.event.json["payload"]["id"]
+        .as_str()
+        .map(str::to_string)
+}
 
 #[derive(Clone)]
 pub struct OutboxService {
@@ -53,7 +65,13 @@ impl OutboxService {
 
     pub async fn record_delivered(&self, delivery: &ClaimedDelivery) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await?;
-        repo::mark_delivered(&mut *tx, delivery.id).await?;
+        // Counted only when this call made the transition, so a late duplicate
+        // record (after a lease re-claim) cannot count a delivery twice.
+        if repo::mark_delivered(&mut *tx, delivery.id).await? {
+            if let Some(webhook_id) = webhook_id(delivery) {
+                webhooks_repo::increment_delivered(&mut *tx, &webhook_id).await?;
+            }
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -66,12 +84,16 @@ impl OutboxService {
     ) -> Result<DeliveryStep, AppError> {
         let step = next_delivery_step(delivery.attempts, delivery.max_attempts);
         let mut tx = self.pool.begin().await?;
-        match step {
+        let recorded = match step {
             DeliveryStep::RetryAfterAttempts(n) => {
-                repo::mark_retry(&mut *tx, delivery.id, Utc::now() + retry_delay(n), error).await?;
+                repo::mark_retry(&mut *tx, delivery.id, Utc::now() + retry_delay(n), error).await?
             }
-            DeliveryStep::Fail => {
-                repo::mark_failed(&mut *tx, delivery.id, error).await?;
+            DeliveryStep::Fail => repo::mark_failed(&mut *tx, delivery.id, error).await?,
+        };
+        // C1: every failed attempt counts, retry or final.
+        if recorded {
+            if let Some(webhook_id) = webhook_id(delivery) {
+                webhooks_repo::increment_failures(&mut *tx, &webhook_id).await?;
             }
         }
         tx.commit().await?;

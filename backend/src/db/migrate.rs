@@ -189,7 +189,6 @@ mod tests {
             ("accounts", "id"),
             ("user_settings", "owner_id"),
             ("webhooks", "owner_id"),
-            ("webhook_outbox", "owner_id"),
             ("ai_user_configs", "owner_id"),
             ("ai_conversations", "owner_id"),
             ("portfolio_holdings", "owner_id"),

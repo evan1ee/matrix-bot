@@ -118,10 +118,10 @@ impl AppServices {
         Self::with_events(pool, &EventBroadcaster::default())
     }
 
-    /// Built by a composition root that already has the process's real
-    /// `EventBroadcaster` (`app.rs`), so a publishing service sends on the
-    /// same channel HTTP and chat subscribe to.
-    pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
+    /// Built by a composition root. Every service now publishes through the
+    /// outbox, so `_events` is unused; the parameter goes with the
+    /// broadcaster in Task 10.
+    pub fn with_events(pool: &PgPool, _events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone());
         let bookmarks = BookmarkService::new(pool.clone());
         let settings = SettingsService::new(pool.clone());
@@ -136,7 +136,7 @@ impl AppServices {
         let todos = TodoService::new(pool.clone(), reminders.clone());
         let recurring_bills =
             RecurringBillsService::new(pool.clone(), reminders.clone(), finance.clone());
-        let webhooks = WebhookService::new(pool.clone(), events.clone());
+        let webhooks = WebhookService::new(pool.clone());
         let portfolio = PortfolioService::new(pool.clone());
         let outbox = OutboxService::new(pool.clone());
         Self {

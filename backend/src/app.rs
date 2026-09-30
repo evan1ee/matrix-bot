@@ -142,11 +142,15 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         services.outbox.clone(),
         crate::events::EventsConfig::production().subscriber_capacity,
     );
+    let sink: Arc<dyn crate::events::DeliverySink> = Arc::new(
+        crate::interface::events::MatrixRoomSink::new(handles.matrix.clone(), services.clone()),
+    );
     let events_runtime = crate::events::EventsRuntime::new(
         db.pool.clone(),
         services.clone(),
         hub.clone(),
         broadcaster.clone(),
+        sink,
         crate::events::EventsConfig::production(),
     );
 
@@ -233,7 +237,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
 /// Awaiting the handles one after another against a shared deadline is the
 /// same bound as joining them concurrently: each wait ends by `deadline`. A
 /// laggard is aborted rather than detached so its drop guards (e.g.
-/// `BackgroundWorkers`) run; it is not awaited again, because a task stuck
+/// `PublishedClient`) run; it is not awaited again, because a task stuck
 /// outside an await point would hold the process past the bound.
 pub(crate) async fn stop_by(deadline: Instant, tasks: Vec<OwnedTask>) -> Vec<&'static str> {
     let mut laggards = Vec::new();

@@ -46,7 +46,8 @@ fn should_reset_backoff(
 /// the process simply exited from under the running task.
 ///
 /// Returning drops the in-flight `bot.run()` future, and with it that
-/// generation's `BackgroundWorkers` guard, which aborts its scheduler tasks.
+/// generation's `PublishedClient` guard, which hands the job handlers and the
+/// events dispatcher `None` until the next generation publishes its client.
 pub async fn run_bot_loop(
     config: Config,
     db: Database,

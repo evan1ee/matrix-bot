@@ -364,7 +364,6 @@ mod tests {
         .await
         .unwrap();
         sqlx::query!("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', $1, 'hook', 'thash', 'pref', '!r:x')", from.as_uuid()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', $1, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!(
             "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES ($1, 'tok1', TRUE)",
             from.as_uuid()
@@ -375,7 +374,7 @@ mod tests {
         sqlx::query!("INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')", from.as_uuid()).execute(&pool).await.unwrap();
 
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 22, "one row per owned table");
+        assert_eq!(preview.total(), 21, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 

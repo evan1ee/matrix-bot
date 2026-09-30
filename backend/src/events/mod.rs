@@ -1,9 +1,10 @@
 //! The events runtime: the SSE hub, the one `LISTEN outbox` per process,
-//! hourly retention, and (Task 9) the durable delivery dispatcher. SQL-free:
+//! hourly retention and the durable delivery dispatcher. SQL-free:
 //! it reaches the outbox only through `OutboxService`.
 
 mod bridge;
 mod broadcaster;
+mod dispatcher;
 mod hub;
 mod listener;
 mod purge;
@@ -20,6 +21,7 @@ use tracing::error;
 use crate::application::AppServices;
 
 pub use broadcaster::EventBroadcaster;
+pub use dispatcher::DeliverySink;
 pub use hub::{Hub, Notified, Subscription};
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,13 @@ pub struct EventsConfig {
     pub replay_window: i64,
     pub replay_limit: i64,
     pub subscriber_capacity: usize,
+    /// How long a claimed delivery stays invisible to other claimers.
+    pub lease: Duration,
+    /// Deliveries claimed per dispatcher round.
+    pub batch: i64,
+    /// Per-delivery send timeout; must stay below `lease` (C8) so a hung
+    /// send can never overlap a re-claim of the same delivery.
+    pub deliver_timeout: Duration,
 }
 
 impl EventsConfig {
@@ -43,6 +52,9 @@ impl EventsConfig {
             replay_window: 100,
             replay_limit: 500,
             subscriber_capacity: 64,
+            lease: Duration::from_secs(60),
+            batch: 20,
+            deliver_timeout: Duration::from_secs(30),
         }
     }
 
@@ -51,6 +63,8 @@ impl EventsConfig {
         Self {
             listener_retry: Duration::from_millis(100),
             poll_interval: Duration::from_millis(100),
+            lease: Duration::from_secs(1),
+            deliver_timeout: Duration::from_millis(500),
             ..Self::production()
         }
     }
@@ -61,6 +75,7 @@ pub struct EventsRuntime {
     services: AppServices,
     hub: Hub,
     legacy: EventBroadcaster,
+    sink: Arc<dyn DeliverySink>,
     config: Arc<EventsConfig>,
 }
 
@@ -70,6 +85,7 @@ impl EventsRuntime {
         services: AppServices,
         hub: Hub,
         legacy: EventBroadcaster,
+        sink: Arc<dyn DeliverySink>,
         config: EventsConfig,
     ) -> Self {
         Self {
@@ -77,6 +93,7 @@ impl EventsRuntime {
             services,
             hub,
             legacy,
+            sink,
             config: Arc::new(config),
         }
     }
@@ -98,6 +115,13 @@ impl EventsRuntime {
             self.config.clone(),
             shutdown.clone(),
         ));
+        tasks.spawn(dispatcher::run(
+            self.services.outbox.clone(),
+            self.sink.clone(),
+            wake.clone(),
+            self.config.clone(),
+            shutdown.clone(),
+        ));
         tasks.spawn(bridge::run(
             self.legacy.clone(),
             self.hub.clone(),
@@ -109,5 +133,24 @@ impl EventsRuntime {
                 shutdown.cancel();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C8: a hung send must time out before its lease expires, or a second
+    /// claimer could deliver the same event concurrently.
+    #[test]
+    fn the_delivery_timeout_is_shorter_than_the_lease() {
+        for config in [EventsConfig::production(), EventsConfig::for_tests()] {
+            assert!(config.deliver_timeout < config.lease);
+        }
+        assert_eq!(EventsConfig::production().lease, Duration::from_secs(60));
+        assert_eq!(
+            EventsConfig::production().deliver_timeout,
+            Duration::from_secs(30)
+        );
     }
 }
