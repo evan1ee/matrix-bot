@@ -262,13 +262,22 @@ mod tests {
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        ApiState::new(
+        // Tests never touch the network: the resolved homeserver is pre-filled
+        // (so no `.well-known` discovery request is made) with a closed
+        // loopback port, and the client gives up fast if one is ever sent.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("test http client");
+        let state = ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
-            reqwest::Client::new(),
-        )
+            client,
+        );
+        *state.resolved_homeserver.write().await = Some("http://127.0.0.1:9".to_string());
+        state
     }
 
     #[tokio::test]
