@@ -4,7 +4,6 @@ use super::context::{AiTurnResult, LlmTurnContext};
 use super::error::AiError;
 use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
-use crate::domain::events::SystemEvent;
 use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 
@@ -374,24 +373,13 @@ pub async fn run_turn(
         final_content = "⚠️ **Action Not Recorded**: The AI assistant generated a text summary but did not execute the database tool. Please retry sending the image or use the `!ai` command to log the expense.".to_string();
     }
 
-    if let Err(e) = llm_repo::add_message(
-        ctx.pool,
-        &conversation.id,
-        "assistant",
-        &final_content,
-        None,
-        None,
-    )
-    .await
+    if let Err(e) = ctx
+        .services
+        .llm
+        .append_assistant_message(ctx.owner_id, &conversation.id, &final_content)
+        .await
     {
         warn!("Failed to persist assistant message: {}", e);
-    }
-
-    if let Some(b) = ctx.broadcaster {
-        b.send(SystemEvent::AiConversationUpdated {
-            id: conversation.id.clone(),
-            owner_id: *ctx.owner_id,
-        });
     }
 
     info!(

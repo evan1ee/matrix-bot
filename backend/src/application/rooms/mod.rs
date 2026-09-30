@@ -169,12 +169,11 @@ fn logged_or_default<T: Default, E: std::fmt::Display>(
 mod tests {
     use super::*;
     use crate::domain::settings::UserSettings;
-    use crate::events::EventBroadcaster;
 
     async fn service_with_account(account_id: &AccountId) -> RoomService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        let accounts = AccountService::new(pool.clone());
         accounts
             .create_with_id(account_id, "Tester", crate::domain::accounts::STATUS_ACTIVE)
             .await
@@ -338,7 +337,7 @@ mod tests {
     async fn the_default_room_reads_linked_ids_and_settings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        let accounts = AccountService::new(pool.clone());
         let account = accounts
             .resolve_or_provision("@evan:mbm.one")
             .await

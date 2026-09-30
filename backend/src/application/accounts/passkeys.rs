@@ -157,12 +157,11 @@ fn serialise(passkey: &Passkey) -> Result<String, AppError> {
 mod tests {
     use super::*;
     use crate::domain::accounts::{SecurityEvent, STATUS_ACTIVE};
-    use crate::events::EventBroadcaster;
 
     async fn service() -> AccountService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        AccountService::new(pool, EventBroadcaster::default())
+        AccountService::new(pool)
     }
 
     /// A structurally valid passkey. Building one through a ceremony needs an

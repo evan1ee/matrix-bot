@@ -53,9 +53,9 @@ impl BotModule for BriefingModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        broadcaster: Option<&EventBroadcaster>,
+        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
-        handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body, broadcaster).await
+        handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body).await
     }
 }
 

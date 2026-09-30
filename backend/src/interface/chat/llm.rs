@@ -8,7 +8,6 @@ use crate::application::settings::SettingsService;
 use crate::application::AppServices;
 use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
-use crate::domain::events::SystemEvent;
 use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
@@ -166,16 +165,8 @@ pub async fn handle_ai_command_with_stage(
         if trimmed.is_empty() && quoted.is_none() {
             return Some(format_help());
         }
-        if let Some(sub_reply) = handle_ai_subcommand(
-            pool,
-            &services.settings,
-            ai,
-            broadcaster,
-            owner_id,
-            room_id,
-            trimmed,
-        )
-        .await
+        if let Some(sub_reply) =
+            handle_ai_subcommand(pool, services, ai, owner_id, room_id, trimmed).await
         {
             return Some(sub_reply);
         }
@@ -258,13 +249,13 @@ pub fn format_help() -> String {
 
 pub async fn handle_ai_subcommand(
     pool: &DbPool,
-    settings: &SettingsService,
+    services: &AppServices,
     ai: &crate::config::AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     room_id: &str,
     trimmed: &str,
 ) -> Option<String> {
+    let settings = &services.settings;
     if trimmed.eq_ignore_ascii_case("retro")
         || trimmed.eq_ignore_ascii_case("retrospective")
         || trimmed.eq_ignore_ascii_case("weekly")
@@ -274,7 +265,7 @@ pub async fn handle_ai_subcommand(
         );
     }
     if trimmed.eq_ignore_ascii_case("reset") || trimmed.eq_ignore_ascii_case("clear") {
-        return Some(handle_reset(pool, broadcaster, owner_id, room_id).await);
+        return Some(handle_reset(services, owner_id, room_id).await);
     }
     if trimmed.eq_ignore_ascii_case("config") {
         return Some(handle_show_config(pool, settings, ai, owner_id).await);
@@ -289,7 +280,7 @@ pub async fn handle_ai_subcommand(
                 "Model name exceeds maximum length of 500 characters.",
             ));
         }
-        return Some(handle_set_model(pool, broadcaster, owner_id, model_arg).await);
+        return Some(handle_set_model(services, owner_id, model_arg).await);
     }
     if let Some(rest) = trimmed
         .strip_prefix("history")
@@ -366,8 +357,7 @@ pub async fn handle_set_history(
 }
 
 pub async fn handle_set_model(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &AppServices,
     owner_id: &AccountId,
     model_name: &str,
 ) -> String {
@@ -376,14 +366,9 @@ pub async fn handle_set_model(
         ..Default::default()
     };
 
-    match llm_repo::upsert_user_config(pool, owner_id, &input).await {
+    match services.llm.update_user_config(owner_id, &input).await {
         Ok(cfg) => {
             clear_ai_error_state();
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::AiConfigUpdated {
-                    owner_id: *owner_id,
-                });
-            }
             let model = cfg.model_name.unwrap_or_else(|| model_name.to_string());
             format!(
                 "✅ AI model updated to: <code>{}</code>",
@@ -397,21 +382,14 @@ pub async fn handle_set_model(
     }
 }
 
-pub async fn handle_reset(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
-    owner_id: &AccountId,
-    room_id: &str,
-) -> String {
-    if let Ok(conv) = llm_repo::get_or_create_conversation(pool, owner_id, room_id, 1800).await {
-        if let Ok(true) = llm_repo::delete_conversation(pool, &conv.id, owner_id).await {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::AiConversationDeleted {
-                    id: conv.id,
-                    owner_id: *owner_id,
-                });
-            }
-        }
+pub async fn handle_reset(services: &AppServices, owner_id: &AccountId, room_id: &str) -> String {
+    if let Ok(conv) = services
+        .llm
+        .get_or_create_conversation(owner_id, room_id, 1800)
+        .await
+    {
+        // The service publishes AiConversationDeleted when a row was deleted.
+        let _ = services.llm.delete_conversation(&conv.id, owner_id).await;
     }
     "🧹 <b>AI conversation history reset.</b> Next message starts a fresh turn.".to_string()
 }
@@ -541,6 +519,14 @@ mod tests {
         .unwrap();
 
         assert!(reset_reply.contains("AI conversation history reset"));
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &db.pool, &owner
+            )
+            .await
+            .unwrap(),
+            vec!["AiConfigUpdated", "AiConversationDeleted"]
+        );
     }
 
     #[tokio::test]

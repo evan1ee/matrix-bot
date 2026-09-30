@@ -127,10 +127,9 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
-    use crate::domain::events::SystemEvent;
+    use crate::domain::events::EventId;
     use crate::domain::jobs::JobId;
     use crate::domain::rooms::JoinedRoom;
-    use crate::events::EventBroadcaster;
     use crate::interface::jobs::fake::FakeDelivery;
 
     const ROOM: &str = "!briefing:test";
@@ -139,7 +138,6 @@ mod tests {
         pool: sqlx::PgPool,
         services: AppServices,
         owner: AccountId,
-        events: EventBroadcaster,
     }
 
     /// An active account (no holdings) with briefings `enabled`, and a cached
@@ -149,8 +147,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::from_seed(name);
         crate::db::pool::seed_account(&pool, &owner).await;
-        let events = EventBroadcaster::new(16);
-        let services = AppServices::with_events(&pool, &events);
+        let services = AppServices::new(&pool);
         services
             .settings
             .modify(&owner, |s| {
@@ -169,7 +166,6 @@ mod tests {
             pool,
             services,
             owner,
-            events,
         }
     }
 
@@ -201,14 +197,20 @@ mod tests {
         f.services.settings.get_last_briefing_date(&f.owner).await
     }
 
-    fn sent_events(rx: &mut tokio::sync::broadcast::Receiver<SystemEvent>) -> Vec<String> {
-        let mut out = Vec::new();
-        while let Ok(e) = rx.try_recv() {
-            if let SystemEvent::MorningBriefingSent { summary, .. } = e {
-                out.push(summary);
-            }
-        }
-        out
+    /// The summaries of this account's stored `MorningBriefingSent` events.
+    async fn sent_events(f: &Fixture) -> Vec<String> {
+        crate::infrastructure::postgres::repositories::outbox::load_since(
+            &f.pool,
+            &[f.owner],
+            EventId(0),
+            50,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.event_type == "MorningBriefingSent")
+        .filter_map(|e| e.json["payload"]["summary"].as_str().map(str::to_string))
+        .collect()
     }
 
     /// Given a database that cannot be read, When the job runs, Then it is
@@ -217,17 +219,16 @@ mod tests {
     #[tokio::test]
     async fn a_database_error_retries_instead_of_using_defaults() {
         let f = fixture("acct_brief_dberr", true).await;
-        let mut rx = f.events.subscribe();
         let day = today(&f).await;
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
         f.pool.close().await;
 
+        // A closed pool cannot store an event, so nothing was published.
         let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
 
         assert!(matches!(out, Err(JobError::Retryable(_))), "{out:?}");
         assert!(fake.room_sends.lock().unwrap().is_empty());
-        assert!(sent_events(&mut rx).is_empty());
     }
 
     /// Given Matrix is disconnected, Then the job waits and the day is open.
@@ -286,7 +287,6 @@ mod tests {
     #[tokio::test]
     async fn generates_sends_to_the_default_room_and_records_the_day() {
         let f = fixture("acct_brief_ok", true).await;
-        let mut rx = f.events.subscribe();
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
@@ -304,7 +304,7 @@ mod tests {
             Some(ymd(today(&f).await).as_str())
         );
         assert_eq!(
-            sent_events(&mut rx),
+            sent_events(&f).await,
             ["0 tasks, 0 habits, 0 bills, 0 holdings"]
         );
     }
@@ -313,7 +313,6 @@ mod tests {
     #[tokio::test]
     async fn a_failed_send_still_records_the_day() {
         let f = fixture("acct_brief_fail", true).await;
-        let mut rx = f.events.subscribe();
         let handler = BriefingSendHandler::new(
             f.services.clone(),
             FakeDelivery::failing_once("homeserver down"),
@@ -329,7 +328,7 @@ mod tests {
             Some(ymd(today(&f).await).as_str())
         );
         assert_eq!(
-            sent_events(&mut rx),
+            sent_events(&f).await,
             ["0 tasks, 0 habits, 0 bills, 0 holdings"]
         );
     }
@@ -349,7 +348,6 @@ mod tests {
     #[tokio::test]
     async fn a_stale_date_is_dropped_without_sending() {
         let f = fixture("acct_brief_stale", true).await;
-        let mut rx = f.events.subscribe();
         let fake = FakeDelivery::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
         let yesterday = today(&f).await - Duration::days(1);
@@ -359,7 +357,7 @@ mod tests {
         assert!(out.is_ok(), "{out:?}");
         assert!(fake.room_sends.lock().unwrap().is_empty());
         assert_eq!(last_date(&f).await, None);
-        assert!(sent_events(&mut rx).is_empty());
+        assert!(sent_events(&f).await.is_empty());
     }
 
     /// Given jobs for two consecutive days that run in the wrong order,

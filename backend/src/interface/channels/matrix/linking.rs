@@ -95,14 +95,13 @@ mod tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
     use crate::domain::todos::{NewTodo, TodoPriority};
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::accounts as repo;
     use crate::infrastructure::postgres::repositories::todos as todo_repo;
 
     async fn db() -> (Database, AccountService) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        let accounts = AccountService::new(pool.clone());
         (Database { pool }, accounts)
     }
 

@@ -3,7 +3,6 @@ use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::events::SystemEvent;
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
@@ -117,17 +116,14 @@ pub async fn trigger_briefing(
         }
     }
 
-    state.broadcaster.send(SystemEvent::MorningBriefingSent {
-        owner_id: user.account_id,
-        delivered_at: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        summary: format!(
-            "{} tasks, {} habits, {} bills, {} holdings",
-            payload.summary.pending_tasks_count,
-            payload.summary.habits_completed_count,
-            payload.summary.upcoming_bills_count,
-            payload.summary.holdings_count
-        ),
-    });
+    if let Err(err) = state
+        .services
+        .briefing
+        .announce_manual(&user.account_id, &payload)
+        .await
+    {
+        tracing::warn!(owner_id = %user.account_id, error = %err, "Failed to publish MorningBriefingSent");
+    }
 
     Ok(Json(BriefingPayload::from(payload)))
 }

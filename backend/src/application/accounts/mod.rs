@@ -13,7 +13,6 @@ use crate::domain::accounts::{
     Account, AccountId, AccountsError, LinkOutcome, MaturedRecovery, MergeOutcome, MergePreview,
     SecurityEvent, SecurityEventKind, Session,
 };
-use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::accounts::{
     core, linking, recovery, security_events, sessions,
 };
@@ -49,13 +48,11 @@ impl From<AccountsError> for AppError {
 #[derive(Clone)]
 pub struct AccountService {
     pool: PgPool,
-    #[allow(dead_code)]
-    events: EventBroadcaster,
 }
 
 impl AccountService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -327,7 +324,7 @@ mod tests {
     async fn service() -> AccountService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        AccountService::new(pool, EventBroadcaster::default())
+        AccountService::new(pool)
     }
 
     /// `(kind, detail)` of every audit row of the account, oldest first.

@@ -94,13 +94,12 @@ impl AccountService {
 mod tests {
     use super::*;
     use crate::domain::accounts::{hash_token, STATUS_ACTIVE};
-    use crate::events::EventBroadcaster;
     use chrono::{DateTime, Utc};
 
     async fn service() -> AccountService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        AccountService::new(pool, EventBroadcaster::default())
+        AccountService::new(pool)
     }
 
     #[tokio::test]

@@ -40,7 +40,7 @@ pub async fn get_user_config(
 }
 
 pub async fn upsert_user_config(
-    pool: &sqlx::PgPool,
+    conn: &mut sqlx::PgConnection,
     owner_id: &AccountId,
     input: &UpdateAiConfigInput,
 ) -> Result<AiUserConfig, sqlx::Error> {
@@ -71,10 +71,10 @@ pub async fn upsert_user_config(
         input.temperature,
         input.max_tokens
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    get_user_config(pool, owner_id)
+    get_user_config(&mut *conn, owner_id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)
 }
@@ -226,8 +226,31 @@ pub async fn touch_conversation(
     Ok(())
 }
 
+/// [`insert_message`] on its own pooled connection.
 pub async fn add_message(
     pool: &sqlx::PgPool,
+    conversation_id: &str,
+    role: &str,
+    content: &str,
+    tool_call_id: Option<&str>,
+    tool_name: Option<&str>,
+) -> Result<AiMessage, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    insert_message(
+        &mut conn,
+        conversation_id,
+        role,
+        content,
+        tool_call_id,
+        tool_name,
+    )
+    .await
+}
+
+/// Inserts a message and touches its conversation on one connection, so a
+/// service can run it inside a transaction.
+pub async fn insert_message(
+    conn: &mut sqlx::PgConnection,
     conversation_id: &str,
     role: &str,
     content: &str,
@@ -247,10 +270,10 @@ pub async fn add_message(
         tool_call_id,
         tool_name
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    touch_conversation(pool, conversation_id).await?;
+    touch_conversation(&mut *conn, conversation_id).await?;
 
     let row = sqlx::query!(
         r#"
@@ -260,7 +283,7 @@ pub async fn add_message(
         "#,
         id
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
 
     Ok(AiMessage {
@@ -324,7 +347,8 @@ impl AiRepository {
         owner_id: &AccountId,
         input: &UpdateAiConfigInput,
     ) -> Result<AiUserConfig, sqlx::Error> {
-        upsert_user_config(pool, owner_id, input).await
+        let mut conn = pool.acquire().await?;
+        upsert_user_config(&mut conn, owner_id, input).await
     }
 
     pub async fn get_or_create_conversation(
@@ -422,7 +446,8 @@ mod tests {
             ..Default::default()
         };
 
-        let saved = upsert_user_config(&pool, &owner, &input).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        let saved = upsert_user_config(&mut conn, &owner, &input).await.unwrap();
         assert_eq!(saved.owner_id, owner.to_string());
         assert_eq!(saved.model_name.as_deref(), Some("gpt-4o"));
         assert!(saved.has_api_key);

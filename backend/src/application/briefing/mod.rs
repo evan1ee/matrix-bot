@@ -8,8 +8,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::jobs::NewJob;
 use crate::domain::settings::{briefing_due_date, UserSettings};
-use crate::events::EventBroadcaster;
-use crate::infrastructure::postgres::repositories;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 pub mod generator;
 pub mod models;
@@ -20,21 +19,14 @@ pub use models::{BriefingPayload, BriefingSummary, TickerPerformance};
 #[derive(Clone)]
 pub struct BriefingService {
     pool: DbPool,
-    events: EventBroadcaster,
     settings: SettingsService,
     accounts: AccountService,
 }
 
 impl BriefingService {
-    pub fn new(
-        pool: DbPool,
-        events: EventBroadcaster,
-        settings: SettingsService,
-        accounts: AccountService,
-    ) -> Self {
+    pub fn new(pool: DbPool, settings: SettingsService, accounts: AccountService) -> Self {
         Self {
             pool,
-            events,
             settings,
             accounts,
         }
@@ -71,7 +63,8 @@ impl BriefingService {
         Ok(enqueued)
     }
 
-    /// Records the day as sent and publishes `MorningBriefingSent`.
+    /// Records the day as sent and publishes `MorningBriefingSent` in the
+    /// same transaction as the `last_briefing_date` write.
     pub async fn record_sent(
         &self,
         owner: &AccountId,
@@ -79,21 +72,40 @@ impl BriefingService {
         summary: &BriefingSummary,
     ) -> Result<(), AppError> {
         let date = local_date.format("%Y-%m-%d").to_string();
-        self.settings
-            .update_last_briefing_date(owner, &date)
-            .await?;
-        self.events.send(SystemEvent::MorningBriefingSent {
-            owner_id: *owner,
-            delivered_at: date,
-            summary: format!(
-                "{} tasks, {} habits, {} bills, {} holdings",
-                summary.pending_tasks_count,
-                summary.habits_completed_count,
-                summary.upcoming_bills_count,
-                summary.holdings_count
-            ),
-        });
+        let mut tx = self.pool.begin().await?;
+        repositories::settings::update_last_briefing_date(&mut *tx, owner, &date).await?;
+        outbox::publish(&mut tx, &sent_event(owner, date, summary)).await?;
+        tx.commit().await?;
         Ok(())
+    }
+
+    /// Announces an on-demand briefing (REST trigger, `!briefing`) to the
+    /// event stream. Does not touch `last_briefing_date`: a manual run must
+    /// not suppress the scheduled one.
+    pub async fn announce_manual(
+        &self,
+        owner: &AccountId,
+        payload: &BriefingPayload,
+    ) -> Result<(), AppError> {
+        let delivered_at = Utc::now().format("%Y-%m-%d").to_string();
+        let mut tx = self.pool.begin().await?;
+        outbox::publish(&mut tx, &sent_event(owner, delivered_at, &payload.summary)).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+fn sent_event(owner: &AccountId, delivered_at: String, summary: &BriefingSummary) -> SystemEvent {
+    SystemEvent::MorningBriefingSent {
+        owner_id: *owner,
+        delivered_at,
+        summary: format!(
+            "{} tasks, {} habits, {} bills, {} holdings",
+            summary.pending_tasks_count,
+            summary.habits_completed_count,
+            summary.upcoming_bills_count,
+            summary.holdings_count
+        ),
     }
 }
 
@@ -103,13 +115,13 @@ mod tests {
 
     use super::*;
     use crate::application::AppServices;
+    use crate::domain::events::EventId;
     use crate::domain::jobs::JobStatus;
 
     struct Fixture {
         pool: DbPool,
         services: AppServices,
         owner: AccountId,
-        events: EventBroadcaster,
     }
 
     async fn setup(name: &str) -> Fixture {
@@ -117,12 +129,10 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::from_seed(name);
         crate::db::pool::seed_account(&pool, &owner).await;
-        let events = EventBroadcaster::new(16);
         Fixture {
-            services: AppServices::with_events(&pool, &events),
+            services: AppServices::new(&pool),
             pool,
             owner,
-            events,
         }
     }
 
@@ -181,24 +191,68 @@ mod tests {
         assert_eq!(job_status(&f, now).await, None);
     }
 
-    /// When record_sent runs, Then last_briefing_date is the date and
-    /// MorningBriefingSent is published with the summary line.
-    #[tokio::test]
-    async fn record_sent_marks_the_day_and_publishes() {
-        let f = setup("acct_brief_record").await;
-        let mut rx = f.events.subscribe();
-        let date = NaiveDate::from_ymd_opt(2026, 9, 29).unwrap();
-        let summary = BriefingSummary {
+    /// The stored `MorningBriefingSent` events of the fixture's owner.
+    async fn sent_events(f: &Fixture) -> Vec<serde_json::Value> {
+        repositories::outbox::load_since(&f.pool, &[f.owner], EventId(0), 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event_type == "MorningBriefingSent")
+            .map(|e| e.json)
+            .collect()
+    }
+
+    fn summary() -> BriefingSummary {
+        BriefingSummary {
             pending_tasks_count: 3,
             habits_completed_count: 2,
             habits_total_count: 5,
             upcoming_bills_count: 1,
             holdings_count: 4,
+        }
+    }
+
+    /// When a manual briefing is announced, Then MorningBriefingSent carries
+    /// today's date and the formatted summary.
+    #[tokio::test]
+    async fn announce_manual_publishes_the_summary_line() {
+        let f = setup("acct_brief_manual").await;
+        let payload = BriefingPayload {
+            owner_id: f.owner.to_string(),
+            html_content: String::new(),
+            plain_text: String::new(),
+            summary: summary(),
+            tickers: Vec::new(),
         };
 
         f.services
             .briefing
-            .record_sent(&f.owner, date, &summary)
+            .announce_manual(&f.owner, &payload)
+            .await
+            .unwrap();
+
+        let events = sent_events(&f).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0]["payload"]["summary"],
+            "3 tasks, 2 habits, 1 bills, 4 holdings"
+        );
+        assert_eq!(
+            events[0]["payload"]["delivered_at"],
+            Utc::now().format("%Y-%m-%d").to_string()
+        );
+    }
+
+    /// When record_sent runs, Then last_briefing_date is the date and
+    /// MorningBriefingSent is published with the summary line.
+    #[tokio::test]
+    async fn record_sent_marks_the_day_and_publishes() {
+        let f = setup("acct_brief_record").await;
+        let date = NaiveDate::from_ymd_opt(2026, 9, 29).unwrap();
+
+        f.services
+            .briefing
+            .record_sent(&f.owner, date, &summary())
             .await
             .unwrap();
 
@@ -210,24 +264,12 @@ mod tests {
                 .as_deref(),
             Some("2026-09-29")
         );
-        let mut got = None;
-        while let Ok(e) = rx.try_recv() {
-            if let SystemEvent::MorningBriefingSent {
-                owner_id,
-                delivered_at,
-                summary,
-            } = e
-            {
-                got = Some((owner_id, delivered_at, summary));
-            }
-        }
+        let events = sent_events(&f).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["payload"]["delivered_at"], "2026-09-29");
         assert_eq!(
-            got,
-            Some((
-                f.owner,
-                "2026-09-29".to_string(),
-                "3 tasks, 2 habits, 1 bills, 4 holdings".to_string()
-            ))
+            events[0]["payload"]["summary"],
+            "3 tasks, 2 habits, 1 bills, 4 holdings"
         );
     }
 }

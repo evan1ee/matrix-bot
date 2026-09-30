@@ -1,15 +1,12 @@
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
-use crate::domain::events::SystemEvent;
 use crate::domain::settings::parse_briefing_time;
-use crate::events::EventBroadcaster;
 use crate::utils::html_escape;
 
 pub async fn handle_briefing_command(
     services: &AppServices,
     owner_id: &AccountId,
     clean_body: &str,
-    broadcaster: Option<&EventBroadcaster>,
 ) -> Option<String> {
     let body = clean_body.trim();
     let lower = body.to_lowercase();
@@ -20,7 +17,7 @@ pub async fn handle_briefing_command(
     let arg = parts.next().unwrap_or("").trim();
 
     match subcmd.as_str() {
-        "" | "now" | "today" => Some(generate_now(services, owner_id, broadcaster).await),
+        "" | "now" | "today" => Some(generate_now(services, owner_id).await),
         "time" => Some(set_time(services, owner_id, arg).await),
         "on" | "enable" => Some(toggle(services, owner_id, true).await),
         "off" | "disable" => Some(toggle(services, owner_id, false).await),
@@ -47,11 +44,7 @@ fn strip_command<'a>(lower: &str, body: &'a str) -> Option<&'a str> {
     None
 }
 
-async fn generate_now(
-    services: &AppServices,
-    owner_id: &AccountId,
-    broadcaster: Option<&EventBroadcaster>,
-) -> String {
+async fn generate_now(services: &AppServices, owner_id: &AccountId) -> String {
     let settings = services.settings.get_or_default(owner_id).await;
     match services
         .briefing
@@ -59,18 +52,8 @@ async fn generate_now(
         .await
     {
         Ok(payload) => {
-            if let Some(b) = broadcaster {
-                b.send(SystemEvent::MorningBriefingSent {
-                    owner_id: *owner_id,
-                    delivered_at: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                    summary: format!(
-                        "{} tasks, {} habits, {} bills, {} holdings",
-                        payload.summary.pending_tasks_count,
-                        payload.summary.habits_completed_count,
-                        payload.summary.upcoming_bills_count,
-                        payload.summary.holdings_count
-                    ),
-                });
+            if let Err(err) = services.briefing.announce_manual(owner_id, &payload).await {
+                tracing::warn!(%owner_id, error = %err, "Failed to publish MorningBriefingSent");
             }
             payload.html_content
         }
@@ -200,18 +183,18 @@ mod tests {
         let (_pool, services) = pool_and_services().await;
         let owner = AccountId::from_seed("briefing_test");
 
-        let res = handle_briefing_command(&services, &owner, "!briefing status", None)
+        let res = handle_briefing_command(&services, &owner, "!briefing status")
             .await
             .unwrap();
         assert!(res.contains("早安简报设置状态"));
         assert!(res.contains("07:00"));
 
-        let res_time = handle_briefing_command(&services, &owner, "!briefing time 08:30", None)
+        let res_time = handle_briefing_command(&services, &owner, "!briefing time 08:30")
             .await
             .unwrap();
         assert!(res_time.contains("08:30"));
 
-        let res_off = handle_briefing_command(&services, &owner, "!briefing off", None)
+        let res_off = handle_briefing_command(&services, &owner, "!briefing off")
             .await
             .unwrap();
         assert!(res_off.contains("关闭"));

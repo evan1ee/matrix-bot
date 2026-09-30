@@ -5,7 +5,6 @@ use axum::{
 };
 use tracing::error;
 
-use crate::domain::events::SystemEvent;
 use crate::error::ApiError;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
@@ -152,18 +151,15 @@ pub async fn delete_conversation(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = llm_repo::delete_conversation(&state.db.pool, &id, &user.account_id)
-        .await
-        .map_err(ApiError::from)?;
+    let deleted = state
+        .services
+        .llm
+        .delete_conversation(&id, &user.account_id)
+        .await?;
 
     if !deleted {
         return Err(ApiError::not_found("Conversation not found"));
     }
-
-    state.broadcaster.send(SystemEvent::AiConversationDeleted {
-        id,
-        owner_id: user.account_id,
-    });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -266,13 +262,11 @@ pub async fn update_ai_config(
     }
 
     let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
-    let updated = llm_repo::upsert_user_config(&state.db.pool, &user.account_id, &domain_input)
-        .await
-        .map_err(ApiError::from)?;
-
-    state.broadcaster.send(SystemEvent::AiConfigUpdated {
-        owner_id: user.account_id,
-    });
+    let updated = state
+        .services
+        .llm
+        .update_user_config(&user.account_id, &domain_input)
+        .await?;
 
     let settings = state
         .services
@@ -482,7 +476,10 @@ mod tests {
             max_history_turns: None,
         };
         let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
-        llm_repo::upsert_user_config(&state.db.pool, &owner, &domain_input)
+        state
+            .services
+            .llm
+            .update_user_config(&owner, &domain_input)
             .await
             .unwrap();
 
