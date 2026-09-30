@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp, ModuleRegistry};
 use crate::utils::html_escape;
 
@@ -49,7 +48,6 @@ impl BotModule for CoreModule {
         ctx: &CommandContext,
         _services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         let cmd_lower = ctx.command.to_lowercase();
         match cmd_lower.as_str() {
@@ -113,7 +111,6 @@ mod tests {
                 &ctx,
                 &crate::application::AppServices::new(&dummy_db.pool),
                 &dummy_db,
-                None,
             )
             .await
             .unwrap();
@@ -128,7 +125,6 @@ mod tests {
                 &ctx_ping,
                 &crate::application::AppServices::new(&dummy_db.pool),
                 &dummy_db,
-                None,
             )
             .await
             .unwrap();

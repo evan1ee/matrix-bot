@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod category;
@@ -72,7 +71,6 @@ impl BotModule for FinanceModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_finance_command(
             services,
@@ -141,28 +139,28 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         assert!(module
-            .handle_command(&ctx("!expense list"), &services, &db, None)
+            .handle_command(&ctx("!expense list"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!income list"), &services, &db, None)
+            .handle_command(&ctx("!income list"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!category list"), &services, &db, None)
+            .handle_command(&ctx("!category list"), &services, &db)
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo add milk"), &services, &db, None)
+            .handle_command(&ctx("!todo add milk"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &services, &db, None)
+            .handle_command(&ctx("!remind me later"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &services, &db, None)
+            .handle_command(&ctx("hello there"), &services, &db)
             .await
             .is_none());
     }
@@ -174,7 +172,7 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db, None)
+            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db)
             .await
             .expect("the module must answer");
         assert!(
@@ -184,7 +182,7 @@ mod tests {
         assert!(reply.contains("EUR"));
 
         let listed = module
-            .handle_command(&ctx("!expense list"), &services, &db, None)
+            .handle_command(&ctx("!expense list"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -200,7 +198,7 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db, None)
+            .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db)
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -237,7 +235,7 @@ mod tests {
             .unwrap();
 
         let reply = module
-            .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db, None)
+            .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db)
             .await
             .expect("the module must answer `!expense add 15.50 lunch`");
 
@@ -251,7 +249,7 @@ mod tests {
         );
 
         let explicit = module
-            .handle_command(&ctx("!expense add 9.99 EUR coffee"), &services, &db, None)
+            .handle_command(&ctx("!expense add 9.99 EUR coffee"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -268,7 +266,7 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         let reply = FinanceModule::new()
-            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db, None)
+            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db)
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Logged"), "unexpected reply: {reply}");
@@ -295,7 +293,6 @@ mod tests {
                 &ctx("!expense add 1.00 EUR <script>alert(1)</script>"),
                 &services,
                 &db,
-                None,
             )
             .await
             .unwrap();

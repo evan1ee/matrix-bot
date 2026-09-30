@@ -387,13 +387,11 @@ mod tests {
     use super::*;
     use crate::db::DbPool;
     use crate::domain::reminders::ReminderSource;
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     fn state_with(pool: DbPool) -> ApiState {
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -571,7 +569,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

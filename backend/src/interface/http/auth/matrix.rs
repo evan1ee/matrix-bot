@@ -256,7 +256,6 @@ pub async fn issue_matrix_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     async fn test_state() -> ApiState {
@@ -271,7 +270,6 @@ mod tests {
             .expect("test http client");
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
             client,

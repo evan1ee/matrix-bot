@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::ModuleRegistry;
 
 pub fn register_handlers(
@@ -16,7 +15,6 @@ pub fn register_handlers(
     registry: Arc<ModuleRegistry>,
     db: Database,
     services: crate::application::AppServices,
-    broadcaster: Option<EventBroadcaster>,
     pending_merges: Option<Arc<crate::interface::channels::matrix::linking::PendingMerges>>,
 ) {
     // 1. Authorized invite event handler
@@ -58,7 +56,6 @@ pub fn register_handlers(
         let registry = registry.clone();
         let db = db.clone();
         let services = services.clone();
-        let broadcaster = broadcaster.clone();
         let pending_merges = pending_merges.clone();
         let ocr_client = ocr_client.clone();
         let voice_config = voice_config.clone();
@@ -89,7 +86,6 @@ pub fn register_handlers(
                         &db,
                         &services,
                         &ai_config,
-                        broadcaster.as_ref(),
                         &ocr_client,
                         &voice_config,
                         &stt_client,
@@ -105,7 +101,6 @@ pub fn register_handlers(
                         &registry,
                         &db,
                         &services,
-                        broadcaster.as_ref(),
                         pending_merges.as_deref(),
                     )
                     .await;

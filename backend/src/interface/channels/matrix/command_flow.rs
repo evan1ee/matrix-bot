@@ -11,7 +11,6 @@ use matrix_sdk::{
 use tracing::{error, info};
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::dispatcher::CommandParser;
 use crate::interface::channels::matrix::linking::PendingMerges;
 use crate::interface::chat::ModuleRegistry;
@@ -29,7 +28,6 @@ pub async fn handle_text(
     registry: &Arc<ModuleRegistry>,
     db: &Database,
     services: &crate::application::AppServices,
-    broadcaster: Option<&EventBroadcaster>,
     pending_merges: Option<&PendingMerges>,
 ) {
     let MessageType::Text(ref text_content) = ev.content.msgtype else {
@@ -132,10 +130,9 @@ pub async fn handle_text(
         None
     };
 
-    let dispatch_res =
-        std::panic::AssertUnwindSafe(registry.dispatch(&cmd_ctx, services, db, broadcaster))
-            .catch_unwind()
-            .await;
+    let dispatch_res = std::panic::AssertUnwindSafe(registry.dispatch(&cmd_ctx, services, db))
+        .catch_unwind()
+        .await;
 
     if let Some(mut guard) = typing_guard {
         guard.stop().await;

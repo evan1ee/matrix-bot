@@ -502,18 +502,15 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::db::DbPool;
-    use crate::events::EventBroadcaster;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["user_api_1"]).await;
         let db = Database { pool: pool.clone() };
-        let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();
         let state = ApiState::new(
             db,
-            broadcaster,
             Some("secret".to_string()),
             "https://matrix.org".to_string(),
             client,

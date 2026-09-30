@@ -4,7 +4,6 @@ use chrono_tz::Tz;
 
 use crate::domain::accounts::AccountId;
 use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use serde_json::json;
 
@@ -30,7 +29,6 @@ fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
-    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     room_id: &str,
     name: &str,
@@ -377,7 +375,6 @@ mod tests {
         let result = execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "add_todo",
@@ -403,7 +400,6 @@ mod tests {
         let result = execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "add_todo",

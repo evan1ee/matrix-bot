@@ -6,7 +6,6 @@ use reqwest::Client;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::bookmarks::BookmarkQuery;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::web::fetch_and_extract_metadata;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
@@ -70,7 +69,6 @@ impl BotModule for BookmarksModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         match ctx.command.as_str() {
             "save" => Some(handle_save_command(ctx, services, Some(&self.http_client)).await),

@@ -9,7 +9,6 @@ use tracing::{error, info};
 use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::MatrixBot;
 
@@ -52,7 +51,6 @@ pub async fn run_bot_loop(
     config: Config,
     db: Database,
     services: AppServices,
-    broadcaster: EventBroadcaster,
     handles: BotHandles,
     shutdown: CancellationToken,
 ) {
@@ -61,13 +59,7 @@ pub async fn run_bot_loop(
     loop {
         info!("Starting Matrix bot event loop sync...");
 
-        let build = MatrixBot::new_full(
-            &config,
-            db.clone(),
-            services.clone(),
-            Some(broadcaster.clone()),
-            handles.clone(),
-        );
+        let build = MatrixBot::new_full(&config, db.clone(), services.clone(), handles.clone());
 
         let bot = tokio::select! {
             _ = shutdown.cancelled() => {

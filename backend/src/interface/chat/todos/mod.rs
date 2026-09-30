@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
@@ -80,7 +79,6 @@ impl BotModule for TodoModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_todo_command(&services.todos, &services.settings, ctx).await
     }
@@ -144,15 +142,15 @@ mod tests {
         let (db, services) = setup_services().await;
 
         assert!(module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db, None)
+            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &services, &db, None)
+            .handle_command(&ctx("!remind me later"), &services, &db)
             .await
             .is_none());
     }
@@ -163,16 +161,11 @@ mod tests {
         let (db, services) = setup_services().await;
 
         module
-            .handle_command(
-                &ctx("!todo add <img src=x onerror=1>"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!todo add <img src=x onerror=1>"), &services, &db)
             .await
             .unwrap();
         let listed = module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
             .unwrap();
 
@@ -191,12 +184,12 @@ mod tests {
         let (db, services) = setup_services().await;
 
         module
-            .handle_command(&ctx("!todo add ship it"), &services, &db, None)
+            .handle_command(&ctx("!todo add ship it"), &services, &db)
             .await
             .unwrap();
 
         let utc_reply = module
-            .handle_command(&ctx("!todo due 1 2d"), &services, &db, None)
+            .handle_command(&ctx("!todo due 1 2d"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -218,7 +211,7 @@ mod tests {
             .unwrap();
 
         let listed = module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -232,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_the_module_broadcasts_events() {
+    async fn test_the_module_writes_events_to_the_outbox() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
@@ -240,7 +233,7 @@ mod tests {
         let db = Database { pool: pool.clone() };
 
         let reply = TodoModule::new()
-            .handle_command(&ctx("!todo add Buy milk"), &services, &db, None)
+            .handle_command(&ctx("!todo add Buy milk"), &services, &db)
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Added Task"), "unexpected reply: {reply}");

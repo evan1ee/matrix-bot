@@ -337,7 +337,6 @@ pub async fn get_public_report(
 mod tests {
     use super::*;
     use crate::domain::finance::{Direction, NewTransaction};
-    use crate::events::EventBroadcaster;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -345,7 +344,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

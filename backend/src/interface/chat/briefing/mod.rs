@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
@@ -53,7 +52,6 @@ impl BotModule for BriefingModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body).await
     }

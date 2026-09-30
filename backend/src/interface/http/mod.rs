@@ -16,7 +16,6 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 
 pub mod account;
 pub mod ai;
@@ -89,29 +88,16 @@ pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
 /// it completes once graceful shutdown has drained open connections. SSE
 /// streams end on the same token (see `sse.rs`), so an open browser tab does
 /// not hold the drain open.
-// Why: the temporary legacy `broadcaster` and the new `hub` are both
-// parameters until step 9 Task 10 deletes the broadcaster, which brings
-// this back to seven arguments. Scope: this function only; remove then.
-#[allow(clippy::too_many_arguments)]
 pub fn start_api_server(
     config: &Config,
     db: Database,
     services: crate::application::AppServices,
-    broadcaster: EventBroadcaster,
     hub: crate::events::Hub,
     handles: crate::interface::channels::matrix::handles::BotHandles,
     listener: TcpListener,
     shutdown: CancellationToken,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let state = auth::ApiState::from_config(
-        config,
-        db,
-        services,
-        broadcaster,
-        hub,
-        handles,
-        shutdown.clone(),
-    )?;
+    let state = auth::ApiState::from_config(config, db, services, hub, handles, shutdown.clone())?;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -196,7 +182,6 @@ pub fn start_api_server(
 mod step_up_tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
-    use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -239,7 +224,6 @@ mod step_up_tests {
 
         let state = auth::ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
@@ -438,7 +422,6 @@ mod server_shutdown_tests {
             &config,
             Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
-            EventBroadcaster::default(),
             crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             listener,

@@ -4,7 +4,6 @@ use crate::domain::life::DayLogInput;
 use chrono::Utc;
 use serde_json::json;
 
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use crate::llm::retrospective::generate_weekly_retrospective;
 
@@ -28,7 +27,6 @@ fn normalize_footprint_category(input: &str) -> &'static str {
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,

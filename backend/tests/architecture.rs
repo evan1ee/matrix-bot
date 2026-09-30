@@ -666,14 +666,50 @@ fn events_runtime_knows_no_transport_and_runs_no_sql() {
 #[test]
 fn lower_layers_do_not_import_the_events_runtime() {
     for dir in ["domain", "application", "infrastructure"] {
-        let v: Vec<String> = violations(dir, &["crate::events::"])
-            .into_iter()
-            // TEMPORARY: removed with the broadcaster in Task 10
-            .filter(|l| !l.contains("EventBroadcaster"))
-            .collect();
+        let v = violations(dir, &["crate::events::"]);
         assert!(
             v.is_empty(),
             "{dir}/ must not depend on crate::events:\n{}",
+            v.join("\n")
+        );
+    }
+}
+
+#[test]
+fn no_in_process_event_broadcast_remains() {
+    for dir in [
+        "domain",
+        "application",
+        "infrastructure",
+        "interface",
+        "llm",
+        "jobs",
+        "events",
+    ] {
+        let v = violations(
+            dir,
+            &[
+                "EventBroadcaster",
+                "tokio::sync::broadcast",
+                "BroadcastStream",
+            ],
+        );
+        assert!(
+            v.is_empty(),
+            "events go through the outbox:\n{}",
+            v.join("\n")
+        );
+    }
+}
+
+#[test]
+fn only_application_publishes_to_the_outbox() {
+    for dir in ["interface", "llm", "jobs", "events"] {
+        // Production code only: hub tests seed events through the repository.
+        let v = production_violations(dir, &["outbox::publish"]);
+        assert!(
+            v.is_empty(),
+            "{dir}/ must publish through a service:\n{}",
             v.join("\n")
         );
     }

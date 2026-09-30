@@ -2,7 +2,6 @@ use async_trait::async_trait;
 
 use crate::application::AppServices;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
@@ -66,7 +65,6 @@ impl BotModule for LifeModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_life_command(services, &ctx.owner_id, &ctx.command, &ctx.raw_args).await
     }

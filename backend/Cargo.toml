@@ -23,7 +23,6 @@ matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"]
 matrix-sdk-crypto = "0.18"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
 # CancellationToken: the one shutdown tree `app.rs` owns.
 tokio-util = "0.7"
 futures-util = "0.3"

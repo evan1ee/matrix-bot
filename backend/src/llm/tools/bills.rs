@@ -4,13 +4,11 @@ use serde_json::json;
 
 use crate::domain::accounts::AccountId;
 use crate::domain::recurring_bills::NewRecurringBill;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
-    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     room_id: &str,
     name: &str,

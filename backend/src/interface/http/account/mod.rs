@@ -23,7 +23,6 @@ mod tests {
         hash_token, AccountId, LinkOutcome, LINK_CODE_TTL_MINUTES, STATUS_ACTIVE, STATUS_UNCLAIMED,
     };
     use crate::domain::todos::{NewTodo, TodoPriority};
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::accounts as repo;
     use crate::infrastructure::postgres::repositories::todos as todo_repo;
     use crate::interface::http::account::{
@@ -39,7 +38,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
             reqwest::Client::new(),

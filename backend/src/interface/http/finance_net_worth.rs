@@ -105,7 +105,6 @@ pub async fn get_net_worth(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_get_net_worth_api_handler() {
@@ -114,7 +113,6 @@ mod tests {
 
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

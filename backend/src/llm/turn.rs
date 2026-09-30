@@ -217,7 +217,6 @@ pub async fn run_turn(
                         let args = tool_call.function.arguments.clone();
                         let services = ctx.services;
                         let pool = ctx.pool;
-                        let broadcaster = ctx.broadcaster;
                         let owner_id = ctx.owner_id;
                         let room_id = ctx.room_id;
                         async move {
@@ -226,13 +225,7 @@ pub async fn run_turn(
                                 iteration, max_iterations, func_name, owner_id
                             );
                             let result_str = match ToolRegistry::execute_tool(
-                                services,
-                                pool,
-                                broadcaster,
-                                owner_id,
-                                room_id,
-                                &func_name,
-                                &args,
+                                services, pool, owner_id, room_id, &func_name, &args,
                             )
                             .await
                             {

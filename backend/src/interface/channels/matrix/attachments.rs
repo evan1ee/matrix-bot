@@ -21,7 +21,6 @@ use tracing::{error, warn};
 use crate::config::AiEnvConfig;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
 use crate::interface::chat::voice::VoiceConfig;
 
@@ -165,7 +164,6 @@ impl<'a> Attachment<'a> {
         db: &Database,
         services: &crate::application::AppServices,
         ai: &AiEnvConfig,
-        broadcaster: Option<&EventBroadcaster>,
         room: &Room,
         owner_id: &AccountId,
         media_bytes: &[u8],
@@ -177,7 +175,6 @@ impl<'a> Attachment<'a> {
                     db,
                     services,
                     ai,
-                    broadcaster,
                     room,
                     owner_id,
                     Some(&content.body),
@@ -196,7 +193,6 @@ impl<'a> Attachment<'a> {
                     db,
                     services,
                     ai,
-                    broadcaster,
                     room,
                     owner_id,
                     media_bytes,
@@ -228,7 +224,6 @@ pub async fn handle_attachment(
     db: &Database,
     services: &crate::application::AppServices,
     ai_config: &AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     ocr: &crate::infrastructure::inference::ocr::OcrClient,
     voice_config: &VoiceConfig,
     stt: &crate::infrastructure::inference::stt::SttClient,
@@ -294,7 +289,6 @@ pub async fn handle_attachment(
         db,
         services,
         ai_config,
-        broadcaster,
         room,
         &owner_id,
         &media_bytes,

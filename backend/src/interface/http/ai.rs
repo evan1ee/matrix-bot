@@ -67,7 +67,6 @@ pub async fn chat(
         &state.services,
         &state.db.pool,
         &state.ai,
-        Some(&state.broadcaster),
         owner_id,
         &room_id,
         None,
@@ -357,7 +356,6 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::domain::accounts::AccountId;
-    use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AccountId) {
         let pool = crate::db::pool::test_pool().await;
@@ -369,7 +367,6 @@ mod tests {
             .unwrap();
         let state = ApiState::new(
             Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

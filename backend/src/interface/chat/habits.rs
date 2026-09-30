@@ -8,7 +8,6 @@ use tracing::error;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
@@ -72,7 +71,6 @@ impl BotModule for HabitsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         let cmd = ctx.command.to_lowercase();
         if cmd != "habit" && cmd != "habits" {

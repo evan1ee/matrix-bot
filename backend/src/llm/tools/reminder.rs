@@ -2,13 +2,11 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::reminders::{NewReminder, RecurrencePattern};
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 use serde_json::json;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
-    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     room_id: &str,
     name: &str,
@@ -269,7 +267,6 @@ mod tests {
 
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            None,
             &test_user,
             "!room:example.org",
             "set_reminder",
@@ -305,7 +302,6 @@ mod tests {
             .to_string();
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            None,
             &test_user,
             "!room:example.org",
             "set_reminder",
@@ -339,7 +335,6 @@ mod tests {
 
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
-            None,
             &acct_id,
             "!room:example.org",
             "set_reminder",
@@ -382,7 +377,6 @@ mod tests {
 
         execute_tool(
             &services,
-            None,
             &acct_id,
             "!room:example.org",
             "set_reminder",

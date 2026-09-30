@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod alerts_handler;
@@ -110,7 +109,6 @@ impl BotModule for PortfolioModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_portfolio_command(services, &ctx.owner_id, &ctx.full_body).await
     }
@@ -161,7 +159,6 @@ mod tests {
                 &ctx(&format!("!portfolio cash deposit 100000 {currency}")),
                 services,
                 db,
-                None,
             )
             .await
             .unwrap();
@@ -188,37 +185,32 @@ mod tests {
         fund(&module, &db, &services, "USD").await;
 
         assert!(module
-            .handle_command(&ctx("!portfolio"), &services, &db, None)
+            .handle_command(&ctx("!portfolio"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00"),
-                &services,
-                &db,
-                None
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!portfolio cash"), &services, &db, None)
+            .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
             .is_some());
 
         assert!(module
-            .handle_command(&ctx("!todo add milk"), &services, &db, None)
+            .handle_command(&ctx("!todo add milk"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db, None)
+            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!settings"), &services, &db, None)
+            .handle_command(&ctx("!settings"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("hello there"), &services, &db, None)
+            .handle_command(&ctx("hello there"), &services, &db)
             .await
             .is_none());
     }
@@ -231,12 +223,7 @@ mod tests {
         fund(&module, &db, &services, "USD").await;
 
         let reply = module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
             .expect("the module must answer");
         assert!(reply.contains("AAPL"));
@@ -246,7 +233,7 @@ mod tests {
         );
 
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &services, &db, None)
+            .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -262,12 +249,7 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         let reply = module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -276,7 +258,7 @@ mod tests {
         );
 
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &services, &db, None)
+            .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -308,12 +290,7 @@ mod tests {
         fund(&module, &db, &services, "CNY").await;
 
         let reply = module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -335,12 +312,7 @@ mod tests {
             .len();
 
         module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
             .unwrap();
 
@@ -359,11 +331,11 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         module
-            .handle_command(&ctx("!portfolio list"), &services, &db, None)
+            .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
             .unwrap();
         module
-            .handle_command(&ctx("!portfolio cash"), &services, &db, None)
+            .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
             .unwrap();
 
@@ -382,12 +354,7 @@ mod tests {
         fund(&module, &db, &services, "USD").await;
 
         module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
             .unwrap();
 
@@ -396,7 +363,6 @@ mod tests {
                 &ctx("!portfolio note AAPL <script>alert(1)</script>"),
                 &services,
                 &db,
-                None,
             )
             .await
             .unwrap();
@@ -407,7 +373,7 @@ mod tests {
         assert!(note_reply.contains("&lt;script&gt;"));
 
         let listed = module
-            .handle_command(&ctx("!portfolio list"), &services, &db, None)
+            .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
             .unwrap();
         assert!(
@@ -424,53 +390,33 @@ mod tests {
         let services = crate::application::AppServices::new(&db.pool);
 
         let deposited = module
-            .handle_command(
-                &ctx("!portfolio cash deposit 1000 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio cash deposit 1000 USD"), &services, &db)
             .await
             .unwrap();
         assert!(deposited.contains("1000.00"), "{deposited}");
 
         module
-            .handle_command(
-                &ctx("!portfolio buy AAPL 5 @ 150.00 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio buy AAPL 5 @ 150.00 USD"), &services, &db)
             .await
             .unwrap();
         let after_buy = module
-            .handle_command(&ctx("!portfolio cash"), &services, &db, None)
+            .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
             .unwrap();
         assert!(after_buy.contains("250.00"), "{after_buy}");
 
         module
-            .handle_command(
-                &ctx("!portfolio sell AAPL 5 @ 180.00"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio sell AAPL 5 @ 180.00"), &services, &db)
             .await
             .unwrap();
         let after_sell = module
-            .handle_command(&ctx("!portfolio cash"), &services, &db, None)
+            .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
             .unwrap();
         assert!(after_sell.contains("1150.00"), "{after_sell}");
 
         let withdrawn = module
-            .handle_command(
-                &ctx("!portfolio cash withdraw 1150 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &services, &db)
             .await
             .unwrap();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
@@ -501,22 +447,12 @@ mod tests {
         let db = db().await;
         let services = crate::application::AppServices::new(&db.pool);
         module
-            .handle_command(
-                &ctx("!portfolio cash deposit 100 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio cash deposit 100 USD"), &services, &db)
             .await
             .unwrap();
 
         let reply = module
-            .handle_command(
-                &ctx("!portfolio cash withdraw 101 USD"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!portfolio cash withdraw 101 USD"), &services, &db)
             .await
             .unwrap();
         assert!(

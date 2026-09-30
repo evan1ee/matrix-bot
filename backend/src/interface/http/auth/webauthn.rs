@@ -461,14 +461,12 @@ pub fn clearing_session_cookie(secure: bool) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             secret.map(str::to_string),
             "https://mbm.one".to_string(),
             reqwest::Client::new(),

@@ -181,7 +181,6 @@ pub async fn redeem_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
     use chrono::Duration;
 
@@ -191,7 +190,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool.clone() },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -254,7 +252,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -403,7 +400,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -462,7 +458,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

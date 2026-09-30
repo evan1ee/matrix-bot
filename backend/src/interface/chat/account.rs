@@ -26,7 +26,6 @@ use crate::db::Database;
 use crate::domain::accounts::{
     AccountId, MaturedRecovery, SecurityEventKind, RECOVERY_DELAY_HOURS,
 };
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::notify::announce_account;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
@@ -106,7 +105,6 @@ impl BotModule for AccountModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         let command = ctx.command.to_lowercase();
 
@@ -398,7 +396,7 @@ mod tests {
 
         for (command, _) in WEB_ONLY {
             let reply = module
-                .handle_command(&ctx(command, &acct, true), &services, &db, None)
+                .handle_command(&ctx(command, &acct, true), &services, &db)
                 .await
                 .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"));
 
@@ -418,7 +416,7 @@ mod tests {
         let (db, services) = setup().await;
         let acct = AccountId::from_seed("acct_evan");
         assert!(module()
-            .handle_command(&ctx("todo", &acct, true), &services, &db, None,)
+            .handle_command(&ctx("todo", &acct, true), &services, &db)
             .await
             .is_none());
     }
@@ -433,7 +431,7 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, false), &services, &db, None)
+            .handle_command(&ctx("recover", &account, false), &services, &db)
             .await
             .unwrap();
 
@@ -459,7 +457,7 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
             .unwrap();
 
@@ -482,7 +480,7 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
             .unwrap();
 
@@ -592,7 +590,7 @@ mod tests {
             .unwrap();
 
         module()
-            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
             .unwrap();
 
@@ -653,7 +651,7 @@ mod tests {
         let mut public_ctx = ctx("passkey", &account, false);
         public_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(&public_ctx, &services, &db, None)
+            .handle_command(&public_ctx, &services, &db)
             .await
             .unwrap();
         assert!(reply.contains("direct message"));
@@ -662,7 +660,7 @@ mod tests {
         let mut dm_ctx = ctx("passkey", &account, true);
         dm_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(&dm_ctx, &services, &db, None)
+            .handle_command(&dm_ctx, &services, &db)
             .await
             .unwrap();
         assert!(reply.contains("?enroll="));
@@ -687,10 +685,7 @@ mod tests {
         for (command, args) in [("passkey", "add"), ("passkey", "enroll"), ("web", "")] {
             let mut dm = ctx(command, &account, true);
             dm.raw_args = args.into();
-            let reply = module()
-                .handle_command(&dm, &services, &db, None)
-                .await
-                .unwrap();
+            let reply = module().handle_command(&dm, &services, &db).await.unwrap();
 
             assert!(
                 !reply.contains("?enroll="),
@@ -733,10 +728,7 @@ mod tests {
         for args in ["sessions", "matrix @evan:other.org"] {
             let mut dm = ctx("unlink", &account, true);
             dm.raw_args = args.into();
-            let reply = module()
-                .handle_command(&dm, &services, &db, None)
-                .await
-                .unwrap();
+            let reply = module().handle_command(&dm, &services, &db).await.unwrap();
             assert!(
                 reply.contains("web app"),
                 "`!unlink {args}` must point to the web app: {reply}"
@@ -768,7 +760,7 @@ mod tests {
         // Initially no passkeys
         let list_ctx = ctx("passkeys", &account, true);
         let reply = module()
-            .handle_command(&list_ctx, &services, &db, None)
+            .handle_command(&list_ctx, &services, &db)
             .await
             .unwrap();
         assert!(reply.contains("no passkeys linked"));
@@ -790,7 +782,7 @@ mod tests {
 
         // List passkeys
         let reply = module()
-            .handle_command(&list_ctx, &services, &db, None)
+            .handle_command(&list_ctx, &services, &db)
             .await
             .unwrap();
         assert!(reply.contains("MacBook"));
@@ -800,7 +792,7 @@ mod tests {
         let mut remove_ctx = ctx("passkey", &account, true);
         remove_ctx.raw_args = "rm 1".into();
         let reply = module()
-            .handle_command(&remove_ctx, &services, &db, None)
+            .handle_command(&remove_ctx, &services, &db)
             .await
             .unwrap();
         assert!(reply.contains("Passkey Removal Requires Verification"));

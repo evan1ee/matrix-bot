@@ -125,7 +125,6 @@ pub async fn delete_category(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     async fn test_state() -> ApiState {
@@ -134,7 +133,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

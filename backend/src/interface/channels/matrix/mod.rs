@@ -8,7 +8,6 @@ use tokio::sync::RwLock;
 use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::client::BotClient;
 use crate::interface::channels::matrix::handler::register_handlers;
 use crate::interface::channels::matrix::verification::{
@@ -56,7 +55,6 @@ pub struct MatrixBot {
     db: Database,
     services: AppServices,
     registry: Arc<ModuleRegistry>,
-    broadcaster: Option<EventBroadcaster>,
     /// Shared with the API, so a merge confirmed in the web UI is the same one
     /// `!link` recorded.
     handles: crate::interface::channels::matrix::handles::BotHandles,
@@ -68,7 +66,6 @@ impl MatrixBot {
         config: &Config,
         db: Database,
         services: AppServices,
-        broadcaster: Option<EventBroadcaster>,
         handles: crate::interface::channels::matrix::handles::BotHandles,
     ) -> Result<Self> {
         let client = BotClient::build_and_login_with_token_handles(
@@ -137,7 +134,6 @@ impl MatrixBot {
             db,
             services,
             registry: registry_arc,
-            broadcaster,
             handles,
             config: config.clone(),
         })
@@ -151,7 +147,6 @@ impl MatrixBot {
             self.registry.clone(),
             self.db.clone(),
             self.services.clone(),
-            self.broadcaster.clone(),
             Some(self.handles.pending_merges.clone()),
         );
 

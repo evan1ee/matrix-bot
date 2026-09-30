@@ -9,7 +9,7 @@ use crate::domain::settings::UserSettings;
 use crate::domain::todos::TodoItem;
 use crate::domain::webhooks::Webhook;
 
-/// Real-time system events broadcast to SSE clients and internal subscribers.
+/// Real-time system events, delivered to SSE clients through the outbox.
 ///
 /// Serialized as `{"type": "<VariantName>", "payload": …}` and sent as unnamed
 /// SSE messages, so browser clients read them from `EventSource.onmessage` and

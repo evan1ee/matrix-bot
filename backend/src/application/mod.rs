@@ -39,7 +39,6 @@ use self::rooms::RoomService;
 use self::settings::SettingsService;
 use self::todos::TodoService;
 use self::webhooks::WebhookService;
-use crate::events::EventBroadcaster;
 
 /// Why a use case failed, by boundary rather than by cause.
 ///
@@ -80,12 +79,12 @@ impl From<&'static str> for AppError {
 
 /// Every application service, built once by the composition root (`app.rs`
 /// and `main.rs`'s stdio MCP mode) and handed to each front door —
-/// `ApiState` and the Matrix `ModuleContext` — so no adapter constructs a
-/// service of its own.
+/// `ApiState`, the Matrix module registry and the job handlers — so no
+/// adapter constructs a service of its own.
 ///
 /// Each service is cheap to clone (a `PgPool` is a handle), so this is too.
 /// A feature joins by adding its service as a field here and building it in
-/// [`AppServices::with_events`].
+/// [`AppServices::new`].
 #[derive(Clone)]
 pub struct AppServices {
     pub accounts: AccountService,
@@ -107,21 +106,10 @@ pub struct AppServices {
 }
 
 impl AppServices {
-    /// Test-only: builds a private, per-call `EventBroadcaster` that nothing
-    /// else subscribes to. Every real composition root uses
-    /// [`Self::with_events`] instead — a build that silently drops every
-    /// `SystemEvent` a service publishes is a trap for whichever adapter
-    /// reaches for the constructor with the fewest arguments, not a
-    /// legitimate production shape.
-    #[cfg(test)]
+    /// Built once per process by a composition root. Services publish
+    /// their events through the outbox inside their own transactions, so no
+    /// event plumbing is passed in.
     pub fn new(pool: &PgPool) -> Self {
-        Self::with_events(pool, &EventBroadcaster::default())
-    }
-
-    /// Built by a composition root. Every service now publishes through the
-    /// outbox, so `_events` is unused; the parameter goes with the
-    /// broadcaster in Task 10.
-    pub fn with_events(pool: &PgPool, _events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone());
         let bookmarks = BookmarkService::new(pool.clone());
         let settings = SettingsService::new(pool.clone());

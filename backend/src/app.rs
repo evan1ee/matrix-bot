@@ -17,7 +17,6 @@ use tracing::{error, info, warn};
 use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::channels::matrix::delivery::MatrixDelivery;
 use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::sync_loop::run_bot_loop;
@@ -123,8 +122,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         }
         db = Database::connect(&config.database_url, config.db_max_connections) => db?,
     };
-    let broadcaster = EventBroadcaster::default();
-    let services = AppServices::with_events(&db.pool, &broadcaster);
+    let services = AppServices::new(&db.pool);
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // and the pending merges survive a Matrix reconnect.
     let handles = BotHandles::default();
@@ -149,7 +147,6 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         db.pool.clone(),
         services.clone(),
         hub.clone(),
-        broadcaster.clone(),
         sink,
         crate::events::EventsConfig::production(),
     );
@@ -159,7 +156,6 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         &config,
         db.clone(),
         services.clone(),
-        broadcaster.clone(),
         hub.clone(),
         handles.clone(),
         listener,
@@ -175,7 +171,6 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         config,
         db.clone(),
         services,
-        broadcaster,
         handles,
         shutdown.child_token(),
     ));

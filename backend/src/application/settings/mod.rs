@@ -73,7 +73,7 @@ impl SettingsService {
     /// caller doing read-modify-write should use [`Self::modify`] instead, or
     /// it risks the lost-update race `modify`'s row lock closes.
     ///
-    /// The broadcast is what keeps an open web tab honest: every timestamp it
+    /// The published event is what keeps an open web tab honest: every timestamp it
     /// shows is formatted against these settings, so a change made over
     /// Matrix or the AI tools has to reach the SSE stream or the browser
     /// silently keeps rendering the old values.

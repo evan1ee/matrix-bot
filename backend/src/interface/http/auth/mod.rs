@@ -14,7 +14,6 @@ mod tests {
     use super::*;
     use crate::domain::accounts::{hash_token, AccountId, COOKIE_NAME, STATUS_ACTIVE};
     use crate::error::ApiError;
-    use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
 
@@ -25,7 +24,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://mbm.one".to_string(),
             reqwest::Client::new(),

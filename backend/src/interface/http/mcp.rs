@@ -73,12 +73,7 @@ pub async fn mcp_message_handler(
     Query(_query): Query<McpQuery>,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let service = McpService::new(
-        &state.services,
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.account_id,
-    );
+    let service = McpService::new(&state.services, &state.db.pool, &user.account_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -93,12 +88,7 @@ pub async fn mcp_direct_handler(
     user: AuthUser,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let service = McpService::new(
-        &state.services,
-        &state.db.pool,
-        Some(&state.broadcaster),
-        &user.account_id,
-    );
+    let service = McpService::new(&state.services, &state.db.pool, &user.account_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -227,7 +217,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
         let owner = crate::domain::accounts::AccountId::from_seed("test_owner");
-        let service = McpService::new(&services, &pool, None, &owner);
+        let service = McpService::new(&services, &pool, &owner);
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),

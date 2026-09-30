@@ -181,16 +181,13 @@ pub async fn delete_alert(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, AuthUser) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["user_test"]).await;
-        let broadcaster = EventBroadcaster::default();
         let state = ApiState::new(
             crate::db::Database { pool },
-            broadcaster,
             None,
             "http://localhost:8008".to_string(),
             reqwest::Client::new(),

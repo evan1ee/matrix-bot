@@ -7,7 +7,6 @@ use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::recurring_bills::{NewRecurringBill, RecurringBillPatch};
 use crate::domain::reminders::{SyncOutcome, MAX_LEAD_MINUTES};
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html_escape;
 
@@ -67,7 +66,6 @@ impl BotModule for RecurringBillsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         if ctx.command == "bill" || ctx.command == "bills" || ctx.command == "recurring" {
             handle_bill_command(ctx, &services.recurring_bills).await
@@ -327,7 +325,7 @@ mod tests {
 
         // 1. List when empty
         let res = module
-            .handle_command(&ctx("bill", "list"), &services, &db, None)
+            .handle_command(&ctx("bill", "list"), &services, &db)
             .await
             .unwrap();
         assert!(res.contains("No recurring bills recorded"));
@@ -338,7 +336,6 @@ mod tests {
                 &ctx("bill", "add Netflix 15.99 EUR subscription monthly"),
                 &services,
                 &db,
-                None,
             )
             .await
             .unwrap();
@@ -346,7 +343,7 @@ mod tests {
 
         // 3. List
         let res = module
-            .handle_command(&ctx("bill", "list"), &services, &db, None)
+            .handle_command(&ctx("bill", "list"), &services, &db)
             .await
             .unwrap();
         assert!(res.contains("Netflix"));
@@ -354,21 +351,21 @@ mod tests {
 
         // 4. Remind
         let res = module
-            .handle_command(&ctx("bill", "remind 1 60"), &services, &db, None)
+            .handle_command(&ctx("bill", "remind 1 60"), &services, &db)
             .await
             .unwrap();
         assert!(res.contains("bill <b>#1</b>"));
 
         // 5. Pay
         let res = module
-            .handle_command(&ctx("bill", "pay 1"), &services, &db, None)
+            .handle_command(&ctx("bill", "pay 1"), &services, &db)
             .await
             .unwrap();
         assert!(res.contains("Marked bill <b>#1</b> (Netflix) as paid"));
 
         // 6. Delete
         let res = module
-            .handle_command(&ctx("bill", "delete 1"), &services, &db, None)
+            .handle_command(&ctx("bill", "delete 1"), &services, &db)
             .await
             .unwrap();
         assert!(res.contains("Deleted bill <b>#1</b>"));

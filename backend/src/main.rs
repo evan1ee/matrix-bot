@@ -102,15 +102,10 @@ async fn async_main() -> Result<()> {
         }
 
         // The stdio MCP server is its own composition root: no API server
-        // or Matrix loop, just the services its tools call. It has no SSE
-        // subscribers of its own, but still wires a real `EventBroadcaster`
-        // rather than the test-only `AppServices::new` — a settings change
-        // made through an MCP tool call must publish `SettingsUpdated` like
-        // any other write, in case something else in-process is listening.
-        let services = matrix_bot::application::AppServices::with_events(
-            &db.pool,
-            &matrix_bot::events::EventBroadcaster::default(),
-        );
+        // or Matrix loop, just the services its tools call. Writes publish
+        // to the outbox in their own transactions, so the running bot's
+        // hub delivers them to SSE subscribers.
+        let services = matrix_bot::application::AppServices::new(&db.pool);
         let account_id: matrix_bot::domain::accounts::AccountId = owner_id
             .parse()
             .map_err(|_| anyhow::anyhow!("--owner must be an account id (acct_<uuid>)"))?;

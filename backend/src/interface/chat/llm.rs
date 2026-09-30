@@ -8,7 +8,6 @@ use crate::application::settings::SettingsService;
 use crate::application::AppServices;
 use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::llm::alert::{clear_ai_error_state, notify_dev_room_ai_error};
@@ -81,13 +80,11 @@ impl BotModule for LlmModule {
         ctx: &CommandContext,
         services: &AppServices,
         db: &Database,
-        broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handle_ai_command_with_stage(
             services,
             &db.pool,
             &self.ai,
-            broadcaster,
             Some(&self.client_handle),
             &ctx.room_id,
             &ctx.owner_id,
@@ -109,7 +106,6 @@ pub async fn handle_ai_command(
     services: &AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     room_id: &str,
     owner_id: &AccountId,
@@ -125,7 +121,6 @@ pub async fn handle_ai_command(
         services,
         pool,
         ai,
-        broadcaster,
         client_handle,
         room_id,
         owner_id,
@@ -146,7 +141,6 @@ pub async fn handle_ai_command_with_stage(
     services: &AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     client_handle: Option<&Arc<RwLock<Option<Client>>>>,
     room_id: &str,
     owner_id: &AccountId,
@@ -199,15 +193,7 @@ pub async fn handle_ai_command_with_stage(
         )));
     }
 
-    let turn_ctx = LlmTurnContext::new(
-        services,
-        pool,
-        ai,
-        broadcaster,
-        owner_id,
-        room_id,
-        stage_reporter,
-    );
+    let turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, stage_reporter);
 
     match run_turn(&turn_ctx, &effective_prompt, None).await {
         Ok(result) => {
@@ -419,7 +405,6 @@ mod tests {
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
-            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -440,7 +425,6 @@ mod tests {
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
-            None,
             None,
             "!room:mbm.one",
             &owner,
@@ -466,7 +450,6 @@ mod tests {
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
-            None,
             None,
             "!room:mbm.one",
             &owner,
@@ -504,7 +487,6 @@ mod tests {
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
-            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -538,7 +520,6 @@ mod tests {
             &db.pool,
             &crate::config::AiEnvConfig::default(),
             None,
-            None,
             "!room:mbm.one",
             &owner,
             "User",
@@ -556,7 +537,6 @@ mod tests {
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
             &crate::config::AiEnvConfig::default(),
-            None,
             None,
             "!room:mbm.one",
             &owner,

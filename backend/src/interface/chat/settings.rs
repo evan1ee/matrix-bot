@@ -10,7 +10,6 @@ use crate::domain::settings::{
     parse_currency, parse_max_history_turns, parse_timezone, parse_tts_voice, UserSettings,
     MAX_MAX_HISTORY_TURNS, MIN_MAX_HISTORY_TURNS,
 };
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::{format_datetime, html_escape};
 
@@ -83,7 +82,6 @@ impl BotModule for SettingsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handle_settings_command(&services.settings, &ctx.owner_id, &ctx.full_body).await
     }
@@ -722,11 +720,11 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!settings"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!settings"), &AppServices::new(&db.pool), &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db)
             .await
             .is_none());
     }
@@ -740,35 +738,24 @@ mod tests {
         let settings = SettingsModule::new();
         let todo = TodoModule::new();
 
-        todo.handle_command(
-            &ctx("!todo add ship it"),
-            &AppServices::new(&db.pool),
-            &db,
-            None,
-        )
-        .await
-        .unwrap();
-        todo.handle_command(
-            &ctx("!todo due 1 2d"),
-            &AppServices::new(&db.pool),
-            &db,
-            None,
-        )
-        .await
-        .unwrap();
+        todo.handle_command(&ctx("!todo add ship it"), &AppServices::new(&db.pool), &db)
+            .await
+            .unwrap();
+        todo.handle_command(&ctx("!todo due 1 2d"), &AppServices::new(&db.pool), &db)
+            .await
+            .unwrap();
 
         settings
             .handle_command(
                 &ctx("!settings timezone Asia/Tokyo"),
                 &AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();
 
         let listed = todo
-            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db)
             .await
             .unwrap();
         assert!(

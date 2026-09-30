@@ -351,7 +351,6 @@ pub async fn delete_bookmark(
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::events::EventBroadcaster;
 
     async fn setup_state() -> (ApiState, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
@@ -363,7 +362,6 @@ mod tests {
             .unwrap();
         let state = ApiState::new(
             Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

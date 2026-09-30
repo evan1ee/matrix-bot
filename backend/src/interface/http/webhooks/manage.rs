@@ -270,7 +270,6 @@ pub async fn get_webhook_logs(
 mod tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
-    use crate::events::EventBroadcaster;
     use crate::interface::http::webhooks::dto::{InboundPayload, TelegramQuery};
     use crate::interface::http::webhooks::inbound::inbound_webhook;
     use crate::interface::http::webhooks_telegram::telegram_send_message_get;
@@ -282,7 +281,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::new(32),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

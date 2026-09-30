@@ -131,7 +131,6 @@ pub async fn trigger_briefing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -139,7 +138,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

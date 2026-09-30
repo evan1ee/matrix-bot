@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
@@ -54,7 +53,6 @@ impl BotModule for ReminderModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handler::handle_reminder_command(&services.reminders, &services.settings, ctx).await
     }
@@ -112,8 +110,7 @@ mod tests {
             .handle_command(
                 &ctx("!remind list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_some());
@@ -121,8 +118,7 @@ mod tests {
             .handle_command(
                 &ctx("!todo list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());
@@ -130,8 +126,7 @@ mod tests {
             .handle_command(
                 &ctx("!expense list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());

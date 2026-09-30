@@ -301,7 +301,6 @@ pub async fn delete_todo(
 mod tests {
     use super::*;
     use crate::domain::reminders::{ReminderSource, MAX_LEAD_MINUTES};
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     /// `total` must count only the requested completion state.
@@ -325,7 +324,6 @@ mod tests {
         .await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -417,7 +415,6 @@ mod tests {
         .await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -501,7 +498,6 @@ mod tests {
         .await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -590,7 +586,6 @@ mod tests {
         .await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -709,7 +704,6 @@ mod tests {
         .await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

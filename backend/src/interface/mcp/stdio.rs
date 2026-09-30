@@ -18,7 +18,7 @@ pub async fn run_stdio(
         owner_id
     );
 
-    let service = McpService::new(services, pool, None, owner_id);
+    let service = McpService::new(services, pool, owner_id);
 
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();

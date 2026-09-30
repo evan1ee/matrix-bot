@@ -13,7 +13,6 @@ pub mod settings;
 pub mod todo;
 pub mod webhooks;
 
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub struct ToolRegistry;
@@ -26,22 +25,12 @@ impl ToolRegistry {
     pub async fn execute_tool(
         services: &crate::application::AppServices,
         pool: &DbPool,
-        broadcaster: Option<&EventBroadcaster>,
         owner_id: &AccountId,
         room_id: &str,
         name: &str,
         args_json: &str,
     ) -> Result<String, String> {
-        executor::execute(
-            services,
-            pool,
-            broadcaster,
-            owner_id,
-            room_id,
-            name,
-            args_json,
-        )
-        .await
+        executor::execute(services, pool, owner_id, room_id, name, args_json).await
     }
 }
 
@@ -127,7 +116,6 @@ mod tests {
             ToolRegistry::execute_tool(
                 &crate::application::AppServices::new(&db.pool),
                 &db.pool,
-                None,
                 &a,
                 "!room:a",
                 "add_todo",
@@ -158,7 +146,6 @@ mod tests {
         let add_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "add_todo",
@@ -171,7 +158,6 @@ mod tests {
         let complete_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "complete_todo",
@@ -188,7 +174,6 @@ mod tests {
 
         let fin_res = ToolRegistry::execute_tool( &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "record_finance_entry",
@@ -202,7 +187,6 @@ mod tests {
         let rem_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "set_reminder",
@@ -220,7 +204,6 @@ mod tests {
         let dep_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "deposit_portfolio_cash",
@@ -233,7 +216,6 @@ mod tests {
         let buy_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "buy_portfolio_holding",
@@ -252,7 +234,6 @@ mod tests {
         ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "deposit_portfolio_cash",
@@ -265,7 +246,6 @@ mod tests {
         ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "buy_portfolio_holding",
@@ -278,7 +258,6 @@ mod tests {
         let holding_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_portfolio_holding",
@@ -293,7 +272,6 @@ mod tests {
         let sell_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "sell_portfolio_holding",
@@ -308,7 +286,6 @@ mod tests {
         let withdraw_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "withdraw_portfolio_cash",
@@ -327,7 +304,6 @@ mod tests {
         let alert_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "create_portfolio_price_alert",
@@ -342,7 +318,6 @@ mod tests {
         let list_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_portfolio_price_alerts",
@@ -356,7 +331,6 @@ mod tests {
         let cancel_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "cancel_portfolio_price_alert",
@@ -370,7 +344,6 @@ mod tests {
         let history_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_portfolio_performance_history",
@@ -389,7 +362,6 @@ mod tests {
         let e1 = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "record_finance_entry",
@@ -402,7 +374,6 @@ mod tests {
         ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "record_finance_entry",
@@ -415,7 +386,6 @@ mod tests {
         let list_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "list_finance_transactions",
@@ -430,7 +400,6 @@ mod tests {
         let spending_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_spending_by_category",
@@ -449,7 +418,6 @@ mod tests {
         // LLM calls record_finance_entry with number amount, entry_type, description, occurred_at
         let res = ToolRegistry::execute_tool( &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "record_finance_entry",
@@ -490,7 +458,6 @@ mod tests {
         let create_habit_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "create_habit",
@@ -504,7 +471,6 @@ mod tests {
         let log_habit_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "log_habit",
@@ -518,7 +484,6 @@ mod tests {
         let log_life_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "log_life_day",
@@ -532,7 +497,6 @@ mod tests {
         let footprint_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "record_footprint",
@@ -546,7 +510,6 @@ mod tests {
         let retro_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_weekly_retrospective",
@@ -559,7 +522,6 @@ mod tests {
         // 6. Bookmarks
         let save_res = ToolRegistry::execute_tool( &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "save_bookmark",
@@ -573,7 +535,6 @@ mod tests {
         let list_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_my_bookmarks",
@@ -592,7 +553,6 @@ mod tests {
         let add_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "add_todo",
@@ -606,7 +566,6 @@ mod tests {
         let update_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "update_todo",
@@ -623,7 +582,6 @@ mod tests {
         let delete_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "delete_todo",
@@ -637,7 +595,6 @@ mod tests {
         let rem_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "set_reminder",
@@ -651,7 +608,6 @@ mod tests {
         let cancel_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "cancel_reminder",
@@ -665,7 +621,6 @@ mod tests {
         let bill_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "create_recurring_bill",
@@ -680,7 +635,6 @@ mod tests {
         let del_bill_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "delete_recurring_bill",
@@ -694,7 +648,6 @@ mod tests {
         let habit_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "create_habit",
@@ -708,7 +661,6 @@ mod tests {
         let del_habit_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "delete_habit",
@@ -722,7 +674,6 @@ mod tests {
         let daily_log_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_daily_log",
@@ -736,7 +687,6 @@ mod tests {
         let settings_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "update_my_settings",
@@ -751,7 +701,6 @@ mod tests {
         let webhooks_res = ToolRegistry::execute_tool(
             &crate::application::AppServices::new(&db.pool),
             &db.pool,
-            None,
             &owner,
             "!room:a",
             "get_my_webhooks",

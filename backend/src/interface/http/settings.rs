@@ -169,7 +169,6 @@ pub async fn update_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     async fn state() -> ApiState {
@@ -178,7 +177,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_@evan:mbm.one", "acct_evan"]).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

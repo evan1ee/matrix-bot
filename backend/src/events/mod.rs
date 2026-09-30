@@ -2,8 +2,6 @@
 //! hourly retention and the durable delivery dispatcher. SQL-free:
 //! it reaches the outbox only through `OutboxService`.
 
-mod bridge;
-mod broadcaster;
 mod dispatcher;
 mod hub;
 mod listener;
@@ -20,7 +18,6 @@ use tracing::error;
 
 use crate::application::AppServices;
 
-pub use broadcaster::EventBroadcaster;
 pub use dispatcher::DeliverySink;
 pub use hub::{Hub, Notified, Subscription};
 
@@ -74,7 +71,6 @@ pub struct EventsRuntime {
     pool: PgPool,
     services: AppServices,
     hub: Hub,
-    legacy: EventBroadcaster,
     sink: Arc<dyn DeliverySink>,
     config: Arc<EventsConfig>,
 }
@@ -84,7 +80,6 @@ impl EventsRuntime {
         pool: PgPool,
         services: AppServices,
         hub: Hub,
-        legacy: EventBroadcaster,
         sink: Arc<dyn DeliverySink>,
         config: EventsConfig,
     ) -> Self {
@@ -92,7 +87,6 @@ impl EventsRuntime {
             pool,
             services,
             hub,
-            legacy,
             sink,
             config: Arc::new(config),
         }
@@ -120,11 +114,6 @@ impl EventsRuntime {
             self.sink.clone(),
             wake.clone(),
             self.config.clone(),
-            shutdown.clone(),
-        ));
-        tasks.spawn(bridge::run(
-            self.legacy.clone(),
-            self.hub.clone(),
             shutdown.clone(),
         ));
         while let Some(result) = tasks.join_next().await {

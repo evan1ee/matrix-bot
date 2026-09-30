@@ -461,7 +461,6 @@ pub async fn summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use crate::interface::http::portfolio_cash::deposit_cash;
 
     async fn test_state() -> ApiState {
@@ -470,7 +469,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

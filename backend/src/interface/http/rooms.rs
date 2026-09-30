@@ -118,7 +118,6 @@ pub async fn sync_rooms(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     async fn state_with_account(account_id: &str) -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -130,7 +129,6 @@ mod tests {
         .await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

@@ -15,7 +15,6 @@ use tokio::sync::RwLock;
 use tracing::{error, warn};
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::tts::{
     SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
 };
@@ -187,7 +186,6 @@ impl BotModule for TtsModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         if ctx.command != "say" {
             return None;
@@ -262,8 +260,7 @@ mod tests {
             .handle_command(
                 &ctx_for("todo", "list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());
@@ -278,7 +275,6 @@ mod tests {
                 &ctx_for("say", "hello there"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();
@@ -294,7 +290,6 @@ mod tests {
                 &ctx_for("say", "✅🎉"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();
@@ -311,7 +306,6 @@ mod tests {
                 &ctx_for("say", &long),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();
@@ -349,7 +343,6 @@ mod tests {
                 &ctx_for("say", "hello"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();

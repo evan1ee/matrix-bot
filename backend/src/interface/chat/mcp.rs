@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::interface::mcp::{adapter, models, prompts, resources};
@@ -42,7 +41,6 @@ impl BotModule for McpModule {
         ctx: &CommandContext,
         _services: &crate::application::AppServices,
         db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         handle_command(ctx, db).await
     }

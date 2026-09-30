@@ -2,7 +2,6 @@ use matrix_sdk::room::Room;
 use tracing::{info, warn};
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::utils::html::html_escape;
 
 pub mod models;
@@ -23,7 +22,6 @@ pub async fn process_image_event(
     db: &Database,
     services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     room: &Room,
     owner_id: &AccountId,
     caption: Option<&str>,
@@ -81,7 +79,6 @@ pub async fn process_image_event(
         services,
         &db.pool,
         ai,
-        broadcaster,
         owner_id,
         room.room_id().as_str(),
         stage_reporter,

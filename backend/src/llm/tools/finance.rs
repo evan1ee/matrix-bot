@@ -5,13 +5,11 @@ use serde_json::json;
 use crate::domain::accounts::AccountId;
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::finance::{Direction, ListTransactionsFilter, NewTransaction};
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
-    _broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     room_id: &str,
     name: &str,
@@ -428,7 +426,6 @@ mod tests {
         let result = execute_tool(
             &crate::application::AppServices::new(&pool),
             &pool,
-            None,
             &alice,
             "!room:1",
             "record_finance_entry",

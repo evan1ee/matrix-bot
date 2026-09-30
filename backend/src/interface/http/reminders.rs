@@ -360,7 +360,6 @@ pub async fn clear_reminder_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {
@@ -369,7 +368,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -421,7 +419,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -500,7 +497,6 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

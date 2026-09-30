@@ -32,7 +32,6 @@ use tracing::{error, info};
 
 use crate::application::AppError;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 use crate::utils::html::html_escape;
 
 /// A message the parser recognised as a command, before its sender has been
@@ -149,10 +148,10 @@ pub trait BotModule: Send + Sync {
 
     /// Attempts to handle a command. Returns `Some(html_reply)` if handled, `None` to pass.
     ///
-    /// `broadcaster` is `None` only where no event stream exists (tests). A module
-    /// that mutates state must send its `SystemEvent` through it, exactly as the
-    /// REST handlers do — otherwise a change made over Matrix leaves every open
-    /// web client showing stale data.
+    /// A module that mutates state does so through `services`; the service
+    /// publishes its `SystemEvent` through the outbox in the same transaction,
+    /// so a change made over Matrix reaches every open web client without
+    /// the module doing anything.
     ///
     /// `services` is the application layer built once in `app.rs`; a moved
     /// feature's command handler calls its service through it. Modules not
@@ -162,7 +161,6 @@ pub trait BotModule: Send + Sync {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         db: &Database,
-        broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String>;
 }
 
@@ -191,10 +189,9 @@ impl ModuleRegistry {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         db: &Database,
-        broadcaster: Option<&EventBroadcaster>,
     ) -> Option<String> {
         for module in &self.modules {
-            if let Some(reply) = module.handle_command(ctx, services, db, broadcaster).await {
+            if let Some(reply) = module.handle_command(ctx, services, db).await {
                 return Some(reply);
             }
         }
@@ -334,12 +331,7 @@ mod tests {
             };
             assert!(
                 registry
-                    .dispatch(
-                        &ctx,
-                        &crate::application::AppServices::new(&db.pool),
-                        &db,
-                        None
-                    )
+                    .dispatch(&ctx, &crate::application::AppServices::new(&db.pool), &db)
                     .await
                     .is_some(),
                 "`{body}` reached no module"
@@ -368,7 +360,6 @@ mod tests {
                 ctx: &CommandContext,
                 _services: &crate::application::AppServices,
                 _db: &Database,
-                _broadcaster: Option<&EventBroadcaster>,
             ) -> Option<String> {
                 ctx.is_direct
                     .then(|| "answered by the catch-all".to_string())
@@ -397,7 +388,6 @@ mod tests {
                 &ctx_for("say"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .expect("TTS claims `say`");
@@ -414,7 +404,6 @@ mod tests {
                 &ctx_for("say"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .expect("the catch-all claims every direct message");
@@ -448,7 +437,6 @@ mod tests {
             ctx: &CommandContext,
             _services: &crate::application::AppServices,
             _db: &Database,
-            _broadcaster: Option<&EventBroadcaster>,
         ) -> Option<String> {
             (ctx.command == self.claims).then(|| format!("handled by {}", self.label))
         }
@@ -494,7 +482,6 @@ mod tests {
                 &ctx_for("shared"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await;
         assert_eq!(reply.as_deref(), Some("handled by first"));
@@ -513,8 +500,7 @@ mod tests {
             .dispatch(
                 &ctx_for("nonsense"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());
@@ -538,7 +524,6 @@ mod tests {
                 &ctx_for("expense"),
                 &crate::application::AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await;
         assert_eq!(reply.as_deref(), Some("handled by finance"));

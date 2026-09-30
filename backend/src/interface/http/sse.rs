@@ -49,14 +49,12 @@ pub async fn sse_handler(
 mod tests {
     use super::*;
     use crate::domain::accounts::{AccountId, Credential};
-    use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_sse_handler_creation() {
         let pool = crate::db::pool::test_pool().await;
         let state = ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -69,7 +67,6 @@ mod tests {
     fn test_state(pool: crate::db::DbPool) -> ApiState {
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

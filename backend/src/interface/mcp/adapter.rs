@@ -2,7 +2,6 @@ use crate::db::DbPool;
 use tracing::{debug, warn};
 
 use super::protocol::{CallToolParams, CallToolResult, McpTool, ToolContent};
-use crate::events::EventBroadcaster;
 use crate::llm::tools::definitions::all_tool_definitions;
 use crate::llm::tools::executor;
 
@@ -24,7 +23,6 @@ use crate::domain::accounts::AccountId;
 pub async fn call_mcp_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     params: CallToolParams,
 ) -> CallToolResult {
@@ -39,17 +37,7 @@ pub async fn call_mcp_tool(
         .unwrap_or_else(|| "{}".to_string());
 
     // Use "mcp" as the synthetic room identifier so actions are tagged with an MCP origin
-    match executor::execute(
-        services,
-        pool,
-        broadcaster,
-        owner_id,
-        "mcp",
-        &params.name,
-        &args_str,
-    )
-    .await
-    {
+    match executor::execute(services, pool, owner_id, "mcp", &params.name, &args_str).await {
         Ok(output) => CallToolResult {
             content: vec![ToolContent::Text { text: output }],
             is_error: Some(false),

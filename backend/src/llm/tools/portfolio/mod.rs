@@ -11,25 +11,22 @@ use crate::domain::portfolio::models::{
     cost_of, normalise_symbol, BuyOutcome, SellOutcome, QUANTITY_EXPONENT,
 };
 use crate::domain::portfolio::TradeRequest;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
     owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     // 1. Check cash operations
-    if let Some(res) = cash::execute_tool(services, pool, broadcaster, owner_id, name, args).await {
+    if let Some(res) = cash::execute_tool(services, pool, owner_id, name, args).await {
         return Some(res);
     }
 
     // 2. Check alert operations
-    if let Some(res) = alerts::execute_tool(services, pool, broadcaster, owner_id, name, args).await
-    {
+    if let Some(res) = alerts::execute_tool(services, pool, owner_id, name, args).await {
         return Some(res);
     }
 
@@ -423,15 +420,7 @@ mod tests {
         let alice = AccountId::from_seed("@alice:a");
         crate::db::pool::seed_account(&pool, &alice).await;
         let services = crate::application::AppServices::new(&pool);
-        let result = execute_tool(
-            &services,
-            &pool,
-            None,
-            &alice,
-            "buy_portfolio_holding",
-            &args,
-        )
-        .await;
+        let result = execute_tool(&services, &pool, &alice, "buy_portfolio_holding", &args).await;
         let err = result
             .expect("the tool must handle this call")
             .expect_err("an over-long note must be rejected");
