@@ -127,7 +127,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run (step 8 final fix wave, `cargo test -p matrix-bot --all-targets --no-fail-fast`, no `--skip`): **lib 857 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 18 passed**. Inference: 71 passed at step 7 (crate unchanged, not re-run).
+The last full test run (step 8, after merging the test-schema reaper, `cargo test -p matrix-bot --all-targets --no-fail-fast`, no `--skip`): **lib 859 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 18 passed**. Inference: 71 passed at step 7 (crate unchanged, not re-run).
 
 ## 5. How to work
 
@@ -177,7 +177,7 @@ docker run -d --name pg18-test --shm-size=1g -p 55433:5432 -e POSTGRES_PASSWORD=
 # DATABASE_URL (for sqlx prepare) = same URL, after migrations have run once (any test run does it)
 ```
 
-The tests create a schema per test and never drop it, which is why the container needs `--shm-size=1g`. To clean up, drop the leftover `test_%` schemas or recreate the container.
+Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas left by dead processes (`db::test_schemas`, see `docs/database.md` → *Test databases*).
 
 ## 6. Safety rules (hard; never override)
 
@@ -197,7 +197,7 @@ The tests create a schema per test and never drop it, which is why the container
 ## 7. Next actions (in order)
 
 1. **Step 9: outbox (`0004_outbox`).** Write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
-2. Clear the §11 items that touch the test suite first: the test-schema leaks.
+2. Clear the §11 items that touch the test suite first.
 3. Hand the user the merge gates (§10). Merge only on their instruction.
 4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
 
@@ -341,7 +341,7 @@ These need the human. Prepare them; don't perform them.
 - The architecture-test scanner cuts each line at `//`, so a URL literal hides the rest of the line. Task 14 makes it strip string literals.
 - Resolved in the step 8 final fix wave: the `interface::http::auth::matrix` tests no longer reach the network (`test_state()` pre-fills `resolved_homeserver` with a closed loopback port and the client has a 500 ms timeout), so no test needs `--skip` any more.
 - No handler test pins the portfolio snapshot capture call (R38): deleting `capture_current_snapshot_for_owner` from `RefreshPricesHandler` would pass the handler tests; only the application-layer test covers the write.
-- Test-pool schema leaks: scratch schemas from `test_pool()` are not always reaped (separate task `task_e73c72d5` in progress; see also R36).
+- ~~Test-pool schema leaks~~ — resolved by `5469098` (`db::test_schemas` reaps schemas of dead test processes), merged into this branch.
 - Resolved in the final fix wave: the two flaky timing tests (`the_runtime_runs_jobs_and_stops_on_cancel` now waits `shutdown_grace` plus a margin and the reaper races each query against shutdown; the wake-up test waits for the listener's catch-up wake instead of sleeping, and the worker registers for wake-ups before it claims).
 - `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.
 - (Resolved: `AccountId::from_seed` is now `#[cfg(test)]`.)
