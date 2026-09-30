@@ -58,9 +58,14 @@ mod tests {
             source: None,
             create_missing_category: false,
         };
-        transactions::create_transaction(pool, owner, &input, category_id)
-            .await
-            .unwrap()
+        transactions::create_transaction(
+            &mut pool.acquire().await.unwrap(),
+            owner,
+            &input,
+            category_id,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -109,9 +114,10 @@ mod tests {
         )
         .await;
 
-        let orphaned = categories::delete_category(&pool, &owner, cat.id)
-            .await
-            .unwrap();
+        let orphaned =
+            categories::delete_category(&mut pool.acquire().await.unwrap(), &owner, cat.id)
+                .await
+                .unwrap();
         assert_eq!(orphaned, Some(1));
 
         let still_there = transactions::find(&pool, tx.id).await.unwrap().unwrap();
@@ -135,10 +141,12 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(categories::delete_category(&pool, &owner_b, cat.id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            categories::delete_category(&mut pool.acquire().await.unwrap(), &owner_b, cat.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             categories::list_categories(&pool, &owner_a)
                 .await

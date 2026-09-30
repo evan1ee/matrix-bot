@@ -3,6 +3,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Category, FinanceError, MAX_CATEGORY_LEN};
 use crate::infrastructure::postgres::repositories::finance as repo;
+use crate::infrastructure::postgres::repositories::outbox;
 
 use super::FinanceService;
 
@@ -20,11 +21,12 @@ impl FinanceService {
             .into());
         }
 
-        let cat = repo::create_category(&self.pool, owner, trimmed)
+        let mut tx = self.pool.begin().await?;
+        let cat = repo::create_category(&mut *tx, owner, trimmed)
             .await?
             .ok_or(FinanceError::CategoryExists)?;
-
-        self.events.send(SystemEvent::CategoryCreated(cat.clone()));
+        outbox::publish(&mut tx, &SystemEvent::CategoryCreated(cat.clone())).await?;
+        tx.commit().await?;
         Ok(cat)
     }
 
@@ -38,13 +40,19 @@ impl FinanceService {
         owner: &AccountId,
         id: i64,
     ) -> Result<Option<u64>, AppError> {
-        let orphaned = repo::delete_category(&self.pool, owner, id).await?;
+        let mut tx = self.pool.begin().await?;
+        let orphaned = repo::delete_category(&mut tx, owner, id).await?;
         if orphaned.is_some() {
-            self.events.send(SystemEvent::CategoryDeleted {
-                id,
-                owner_id: *owner,
-            });
+            outbox::publish(
+                &mut tx,
+                &SystemEvent::CategoryDeleted {
+                    id,
+                    owner_id: *owner,
+                },
+            )
+            .await?;
         }
+        tx.commit().await?;
         Ok(orphaned)
     }
 

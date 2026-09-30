@@ -48,7 +48,7 @@ impl From<TransactionRow> for Transaction {
 }
 
 pub async fn create_transaction(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     owner_id: &AccountId,
     input: &NewTransaction<'_>,
     category_id: Option<i64>,
@@ -79,7 +79,7 @@ pub async fn create_transaction(
         source_id,
         input.occurred_at
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
 
     let row = sqlx::query_as!(
@@ -95,7 +95,7 @@ pub async fn create_transaction(
         "#,
         id
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
 
     Ok(row.into())
@@ -122,7 +122,7 @@ pub async fn find(pool: &PgPool, id: i64) -> Result<Option<Transaction>, sqlx::E
 }
 
 pub async fn find_owned(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     id: i64,
 ) -> Result<Option<Transaction>, sqlx::Error> {
@@ -140,7 +140,7 @@ pub async fn find_owned(
         id,
         owner_id.as_uuid()
     )
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     Ok(row.map(Into::into))
@@ -148,7 +148,7 @@ pub async fn find_owned(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn update(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     owner_id: &AccountId,
     id: i64,
     direction: Direction,
@@ -176,7 +176,7 @@ pub async fn update(
         id,
         owner_id.as_uuid()
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?
     .rows_affected();
 
@@ -184,15 +184,15 @@ pub async fn update(
         return Ok(None);
     }
 
-    find_owned(pool, owner_id, id).await
+    find_owned(&mut *conn, owner_id, id).await
 }
 
 pub async fn delete(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     owner_id: &AccountId,
     id: i64,
 ) -> Result<Option<Transaction>, sqlx::Error> {
-    let existing = find_owned(pool, owner_id, id).await?;
+    let existing = find_owned(&mut *conn, owner_id, id).await?;
     if existing.is_none() {
         return Ok(None);
     }
@@ -202,7 +202,7 @@ pub async fn delete(
         id,
         owner_id.as_uuid()
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     Ok(existing)

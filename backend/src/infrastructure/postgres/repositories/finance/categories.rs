@@ -35,7 +35,7 @@ pub async fn find_or_create_category(
 }
 
 pub async fn create_category(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     name: &str,
 ) -> Result<Option<Category>, sqlx::Error> {
@@ -50,7 +50,7 @@ pub async fn create_category(
         owner_id.as_uuid(),
         name
     )
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     Ok(row.map(Into::into))
@@ -118,19 +118,19 @@ pub async fn find_category_by_id(
     Ok(row.map(Into::into))
 }
 
+/// Runs on the caller's transaction (C5): the service commits it together with
+/// the `CategoryDeleted` outbox row.
 pub async fn delete_category(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     owner_id: &AccountId,
     id: i64,
 ) -> Result<Option<u64>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     let owns = sqlx::query_scalar!(
         "SELECT id FROM finance_categories WHERE id = $1 AND owner_id = $2 FOR UPDATE",
         id,
         owner_id.as_uuid()
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if owns.is_none() {
@@ -142,7 +142,7 @@ pub async fn delete_category(
         id,
         owner_id.as_uuid()
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?
     .rows_affected();
 
@@ -151,10 +151,8 @@ pub async fn delete_category(
         id,
         owner_id.as_uuid()
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
-
-    tx.commit().await?;
 
     Ok(Some(orphaned))
 }

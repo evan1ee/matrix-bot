@@ -260,31 +260,28 @@ mod tests {
         );
     }
 
+    /// Given a chat command, When the module dispatches an add, Then the
+    /// creation lands in the outbox.
     #[tokio::test]
-    async fn test_the_module_passes_the_broadcaster_to_the_command() {
+    async fn test_the_module_command_writes_the_creation_to_the_outbox() {
         let db = db().await;
-        let broadcaster = crate::events::EventBroadcaster::default();
-        let mut rx = broadcaster.subscribe();
-        let services = crate::application::AppServices::with_events(&db.pool, &broadcaster);
+        let services = crate::application::AppServices::new(&db.pool);
 
         let reply = FinanceModule::new()
-            .handle_command(
-                &ctx("!expense add 15.50 EUR lunch"),
-                &services,
-                &db,
-                Some(&broadcaster),
-            )
+            .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db, None)
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Logged"), "unexpected reply: {reply}");
 
-        let event = rx
-            .try_recv()
-            .expect("dispatching through the module must broadcast the creation");
-        assert!(matches!(
-            event,
-            crate::domain::events::SystemEvent::TransactionCreated(_)
-        ));
+        let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &db.pool, &owner
+            )
+            .await
+            .unwrap(),
+            vec!["TransactionCreated"]
+        );
     }
 
     #[tokio::test]

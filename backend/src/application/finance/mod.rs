@@ -1,6 +1,6 @@
 //! Finance application service.
 //!
-//! Owns business use cases, transactions, and event broadcasting for transactions,
+//! Owns business use cases and transactional-outbox event publishing for transactions,
 //! categories, spending analytics, and public sharing.
 
 mod analytics;
@@ -11,7 +11,6 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::finance::FinanceError;
-use crate::events::EventBroadcaster;
 
 impl From<FinanceError> for AppError {
     fn from(err: FinanceError) -> Self {
@@ -36,15 +35,17 @@ impl From<FinanceError> for AppError {
 #[derive(Clone)]
 pub struct FinanceService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl FinanceService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 }
+
+#[cfg(test)]
+mod tests;

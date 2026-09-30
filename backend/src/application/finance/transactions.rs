@@ -6,6 +6,7 @@ use crate::domain::finance::{
     MAX_CATEGORY_LEN, MAX_NOTE_LEN,
 };
 use crate::infrastructure::postgres::repositories::finance as repo;
+use crate::infrastructure::postgres::repositories::outbox;
 
 use super::FinanceService;
 
@@ -25,10 +26,10 @@ impl FinanceService {
             .resolve_category(owner, input.category, input.create_missing_category)
             .await?;
 
-        let tx = repo::create_transaction(&self.pool, owner, &input, category_id).await?;
-
-        self.events
-            .send(SystemEvent::TransactionCreated(tx.clone()));
+        let mut dbtx = self.pool.begin().await?;
+        let tx = repo::create_transaction(&mut dbtx, owner, &input, category_id).await?;
+        outbox::publish(&mut dbtx, &SystemEvent::TransactionCreated(tx.clone())).await?;
+        dbtx.commit().await?;
         Ok(tx)
     }
 
@@ -107,8 +108,9 @@ impl FinanceService {
         };
         let occurred_at = patch.occurred_at.unwrap_or(existing.occurred_at);
 
+        let mut tx = self.pool.begin().await?;
         let updated = repo::update(
-            &self.pool,
+            &mut tx,
             owner,
             id,
             direction,
@@ -121,9 +123,8 @@ impl FinanceService {
         )
         .await?
         .ok_or(FinanceError::TransactionNotFound)?;
-
-        self.events
-            .send(SystemEvent::TransactionUpdated(updated.clone()));
+        outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -132,15 +133,20 @@ impl FinanceService {
         owner: &AccountId,
         id: i64,
     ) -> Result<Transaction, AppError> {
-        let deleted = repo::delete(&self.pool, owner, id)
+        let mut tx = self.pool.begin().await?;
+        let deleted = repo::delete(&mut tx, owner, id)
             .await?
             .ok_or(FinanceError::TransactionNotFound)?;
-
-        self.events.send(SystemEvent::TransactionDeleted {
-            id,
-            room_id: deleted.room_id.clone(),
-            owner_id: *owner,
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::TransactionDeleted {
+                id,
+                room_id: deleted.room_id.clone(),
+                owner_id: *owner,
+            },
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(deleted)
     }

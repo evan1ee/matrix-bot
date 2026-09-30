@@ -464,7 +464,7 @@ mod tests {
             .unwrap()
             .unwrap();
         finance_repo::create_transaction(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &owner,
             &crate::domain::finance::NewTransaction {
                 direction: crate::domain::finance::Direction::Expense,
@@ -490,7 +490,7 @@ mod tests {
             .unwrap()
             .unwrap();
         finance_repo::create_transaction(
-            &pool,
+            &mut pool.acquire().await.unwrap(),
             &owner,
             &crate::domain::finance::NewTransaction {
                 direction: crate::domain::finance::Direction::Expense,

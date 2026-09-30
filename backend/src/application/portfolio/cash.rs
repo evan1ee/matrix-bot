@@ -128,10 +128,7 @@ impl PortfolioService {
             _ => return None,
         };
 
-        let finance = crate::application::finance::FinanceService::new(
-            self.pool.clone(),
-            self.events.clone(),
-        );
+        let finance = crate::application::finance::FinanceService::new(self.pool.clone());
 
         finance
             .create_transaction(

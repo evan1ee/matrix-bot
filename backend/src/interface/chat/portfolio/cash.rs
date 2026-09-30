@@ -142,8 +142,6 @@ async fn handle_cash_withdraw(services: &AppServices, owner: &AccountId, args: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::events::SystemEvent;
-    use crate::events::EventBroadcaster;
 
     #[test]
     fn test_parse_cash_amount_grammar() {
@@ -167,13 +165,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_portfolio_cash_deposit_broadcasts_a_transaction_created() {
+    async fn test_portfolio_cash_deposit_writes_a_transaction_created_to_the_outbox() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
-        let broadcaster = EventBroadcaster::default();
-        let mut rx = broadcaster.subscribe();
-        let services = crate::application::AppServices::with_events(&pool, &broadcaster);
+        let services = crate::application::AppServices::new(&pool);
+        let owner = AccountId::from_seed("@alice:a");
 
         let reply = handle_cash(
             &services,
@@ -183,15 +180,13 @@ mod tests {
         .await;
         assert!(reply.contains("Deposited"), "unexpected reply: {reply}");
 
-        let mut saw_transaction_created = false;
-        while let Ok(event) = rx.try_recv() {
-            if matches!(event, SystemEvent::TransactionCreated(_)) {
-                saw_transaction_created = true;
-            }
-        }
+        let types =
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap();
         assert!(
-            saw_transaction_created,
-            "a portfolio cash deposit must broadcast TransactionCreated"
+            types.contains(&"TransactionCreated".to_string()),
+            "a portfolio cash deposit must write TransactionCreated: {types:?}"
         );
     }
 }
