@@ -102,7 +102,7 @@ backend/src/
 | 7 | Account UUID (`0002_account_uuid`) | ✅ plan `docs/superpowers/plans/2026-09-29-account-uuid.md` | `186d271` `532e0b6` (clippy backlog cleared) |
 | 8 | Job queue (`0003_jobs`); the reminder, briefing and portfolio loops replaced by jobs (there was no bills loop, R20). Design `specs/2026-09-29-job-queue-design.md`, plan `plans/2026-09-29-job-queue.md` | ✅ (branch `refactor/job-queue`) | `950e043..cade37c` |
 | 8b | `backend/src/accounts/` retired (user request, part of the step 8 plan; Tasks 12–18) | ✅ | `d91baf7..5d6fc1d` |
-| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox` | ◐ design done; plan next | — |
+| 9 | Outbox (`0004_outbox`, `outbox_deliveries`, SSE via LISTEN; remove `EventBroadcaster` and `webhook_outbox`). Design `specs/2026-09-30-outbox-design.md` (approved 2026-09-30), branch `refactor/outbox`, plan `plans/2026-09-30-outbox.md` (Tasks 1–12, clarifications C1–C9) | ◐ design + plan done; implementation next | — |
 | 10 | Docs: `AGENTS.md` rebuilt as rules-only; `docs/{architecture,database,api,llm}.md`; history/review docs removed; plans stay in `docs/superpowers/` | ✅ | `4bf5bc7` |
 
 ### Step 6: feature layering (`docs/superpowers/plans/2026-09-25-feature-layering.md`)
@@ -196,7 +196,7 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Step 9: outbox (`0004_outbox`).** The design is approved (`docs/superpowers/specs/2026-09-30-outbox-design.md`, branch `refactor/outbox`); write the plan `docs/superpowers/plans/2026-09-30-outbox.md` next, then implement it. Original brief: write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
+1. **Step 9: outbox (`0004_outbox`).** The design is approved (`docs/superpowers/specs/2026-09-30-outbox-design.md`, branch `refactor/outbox`) and the plan is `docs/superpowers/plans/2026-09-30-outbox.md`; implement it task by task (Sonnet implements, Opus reviews each task). Original brief: write the design, get the user's approval, then the plan (`SPEC.md` §5.3 and `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` outline it): `outbox_deliveries`, SSE fed by `LISTEN`/`NOTIFY`, remove `EventBroadcaster` and `webhook_outbox`. The webhook worker (`BotModule::spawn_background_workers`, `BackgroundWorkers`, `ModuleContext`) is the last user of the old worker mechanism and goes with it. Update `docs/architecture.md`, `docs/api.md` (the webhook queue is still described as unchanged) and `docs/database.md` in the same commits.
 2. Clear the §11 items that touch the test suite first.
 3. Hand the user the merge gates (§10). Merge only on their instruction.
 4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
