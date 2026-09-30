@@ -42,17 +42,23 @@ impl JobHandler for BriefingSendHandler {
         let date = p.local_date.format("%Y-%m-%d").to_string();
         // Re-check what the scheduler checked: the user may have turned the
         // briefing off, or another run may have sent it, since enqueue.
-        if self
+        // Fallible reads: a database error must retry the job, not fall back
+        // to defaults that would silently skip (or wrongly send) a briefing.
+        let last_sent = self
             .services
             .settings
-            .get_last_briefing_date(&owner)
+            .try_last_briefing_date(&owner)
             .await
-            .as_deref()
-            == Some(date.as_str())
-        {
+            .map_err(JobError::from)?;
+        if last_sent.as_deref() == Some(date.as_str()) {
             return Ok(());
         }
-        let settings = self.services.settings.get_or_default(&owner).await;
+        let settings = self
+            .services
+            .settings
+            .get(&owner)
+            .await
+            .map_err(JobError::from)?;
         if !settings.briefing_enabled {
             return Ok(());
         }
@@ -129,6 +135,7 @@ mod tests {
     const ROOM: &str = "!briefing:test";
 
     struct Fixture {
+        pool: sqlx::PgPool,
         services: AppServices,
         owner: AccountId,
         events: EventBroadcaster,
@@ -158,6 +165,7 @@ mod tests {
             .await
             .unwrap();
         Fixture {
+            pool,
             services,
             owner,
             events,
@@ -200,6 +208,25 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Given a database that cannot be read, When the job runs, Then it is
+    /// retried, not run against default settings, and nothing is sent or
+    /// recorded.
+    #[tokio::test]
+    async fn a_database_error_retries_instead_of_using_defaults() {
+        let f = fixture("acct_brief_dberr", true).await;
+        let mut rx = f.events.subscribe();
+        let day = today(&f).await;
+        let fake = FakeDelivery::connected();
+        let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
+        f.pool.close().await;
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
+
+        assert!(matches!(out, Err(JobError::Retryable(_))), "{out:?}");
+        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(sent_events(&mut rx).is_empty());
     }
 
     /// Given Matrix is disconnected, Then the job waits and the day is open.

@@ -145,12 +145,21 @@ impl SettingsService {
     /// delivered today" rather than skipping every account because one read
     /// failed.
     pub async fn get_last_briefing_date(&self, owner_id: &AccountId) -> Option<String> {
-        repo::get_last_briefing_date(&self.pool, owner_id)
+        self.try_last_briefing_date(owner_id)
             .await
             .unwrap_or_else(|err| {
                 tracing::warn!("Could not read last briefing date for {owner_id}: {err:?}");
                 None
             })
+    }
+
+    /// [`Self::get_last_briefing_date`] for a caller that must tell "never
+    /// sent" from "could not read" (the job handler retries on the latter).
+    pub async fn try_last_briefing_date(
+        &self,
+        owner_id: &AccountId,
+    ) -> Result<Option<String>, AppError> {
+        Ok(repo::get_last_briefing_date(&self.pool, owner_id).await?)
     }
 
     pub async fn update_last_briefing_date(
