@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use serde_json::json;
 
 use crate::infrastructure::inference::llm::ToolDefinition;
@@ -7,14 +8,14 @@ use crate::infrastructure::postgres::read_models::net_worth::compute_net_worth;
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     _args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     match name {
         "get_my_net_worth" => Some(
             async {
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let settings = services.settings.get_or_default(&acct).await;
                 let client = reqwest::Client::new();
                 let report = compute_net_worth(pool, &client, &acct, &settings.currency)

@@ -6,11 +6,11 @@ use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
     services: &AppServices,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let owner = AccountId::from(owner_id);
+    let owner = *owner_id;
     match name {
         "get_my_webhooks" => Some(
             async {

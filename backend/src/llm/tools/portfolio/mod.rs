@@ -18,7 +18,7 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
@@ -38,7 +38,7 @@ pub async fn execute_tool(
         return Some(res);
     }
 
-    let acct = AccountId::new(owner_id);
+    let acct = *owner_id;
 
     // 4. Trade and portfolio holding operations
     match name {
@@ -420,12 +420,14 @@ mod tests {
             "note": over_limit_note,
         });
 
+        let alice = AccountId::from_seed("@alice:a");
+        crate::db::pool::seed_account(&pool, &alice).await;
         let services = crate::application::AppServices::new(&pool);
         let result = execute_tool(
             &services,
             &pool,
             None,
-            "@alice:a",
+            &alice,
             "buy_portfolio_holding",
             &args,
         )

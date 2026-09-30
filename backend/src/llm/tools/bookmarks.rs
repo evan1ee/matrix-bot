@@ -11,7 +11,7 @@ use crate::infrastructure::web::fetch_and_extract_metadata;
 pub async fn execute_tool(
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
@@ -33,7 +33,7 @@ pub async fn execute_tool(
                 let input = CreateBookmark::new(url, meta, custom_title, tags.as_deref())
                     .map_err(|e| e.to_string())?;
 
-                let owner = AccountId::new(owner_id);
+                let owner = *owner_id;
                 let b = repo::create(pool, &owner, &input)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -64,7 +64,7 @@ pub async fn execute_tool(
                     ..Default::default()
                 };
 
-                let owner = AccountId::new(owner_id);
+                let owner = *owner_id;
                 let list = repo::list(pool, &owner, &query)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -80,7 +80,7 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = AccountId::new(owner_id);
+                let owner = *owner_id;
                 let updated = repo::toggle_favorite(pool, id, &owner)
                     .await
                     .map_err(|e| e.to_string())?
@@ -101,7 +101,7 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = AccountId::new(owner_id);
+                let owner = *owner_id;
                 let updated = repo::toggle_archived(pool, id, &owner)
                     .await
                     .map_err(|e| e.to_string())?
@@ -122,7 +122,7 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = AccountId::new(owner_id);
+                let owner = *owner_id;
                 let ok = repo::delete(pool, id, &owner)
                     .await
                     .map_err(|e| e.to_string())?;

@@ -12,12 +12,12 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let owner_acct = AccountId::from(owner_id);
+    let owner_acct = *owner_id;
     match name {
         "get_my_financial_summary" => Some(
             async {
@@ -188,7 +188,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or(category_name);
 
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let settings = services.settings.get_or_default(&acct).await;
                 let tz = settings.tz();
                 let raw_currency = args
@@ -422,12 +422,14 @@ mod tests {
     async fn test_the_ai_tool_enforces_the_note_limit() {
         let pool = setup().await;
         let over_limit_note = "x".repeat(MAX_NOTE_LEN + 1);
+        let alice = AccountId::from_seed("@alice:a");
+        crate::db::pool::seed_account(&pool, &alice).await;
 
         let result = execute_tool(
             &crate::application::AppServices::new(&pool),
             &pool,
             None,
-            "@alice:a",
+            &alice,
             "!room:1",
             "record_finance_entry",
             &json!({

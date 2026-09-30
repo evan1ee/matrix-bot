@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use serde_json::json;
 use tracing::{debug, warn};
 
@@ -18,7 +19,7 @@ pub async fn execute(
     services: &crate::application::AppServices,
     pool: &DbPool,
     broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     name: &str,
     args_json: &str,

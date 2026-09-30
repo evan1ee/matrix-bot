@@ -11,7 +11,7 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -19,7 +19,7 @@ pub async fn execute_tool(
     match name {
         "get_my_recurring_bills" => Some(
             async {
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let items = services
                     .recurring_bills
                     .list_by_owner(&acct)
@@ -73,7 +73,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let settings = services.settings.get_or_default(&acct).await;
                 let today = Utc::now()
                     .with_timezone(&settings.tz())
@@ -116,7 +116,7 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 services
                     .recurring_bills
                     .delete(&acct, id)
@@ -134,7 +134,7 @@ pub async fn execute_tool(
 
         "pay_recurring_bill" => Some(
             async {
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let bill_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
                 } else if let Some(search) = args

@@ -31,7 +31,7 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -39,7 +39,7 @@ pub async fn execute_tool(
     match name {
         "get_my_tasks" => Some(
             async {
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let completed = args.get("completed").and_then(|v| v.as_bool());
                 let items = services
                     .todos
@@ -71,7 +71,7 @@ pub async fn execute_tool(
                     .or_else(|| args.get("due"))
                     .and_then(|v| v.as_str())
                 {
-                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let acct = *owner_id;
                     let settings = services.settings.get_or_default(&acct).await;
                     parse_due_at(due_str, &settings.tz())
                 } else {
@@ -80,7 +80,7 @@ pub async fn execute_tool(
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
 
                 let rooms = &services.rooms;
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
                     rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
@@ -89,7 +89,7 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let (item, _) = services
                     .todos
                     .create(
@@ -114,7 +114,7 @@ pub async fn execute_tool(
 
         "complete_todo" => Some(
             async {
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let target_id = if let Some(id) = args.get("id").and_then(|v| v.as_i64()) {
                     id
                 } else if let Some(search) = args
@@ -173,7 +173,7 @@ pub async fn execute_tool(
                         if let Some(mins) = args.get("due_in_minutes").and_then(|v| v.as_i64()) {
                             Some(Utc::now() + Duration::minutes(mins))
                         } else if let Some(due_str) = args.get("due_at").and_then(|v| v.as_str()) {
-                            let acct = crate::domain::accounts::AccountId::from(owner_id);
+                            let acct = *owner_id;
                             let settings = services.settings.get_or_default(&acct).await;
                             parse_due_at(due_str, &settings.tz())
                         } else {
@@ -184,7 +184,7 @@ pub async fn execute_tool(
                     None
                 };
 
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let (updated, _) = services
                     .todos
                     .update(
@@ -212,7 +212,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
 
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 services
                     .todos
                     .delete(&acct, id)
@@ -354,7 +354,7 @@ mod tests {
     use crate::domain::todos::MAX_TEXT_LEN;
     use crate::infrastructure::postgres::repositories::reminders as reminders_repo;
 
-    async fn setup_db() -> (Database, String) {
+    async fn setup_db() -> (Database, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
@@ -362,8 +362,7 @@ mod tests {
             .accounts
             .resolve_or_provision("@alice:mbm.one")
             .await
-            .unwrap()
-            .to_string();
+            .unwrap();
         (db, account_id)
     }
 

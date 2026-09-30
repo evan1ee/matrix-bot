@@ -28,10 +28,9 @@ pub async fn call_mcp_tool(
     owner_id: &AccountId,
     params: CallToolParams,
 ) -> CallToolResult {
-    let owner_str = owner_id.to_string();
     debug!(
         "MCP tool call '{}' requested by owner '{}'",
-        params.name, owner_str
+        params.name, owner_id
     );
     let args_str = params
         .arguments
@@ -44,7 +43,7 @@ pub async fn call_mcp_tool(
         services,
         pool,
         broadcaster,
-        &owner_str,
+        owner_id,
         "mcp",
         &params.name,
         &args_str,

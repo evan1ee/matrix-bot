@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 pub mod bills;
 pub mod bookmarks;
 pub mod definitions;
@@ -26,7 +27,7 @@ impl ToolRegistry {
         services: &crate::application::AppServices,
         pool: &DbPool,
         broadcaster: Option<&EventBroadcaster>,
-        owner_id: &str,
+        owner_id: &AccountId,
         room_id: &str,
         name: &str,
         args_json: &str,
@@ -50,7 +51,7 @@ mod tests {
     use crate::db::Database;
     use crate::infrastructure::postgres::repositories::finance as finance_repo;
 
-    async fn setup_db() -> (Database, String) {
+    async fn setup_db() -> (Database, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
@@ -58,8 +59,7 @@ mod tests {
             .accounts
             .resolve_or_provision("@alice:mbm.one")
             .await
-            .unwrap()
-            .to_string();
+            .unwrap();
         (db, account_id)
     }
 
@@ -112,6 +112,43 @@ mod tests {
         assert!(names.contains(&"get_webhook_logs"));
         assert!(names.contains(&"get_my_settings"));
         assert!(names.contains(&"update_my_settings"));
+    }
+
+    /// AGENTS.md section 5.3: the owner comes from the authenticated context,
+    /// never from the model. Arguments naming another account are ignored.
+    #[tokio::test]
+    async fn a_tool_cannot_act_for_another_account_named_in_its_arguments() {
+        let (db, a) = setup_db().await;
+        let b = AccountId::from_seed("victim");
+        crate::db::pool::seed_account(&db.pool, &b).await;
+
+        for field in ["owner_id", "account_id"] {
+            let args = serde_json::json!({ "text": "sneaky", field: b.to_string() }).to_string();
+            ToolRegistry::execute_tool(
+                &crate::application::AppServices::new(&db.pool),
+                &db.pool,
+                None,
+                &a,
+                "!room:a",
+                "add_todo",
+                &args,
+            )
+            .await
+            .unwrap();
+        }
+
+        let list = |owner: AccountId| {
+            let pool = db.pool.clone();
+            async move {
+                crate::infrastructure::postgres::repositories::todos::list_all_user(
+                    &pool, &owner, None, 50, 0,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(list(a).await.len(), 2);
+        assert!(list(b).await.is_empty());
     }
 
     #[tokio::test]
@@ -428,7 +465,7 @@ mod tests {
         // Verify transaction was persisted
         let txs = finance_repo::list(
             &db.pool,
-            &crate::domain::accounts::AccountId::new(&owner),
+            &owner,
             &crate::domain::finance::ListTransactionsFilter {
                 limit: Some(10),
                 ..Default::default()

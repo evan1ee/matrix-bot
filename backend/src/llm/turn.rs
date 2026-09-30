@@ -219,7 +219,7 @@ pub async fn run_turn(
                         let services = ctx.services;
                         let pool = ctx.pool;
                         let broadcaster = ctx.broadcaster;
-                        let owner_id = ctx.owner_id.to_string();
+                        let owner_id = ctx.owner_id;
                         let room_id = ctx.room_id;
                         async move {
                             info!(
@@ -230,7 +230,7 @@ pub async fn run_turn(
                                 services,
                                 pool,
                                 broadcaster,
-                                &owner_id,
+                                owner_id,
                                 room_id,
                                 &func_name,
                                 &args,

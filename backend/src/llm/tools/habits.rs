@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use chrono::Utc;
 use serde_json::json;
 
@@ -9,11 +10,11 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
-    let acct = crate::domain::accounts::AccountId::from(owner_id);
+    let acct = *owner_id;
     let settings = services.settings.get_or_default(&acct).await;
     let today_str = Utc::now()
         .with_timezone(&settings.tz())

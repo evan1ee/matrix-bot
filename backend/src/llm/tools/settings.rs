@@ -1,3 +1,4 @@
+use crate::domain::accounts::AccountId;
 use serde_json::json;
 
 use crate::application::AppServices;
@@ -6,14 +7,14 @@ use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
     services: &AppServices,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     match name {
         "get_my_settings" => Some(
             async {
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let settings = services.settings.get_or_default(&acct).await;
                 serde_json::to_string(&settings).map_err(|e| e.to_string())
             }
@@ -28,7 +29,7 @@ pub async fn execute_tool(
         // touches the saved row.
         "update_my_settings" => Some(
             async {
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let saved = services
                     .settings
                     .modify(&acct, |settings| {

@@ -9,7 +9,7 @@ use serde_json::json;
 pub async fn execute_tool(
     services: &crate::application::AppServices,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     room_id: &str,
     name: &str,
     args: &serde_json::Value,
@@ -17,7 +17,7 @@ pub async fn execute_tool(
     match name {
         "get_my_reminders" => Some(
             async {
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 let items = services
                     .reminders
                     .list(&acct, Some("pending"), None, 50, 0)
@@ -40,7 +40,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or("none");
                 let recurrence = RecurrencePattern::from_str_or_default(rec_str);
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let settings = services.settings.get_or_default(&acct).await;
                 let tz = settings.tz();
 
@@ -107,7 +107,7 @@ pub async fn execute_tool(
                 };
 
                 let rooms = &services.rooms;
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
                     rooms.resolve_target_room(&acct, Some(r)).await
                 } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
@@ -116,29 +116,11 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let sender_name = if let Ok(Some(acct)) = services.accounts.find(&acct).await {
-                    if !acct.display_name.trim().is_empty() {
-                        acct.display_name
-                    } else {
-                        "You".to_string()
+                let sender_name = match services.accounts.find(&acct).await {
+                    Ok(Some(account)) if !account.display_name.trim().is_empty() => {
+                        account.display_name
                     }
-                } else if let Ok(Some(account_id)) = services.accounts.find_by_mxid(owner_id).await
-                {
-                    if let Ok(Some(acct)) = services.accounts.find(&account_id).await {
-                        if !acct.display_name.trim().is_empty() {
-                            acct.display_name
-                        } else {
-                            "You".to_string()
-                        }
-                    } else {
-                        "You".to_string()
-                    }
-                } else if let Some(localpart) =
-                    owner_id.strip_prefix('@').and_then(|s| s.split(':').next())
-                {
-                    localpart.to_string()
-                } else {
-                    "You".to_string()
+                    _ => "You".to_string(),
                 };
 
                 let rem = services
@@ -180,7 +162,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
 
-                let acct = AccountId::from(owner_id);
+                let acct = *owner_id;
                 services
                     .reminders
                     .cancel(&acct, id)
@@ -274,7 +256,8 @@ mod tests {
     async fn test_set_reminder_with_local_time() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
+        let test_user = AccountId::from_seed("test_user");
+        crate::db::pool::seed_account(&pool, &test_user).await;
 
         // Dated relative to the run: the service rejects a trigger time that has
 
@@ -287,7 +270,7 @@ mod tests {
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
             None,
-            "test_user",
+            &test_user,
             "!room:example.org",
             "set_reminder",
             &json!({
@@ -311,7 +294,8 @@ mod tests {
     async fn test_set_reminder_with_z_suffix() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
+        let test_user = AccountId::from_seed("test_user");
+        crate::db::pool::seed_account(&pool, &test_user).await;
 
         // When an LLM sends a local time formatted as ISO-8601 with Z
         // Dated relative to the run: the service rejects a trigger time that has
@@ -322,7 +306,7 @@ mod tests {
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
             None,
-            "test_user",
+            &test_user,
             "!room:example.org",
             "set_reminder",
             &json!({
@@ -344,7 +328,8 @@ mod tests {
     async fn test_set_reminder_resolves_account_display_name() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::db::pool::seed_accounts(&pool, &["test_user"]).await;
+        let test_user = AccountId::from_seed("test_user");
+        crate::db::pool::seed_account(&pool, &test_user).await;
 
         let acct_id = crate::application::AppServices::new(&pool)
             .accounts
@@ -355,7 +340,7 @@ mod tests {
         let res = execute_tool(
             &crate::application::AppServices::new(&pool),
             None,
-            &acct_id.to_string(),
+            &acct_id,
             "!room:example.org",
             "set_reminder",
             &json!({
@@ -382,5 +367,42 @@ mod tests {
         .unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].sender_name, "evan");
+    }
+
+    #[tokio::test]
+    async fn sender_name_is_the_account_display_name() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = crate::application::AppServices::new(&pool);
+        let acct_id = services
+            .accounts
+            .create("Ada", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        execute_tool(
+            &services,
+            None,
+            &acct_id,
+            "!room:example.org",
+            "set_reminder",
+            &json!({ "text": "Stretch", "in_minutes": 30 }),
+        )
+        .await
+        .expect("tool execution result")
+        .expect("success");
+
+        let items = crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
+            &pool,
+            &acct_id,
+            Some("all"),
+            None,
+            10,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sender_name, "Ada");
     }
 }

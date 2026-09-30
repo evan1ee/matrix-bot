@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use serde_json::json;
 
 use crate::domain::portfolio::models::WithdrawOutcome;
@@ -9,7 +10,7 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
@@ -23,7 +24,7 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let raw_currency = args
                     .get("currency")
@@ -56,7 +57,7 @@ pub async fn execute_tool(
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let raw_currency = args
                     .get("currency")

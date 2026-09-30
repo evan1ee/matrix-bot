@@ -1,4 +1,5 @@
 use crate::db::DbPool;
+use crate::domain::accounts::AccountId;
 use serde_json::json;
 
 use crate::domain::finance::money::{exponent_for, parse_amount};
@@ -11,7 +12,7 @@ pub async fn execute_tool(
     services: &crate::application::AppServices,
     _pool: &DbPool,
     _broadcaster: Option<&EventBroadcaster>,
-    owner_id: &str,
+    owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
@@ -43,7 +44,7 @@ pub async fn execute_tool(
                     return Err("Field 'target_price' is required".to_string());
                 };
 
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let default_cur = services.settings.get_or_default(&acct).await.currency;
                 let holding = services
                     .portfolio
@@ -82,7 +83,7 @@ pub async fn execute_tool(
                     .get("active_only")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let acct = crate::domain::accounts::AccountId::from(owner_id);
+                let acct = *owner_id;
                 let alerts = services
                     .portfolio
                     .list_alerts(&acct)
@@ -107,7 +108,7 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_i64());
 
                 if let Some(id) = id_opt {
-                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let acct = *owner_id;
                     let deleted = services
                         .portfolio
                         .delete_alert(&acct, id)
@@ -126,7 +127,7 @@ pub async fn execute_tool(
                     }
                 } else if let Some(sym_str) = args.get("symbol").and_then(|v| v.as_str()) {
                     let symbol = normalise_symbol(sym_str)?;
-                    let acct = crate::domain::accounts::AccountId::from(owner_id);
+                    let acct = *owner_id;
                     let alerts = services
                         .portfolio
                         .list_alerts(&acct)
