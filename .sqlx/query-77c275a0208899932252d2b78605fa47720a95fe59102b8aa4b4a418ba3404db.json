@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, account_id, event_type, payload FROM outbox_events\n        WHERE id > $1 AND account_id = ANY($2)\n        ORDER BY id\n        LIMIT $3\n        ",
+  "query": "\n        SELECT id AS \"id!\", account_id AS \"account_id!\", event_type AS \"event_type!\", payload AS \"payload!\"\n        FROM (\n            SELECT id, account_id, event_type, payload FROM outbox_events\n            WHERE id > $1 AND account_id = ANY($2)\n            ORDER BY id DESC\n            LIMIT $3\n        ) newest\n        ORDER BY id\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "account_id",
+        "name": "account_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "event_type",
+        "name": "event_type!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "payload",
+        "name": "payload!",
         "type_info": "Jsonb",
         "origin": {
           "Table": {
@@ -62,5 +62,5 @@
       false
     ]
   },
-  "hash": "49126709c2cab1ed83d75b44076c6aa6f62ae41596f7a8684b7c71cc4c2dbc35"
+  "hash": "77c275a0208899932252d2b78605fa47720a95fe59102b8aa4b4a418ba3404db"
 }

@@ -114,13 +114,19 @@ pub async fn load_since(
     limit: i64,
 ) -> sqlx::Result<Vec<StoredEvent>> {
     let uuids: Vec<uuid::Uuid> = accounts.iter().map(|a| *a.as_uuid()).collect();
+    // The NEWEST `limit` rows, oldest first: a replay bounded by `limit`
+    // must drop the stale end of the gap, not the fresh one.
     let rows = sqlx::query_as!(
         EventRow,
         r#"
-        SELECT id, account_id, event_type, payload FROM outbox_events
-        WHERE id > $1 AND account_id = ANY($2)
+        SELECT id AS "id!", account_id AS "account_id!", event_type AS "event_type!", payload AS "payload!"
+        FROM (
+            SELECT id, account_id, event_type, payload FROM outbox_events
+            WHERE id > $1 AND account_id = ANY($2)
+            ORDER BY id DESC
+            LIMIT $3
+        ) newest
         ORDER BY id
-        LIMIT $3
         "#,
         after.0,
         &uuids,
@@ -129,6 +135,14 @@ pub async fn load_since(
     .fetch_all(ex)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// The highest event id, 0 when the outbox is empty.
+pub async fn max_event_id(ex: impl PgExecutor<'_>) -> sqlx::Result<EventId> {
+    let max = sqlx::query_scalar!(r#"SELECT COALESCE(MAX(id), 0) AS "max!" FROM outbox_events"#)
+        .fetch_one(ex)
+        .await?;
+    Ok(EventId(max))
 }
 
 struct ClaimedRow {
@@ -663,5 +677,25 @@ mod tests {
         let mine = load_since(&pool, &ids[..1], EventId(0), 100).await.unwrap();
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].account_id, ids[0]);
+    }
+
+    /// With more rows than `limit`, the newest ones come back, ascending.
+    #[tokio::test]
+    async fn load_since_returns_the_newest_rows_when_over_the_limit() {
+        let (pool, ids) = pool_with(&["acct_a"]).await;
+        let mut published = Vec::new();
+        for _ in 0..5 {
+            let mut tx = pool.begin().await.unwrap();
+            let p = publish(&mut tx, &SystemEvent::AiConfigUpdated { owner_id: ids[0] })
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            published.push(p.event_id);
+        }
+
+        let got = load_since(&pool, &ids, EventId(0), 2).await.unwrap();
+        let got: Vec<EventId> = got.into_iter().map(|e| e.id).collect();
+        assert_eq!(got, published[3..].to_vec());
+        assert_eq!(max_event_id(&pool).await.unwrap(), published[4]);
     }
 }

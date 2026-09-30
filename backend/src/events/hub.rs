@@ -33,7 +33,7 @@ type Registered = (u64, mpsc::Sender<Arc<str>>);
 struct State {
     next_key: u64,
     subscribers: HashMap<AccountId, Vec<Registered>>,
-    /// Highest event id pushed; replay starts just below it.
+    /// Highest event id notified or pushed; replay starts just below it.
     last_seen: i64,
 }
 
@@ -57,9 +57,7 @@ struct Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(list) = state.subscribers.get_mut(&self.account) {
             list.retain(|(k, _)| *k != self.key);
             if list.is_empty() {
@@ -136,12 +134,14 @@ impl Hub {
     fn forward(&self, event: &StoredEvent) -> usize {
         let line: Arc<str> = Arc::from(event.json.to_string());
         let n = self.push(&event.account_id, line);
-        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        state.last_seen = state.last_seen.max(event.id.0);
+        self.note_seen(event.id);
         n
     }
 
     pub(crate) async fn on_notification(&self, id: EventId, account: AccountId) -> Notified {
+        // Before the subscriber check: a browser that connects later must
+        // not see this event's id as "unseen" on a replay.
+        self.note_seen(id);
         if !self.has_subscriber(&account) {
             return Notified::NoSubscriber;
         }
@@ -153,6 +153,29 @@ impl Hub {
                 Notified::LoadFailed
             }
         }
+    }
+
+    /// Makes a fresh process start from "now": without it a first reconnect
+    /// would replay history the process never saw. Seeds only while nothing
+    /// has been seen; returns false when the read failed (try again).
+    pub(crate) async fn seed(&self) -> bool {
+        match self.outbox.max_event_id().await {
+            Ok(max) => {
+                self.note_seen(max);
+                true
+            }
+            Err(err) => {
+                warn!(error = %err, "Could not seed the SSE replay floor");
+                false
+            }
+        }
+    }
+
+    /// Raises the replay floor: the highest event id this process knows of,
+    /// whether or not anyone here was subscribed to it.
+    fn note_seen(&self, id: EventId) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.last_seen = state.last_seen.max(id.0);
     }
 
     /// After a listener reconnect: re-sends recent events for connected
@@ -302,5 +325,67 @@ mod tests {
         let owner = AccountId::from_seed("acct_mine");
         drop(hub.subscribe(owner));
         assert_eq!(hub.push(&owner, Arc::from("x")), 0);
+    }
+
+    async fn publish_for(svc: &AppServices, owner: AccountId) -> EventId {
+        let mut tx = svc.outbox.pool().begin().await.unwrap();
+        let published = crate::infrastructure::postgres::repositories::outbox::publish(
+            &mut tx,
+            &SystemEvent::AiConfigUpdated { owner_id: owner },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        published.event_id
+    }
+
+    /// Given old events and a notification for an account nobody is
+    /// subscribed for, When a subscriber appears and the hub replays, Then the
+    /// notification still advanced the floor: events older than the window
+    /// are not replayed.
+    #[tokio::test]
+    async fn an_unsubscribed_notification_still_advances_the_replay_floor() {
+        let svc = services().await;
+        let mine = AccountId::from_seed("acct_mine");
+        let theirs = AccountId::from_seed("acct_theirs");
+        let mut old = Vec::new();
+        for _ in 0..5 {
+            old.push(publish_for(&svc, mine).await);
+        }
+        let latest = publish_for(&svc, theirs).await;
+
+        let hub = Hub::new(svc.outbox.clone(), 16);
+        assert_eq!(
+            hub.on_notification(latest, theirs).await,
+            Notified::NoSubscriber
+        );
+        let mut sub = hub.subscribe(mine);
+        // Window of 2 below `latest` reaches only the newest two of `mine`.
+        hub.replay(2, 500).await;
+
+        let mut got = Vec::new();
+        while let Ok(Some(line)) = tokio::time::timeout(Duration::from_millis(50), sub.next()).await
+        {
+            got.push(line);
+        }
+        assert_eq!(got.len(), 1, "only the event inside the window: {got:?}");
+    }
+
+    /// Given history from before this process, When the hub is seeded and a
+    /// subscriber connects, Then a zero-window replay sends none of it.
+    #[tokio::test]
+    async fn a_seeded_hub_does_not_replay_history() {
+        let svc = services().await;
+        let mine = AccountId::from_seed("acct_mine");
+        publish_for(&svc, mine).await;
+        publish_for(&svc, mine).await;
+
+        let hub = Hub::new(svc.outbox.clone(), 16);
+        assert!(hub.seed().await);
+        let mut sub = hub.subscribe(mine);
+        hub.replay(0, 500).await;
+        assert!(tokio::time::timeout(Duration::from_millis(50), sub.next())
+            .await
+            .is_err());
     }
 }

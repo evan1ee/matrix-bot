@@ -54,6 +54,10 @@ impl OutboxService {
         Ok(repo::load_since(&self.pool, accounts, after, limit).await?)
     }
 
+    pub async fn max_event_id(&self) -> Result<EventId, AppError> {
+        Ok(repo::max_event_id(&self.pool).await?)
+    }
+
     pub async fn claim_due(
         &self,
         limit: i64,

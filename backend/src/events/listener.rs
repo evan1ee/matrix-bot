@@ -21,10 +21,13 @@ pub(crate) async fn run(
     config: Arc<EventsConfig>,
     shutdown: CancellationToken,
 ) {
+    // Seeded once, on the first successful connect: later connects must
+    // replay what the outage missed, not skip it.
+    let mut needs_seed = true;
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
-            result = listen(&pool, &hub, &wake, &config) => {
+            result = listen(&pool, &hub, &wake, &config, &mut needs_seed) => {
                 let Err(err) = result;
                 warn!(error = %err, "Outbox LISTEN failed; SSE pauses, deliveries fall back to polling");
             }
@@ -41,8 +44,14 @@ async fn listen(
     hub: &Hub,
     wake: &Notify,
     config: &EventsConfig,
+    needs_seed: &mut bool,
 ) -> sqlx::Result<std::convert::Infallible> {
+    // LISTEN first, then read the floor: an event committing in between is
+    // both notified and at or below the seed, never lost.
     let mut listener = OutboxNotifications::connect(pool).await?;
+    if *needs_seed {
+        *needs_seed = !hub.seed().await;
+    }
     wake.notify_waiters();
     hub.replay(config.replay_window, config.replay_limit).await;
     loop {
