@@ -94,8 +94,8 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["@bob:1"]).await;
         let broadcaster = EventBroadcaster::default();
         let settings = SettingsService::new(pool.clone(), broadcaster.clone());
-        let reminders = ReminderService::new(pool.clone(), broadcaster.clone());
-        let todos = TodoService::new(pool, broadcaster, reminders);
+        let reminders = ReminderService::new(pool.clone());
+        let todos = TodoService::new(pool, reminders);
         (todos, settings)
     }
 

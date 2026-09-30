@@ -188,12 +188,11 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
-    use crate::domain::events::SystemEvent;
     use crate::domain::jobs::JobId;
     use crate::domain::reminders::{
         NewReminder, RecurrencePattern, ReminderSource, ReminderStatus,
     };
-    use crate::events::EventBroadcaster;
+    use crate::infrastructure::postgres::repositories;
     use crate::interface::channels::matrix::reaction_targets::get_target;
     use crate::interface::jobs::fake::FakeDelivery;
 
@@ -225,7 +224,6 @@ mod tests {
         services: AppServices,
         owner: AccountId,
         reminder: Reminder,
-        events: EventBroadcaster,
     }
 
     async fn fixture(owner: &str, recurrence: RecurrencePattern) -> Fixture {
@@ -241,8 +239,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::from_seed(owner);
         crate::db::pool::seed_account(&pool, &owner).await;
-        let events = EventBroadcaster::new(16);
-        let services = AppServices::with_events(&pool, &events);
+        let services = AppServices::new(&pool);
         let reminder = services
             .reminders
             .create(
@@ -264,7 +261,6 @@ mod tests {
             services,
             owner,
             reminder,
-            events,
         }
     }
 
@@ -294,7 +290,6 @@ mod tests {
     #[tokio::test]
     async fn delivers_formats_in_the_owners_zone_records_the_target_and_advances() {
         let f = fixture("acct_fire_ok", RecurrencePattern::None).await;
-        let mut rx = f.events.subscribe();
         let fake = FakeDelivery::connected();
         let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
 
@@ -315,11 +310,13 @@ mod tests {
         assert_eq!(target.entity_type, "reminder");
         assert_eq!(target.entity_id, f.reminder.id);
         assert_eq!(current(&f).await.status, ReminderStatus::Triggered);
-        let mut saw = false;
-        while let Ok(e) = rx.try_recv() {
-            saw |= matches!(e, SystemEvent::ReminderTriggered(r) if r.id == f.reminder.id);
-        }
-        assert!(saw, "ReminderTriggered received");
+        assert!(
+            repositories::outbox::event_types_for(&f.pool, &f.owner)
+                .await
+                .unwrap()
+                .contains(&"ReminderTriggered".to_string()),
+            "ReminderTriggered written to the outbox"
+        );
     }
 
     #[tokio::test]

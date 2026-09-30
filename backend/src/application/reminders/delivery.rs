@@ -9,7 +9,7 @@ use crate::application::AppError;
 use crate::domain::events::SystemEvent;
 use crate::domain::jobs::{JobStatus, NewJob};
 use crate::domain::reminders::{next_occurrence, Reminder};
-use crate::infrastructure::postgres::repositories;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 impl ReminderService {
     /// Enqueues a `reminder.fire` job for every pending reminder due by `now`.
@@ -66,16 +66,17 @@ impl ReminderService {
         reminder: &Reminder,
         now: DateTime<Utc>,
     ) -> Result<(), AppError> {
-        self.events
-            .send(SystemEvent::ReminderTriggered(reminder.clone()));
+        let mut tx = self.pool.begin().await?;
+        outbox::publish(&mut tx, &SystemEvent::ReminderTriggered(reminder.clone())).await?;
         match next_occurrence(reminder.trigger_at, reminder.recurrence, now) {
             Some(next) => {
-                repositories::reminders::reschedule(&self.pool, reminder.id, next).await?;
+                repositories::reminders::reschedule(&mut *tx, reminder.id, next).await?;
             }
             None => {
-                repositories::reminders::mark_triggered(&self.pool, reminder.id).await?;
+                repositories::reminders::mark_triggered(&mut *tx, reminder.id).await?;
             }
         }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -135,21 +136,16 @@ mod tests {
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
     use crate::domain::reminders::{NewReminder, RecurrencePattern, ReminderStatus};
-    use crate::events::EventBroadcaster;
 
     async fn services_with_reminder(
         owner: &str,
         recurrence: RecurrencePattern,
-        events: Option<&EventBroadcaster>,
     ) -> (AppServices, AccountId, Reminder, DateTime<Utc>) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::from_seed(owner);
         crate::db::pool::seed_account(&pool, &owner).await;
-        let services = match events {
-            Some(e) => AppServices::with_events(&pool, e),
-            None => AppServices::new(&pool),
-        };
+        let services = AppServices::new(&pool);
         let now = crate::utils::time::now_at_storage_precision();
         let reminder = services
             .reminders
@@ -174,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn enqueue_due_is_idempotent_across_two_ticks() {
         let (services, _, _, now) =
-            services_with_reminder("acct_enq_twice", RecurrencePattern::None, None).await;
+            services_with_reminder("acct_enq_twice", RecurrencePattern::None).await;
         let due = now + Duration::minutes(2);
 
         assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
@@ -186,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn a_moved_trigger_gets_its_own_job() {
         let (services, owner, reminder, now) =
-            services_with_reminder("acct_enq_moved", RecurrencePattern::None, None).await;
+            services_with_reminder("acct_enq_moved", RecurrencePattern::None).await;
         let due = now + Duration::minutes(10);
         assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
 
@@ -210,10 +206,8 @@ mod tests {
     /// day with retry_count 0; a one-off reminder becomes triggered.
     #[tokio::test]
     async fn complete_delivery_advances_or_finishes() {
-        let events = EventBroadcaster::new(16);
-        let mut rx = events.subscribe();
         let (services, owner, daily, now) =
-            services_with_reminder("acct_complete", RecurrencePattern::Daily, Some(&events)).await;
+            services_with_reminder("acct_complete", RecurrencePattern::Daily).await;
         services
             .reminders
             .record_failed_attempt(&daily, 2)
@@ -227,11 +221,13 @@ mod tests {
             .unwrap();
 
         // Setup also published ReminderCreated; look for the trigger among them.
-        let mut triggered = false;
-        while let Ok(event) = rx.try_recv() {
-            triggered |= matches!(event, SystemEvent::ReminderTriggered(r) if r.id == daily.id);
-        }
-        assert!(triggered, "ReminderTriggered must be published");
+        let types = repositories::outbox::event_types_for(&services.reminders.pool, &owner)
+            .await
+            .unwrap();
+        assert!(
+            types.contains(&"ReminderTriggered".to_string()),
+            "ReminderTriggered must be published"
+        );
         let after = services
             .reminders
             .find_owned(&owner, daily.id)
@@ -243,7 +239,7 @@ mod tests {
         assert_eq!(after.retry_count, 0);
 
         let (services, owner, once, now) =
-            services_with_reminder("acct_complete_once", RecurrencePattern::None, None).await;
+            services_with_reminder("acct_complete_once", RecurrencePattern::None).await;
         services
             .reminders
             .complete_delivery(&once, now + Duration::minutes(2))
@@ -278,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn a_reminder_whose_job_failed_is_marked_failed() {
         let (services, owner, reminder, now) =
-            services_with_reminder("acct_stranded", RecurrencePattern::None, None).await;
+            services_with_reminder("acct_stranded", RecurrencePattern::None).await;
         let due = now + Duration::minutes(2);
         assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
         force_job_failed(&services, &reminder, &services.reminders.pool).await;
@@ -304,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn a_snoozed_reminder_is_not_failed_by_its_old_job() {
         let (services, owner, reminder, now) =
-            services_with_reminder("acct_snoozed_failed", RecurrencePattern::None, None).await;
+            services_with_reminder("acct_snoozed_failed", RecurrencePattern::None).await;
         let due = now + Duration::minutes(10);
         assert_eq!(services.reminders.enqueue_due(due).await.unwrap(), 1);
         force_job_failed(&services, &reminder, &services.reminders.pool).await;

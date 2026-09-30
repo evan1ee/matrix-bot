@@ -137,14 +137,10 @@ impl AppServices {
         let life = LifeService::new(pool.clone(), events.clone());
         let llm = LlmService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
-        let reminders = ReminderService::new(pool.clone(), events.clone());
-        let todos = TodoService::new(pool.clone(), events.clone(), reminders.clone());
-        let recurring_bills = RecurringBillsService::new(
-            pool.clone(),
-            events.clone(),
-            reminders.clone(),
-            finance.clone(),
-        );
+        let reminders = ReminderService::new(pool.clone());
+        let todos = TodoService::new(pool.clone(), reminders.clone());
+        let recurring_bills =
+            RecurringBillsService::new(pool.clone(), reminders.clone(), finance.clone());
         let webhooks = WebhookService::new(pool.clone(), events.clone());
         let portfolio = PortfolioService::new(pool.clone(), events.clone());
         let outbox = OutboxService::new(pool.clone());

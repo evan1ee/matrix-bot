@@ -454,22 +454,20 @@ pub async fn handle_delete(
 mod tests {
     use super::*;
     use crate::application::reminders::ReminderService;
-    use crate::events::EventBroadcaster;
+    use crate::infrastructure::postgres::repositories;
 
-    async fn setup_service() -> (TodoService, EventBroadcaster) {
+    async fn setup_service() -> (TodoService, sqlx::PgPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@alice:1"]).await;
-        let broadcaster = EventBroadcaster::default();
-        let reminders = ReminderService::new(pool.clone(), broadcaster.clone());
-        let todos = TodoService::new(pool, broadcaster.clone(), reminders);
-        (todos, broadcaster)
+        let reminders = ReminderService::new(pool.clone());
+        let todos = TodoService::new(pool.clone(), reminders);
+        (todos, pool)
     }
 
     #[tokio::test]
     async fn test_a_matrix_add_announces_itself() {
-        let (todos, broadcaster) = setup_service().await;
-        let mut rx = broadcaster.subscribe();
+        let (todos, pool) = setup_service().await;
         let owner = AccountId::from_seed("@alice:1");
 
         let reply = handle_add(&todos, "!room:1", &owner, "alice", "add Buy milk", None)
@@ -477,10 +475,11 @@ mod tests {
             .unwrap();
         assert!(reply.contains("Added Task"));
 
-        let event = rx.try_recv().expect("the add must broadcast an event");
-        assert!(matches!(
-            event,
-            crate::domain::events::SystemEvent::TodoCreated(_)
-        ));
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["TodoCreated"]
+        );
     }
 }

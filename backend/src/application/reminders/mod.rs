@@ -12,18 +12,16 @@ use crate::domain::reminders::{
     NewReminder, RecurrencePattern, Reminder, ReminderPlan, ReminderSource, ReminderStatus,
     SyncOutcome,
 };
-use crate::events::EventBroadcaster;
-use crate::infrastructure::postgres::repositories;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Clone)]
 pub struct ReminderService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl ReminderService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub async fn create(
@@ -33,8 +31,10 @@ impl ReminderService {
     ) -> Result<Reminder, AppError> {
         input.validate(Utc::now())?;
 
-        let reminder = repositories::reminders::create(&self.pool, owner_id, &input).await?;
-        self.broadcast_created(&reminder);
+        let mut tx = self.pool.begin().await?;
+        let reminder = repositories::reminders::create(&mut *tx, owner_id, &input).await?;
+        outbox::publish(&mut tx, &SystemEvent::ReminderCreated(reminder.clone())).await?;
+        tx.commit().await?;
 
         Ok(reminder)
     }
@@ -54,18 +54,20 @@ impl ReminderService {
             .await?
             .ok_or_else(|| AppError::NotFound("Reminder not found or access denied".to_string()))?;
 
-        let cancelled = repositories::reminders::cancel(&self.pool, owner_id, id).await?;
+        let mut tx = self.pool.begin().await?;
+        let cancelled = repositories::reminders::cancel(&mut *tx, owner_id, id).await?;
         if !cancelled {
             return Err(AppError::NotFound(
                 "Reminder not found or no longer pending".to_string(),
             ));
         }
-
-        self.events.send(SystemEvent::ReminderCancelled {
+        let event = SystemEvent::ReminderCancelled {
             id,
             room_id: existing.room_id.clone(),
             owner_id: *owner_id,
-        });
+        };
+        outbox::publish(&mut tx, &event).await?;
+        tx.commit().await?;
 
         Ok(existing)
     }
@@ -76,15 +78,17 @@ impl ReminderService {
         id: i64,
         room_id: &str,
     ) -> Result<bool, AppError> {
-        let cancelled =
-            repositories::reminders::force_cancel_owned(&self.pool, owner_id, id).await?;
+        let mut tx = self.pool.begin().await?;
+        let cancelled = repositories::reminders::force_cancel_owned(&mut *tx, owner_id, id).await?;
         if cancelled {
-            self.events.send(SystemEvent::ReminderCancelled {
+            let event = SystemEvent::ReminderCancelled {
                 id,
                 room_id: room_id.to_string(),
                 owner_id: *owner_id,
-            });
+            };
+            outbox::publish(&mut tx, &event).await?;
         }
+        tx.commit().await?;
         Ok(cancelled)
     }
 
@@ -99,8 +103,9 @@ impl ReminderService {
             .await?
             .ok_or_else(|| AppError::NotFound("Reminder not found or access denied".to_string()))?;
 
+        let mut tx = self.pool.begin().await?;
         let updated = repositories::reminders::update_pending(
-            &self.pool,
+            &mut *tx,
             owner_id,
             id,
             &existing.message,
@@ -109,8 +114,8 @@ impl ReminderService {
         )
         .await?
         .ok_or_else(|| AppError::NotFound("Reminder not found or no longer pending".to_string()))?;
-
-        self.broadcast_updated(&updated);
+        outbox::publish(&mut tx, &SystemEvent::ReminderUpdated(updated.clone())).await?;
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -125,13 +130,14 @@ impl ReminderService {
         crate::domain::reminders::validate_message(message)?;
         crate::domain::reminders::validate_trigger_at(trigger_at, Utc::now())?;
 
+        let mut tx = self.pool.begin().await?;
         let updated = repositories::reminders::update_pending(
-            &self.pool, owner_id, id, message, trigger_at, recurrence,
+            &mut *tx, owner_id, id, message, trigger_at, recurrence,
         )
         .await?
         .ok_or_else(|| AppError::NotFound("Reminder not found or no longer pending".to_string()))?;
-
-        self.broadcast_updated(&updated);
+        outbox::publish(&mut tx, &SystemEvent::ReminderUpdated(updated.clone())).await?;
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -145,20 +151,24 @@ impl ReminderService {
             .await?
             .ok_or_else(|| AppError::NotFound("Reminder not found or access denied".to_string()))?;
 
-        repositories::reminders::mark_triggered(&self.pool, id).await?;
+        let mut tx = self.pool.begin().await?;
+        repositories::reminders::mark_triggered(&mut *tx, id).await?;
 
         let mut updated = existing;
         updated.status = ReminderStatus::Triggered;
-        self.broadcast_updated(&updated);
+        outbox::publish(&mut tx, &SystemEvent::ReminderUpdated(updated.clone())).await?;
+        tx.commit().await?;
         Ok(updated)
     }
 
     pub async fn clear_history(&self, owner_id: &AccountId) -> Result<(), AppError> {
-        repositories::reminders::clear_user_history(&self.pool, owner_id).await?;
-
-        self.events.send(SystemEvent::ReminderHistoryCleared {
+        let mut tx = self.pool.begin().await?;
+        repositories::reminders::clear_user_history(&mut *tx, owner_id).await?;
+        let event = SystemEvent::ReminderHistoryCleared {
             owner_id: *owner_id,
-        });
+        };
+        outbox::publish(&mut tx, &event).await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -172,12 +182,15 @@ impl ReminderService {
         if existing.status == ReminderStatus::Pending {
             self.cancel(owner_id, id).await?;
         } else {
-            repositories::reminders::delete_history_item(&self.pool, owner_id, id).await?;
-            self.events.send(SystemEvent::ReminderDeleted {
+            let mut tx = self.pool.begin().await?;
+            repositories::reminders::delete_history_item(&mut *tx, owner_id, id).await?;
+            let event = SystemEvent::ReminderDeleted {
                 id,
                 room_id: existing.room_id,
                 owner_id: *owner_id,
-            });
+            };
+            outbox::publish(&mut tx, &event).await?;
+            tx.commit().await?;
         }
 
         Ok(())
@@ -248,9 +261,10 @@ impl ReminderService {
             source: Some((plan.source, plan.source_id)),
         };
 
-        let created =
-            repositories::reminders::create(&self.pool, &plan.owner_id, &new_input).await?;
-        self.broadcast_created(&created);
+        let mut tx = self.pool.begin().await?;
+        let created = repositories::reminders::create(&mut *tx, &plan.owner_id, &new_input).await?;
+        outbox::publish(&mut tx, &SystemEvent::ReminderCreated(created)).await?;
+        tx.commit().await?;
 
         Ok(SyncOutcome::Scheduled(trigger_at))
     }
@@ -260,17 +274,19 @@ impl ReminderService {
         source: ReminderSource,
         source_id: i64,
     ) -> Result<SyncOutcome, AppError> {
+        let mut tx = self.pool.begin().await?;
         let Some(cancelled) =
-            repositories::reminders::cancel_for_source(&self.pool, source, source_id).await?
+            repositories::reminders::cancel_for_source(&mut *tx, source, source_id).await?
         else {
             return Ok(SyncOutcome::Nothing);
         };
-
-        self.events.send(SystemEvent::ReminderCancelled {
+        let event = SystemEvent::ReminderCancelled {
             id: cancelled.id,
             room_id: cancelled.room_id,
             owner_id: cancelled.owner_id,
-        });
+        };
+        outbox::publish(&mut tx, &event).await?;
+        tx.commit().await?;
 
         Ok(SyncOutcome::Cancelled)
     }
@@ -284,12 +300,54 @@ impl ReminderService {
             repositories::reminders::find_pending_for_source(&self.pool, source, source_id).await?;
         Ok(item)
     }
+}
 
-    fn broadcast_created(&self, r: &Reminder) {
-        self.events.send(SystemEvent::ReminderCreated(r.clone()));
-    }
+#[cfg(test)]
+mod tests {
+    use chrono::Duration;
 
-    fn broadcast_updated(&self, r: &Reminder) {
-        self.events.send(SystemEvent::ReminderUpdated(r.clone()));
+    use crate::application::AppServices;
+    use crate::domain::accounts::AccountId;
+    use crate::domain::reminders::{NewReminder, RecurrencePattern};
+    use crate::infrastructure::postgres::repositories;
+
+    /// Given a pending reminder, When it is cancelled, Then ReminderCancelled
+    /// is in the outbox.
+    #[tokio::test]
+    async fn cancel_writes_reminder_cancelled_to_the_outbox() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("reminder_outbox_cancel");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        let reminder = services
+            .reminders
+            .create(
+                &owner,
+                NewReminder {
+                    message: "stretch".to_string(),
+                    trigger_at: crate::utils::time::now_at_storage_precision()
+                        + Duration::minutes(5),
+                    room_id: "!room:test".to_string(),
+                    owner_name: "alice".to_string(),
+                    recurrence: RecurrencePattern::None,
+                    source: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        services
+            .reminders
+            .cancel(&owner, reminder.id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["ReminderCreated", "ReminderCancelled"]
+        );
     }
 }

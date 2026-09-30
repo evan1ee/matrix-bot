@@ -236,28 +236,22 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
-        let broadcaster = EventBroadcaster::default();
-        let mut rx = broadcaster.subscribe();
-        let services = crate::application::AppServices::with_events(&pool, &broadcaster);
-        let db = Database { pool };
+        let services = crate::application::AppServices::new(&pool);
+        let db = Database { pool: pool.clone() };
 
         let reply = TodoModule::new()
-            .handle_command(
-                &ctx("!todo add Buy milk"),
-                &services,
-                &db,
-                Some(&broadcaster),
-            )
+            .handle_command(&ctx("!todo add Buy milk"), &services, &db, None)
             .await
             .expect("the add must be handled");
         assert!(reply.contains("Added Task"), "unexpected reply: {reply}");
 
-        let event = rx
-            .try_recv()
-            .expect("dispatching through the module must broadcast the creation");
-        assert!(matches!(
-            event,
-            crate::domain::events::SystemEvent::TodoCreated(_)
-        ));
+        let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["TodoCreated"],
+            "dispatching through the module must write the creation to the outbox"
+        );
     }
 }
