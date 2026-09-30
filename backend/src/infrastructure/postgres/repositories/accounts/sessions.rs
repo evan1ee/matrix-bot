@@ -138,7 +138,7 @@ pub async fn revoke_for_account(
     id_hash: &str,
 ) -> Result<bool, sqlx::Error> {
     let affected = sqlx::query!(
-        "UPDATE sessions SET revoked_at = $1          WHERE id_hash = $2 AND account_id = $3 AND revoked_at IS NULL",
+        "UPDATE sessions SET revoked_at = $1 WHERE id_hash = $2 AND account_id = $3 AND revoked_at IS NULL",
         Utc::now(),
         id_hash,
         account_id.as_uuid(),
