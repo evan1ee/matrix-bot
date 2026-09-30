@@ -97,6 +97,19 @@ pub(crate) async fn terminate_lock_holder(pool: &PgPool, key: i64) -> sqlx::Resu
     .await
 }
 
+/// Test support: terminates every other backend of the current database and
+/// returns how many. Only for a private database (`test_pool_private_database`):
+/// a LISTEN connection has no name or lock to find it by.
+#[cfg(test)]
+pub(crate) async fn terminate_other_backends(pool: &PgPool) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(pg_terminate_backend(pid)) AS "n!" FROM pg_stat_activity
+           WHERE datname = current_database() AND pid <> pg_backend_pid()"#
+    )
+    .fetch_one(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

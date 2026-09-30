@@ -12,7 +12,7 @@ use tracing::warn;
 
 use crate::events::hub::Hub;
 use crate::events::EventsConfig;
-use crate::infrastructure::postgres::outbox_notifications::OutboxNotifications;
+use crate::infrastructure::postgres::outbox_notifications::{OutboxNotifications, OutboxSignal};
 
 pub(crate) async fn run(
     pool: PgPool,
@@ -46,9 +46,17 @@ async fn listen(
     wake.notify_waiters();
     hub.replay(config.replay_window, config.replay_limit).await;
     loop {
-        if let Some((id, account)) = listener.next().await? {
-            hub.on_notification(id, account).await;
-            wake.notify_waiters();
+        match listener.next().await? {
+            OutboxSignal::Event(id, account) => {
+                hub.on_notification(id, account).await;
+                wake.notify_waiters();
+            }
+            OutboxSignal::Reconnected => {
+                warn!("Outbox LISTEN connection was lost and re-established; replaying");
+                wake.notify_waiters();
+                hub.replay(config.replay_window, config.replay_limit).await;
+            }
+            OutboxSignal::Malformed => {}
         }
     }
 }

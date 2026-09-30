@@ -20,18 +20,36 @@ impl OutboxNotifications {
         Ok(Self { listener })
     }
 
-    /// The next committed event. `Ok(None)` is a malformed payload (logged).
-    pub async fn next(&mut self) -> sqlx::Result<Option<(EventId, AccountId)>> {
-        let n = self.listener.recv().await?;
-        let parsed = parse_payload(n.payload());
-        if parsed.is_none() {
-            warn!(
-                payload = n.payload(),
-                "Ignoring a malformed outbox notification"
-            );
-        }
-        Ok(parsed)
+    /// The next signal: a committed event, or the news that the connection
+    /// was lost and re-established.
+    pub async fn next(&mut self) -> sqlx::Result<OutboxSignal> {
+        // `recv()` would swallow the `Ok(None)` of a silent reconnect (sqlx 0.9
+        // reconnects eagerly on an IO-level loss), hiding the loss.
+        let Some(n) = self.listener.try_recv().await? else {
+            return Ok(OutboxSignal::Reconnected);
+        };
+        Ok(match parse_payload(n.payload()) {
+            Some((id, account)) => OutboxSignal::Event(id, account),
+            None => {
+                warn!(
+                    payload = n.payload(),
+                    "Ignoring a malformed outbox notification"
+                );
+                OutboxSignal::Malformed
+            }
+        })
     }
+}
+
+/// What [`OutboxNotifications::next`] reports.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OutboxSignal {
+    Event(EventId, AccountId),
+    /// The connection dropped and sqlx already re-LISTENed on a fresh one.
+    /// NOTIFYs sent in between are gone, so the caller must replay.
+    Reconnected,
+    /// A payload that does not parse (logged, skipped).
+    Malformed,
 }
 
 fn parse_payload(payload: &str) -> Option<(EventId, AccountId)> {
@@ -49,6 +67,7 @@ mod tests {
     use super::*;
     use crate::domain::accounts::AccountId;
     use crate::domain::events::SystemEvent;
+    use crate::infrastructure::postgres::advisory::terminate_other_backends;
     use crate::infrastructure::postgres::repositories::outbox::publish;
 
     /// Given a listener, When an event commits, Then it receives
@@ -70,9 +89,9 @@ mod tests {
         // Other tests share the database-wide channel: skip foreign events.
         let got = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Some(n) = listener.next().await.unwrap() {
-                    if n.0 == published.event_id {
-                        return n;
+                if let OutboxSignal::Event(id, account) = listener.next().await.unwrap() {
+                    if id == published.event_id {
+                        return (id, account);
                     }
                 }
             }
@@ -104,6 +123,42 @@ mod tests {
 
         let got = tokio::time::timeout(Duration::from_millis(500), listener.next()).await;
         assert!(got.is_err(), "a rollback must not notify");
+        drop(listener);
+        crate::db::pool::drop_private_database(pool, db).await;
+    }
+
+    /// Given a listener whose connection is killed server-side, When it is
+    /// polled, Then it reports `Reconnected` (sqlx reconnects silently inside
+    /// `recv`, so this is the only place the loss is visible), and events
+    /// published afterwards still arrive.
+    #[tokio::test]
+    async fn a_lost_connection_is_reported_and_the_listener_keeps_working() {
+        let db = format!("outbox_notify_reconnect_{}", std::process::id());
+        let db = db.as_str();
+        let pool = crate::db::pool::test_pool_private_database(db, 4).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("acct_reconnect");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let mut listener = OutboxNotifications::connect(&pool).await.unwrap();
+
+        let killed = terminate_other_backends(&pool).await.unwrap();
+        assert!(killed >= 1, "the listener's backend is among the others");
+        let signal = tokio::time::timeout(Duration::from_secs(5), listener.next())
+            .await
+            .expect("the loss is reported within 5 s")
+            .unwrap();
+        assert_eq!(signal, OutboxSignal::Reconnected);
+
+        let mut tx = pool.begin().await.unwrap();
+        let published = publish(&mut tx, &SystemEvent::AiConfigUpdated { owner_id: owner })
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let signal = tokio::time::timeout(Duration::from_secs(5), listener.next())
+            .await
+            .expect("the event arrives within 5 s")
+            .unwrap();
+        assert_eq!(signal, OutboxSignal::Event(published.event_id, owner));
         drop(listener);
         crate::db::pool::drop_private_database(pool, db).await;
     }
