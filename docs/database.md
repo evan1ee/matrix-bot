@@ -46,7 +46,7 @@ Change column types one at a time, against the field that reads them; three roun
 
 ## Job queue
 
-Migration `0003_jobs` adds one table, `jobs`, that the job runtime in `backend/src/jobs/` uses ([`architecture.md`](architecture.md#background-jobs)). Only `infrastructure/postgres/repositories/jobs.rs` (and the leader lock and `LISTEN` helpers beside it) touch it.
+Migration `0003_jobs` adds one table, `jobs`, that the job runtime in `backend/src/jobs/` uses ([`architecture.md`](architecture.md#background-jobs)). Only `infrastructure/postgres/repositories/jobs.rs` reads or writes it; the `LISTEN` helper (`job_notifications.rs`) subscribes to its channel, and the scheduler's advisory lock (`advisory.rs`) is a session lock that does not touch the table.
 
 | Column | Meaning |
 |---|---|

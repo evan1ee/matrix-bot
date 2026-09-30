@@ -71,7 +71,8 @@ backend/src/
 |---|---|
 | `domain` | anything except the pure crates listed in the tree above |
 | `application` | axum, matrix-sdk, reqwest, utoipa, `interface` |
-| `infrastructure` | `application`, `interface`, `modules` |
+| `infrastructure` | `application`, `interface` |
+| `jobs` | axum, matrix-sdk, utoipa, reqwest, `interface`; no SQL, tests included |
 
 ## 3. Settled user decisions
 
@@ -126,7 +127,7 @@ backend/src/
 
 All features have moved into the layer-first layout (`domain/`, `application/`, `infrastructure/postgres/repositories/`, `interface/http/`, `interface/chat/`). `modules/` and the interim `db_*!`/`tx_*!` macros are deleted. Zero files run direct SQL from `interface/` or `application/`, `INTERFACE_SQL_ALLOW_LIST` has been deleted, and `backend/tests/architecture.rs` enforces all architectural boundaries.
 
-The last full test run (step 8): **`cargo test -p matrix-bot --all-targets` 846 lib tests passed / 0 failed / 7 ignored, architecture suite 18 passed; inference 71 passed (crate unchanged since step 7)**. Two `interface::http::auth::matrix` tests are `--skip`ped in local runs (§11).
+The last full test run (step 8, `cargo test -p matrix-bot --all-targets --no-fail-fast -- --skip interface::http::auth::matrix`): **lib 846 passed / 0 failed / 7 ignored (5 filtered out), `main.rs` 2 passed, architecture suite 18 passed**. The five `interface::http::auth::matrix` tests were skipped because two of them make a real, untimed GET to `https://mbm.one` (§11). Inference: 71 passed at step 7 (crate unchanged, not re-run).
 
 ## 5. How to work
 
@@ -308,15 +309,18 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 - **R34:** portfolio alert DMs are sent per symbol right after that symbol's marks, and `enqueue_alert_check` skips a tick while an earlier `portfolio.check_alerts` job is still open (`repositories::jobs::has_open`) — restores the old mark-then-DM locality, bounds loss on timeout or shutdown, and stops a backlog of checks building while Matrix is down — cost if wrong: none; the check-then-enqueue is not transactional and the minute-bucket dedupe key backstops an overlap.
 - **R35:** `app::run` spawns the job runtime after the API server has started, once nothing fallible remains before supervision, not before `http::bind` — a runtime detached by a bind error would leave claimed jobs locked until the reaper — cost if wrong: none observable.
 - **R36:** `jobs/` stays SQL-free including its tests (the `pg_terminate_backend` test helper lives in `infrastructure::postgres::advisory` under `#[cfg(test)]`), and `test_all_account_and_owner_id_columns_are_uuid` is scoped to `current_schema()` because leaked scratch schemas made every later full-suite run flaky — cost if wrong: none.
+- **R38 (X11):** the portfolio handler's snapshot test is renamed to what it proves (a refresh succeeds for an owner with no holdings); the snapshot-row write is proven at the application layer by `capturing_records_todays_usd_snapshot` — `get_history` filters today's stored row, so a handler test cannot observe it without repository access (X3) — cost if wrong: deleting the handler's capture call would not fail any test (§11).
+- **R40 (X1–X11):** the pre-flight amendments X1–X11 to the plan were adopted as proposed — each fixes a plan-internal defect without changing intent — cost if wrong: none beyond what each notes.
+- **R41:** commits made by subagents may carry their own model's `Co-Authored-By` trailer — accurate attribution — cost if wrong: cosmetic.
 
 ### accounts/ retirement
 
-Added to the step 8 plan at the user's request, with no separate design: the target layout was already settled by `AGENTS.md` §3.1.
 
 - **R28 (C8):** `domain::accounts::COOKIE_NAME` / `STEP_UP_WINDOW_MINUTES` were corrected to the live `"mb_session"` / 5 before any caller switched to them, and are pinned by `live_security_constants_are_pinned` — the domain copies had drifted and were unused — cost if wrong: every browser logged out, or a 15-minute step-up window.
 - **R29:** audit-row parity — where an `AccountService` method records a security event the replaced facade did not, the handler's duplicate manual record is deleted, or a non-recording service method is used (logout: `end_session`); each flow has a test pinning its `security_events` rows. Services are the only audit writers: `tests/architecture.rs::interface_never_writes_security_events` forbids the write calls in `interface/` and `llm/` production code. Disclosed data-correctness fixes: the doubled `recovery_completed` row (the chat and HTTP handlers each wrote one on top of `redeem_recovery_request`'s) is gone; `recovery_requested` is written once, by the service; `matrix_linked` is written once, by the service, with the raw mxid as detail (production stored only the handler's HTML-escaped copy; the UI and DM render detail as text, so the two differ only for mxids containing `&<>"'`) — cost if wrong: a missing or doubled audit line, or historical and new `matrix_linked` rows escaped differently.
-- **R37:** the backup-code path writes its `recovery_completed` row when the code is consumed (before the session is created), matching the matured-request path — "completed" means the code was consumed — cost if wrong: a completed row with no session if session creation fails afterwards.
 - **R30:** credential parsing is split: `domain::accounts::{Credential, cookie_value, Principal}` (pure), `interface/http/auth/credential.rs::parse_credential` (headers), `AccountService::resolve_credential` (lookups). The MCP `touch_last_used` stays a fire-and-forget spawn (frozen) — cost if wrong: a last-used stamp lost on shutdown.
+- **R37:** the backup-code path writes its `recovery_completed` row when the code is consumed (before the session is created), matching the matured-request path — "completed" means the code was consumed — cost if wrong: a completed row with no session if session creation fails afterwards.
+- **R39:** the `accounts/` retirement was added to the step 8 plan at the user's request with no separate design — the target layout was already settled by `AGENTS.md` §3.1 — cost if wrong: a security-sensitive refactor without a design doc.
 
 ## 10. User gates before merging sub-project 1
 
@@ -336,6 +340,7 @@ These need the human. Prepare them; don't perform them.
 - Historical plan and review docs still mention the removed `/api/v1/health`. This is intentional.
 - The architecture-test scanner cuts each line at `//`, so a URL literal hides the rest of the line. Task 14 makes it strip string literals.
 - **MUST FIX:** two `interface::http::auth::matrix` tests make a real GET to `https://mbm.one` with no timeout. That breaks the AGENTS.md rule against contacting external services from tests; they are `--skip`ped in local runs. Replace the fetch with a local fake and bound it with a timeout.
+- No handler test pins the portfolio snapshot capture call (R38): deleting `capture_current_snapshot_for_owner` from `RefreshPricesHandler` would pass the handler tests; only the application-layer test covers the write.
 - Test-pool schema leaks: scratch schemas from `test_pool()` are not always reaped (separate task `task_e73c72d5` in progress; see also R36).
 - Flaky timing tests: `jobs::tests::the_runtime_runs_jobs_and_stops_on_cancel` (`jobs/mod.rs`) and `an_enqueue_wakes_an_idle_worker_before_the_poll_interval` (`jobs/worker.rs`, 700 ms sleep) depend on wall-clock timing and can fail on a loaded machine.
 - `error.rs` and `events.rs` still sit at the crate root, outside the layer layout (the user flagged this as a file-structure issue); step 9 moves `events`, and `error.rs` needs a home.

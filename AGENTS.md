@@ -90,6 +90,7 @@ db/                          pool, migration runner, test pools and the schema c
 | `domain` | rules and invariants | anything but `std`, `chrono`, `uuid`, `serde`, `thiserror`; no Axum, matrix-sdk, sqlx, reqwest, utoipa, React, MCP |
 | `application` | use cases, transactions | axum, matrix-sdk, reqwest, utoipa, `interface` |
 | `interface`, `llm` | protocol translation, AI orchestration | SQL of any kind outside `#[cfg(test)]` (the architecture test enforces this for `interface/` and `application/`; keep `llm/` to it too) |
+| `jobs` | worker runtime, scheduler | axum, matrix-sdk, utoipa, `interface`; SQL of any kind, tests included (the architecture test enforces it) |
 | `infrastructure` | external capabilities | `application`, `interface` |
 
 - Before adding a module, check whether an existing one already owns the responsibility. Do not create new top-level layers without a clear reason and an ADR.
