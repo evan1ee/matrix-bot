@@ -329,15 +329,16 @@ mod tests {
         );
     }
 
-    /// Given a text PostgreSQL rejects (NUL byte), When create fails, Then
-    /// neither a todo row nor an event exists.
+    /// Given the outbox insert failing, When create runs, Then the todo row
+    /// the same transaction inserted is rolled back and the call errors.
     #[tokio::test]
     async fn a_failed_create_leaves_no_row_and_no_event() {
         let (pool, services, owner) = setup("todo_outbox_atomic").await;
+        repositories::outbox::fail_every_publish(&pool).await;
 
         assert!(services
             .todos
-            .create(&owner, new_todo("a\0b"))
+            .create(&owner, new_todo("buy milk"))
             .await
             .is_err());
 

@@ -134,6 +134,23 @@ async fn buy_failing_mid_transaction_leaves_no_state_and_no_event() {
     assert_eq!(cash.balance_minor, 1_000_000);
 }
 
+/// Given funded cash and a failing outbox insert, When a buy runs, Then the
+/// debit and the holding written before the publish are rolled back.
+#[tokio::test]
+async fn buy_with_a_failing_publish_leaves_no_state() {
+    let (pool, services, owner) = setup("pf_outbox_buy_publish_fail").await;
+    let before = fund(&pool, &services, &owner).await;
+    outbox::fail_every_publish(&pool).await;
+
+    let res = services.portfolio.buy(&owner, trade("AAPL", None)).await;
+
+    assert!(res.is_err());
+    assert_eq!(holding_count(&pool, &owner).await, 0);
+    assert_eq!(types(&pool, &owner).await.len(), before);
+    let cash = services.portfolio.get_cash(&owner, "USD", 2).await.unwrap();
+    assert_eq!(cash.balance_minor, 1_000_000);
+}
+
 /// Given a holding, When it is partly sold and then closed, Then reduce and close events follow.
 #[tokio::test]
 async fn sell_writes_holding_and_cash_events() {

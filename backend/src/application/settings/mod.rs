@@ -495,24 +495,38 @@ mod tests {
         );
     }
 
-    /// Given an owner with no account row, When modify runs, Then the publish
-    /// fails and no settings row is left behind (state and event are atomic).
+    /// Given saved settings and a failing outbox insert, When modify changes
+    /// them, Then the upsert is rolled back: the old value stays and the call
+    /// errors.
     #[tokio::test]
     async fn a_failed_publish_rolls_the_modify_back() {
         let service = service().await;
-        let ghost = AccountId::from_seed("settings_outbox_ghost");
-
-        assert!(service.modify(&ghost, |_| Ok(())).await.is_err());
-
-        assert_eq!(service.get(&ghost).await.unwrap(), UserSettings::default());
-        assert!(
-            crate::infrastructure::postgres::repositories::outbox::event_types_for(
-                &service.pool,
-                &ghost
-            )
+        let owner = AccountId::from_seed("settings_outbox_atomic");
+        ensure_account(&service.pool, &owner).await;
+        service
+            .modify(&owner, |s| {
+                s.briefing_time = "07:30".into();
+                Ok(())
+            })
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap();
+        outbox::fail_every_publish(&service.pool).await;
+
+        let res = service
+            .modify(&owner, |s| {
+                s.briefing_time = "08:45".into();
+                Ok(())
+            })
+            .await;
+
+        assert!(res.is_err());
+        assert_eq!(service.get(&owner).await.unwrap().briefing_time, "07:30");
+        assert_eq!(
+            outbox::event_types_for(&service.pool, &owner)
+                .await
+                .unwrap(),
+            vec!["SettingsUpdated"],
+            "only the first, successful modify published"
         );
     }
 }

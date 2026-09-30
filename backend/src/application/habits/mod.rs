@@ -227,21 +227,22 @@ mod tests {
         );
     }
 
-    /// Given a name PostgreSQL rejects (NUL byte), When create fails, Then no
-    /// habit row and no event exists.
+    /// Given the outbox insert failing, When create runs, Then the habit row is
+    /// rolled back and the call errors.
     #[tokio::test]
     async fn a_failed_create_leaves_no_row_and_no_event() {
         let (pool, services, owner) = setup("habit_outbox_atomic").await;
+        repositories::outbox::fail_every_publish(&pool).await;
 
         assert!(services
             .habits
-            .create_habit(&owner, "a\0b", None, None, None, None)
+            .create_habit(&owner, "abc", None, None, None, None)
             .await
             .is_err());
 
         assert!(services
             .habits
-            .find_by_name(&owner, "a")
+            .find_by_name(&owner, "abc")
             .await
             .unwrap()
             .is_none());

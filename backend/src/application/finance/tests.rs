@@ -1,6 +1,5 @@
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
-use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Direction, NewTransaction};
 use crate::infrastructure::postgres::repositories::{self, finance as repo, outbox};
 use crate::utils::time::now_at_storage_precision;
@@ -145,9 +144,9 @@ async fn delete_category_writes_to_the_outbox() {
     );
 }
 
-/// Given the category delete's multi-statement transaction, When publishing fails
-/// after the writes (owner without an accounts row), Then the category and its
-/// transaction link survive and no event exists.
+/// Given the category delete's multi-statement transaction, When the publish
+/// fails after the writes, Then the category and its transaction link survive
+/// and no event exists.
 #[tokio::test]
 async fn a_failed_publish_rolls_back_the_category_delete() {
     let (pool, services, owner) = setup("fin_outbox_delete_cat_atomic").await;
@@ -163,25 +162,13 @@ async fn a_failed_publish_rolls_back_the_category_delete() {
         .create_transaction(&owner, input)
         .await
         .unwrap();
-    let unseeded = AccountId::from_seed("fin_outbox_unseeded");
+    outbox::fail_every_publish(&pool).await;
 
-    let mut tx = pool.begin().await.unwrap();
-    assert_eq!(
-        repo::delete_category(&mut tx, &owner, cat.id)
-            .await
-            .unwrap(),
-        Some(1)
-    );
-    let published = outbox::publish(
-        &mut tx,
-        &SystemEvent::CategoryDeleted {
-            id: cat.id,
-            owner_id: unseeded,
-        },
-    )
-    .await;
-    assert!(published.is_err(), "the FK violation must fail the publish");
-    drop(tx);
+    assert!(services
+        .finance
+        .delete_category(&owner, cat.id)
+        .await
+        .is_err());
 
     assert_eq!(
         services

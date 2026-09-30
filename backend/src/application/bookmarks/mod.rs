@@ -253,17 +253,18 @@ mod tests {
         );
     }
 
-    /// Given a title PostgreSQL rejects (NUL byte), When create fails, Then no
-    /// row and no event exists.
+    /// Given the outbox insert failing, When create runs, Then the bookmark
+    /// row is rolled back and the call errors.
     #[tokio::test]
     async fn a_failed_create_leaves_no_row_and_no_event() {
         let (service, owner) = setup().await;
+        repositories::outbox::fail_every_publish(&service.pool).await;
 
         assert!(service
             .create(
                 &owner,
                 "https://rust-lang.org",
-                Some("a\0b"),
+                Some("title"),
                 None,
                 ExtractedMetadata::default(),
             )

@@ -420,6 +420,23 @@ pub async fn count_webhook_logs(
     Ok(count.unwrap_or(0))
 }
 
+/// Test-only: makes every later `outbox_events` insert in this test's schema
+/// raise, so a service's real `publish` fails and the atomicity of "state
+/// change + event" is observable. The trigger lives in the schema on the
+/// pool's `search_path`, so it cannot affect another test.
+#[cfg(test)]
+pub async fn fail_every_publish(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION outbox_test_fail() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'outbox publish forced to fail'; END $$; \
+         CREATE TRIGGER outbox_test_fail BEFORE INSERT ON outbox_events \
+         FOR EACH ROW EXECUTE FUNCTION outbox_test_fail()",
+    )
+    .execute(pool)
+    .await
+    .expect("install the failing-publish trigger");
+}
+
 /// Test-only: the delivery states of one account's events, oldest first.
 #[cfg(test)]
 pub async fn delivery_statuses_for(
