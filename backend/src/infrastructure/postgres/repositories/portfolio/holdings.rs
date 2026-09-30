@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 
 use super::cash::list_cash;
 use crate::domain::accounts::AccountId;
@@ -7,7 +7,7 @@ use crate::domain::portfolio::models::{
 };
 
 pub async fn find(
-    pool: &PgPool,
+    ex: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     symbol: &str,
 ) -> Result<Option<Holding>, sqlx::Error> {
@@ -22,7 +22,7 @@ pub async fn find(
         owner_id.as_uuid(),
         symbol
     )
-    .fetch_optional(pool)
+    .fetch_optional(ex)
     .await?;
 
     Ok(row.map(|r| Holding {
@@ -42,7 +42,7 @@ pub async fn find(
 }
 
 pub async fn find_owned(
-    pool: &PgPool,
+    ex: impl sqlx::PgExecutor<'_>,
     id: i64,
     owner_id: &AccountId,
 ) -> Result<Option<Holding>, sqlx::Error> {
@@ -57,7 +57,7 @@ pub async fn find_owned(
         id,
         owner_id.as_uuid()
     )
-    .fetch_optional(pool)
+    .fetch_optional(ex)
     .await?;
 
     Ok(row.map(|r| Holding {
@@ -111,7 +111,7 @@ pub async fn list(pool: &PgPool, owner_id: &AccountId) -> Result<Vec<Holding>, s
 }
 
 pub async fn set_price(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
     price_minor: i64,
@@ -126,17 +126,17 @@ pub async fn set_price(
         owner_id.as_uuid(),
         symbol
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     if result.rows_affected() == 0 {
         return Ok(None);
     }
-    find(pool, owner_id, symbol).await
+    find(&mut *conn, owner_id, symbol).await
 }
 
 pub async fn set_note(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
     note: Option<&str>,
@@ -151,17 +151,17 @@ pub async fn set_note(
         owner_id.as_uuid(),
         symbol
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     if result.rows_affected() == 0 {
         return Ok(None);
     }
-    find(pool, owner_id, symbol).await
+    find(&mut *conn, owner_id, symbol).await
 }
 
 pub async fn update_symbol(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     id: i64,
     new_symbol: &str,
@@ -171,7 +171,7 @@ pub async fn update_symbol(
         Err(e) => return Ok(Err(e)),
     };
 
-    if let Some(existing) = find(pool, owner_id, &normalized).await? {
+    if let Some(existing) = find(&mut *conn, owner_id, &normalized).await? {
         if existing.id != id {
             return Ok(Err(format!("Position in {} already exists", normalized)));
         }
@@ -187,21 +187,21 @@ pub async fn update_symbol(
         id,
         owner_id.as_uuid()
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     if result.rows_affected() == 0 {
         return Ok(Err("Holding not found or access denied".to_string()));
     }
 
-    match find_owned(pool, id, owner_id).await? {
+    match find_owned(&mut *conn, id, owner_id).await? {
         Some(h) => Ok(Ok(h)),
         None => Ok(Err("Updated holding vanished".to_string())),
     }
 }
 
 pub async fn delete(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -213,7 +213,7 @@ pub async fn delete(
         owner_id.as_uuid(),
         symbol
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     Ok(result.rows_affected() > 0)

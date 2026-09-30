@@ -5,7 +5,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 
 pub async fn create(
-    pool: &PgPool,
+    ex: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     symbol: &str,
     target_price_minor: i64,
@@ -31,7 +31,7 @@ pub async fn create(
         currency_exponent,
         condition.as_str()
     )
-    .fetch_one(pool)
+    .fetch_one(ex)
     .await?;
 
     Ok(PriceAlert {
@@ -160,24 +160,28 @@ pub async fn list_active_symbols(pool: &PgPool) -> Result<Vec<String>, sqlx::Err
     Ok(rows.into_iter().map(|r| r.symbol).collect())
 }
 
-pub async fn delete(pool: &PgPool, id: i64, owner_id: &AccountId) -> Result<bool, sqlx::Error> {
+pub async fn delete(
+    ex: impl sqlx::PgExecutor<'_>,
+    id: i64,
+    owner_id: &AccountId,
+) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM portfolio_price_alerts WHERE id = $1 AND owner_id = $2",
         id,
         owner_id.as_uuid()
     )
-    .execute(pool)
+    .execute(ex)
     .await?;
 
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn mark_triggered(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+pub async fn mark_triggered(ex: impl sqlx::PgExecutor<'_>, id: i64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "UPDATE portfolio_price_alerts SET is_triggered = TRUE, triggered_at = CURRENT_TIMESTAMP WHERE id = $1",
         id
     )
-    .execute(pool)
+    .execute(ex)
     .await?;
 
     Ok(result.rows_affected() > 0)

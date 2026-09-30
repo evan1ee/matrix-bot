@@ -3,6 +3,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::models::{Holding, PortfolioCurrencySummary};
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as repo;
 
 impl PortfolioService {
@@ -35,11 +36,12 @@ impl PortfolioService {
         symbol: &str,
         price_minor: i64,
     ) -> Result<Option<Holding>, AppError> {
-        let updated = repo::set_price(&self.pool, owner, symbol, price_minor).await?;
+        let mut tx = self.pool.begin().await?;
+        let updated = repo::set_price(&mut tx, owner, symbol, price_minor).await?;
         if let Some(ref h) = updated {
-            self.events
-                .send(SystemEvent::PortfolioHoldingUpdated(h.clone()));
+            outbox::publish(&mut tx, &SystemEvent::PortfolioHoldingUpdated(h.clone())).await?;
         }
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -49,11 +51,12 @@ impl PortfolioService {
         symbol: &str,
         note: Option<&str>,
     ) -> Result<Option<Holding>, AppError> {
-        let updated = repo::set_note(&self.pool, owner, symbol, note).await?;
+        let mut tx = self.pool.begin().await?;
+        let updated = repo::set_note(&mut tx, owner, symbol, note).await?;
         if let Some(ref h) = updated {
-            self.events
-                .send(SystemEvent::PortfolioHoldingUpdated(h.clone()));
+            outbox::publish(&mut tx, &SystemEvent::PortfolioHoldingUpdated(h.clone())).await?;
         }
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -63,25 +66,32 @@ impl PortfolioService {
         id: i64,
         new_symbol: &str,
     ) -> Result<Result<Holding, String>, AppError> {
-        let res = repo::update_symbol(&self.pool, owner, id, new_symbol).await?;
+        let mut tx = self.pool.begin().await?;
+        let res = repo::update_symbol(&mut tx, owner, id, new_symbol).await?;
         if let Ok(ref h) = res {
-            self.events
-                .send(SystemEvent::PortfolioHoldingUpdated(h.clone()));
+            outbox::publish(&mut tx, &SystemEvent::PortfolioHoldingUpdated(h.clone())).await?;
         }
+        tx.commit().await?;
         Ok(res)
     }
 
     pub async fn delete_holding(&self, owner: &AccountId, symbol: &str) -> Result<bool, AppError> {
-        let existing = self.get_holding_by_symbol(owner, symbol).await?;
-        let deleted = repo::delete(&self.pool, owner, symbol).await?;
+        let mut tx = self.pool.begin().await?;
+        let existing = repo::find(&mut *tx, owner, symbol).await?;
+        let deleted = repo::delete(&mut tx, owner, symbol).await?;
         if deleted {
             if let Some(h) = existing {
-                self.events.send(SystemEvent::PortfolioHoldingDeleted {
-                    id: h.id,
-                    owner_id: *owner,
-                });
+                outbox::publish(
+                    &mut tx,
+                    &SystemEvent::PortfolioHoldingDeleted {
+                        id: h.id,
+                        owner_id: *owner,
+                    },
+                )
+                .await?;
             }
         }
+        tx.commit().await?;
         Ok(deleted)
     }
 

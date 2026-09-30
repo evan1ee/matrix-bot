@@ -5,6 +5,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::portfolio::alerts as repo;
 use crate::infrastructure::web::portfolio_feed::{fetch_latest_price, price_to_minor};
 
@@ -25,8 +26,9 @@ impl PortfolioService {
         currency_exponent: i64,
         condition: AlertCondition,
     ) -> Result<PriceAlert, AppError> {
+        let mut tx = self.pool.begin().await?;
         let alert = repo::create(
-            &self.pool,
+            &mut *tx,
             owner,
             symbol,
             target_price_minor,
@@ -36,8 +38,8 @@ impl PortfolioService {
         )
         .await?;
 
-        self.events
-            .send(SystemEvent::PortfolioAlertCreated(alert.clone()));
+        outbox::publish(&mut tx, &SystemEvent::PortfolioAlertCreated(alert.clone())).await?;
+        tx.commit().await?;
         Ok(alert)
     }
 
@@ -56,13 +58,19 @@ impl PortfolioService {
     }
 
     pub async fn delete_alert(&self, owner: &AccountId, id: i64) -> Result<bool, AppError> {
-        let deleted = repo::delete(&self.pool, id, owner).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = repo::delete(&mut *tx, id, owner).await?;
         if deleted {
-            self.events.send(SystemEvent::PortfolioAlertDeleted {
-                id,
-                owner_id: *owner,
-            });
+            outbox::publish(
+                &mut tx,
+                &SystemEvent::PortfolioAlertDeleted {
+                    id,
+                    owner_id: *owner,
+                },
+            )
+            .await?;
         }
+        tx.commit().await?;
         Ok(deleted)
     }
 
@@ -80,11 +88,16 @@ impl PortfolioService {
     }
 
     pub async fn mark_alert_triggered(&self, alert: &PriceAlert) -> Result<bool, AppError> {
-        let marked = repo::mark_triggered(&self.pool, alert.id).await?;
+        let mut tx = self.pool.begin().await?;
+        let marked = repo::mark_triggered(&mut *tx, alert.id).await?;
         if marked {
-            self.events
-                .send(SystemEvent::PortfolioAlertTriggered(alert.clone()));
+            outbox::publish(
+                &mut tx,
+                &SystemEvent::PortfolioAlertTriggered(alert.clone()),
+            )
+            .await?;
         }
+        tx.commit().await?;
         Ok(marked)
     }
 

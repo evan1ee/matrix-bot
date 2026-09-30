@@ -119,6 +119,7 @@ impl BotModule for PortfolioModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::postgres::repositories::outbox;
     use crate::interface::chat::CommandContext;
 
     fn ctx(body: &str) -> CommandContext {
@@ -322,66 +323,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_buy_broadcasts_holding_and_cash_to_the_owner() {
+    async fn test_buy_writes_holding_and_cash_events_to_the_owners_outbox() {
         let module = PortfolioModule::new();
         let db = db().await;
-        let broadcaster = EventBroadcaster::default();
-        let services = crate::application::AppServices::with_events(&db.pool, &broadcaster);
+        let services = crate::application::AppServices::new(&db.pool);
         fund(&module, &db, &services, "USD").await;
-        let mut rx = broadcaster.subscribe();
+        let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
+        let before = outbox::event_types_for(&db.pool, &owner)
+            .await
+            .unwrap()
+            .len();
 
         module
             .handle_command(
                 &ctx("!portfolio buy AAPL 10 @ 150.00 USD"),
                 &services,
                 &db,
-                Some(&broadcaster),
+                None,
             )
             .await
             .unwrap();
 
-        let mut saw_holding = false;
-        let mut saw_cash = false;
-        while let Ok(event) = rx.try_recv() {
-            assert_eq!(
-                event.owner_id(),
-                &crate::domain::accounts::AccountId::from_seed("@alice:a")
-            );
-            match event {
-                crate::domain::events::SystemEvent::PortfolioHoldingCreated(_) => {
-                    saw_holding = true
-                }
-                crate::domain::events::SystemEvent::PortfolioCashUpdated {
-                    balance_minor, ..
-                } => {
-                    saw_cash = true;
-                    assert_eq!(balance_minor, 10_000_000 - 150_000);
-                }
-                _ => {}
-            }
-        }
-        assert!(saw_holding, "a buy must broadcast the holding");
-        assert!(saw_cash, "a buy must broadcast the debited cash");
+        let types = outbox::event_types_for(&db.pool, &owner).await.unwrap();
+        assert_eq!(
+            types[before..].to_vec(),
+            vec!["PortfolioHoldingCreated", "PortfolioCashUpdated"],
+            "a buy must store the holding and the debited cash"
+        );
     }
 
     #[tokio::test]
-    async fn test_list_does_not_broadcast() {
+    async fn test_list_writes_no_events() {
         let module = PortfolioModule::new();
         let db = db().await;
-        let broadcaster = EventBroadcaster::default();
-        let services = crate::application::AppServices::with_events(&db.pool, &broadcaster);
-        let mut rx = broadcaster.subscribe();
+        let services = crate::application::AppServices::new(&db.pool);
 
         module
-            .handle_command(&ctx("!portfolio list"), &services, &db, Some(&broadcaster))
+            .handle_command(&ctx("!portfolio list"), &services, &db, None)
             .await
             .unwrap();
         module
-            .handle_command(&ctx("!portfolio cash"), &services, &db, Some(&broadcaster))
+            .handle_command(&ctx("!portfolio cash"), &services, &db, None)
             .await
             .unwrap();
 
-        assert!(rx.try_recv().is_err(), "a read must not broadcast");
+        let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
+        assert!(outbox::event_types_for(&db.pool, &owner)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

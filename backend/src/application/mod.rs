@@ -142,7 +142,7 @@ impl AppServices {
         let recurring_bills =
             RecurringBillsService::new(pool.clone(), reminders.clone(), finance.clone());
         let webhooks = WebhookService::new(pool.clone(), events.clone());
-        let portfolio = PortfolioService::new(pool.clone(), events.clone());
+        let portfolio = PortfolioService::new(pool.clone());
         let outbox = OutboxService::new(pool.clone());
         Self {
             accounts,

@@ -7,6 +7,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::portfolio::models::{CashBalance, WithdrawOutcome};
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::portfolio::cash as repo;
 
 pub fn cash_event(owner_id: &AccountId, cash: &CashBalance) -> SystemEvent {
@@ -50,8 +51,9 @@ impl PortfolioService {
         amount_minor: i64,
         executed_at: Option<DateTime<Utc>>,
     ) -> Result<CashBalance, AppError> {
+        let mut tx = self.pool.begin().await?;
         let cash = repo::deposit_cash_at(
-            &self.pool,
+            &mut tx,
             owner,
             currency,
             currency_exponent,
@@ -60,7 +62,8 @@ impl PortfolioService {
         )
         .await?;
 
-        self.events.send(cash_event(owner, &cash));
+        outbox::publish(&mut tx, &cash_event(owner, &cash)).await?;
+        tx.commit().await?;
 
         self.record_portfolio_cash_transaction(
             owner,
@@ -86,12 +89,16 @@ impl PortfolioService {
         amount_minor: i64,
         executed_at: Option<DateTime<Utc>>,
     ) -> Result<WithdrawOutcome, AppError> {
+        let mut tx = self.pool.begin().await?;
         let outcome =
-            repo::withdraw_cash_at(&self.pool, owner, currency, amount_minor, executed_at).await?;
+            repo::withdraw_cash_at(&mut tx, owner, currency, amount_minor, executed_at).await?;
 
         if let WithdrawOutcome::Ok(ref cash) = outcome {
-            self.events.send(cash_event(owner, cash));
+            outbox::publish(&mut tx, &cash_event(owner, cash)).await?;
+        }
+        tx.commit().await?;
 
+        if let WithdrawOutcome::Ok(ref cash) = outcome {
             self.record_portfolio_cash_transaction(
                 owner,
                 "withdraw",

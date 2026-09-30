@@ -5,6 +5,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::portfolio::models::Holding;
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as repo;
 use crate::infrastructure::web::portfolio_feed::{
     fetch_latest_price, price_to_minor, search_symbols, TickerSearchResult,
@@ -32,14 +33,18 @@ impl PortfolioService {
 
         let price_minor = price_to_minor(fetched.price, holding.currency_exponent);
 
-        let updated = repo::set_price(&self.pool, owner, &holding.symbol, price_minor)
+        let mut tx = self.pool.begin().await?;
+        let updated = repo::set_price(&mut tx, owner, &holding.symbol, price_minor)
             .await?
             .ok_or_else(|| {
                 AppError::NotFound(format!("Holding for {} not found", holding.symbol))
             })?;
-
-        self.events
-            .send(SystemEvent::PortfolioHoldingUpdated(updated.clone()));
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::PortfolioHoldingUpdated(updated.clone()),
+        )
+        .await?;
+        tx.commit().await?;
 
         info!(
             "Refreshed price for {} (owner {}): {:.2} {} ({} minor units)",

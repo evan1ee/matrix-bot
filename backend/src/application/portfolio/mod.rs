@@ -11,7 +11,6 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::portfolio::PortfolioError;
-use crate::events::EventBroadcaster;
 
 pub use alerts::TriggeredAlert;
 pub use prices::RefreshSummary;
@@ -19,20 +18,15 @@ pub use prices::RefreshSummary;
 #[derive(Clone)]
 pub struct PortfolioService {
     pub(crate) pool: PgPool,
-    pub(crate) events: EventBroadcaster,
 }
 
 impl PortfolioService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
-    }
-
-    pub fn events(&self) -> &EventBroadcaster {
-        &self.events
     }
 }
 
@@ -41,3 +35,6 @@ impl From<PortfolioError> for AppError {
         AppError::Validation(err.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;

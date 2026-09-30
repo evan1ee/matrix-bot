@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::PgConnection;
 
 use super::audit::record_audit_entry_tx;
 use crate::domain::accounts::AccountId;
@@ -10,7 +10,7 @@ use crate::domain::portfolio::models::{
 
 #[allow(clippy::too_many_arguments)]
 pub async fn buy_at(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
@@ -20,8 +20,6 @@ pub async fn buy_at(
     note: Option<&str>,
     executed_at: Option<DateTime<Utc>>,
 ) -> Result<BuyOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     let existing = sqlx::query!(
         r#"
         SELECT id, owner_id, symbol, quantity_minor, avg_cost_minor, currency,
@@ -34,7 +32,7 @@ pub async fn buy_at(
         owner_id.as_uuid(),
         symbol
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if let Some(ref h) = existing {
@@ -56,7 +54,7 @@ pub async fn buy_at(
         owner_id.as_uuid(),
         currency
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     let (cash_id, balance) = match cash_row {
@@ -85,7 +83,7 @@ pub async fn buy_at(
         needed,
         cash_id
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     let cash_record = sqlx::query!(
@@ -96,7 +94,7 @@ pub async fn buy_at(
         "#,
         cash_id
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
 
     let cash = CashBalance {
@@ -129,7 +127,7 @@ pub async fn buy_at(
                 note,
                 created_at
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?;
 
             Holding {
@@ -170,7 +168,7 @@ pub async fn buy_at(
                 note,
                 existing.id
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?;
 
             Holding {
@@ -191,7 +189,7 @@ pub async fn buy_at(
     };
 
     record_audit_entry_tx(
-        &mut tx,
+        conn,
         owner_id,
         "buy",
         Some(symbol),
@@ -206,8 +204,6 @@ pub async fn buy_at(
     )
     .await?;
 
-    tx.commit().await?;
-
     Ok(BuyOutcome::Ok {
         holding: Box::new(holding),
         cash,
@@ -215,15 +211,13 @@ pub async fn buy_at(
 }
 
 pub async fn sell_at(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
     sell_price_minor: i64,
     executed_at: Option<DateTime<Utc>>,
 ) -> Result<SellOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     let existing = sqlx::query!(
         r#"
         SELECT id, owner_id, symbol, quantity_minor, avg_cost_minor, currency,
@@ -236,7 +230,7 @@ pub async fn sell_at(
         owner_id.as_uuid(),
         symbol
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     let existing = match existing {
@@ -266,7 +260,7 @@ pub async fn sell_at(
         existing.currency_exponent,
         proceeds
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     let cash_record = sqlx::query!(
@@ -278,7 +272,7 @@ pub async fn sell_at(
         owner_id.as_uuid(),
         existing.currency
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
 
     let cash = CashBalance {
@@ -293,7 +287,7 @@ pub async fn sell_at(
     let remaining = existing.quantity_minor - quantity_minor;
     let outcome = if remaining == 0 {
         sqlx::query!("DELETE FROM portfolio_holdings WHERE id = $1", existing.id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
         SellOutcome::Closed {
             realized_pl_minor: realized,
@@ -312,7 +306,7 @@ pub async fn sell_at(
             remaining,
             existing.id
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await?;
 
         let holding = Holding {
@@ -338,7 +332,7 @@ pub async fn sell_at(
     };
 
     record_audit_entry_tx(
-        &mut tx,
+        conn,
         owner_id,
         "sell",
         Some(symbol),
@@ -353,14 +347,12 @@ pub async fn sell_at(
     )
     .await?;
 
-    tx.commit().await?;
-
     Ok(outcome)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub async fn record_holding_action(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     symbol: &str,
     quantity_minor: i64,
@@ -371,8 +363,6 @@ pub async fn record_holding_action(
     action: &str,
     executed_at: Option<DateTime<Utc>>,
 ) -> Result<Result<Holding, String>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     let existing = sqlx::query!(
         r#"
         SELECT id, owner_id, symbol, quantity_minor, avg_cost_minor, currency,
@@ -385,7 +375,7 @@ pub async fn record_holding_action(
         owner_id.as_uuid(),
         symbol
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if let Some(ref h) = existing {
@@ -417,7 +407,7 @@ pub async fn record_holding_action(
                 note,
                 created_at
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?;
 
             Holding {
@@ -458,7 +448,7 @@ pub async fn record_holding_action(
                 note,
                 existing.id
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?;
 
             Holding {
@@ -479,7 +469,7 @@ pub async fn record_holding_action(
     };
 
     record_audit_entry_tx(
-        &mut tx,
+        conn,
         owner_id,
         action,
         Some(symbol),
@@ -493,8 +483,6 @@ pub async fn record_holding_action(
         executed_at,
     )
     .await?;
-
-    tx.commit().await?;
 
     Ok(Ok(holding))
 }

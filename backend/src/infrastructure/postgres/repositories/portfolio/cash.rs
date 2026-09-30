@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::PgConnection;
 
-use super::audit::record_audit_entry;
+use super::audit::record_audit_entry_tx;
 use crate::domain::accounts::AccountId;
 use crate::domain::portfolio::models::{CashBalance, WithdrawOutcome};
 
 pub async fn get_cash_or_zero(
-    pool: &PgPool,
+    ex: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
@@ -20,7 +20,7 @@ pub async fn get_cash_or_zero(
         owner_id.as_uuid(),
         currency
     )
-    .fetch_optional(pool)
+    .fetch_optional(ex)
     .await?;
 
     Ok(found
@@ -43,7 +43,7 @@ pub async fn get_cash_or_zero(
 }
 
 pub async fn list_cash(
-    pool: &PgPool,
+    ex: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
 ) -> Result<Vec<CashBalance>, sqlx::Error> {
     let rows = sqlx::query!(
@@ -55,7 +55,7 @@ pub async fn list_cash(
         "#,
         owner_id.as_uuid()
     )
-    .fetch_all(pool)
+    .fetch_all(ex)
     .await?;
 
     Ok(rows
@@ -72,7 +72,7 @@ pub async fn list_cash(
 }
 
 pub async fn credit_cash(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
@@ -91,23 +91,23 @@ pub async fn credit_cash(
         currency_exponent,
         amount_minor
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    get_cash_or_zero(pool, owner_id, currency, currency_exponent).await
+    get_cash_or_zero(&mut *conn, owner_id, currency, currency_exponent).await
 }
 
 pub async fn deposit_cash_at(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     currency: &str,
     currency_exponent: i64,
     amount_minor: i64,
     executed_at: Option<DateTime<Utc>>,
 ) -> Result<CashBalance, sqlx::Error> {
-    let cash = credit_cash(pool, owner_id, currency, currency_exponent, amount_minor).await?;
-    let _ = record_audit_entry(
-        pool,
+    let cash = credit_cash(conn, owner_id, currency, currency_exponent, amount_minor).await?;
+    let _ = record_audit_entry_tx(
+        conn,
         owner_id,
         "deposit",
         None,
@@ -125,19 +125,17 @@ pub async fn deposit_cash_at(
 }
 
 pub async fn debit_cash(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     currency: &str,
     amount_minor: i64,
 ) -> Result<WithdrawOutcome, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     let existing = sqlx::query!(
         "SELECT id, balance_minor, currency_exponent FROM portfolio_cash_balances WHERE owner_id = $1 AND currency = $2 FOR UPDATE",
         owner_id.as_uuid(),
         currency
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     let row = match existing {
@@ -156,7 +154,7 @@ pub async fn debit_cash(
         amount_minor,
         row.id
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     let updated = sqlx::query!(
@@ -167,10 +165,8 @@ pub async fn debit_cash(
         "#,
         row.id
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-
-    tx.commit().await?;
 
     Ok(WithdrawOutcome::Ok(CashBalance {
         id: updated.id,
@@ -183,16 +179,16 @@ pub async fn debit_cash(
 }
 
 pub async fn withdraw_cash_at(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     owner_id: &AccountId,
     currency: &str,
     amount_minor: i64,
     executed_at: Option<DateTime<Utc>>,
 ) -> Result<WithdrawOutcome, sqlx::Error> {
-    let outcome = debit_cash(pool, owner_id, currency, amount_minor).await?;
+    let outcome = debit_cash(conn, owner_id, currency, amount_minor).await?;
     if let WithdrawOutcome::Ok(ref cash) = outcome {
-        let _ = record_audit_entry(
-            pool,
+        let _ = record_audit_entry_tx(
+            conn,
             owner_id,
             "withdraw",
             None,

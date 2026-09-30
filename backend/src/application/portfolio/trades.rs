@@ -10,6 +10,7 @@ use crate::domain::portfolio::models::{
     normalise_symbol, BuyOutcome, Holding, SellOutcome, QUANTITY_EXPONENT,
 };
 use crate::domain::portfolio::{validate_note, PortfolioError, TradeRequest};
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::portfolio::holdings as holdings_repo;
 use crate::infrastructure::postgres::repositories::portfolio::trades as trades_repo;
 
@@ -49,12 +50,13 @@ impl PortfolioService {
         let note = validate_note(req.note)?;
         let parsed = parse_trade(&req)?;
 
-        let already_held = holdings_repo::find(&self.pool, owner, &parsed.symbol)
+        let mut tx = self.pool.begin().await?;
+        let already_held = holdings_repo::find(&mut *tx, owner, &parsed.symbol)
             .await?
             .is_some();
 
         let outcome = trades_repo::buy_at(
-            &self.pool,
+            &mut tx,
             owner,
             &parsed.symbol,
             parsed.quantity_minor,
@@ -71,13 +73,15 @@ impl PortfolioService {
             ref cash,
         } = outcome
         {
-            self.events.send(if already_held {
+            let holding_event = if already_held {
                 SystemEvent::PortfolioHoldingUpdated(Holding::clone(holding))
             } else {
                 SystemEvent::PortfolioHoldingCreated(Holding::clone(holding))
-            });
-            self.events.send(cash_event(owner, cash));
+            };
+            outbox::publish(&mut tx, &holding_event).await?;
+            outbox::publish(&mut tx, &cash_event(owner, cash)).await?;
         }
+        tx.commit().await?;
 
         Ok(outcome)
     }
@@ -103,8 +107,9 @@ impl PortfolioService {
         let quantity_minor = parse_amount(quantity, QUANTITY_EXPONENT)
             .map_err(|e| PortfolioError::Invalid(e.to_string()))?;
 
+        let mut tx = self.pool.begin().await?;
         let outcome = trades_repo::sell_at(
-            &self.pool,
+            &mut tx,
             owner,
             &symbol,
             quantity_minor,
@@ -115,19 +120,24 @@ impl PortfolioService {
 
         match &outcome {
             SellOutcome::Closed { cash, .. } => {
-                self.events.send(SystemEvent::PortfolioHoldingDeleted {
+                let closed = SystemEvent::PortfolioHoldingDeleted {
                     id: existing.id,
                     owner_id: *owner,
-                });
-                self.events.send(cash_event(owner, cash));
+                };
+                outbox::publish(&mut tx, &closed).await?;
+                outbox::publish(&mut tx, &cash_event(owner, cash)).await?;
             }
             SellOutcome::Reduced { holding, cash, .. } => {
-                self.events
-                    .send(SystemEvent::PortfolioHoldingUpdated(holding.clone()));
-                self.events.send(cash_event(owner, cash));
+                outbox::publish(
+                    &mut tx,
+                    &SystemEvent::PortfolioHoldingUpdated(holding.clone()),
+                )
+                .await?;
+                outbox::publish(&mut tx, &cash_event(owner, cash)).await?;
             }
             SellOutcome::NotFound | SellOutcome::ExceedsHolding { .. } => {}
         }
+        tx.commit().await?;
 
         Ok(outcome)
     }
@@ -140,12 +150,13 @@ impl PortfolioService {
         let note = validate_note(req.note)?;
         let parsed = parse_trade(&req)?;
 
-        let already_held = holdings_repo::find(&self.pool, owner, &parsed.symbol)
+        let mut tx = self.pool.begin().await?;
+        let already_held = holdings_repo::find(&mut *tx, owner, &parsed.symbol)
             .await?
             .is_some();
 
         let res = trades_repo::record_holding_action(
-            &self.pool,
+            &mut tx,
             owner,
             &parsed.symbol,
             parsed.quantity_minor,
@@ -159,12 +170,14 @@ impl PortfolioService {
         .await?;
 
         if let Ok(ref holding) = res {
-            self.events.send(if already_held {
+            let event = if already_held {
                 SystemEvent::PortfolioHoldingUpdated(holding.clone())
             } else {
                 SystemEvent::PortfolioHoldingCreated(holding.clone())
-            });
+            };
+            outbox::publish(&mut tx, &event).await?;
         }
+        tx.commit().await?;
 
         Ok(res)
     }
