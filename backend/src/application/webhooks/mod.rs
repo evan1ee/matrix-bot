@@ -148,6 +148,9 @@ impl WebhookService {
         if !deleted {
             return Err(AppError::NotFound("Webhook not found".to_string()));
         }
+        // Deliveries outlive the webhook row; without this a revoked webhook's
+        // queued alerts would still be posted, possibly days later.
+        outbox::fail_pending_webhook_deliveries(&mut *tx, owner, id, "webhook deleted").await?;
 
         outbox::publish(
             &mut tx,
@@ -303,5 +306,60 @@ mod tests {
                 .await,
             Err(AppError::NotFound(_))
         ));
+    }
+
+    /// Given a webhook with a pending alert, When it is deleted, Then the
+    /// alert is never delivered (the pre-outbox ON DELETE CASCADE semantics),
+    /// and another account's alert carrying the same id string is untouched.
+    #[tokio::test]
+    async fn deleting_a_webhook_fails_its_pending_deliveries_only() {
+        let (services, owner) = services("acct_del_alerts").await;
+        let other = AccountId::from_seed("acct_del_other");
+        crate::db::pool::seed_account(services.outbox.pool(), &other).await;
+        let (webhook, _) = services
+            .webhooks
+            .create(&owner, "ci", "!room:example.org")
+            .await
+            .unwrap();
+        services
+            .webhooks
+            .enqueue_alert(&webhook, "!r:1", None, "h", "h", WebhookSeverity::Info)
+            .await
+            .unwrap();
+        let mut tx = services.outbox.pool().begin().await.unwrap();
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::WebhookTriggered(WebhookAlert {
+                id: webhook.id.clone(),
+                owner_id: other,
+                room_id: "!r:2".into(),
+                severity: "info".into(),
+                title: None,
+                html_body: "h".into(),
+                plain_body: "h".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        services.webhooks.delete(&owner, &webhook.id).await.unwrap();
+
+        let pool = services.outbox.pool();
+        assert_eq!(
+            outbox::delivery_statuses_for(pool, &owner).await.unwrap(),
+            vec!["failed"]
+        );
+        assert_eq!(
+            outbox::delivery_statuses_for(pool, &other).await.unwrap(),
+            vec!["pending"]
+        );
+        let due = services
+            .outbox
+            .claim_due(10, std::time::Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(due.len(), 1, "only the other account's alert is due");
+        assert_eq!(due[0].event.account_id, other);
     }
 }

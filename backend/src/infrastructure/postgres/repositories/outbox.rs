@@ -232,6 +232,34 @@ pub async fn mark_failed(
     Ok(r.rows_affected() == 1)
 }
 
+/// Stops the pending alerts of a deleted webhook (the pre-outbox `ON DELETE
+/// CASCADE` semantics). Scoped to the owner: the webhook id is only a JSON
+/// field of the event, so ownership must come from `account_id`.
+pub async fn fail_pending_webhook_deliveries(
+    ex: impl PgExecutor<'_>,
+    owner: &AccountId,
+    webhook_id: &str,
+    reason: &str,
+) -> sqlx::Result<u64> {
+    let r = sqlx::query!(
+        r#"
+        UPDATE outbox_deliveries d SET status = 'failed', last_error = $3
+        FROM outbox_events e
+        WHERE d.event_id = e.id
+          AND e.account_id = $1
+          AND e.event_type = 'WebhookTriggered'
+          AND e.payload -> 'payload' ->> 'id' = $2
+          AND d.status = 'pending'
+        "#,
+        owner.as_uuid(),
+        webhook_id,
+        truncate_error(reason)
+    )
+    .execute(ex)
+    .await?;
+    Ok(r.rows_affected())
+}
+
 pub async fn purge(ex: impl PgExecutor<'_>, older_than: Duration) -> sqlx::Result<u64> {
     let r = sqlx::query!(
         r#"
@@ -344,6 +372,21 @@ pub async fn count_webhook_logs(
     .fetch_one(ex)
     .await?;
     Ok(count.unwrap_or(0))
+}
+
+/// Test-only: the delivery states of one account's events, oldest first.
+#[cfg(test)]
+pub async fn delivery_statuses_for(
+    ex: impl PgExecutor<'_>,
+    account: &AccountId,
+) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar!(
+        r#"SELECT d.status FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id
+           WHERE e.account_id = $1 ORDER BY d.id"#,
+        account.as_uuid()
+    )
+    .fetch_all(ex)
+    .await
 }
 
 #[cfg(test)]
