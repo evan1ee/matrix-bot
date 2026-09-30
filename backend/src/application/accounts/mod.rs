@@ -144,15 +144,20 @@ impl AccountService {
         Ok(sessions::update_last_verified_at(&self.pool, account_id, verified_at).await?)
     }
 
+    /// Signs out one of `account_id`'s own sessions. Returns whether a live
+    /// session of that account was revoked; a hash belonging to another
+    /// account (or already revoked) changes nothing and records nothing.
     pub async fn revoke_session(
         &self,
         account_id: &AccountId,
         id_hash: &str,
-    ) -> Result<(), AppError> {
-        sessions::revoke(&self.pool, id_hash).await?;
-        self.record_security_event(account_id, SecurityEventKind::SessionsRevoked, None)
-            .await;
-        Ok(())
+    ) -> Result<bool, AppError> {
+        let revoked = sessions::revoke_for_account(&self.pool, account_id, id_hash).await?;
+        if revoked {
+            self.record_security_event(account_id, SecurityEventKind::SessionsRevoked, None)
+                .await;
+        }
+        Ok(revoked)
     }
 
     pub async fn revoke_all_sessions(

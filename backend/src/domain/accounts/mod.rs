@@ -75,7 +75,9 @@ impl AccountId {
         Self(*handle)
     }
 
-    /// Deterministically generates an `AccountId` from a seed name (for tests and predictable IDs).
+    /// Deterministically generates an `AccountId` from a seed name. Test-only:
+    /// production ids come from the database, never from a name.
+    #[cfg(test)]
     pub fn from_seed(seed: &str) -> Self {
         Self(uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_DNS,

@@ -204,10 +204,11 @@ mod tests {
             .unwrap()
             .len();
 
-        service
+        let revoked = service
             .revoke_session(&account, &hash_token(&token))
             .await
             .unwrap();
+        assert!(revoked);
 
         let after = service
             .list_security_events(&account, 50)
@@ -215,5 +216,41 @@ mod tests {
             .unwrap()
             .len();
         assert_eq!(after, before + 1);
+    }
+
+    /// Given a session of account B, When account A "revokes" it by hash,
+    /// Then B's session survives, nothing is reported revoked and neither
+    /// account gets an audit row.
+    #[tokio::test]
+    async fn revoking_another_accounts_session_does_nothing() {
+        let service = service().await;
+        let a = service.create("alice", STATUS_ACTIVE).await.unwrap();
+        let b = service.create("bob", STATUS_ACTIVE).await.unwrap();
+        let b_token = service.create_session(&b, None, None, None).await.unwrap();
+        let a_before = service.list_security_events(&a, 50).await.unwrap().len();
+        let b_before = service.list_security_events(&b, 50).await.unwrap().len();
+
+        let revoked = service
+            .revoke_session(&a, &hash_token(&b_token))
+            .await
+            .unwrap();
+
+        assert!(!revoked, "a foreign session must not count as revoked");
+        assert!(
+            service
+                .resolve_credential(&Credential::Cookie(&b_token))
+                .await
+                .unwrap()
+                .is_some(),
+            "the other account's session must survive"
+        );
+        assert_eq!(
+            service.list_security_events(&a, 50).await.unwrap().len(),
+            a_before
+        );
+        assert_eq!(
+            service.list_security_events(&b, 50).await.unwrap().len(),
+            b_before
+        );
     }
 }

@@ -129,6 +129,26 @@ pub async fn revoke(conn: impl sqlx::PgExecutor<'_>, id_hash: &str) -> Result<()
     Ok(())
 }
 
+/// Revokes one live session, but only if it belongs to `account_id`; the
+/// hash alone never grants authority over another account's session.
+/// Returns whether a row was revoked.
+pub async fn revoke_for_account(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+    id_hash: &str,
+) -> Result<bool, sqlx::Error> {
+    let affected = sqlx::query!(
+        "UPDATE sessions SET revoked_at = $1          WHERE id_hash = $2 AND account_id = $3 AND revoked_at IS NULL",
+        Utc::now(),
+        id_hash,
+        account_id.as_uuid(),
+    )
+    .execute(conn)
+    .await?
+    .rows_affected();
+    Ok(affected > 0)
+}
+
 /// Signs out every session for an account except, optionally, the one
 /// asking. Used by "sign out other devices" and by account recovery.
 pub async fn revoke_all_for_account(
