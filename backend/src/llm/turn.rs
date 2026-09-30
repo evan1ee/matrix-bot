@@ -89,7 +89,7 @@ pub async fn run_turn(
         .settings
         .get_or_default(ctx.owner_id)
         .await
-        .max_history_turns as i64;
+        .max_history_turns;
     let recent_messages = llm_repo::get_recent_messages(ctx.pool, &conversation.id, history_limit)
         .await
         .unwrap_or_default();
