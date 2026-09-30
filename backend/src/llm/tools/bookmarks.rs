@@ -1,17 +1,13 @@
-use crate::db::DbPool;
 use serde_json::json;
 
+use crate::application::{AppError, AppServices};
 use crate::domain::accounts::AccountId;
-use crate::domain::bookmarks::{BookmarkQuery, CreateBookmark};
-use crate::domain::events::SystemEvent;
-use crate::events::EventBroadcaster;
+use crate::domain::bookmarks::BookmarkQuery;
 use crate::infrastructure::inference::llm::ToolDefinition;
-use crate::infrastructure::postgres::repositories::bookmarks as repo;
 use crate::infrastructure::web::fetch_and_extract_metadata;
 
 pub async fn execute_tool(
-    pool: &DbPool,
-    broadcaster: Option<&EventBroadcaster>,
+    services: &AppServices,
     owner_id: &AccountId,
     name: &str,
     args: &serde_json::Value,
@@ -31,17 +27,11 @@ pub async fn execute_tool(
                 });
 
                 let meta = fetch_and_extract_metadata(None, url, custom_title).await;
-                let input = CreateBookmark::new(url, meta, custom_title, tags.as_deref())
-                    .map_err(|e| e.to_string())?;
-
-                let owner = *owner_id;
-                let b = repo::create(pool, &owner, &input)
+                let b = services
+                    .bookmarks
+                    .create(owner_id, url, custom_title, tags.as_deref(), meta)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                if let Some(bc) = broadcaster {
-                    bc.send(SystemEvent::BookmarkCreated(b.clone()));
-                }
 
                 serde_json::to_string(&b).map_err(|e| e.to_string())
             }
@@ -65,8 +55,9 @@ pub async fn execute_tool(
                     ..Default::default()
                 };
 
-                let owner = *owner_id;
-                let list = repo::list(pool, &owner, &query)
+                let list = services
+                    .bookmarks
+                    .list(owner_id, &query)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -81,15 +72,14 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = *owner_id;
-                let updated = repo::toggle_favorite(pool, id, &owner)
+                let updated = services
+                    .bookmarks
+                    .toggle_favorite(owner_id, id)
                     .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Bookmark #{id} not found"))?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::BookmarkUpdated(updated.clone()));
-                }
+                    .map_err(|e| match e {
+                        AppError::NotFound(_) => format!("Bookmark #{id} not found"),
+                        other => other.to_string(),
+                    })?;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
@@ -102,15 +92,14 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = *owner_id;
-                let updated = repo::toggle_archived(pool, id, &owner)
+                let updated = services
+                    .bookmarks
+                    .toggle_archived(owner_id, id)
                     .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("Bookmark #{id} not found"))?;
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::BookmarkUpdated(updated.clone()));
-                }
+                    .map_err(|e| match e {
+                        AppError::NotFound(_) => format!("Bookmark #{id} not found"),
+                        other => other.to_string(),
+                    })?;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }
@@ -123,21 +112,16 @@ pub async fn execute_tool(
                     .get("id")
                     .and_then(|v| v.as_i64())
                     .ok_or("Field 'id' is required")?;
-                let owner = *owner_id;
-                let ok = repo::delete(pool, id, &owner)
+                services
+                    .bookmarks
+                    .delete(owner_id, id)
                     .await
-                    .map_err(|e| e.to_string())?;
-
-                if !ok {
-                    return Err(format!("Bookmark #{} not found or not owned by user", id));
-                }
-
-                if let Some(b) = broadcaster {
-                    b.send(SystemEvent::BookmarkDeleted {
-                        id,
-                        owner_id: *owner_id,
-                    });
-                }
+                    .map_err(|e| match e {
+                        AppError::NotFound(_) => {
+                            format!("Bookmark #{} not found or not owned by user", id)
+                        }
+                        other => other.to_string(),
+                    })?;
 
                 serde_json::to_string(&json!({
                     "id": id,
@@ -246,4 +230,57 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::AppServices;
+    use crate::domain::bookmarks::ExtractedMetadata;
+    use crate::infrastructure::postgres::repositories;
+
+    /// Given a seeded bookmark, When the AI tool deletes it, Then the service
+    /// wrote BookmarkDeleted to the outbox. (save_bookmark fetches the URL's
+    /// metadata over the network, so the tool test seeds through the service.)
+    #[tokio::test]
+    async fn delete_bookmark_goes_through_the_service_and_writes_the_outbox() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("bookmark_tool_outbox");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        let bookmark = services
+            .bookmarks
+            .create(
+                &owner,
+                "https://example.com",
+                None,
+                None,
+                ExtractedMetadata {
+                    title: "Example".to_string(),
+                    domain: "example.com".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let out = execute_tool(
+            &services,
+            &owner,
+            "delete_bookmark",
+            &json!({"id": bookmark.id}),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(out.contains("\"deleted\":true"));
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["BookmarkCreated", "BookmarkDeleted"]
+        );
+    }
 }

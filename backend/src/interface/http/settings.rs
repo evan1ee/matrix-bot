@@ -169,7 +169,6 @@ pub async fn update_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::events::SystemEvent;
     use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
@@ -293,9 +292,9 @@ mod tests {
     /// The live UI reformats every visible timestamp when this arrives, so the
     /// event has to reach the stream — and only its owner's stream.
     #[tokio::test]
-    async fn test_saving_broadcasts_to_the_owner() {
+    async fn test_saving_publishes_to_the_owner() {
         let state = state().await;
-        let mut rx = state.broadcaster.subscribe();
+        let pool = state.db.pool.clone();
 
         let _ = update_settings(
             State(state.clone()),
@@ -305,12 +304,16 @@ mod tests {
         .await
         .unwrap();
 
-        let event = rx.try_recv().unwrap();
+        // The outbox row is keyed by the owner, so it reaches only their stream.
         assert_eq!(
-            event.owner_id(),
-            &crate::domain::accounts::AccountId::from_seed("acct_@evan:mbm.one")
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &pool,
+                &crate::domain::accounts::AccountId::from_seed("acct_@evan:mbm.one")
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
         );
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 
     /// The two identity spaces must not share a settings row, exactly as they do

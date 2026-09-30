@@ -16,7 +16,7 @@ use crate::domain::events::SystemEvent;
 use crate::domain::settings::{
     parse_currency, parse_timezone, RawSettingsUpdate, SettingsError, UserSettings,
 };
-use crate::events::EventBroadcaster;
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::settings as repo;
 
 impl From<SettingsError> for AppError {
@@ -40,12 +40,11 @@ fn validate(settings: &UserSettings) -> Result<(), SettingsError> {
 #[derive(Clone)]
 pub struct SettingsService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl SettingsService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     /// The caller's settings, or the documented defaults if they have never
@@ -84,11 +83,17 @@ impl SettingsService {
         settings: UserSettings,
     ) -> Result<UserSettings, AppError> {
         validate(&settings)?;
-        repo::upsert(&self.pool, owner_id, &settings).await?;
-        self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: *owner_id,
-            settings: settings.clone(),
-        });
+        let mut tx = self.pool.begin().await?;
+        repo::upsert(&mut *tx, owner_id, &settings).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::SettingsUpdated {
+                owner_id: *owner_id,
+                settings: settings.clone(),
+            },
+        )
+        .await?;
+        tx.commit().await?;
         Ok(settings)
     }
 
@@ -118,11 +123,15 @@ impl SettingsService {
         f(&mut settings)?;
         validate(&settings)?;
         repo::upsert(&mut *tx, owner_id, &settings).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::SettingsUpdated {
+                owner_id: *owner_id,
+                settings: settings.clone(),
+            },
+        )
+        .await?;
         tx.commit().await?;
-        self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: *owner_id,
-            settings: settings.clone(),
-        });
         Ok(settings)
     }
 
@@ -170,14 +179,6 @@ impl SettingsService {
     ) -> Result<(), AppError> {
         Ok(repo::update_last_briefing_date(&self.pool, owner_id, date_str).await?)
     }
-
-    /// Subscribes to the events this service publishes. Test-only: a
-    /// production caller that needs the stream subscribes to the same
-    /// `EventBroadcaster` it built this service with instead.
-    #[cfg(test)]
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SystemEvent> {
-        self.events.subscribe()
-    }
 }
 
 #[cfg(test)]
@@ -187,7 +188,7 @@ mod tests {
     async fn service() -> SettingsService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        SettingsService::new(pool, EventBroadcaster::default())
+        SettingsService::new(pool)
     }
 
     #[tokio::test]
@@ -228,9 +229,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_persists_and_broadcasts_to_the_owner() {
+    async fn save_persists_and_writes_the_event_to_the_outbox() {
         let service = service().await;
-        let mut rx = service.events.subscribe();
         let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
 
@@ -250,9 +250,15 @@ mod tests {
         let read_back = service.get(&owner).await.unwrap();
         assert_eq!(read_back, saved);
 
-        let event = rx.try_recv().unwrap();
-        assert_eq!(event.owner_id(), &owner);
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
     }
 
     #[tokio::test]
@@ -441,5 +447,72 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Database(_)));
+    }
+
+    /// Given a caller, When modify commits, Then SettingsUpdated is in the outbox.
+    #[tokio::test]
+    async fn modify_writes_settings_updated_to_the_outbox() {
+        let service = service().await;
+        let owner = AccountId::from_seed("settings_outbox_modify");
+        ensure_account(&service.pool, &owner).await;
+
+        service
+            .modify(&owner, |s| {
+                s.max_history_turns = 7;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
+    }
+
+    /// Given a caller, When save commits, Then SettingsUpdated is in the outbox.
+    #[tokio::test]
+    async fn save_writes_settings_updated_to_the_outbox() {
+        let service = service().await;
+        let owner = AccountId::from_seed("settings_outbox_save");
+        ensure_account(&service.pool, &owner).await;
+
+        service.save(&owner, UserSettings::default()).await.unwrap();
+
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
+    }
+
+    /// Given an owner with no account row, When modify runs, Then the publish
+    /// fails and no settings row is left behind (state and event are atomic).
+    #[tokio::test]
+    async fn a_failed_publish_rolls_the_modify_back() {
+        let service = service().await;
+        let ghost = AccountId::from_seed("settings_outbox_ghost");
+
+        assert!(service.modify(&ghost, |_| Ok(())).await.is_err());
+
+        assert_eq!(service.get(&ghost).await.unwrap(), UserSettings::default());
+        assert!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &ghost
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
     }
 }

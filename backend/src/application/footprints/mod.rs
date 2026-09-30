@@ -14,8 +14,7 @@ use crate::domain::footprints::{
     calculate_stay_duration, CreateFootprint, Footprint, FootprintsSummary, UpdateFootprint,
     MAX_NOTE_LEN, MAX_TITLE_LEN,
 };
-use crate::events::EventBroadcaster;
-use crate::infrastructure::postgres::repositories;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Debug, Clone)]
 pub struct CreateFootprintInput {
@@ -54,17 +53,12 @@ pub struct UpdateFootprintInput {
 #[derive(Clone)]
 pub struct FootprintService {
     pool: PgPool,
-    events: EventBroadcaster,
     settings: SettingsService,
 }
 
 impl FootprintService {
-    pub fn new(pool: PgPool, events: EventBroadcaster, settings: SettingsService) -> Self {
-        Self {
-            pool,
-            events,
-            settings,
-        }
+    pub fn new(pool: PgPool, settings: SettingsService) -> Self {
+        Self { pool, settings }
     }
 
     pub async fn create(
@@ -127,9 +121,10 @@ impl FootprintService {
             note: input.note,
         };
 
-        let created = repositories::footprints::create(&self.pool, owner, &cmd).await?;
-        self.events
-            .send(SystemEvent::FootprintCreated(created.clone()));
+        let mut tx = self.pool.begin().await?;
+        let created = repositories::footprints::create(&mut *tx, owner, &cmd).await?;
+        outbox::publish(&mut tx, &SystemEvent::FootprintCreated(created.clone())).await?;
+        tx.commit().await?;
         Ok(created)
     }
 
@@ -234,23 +229,30 @@ impl FootprintService {
             note,
         };
 
-        let updated = repositories::footprints::update(&self.pool, id, owner, &cmd).await?;
+        let mut tx = self.pool.begin().await?;
+        let updated = repositories::footprints::update(&mut *tx, id, owner, &cmd).await?;
         let updated =
             updated.ok_or_else(|| AppError::NotFound(format!("Footprint #{id} not found")))?;
-        self.events
-            .send(SystemEvent::FootprintUpdated(updated.clone()));
+        outbox::publish(&mut tx, &SystemEvent::FootprintUpdated(updated.clone())).await?;
+        tx.commit().await?;
         Ok(updated)
     }
 
     pub async fn delete(&self, owner: &AccountId, id: i64) -> Result<(), AppError> {
-        let deleted = repositories::footprints::delete(&self.pool, id, owner).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = repositories::footprints::delete(&mut *tx, id, owner).await?;
         if !deleted {
             return Err(AppError::NotFound(format!("Footprint #{id} not found")));
         }
-        self.events.send(SystemEvent::FootprintDeleted {
-            id,
-            owner_id: *owner,
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::FootprintDeleted {
+                id,
+                owner_id: *owner,
+            },
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 

@@ -423,7 +423,6 @@ mod tests {
     use super::*;
     use crate::domain::recurring_bills::NewRecurringBill;
     use crate::domain::settings::UserSettings;
-    use crate::events::EventBroadcaster;
 
     async fn test_db() -> DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -435,7 +434,7 @@ mod tests {
     async fn test_retrospective_keeps_currencies_strictly_apart() {
         let pool = test_db().await;
         let owner = AccountId::from_seed("retro_test");
-        let settings = SettingsService::new(pool.clone(), EventBroadcaster::default());
+        let settings = SettingsService::new(pool.clone());
 
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'User', 'active') ON CONFLICT DO NOTHING",

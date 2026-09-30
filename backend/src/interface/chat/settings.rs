@@ -347,14 +347,26 @@ async fn modify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::events::SystemEvent;
-    use crate::events::EventBroadcaster;
+    use crate::infrastructure::postgres::repositories::outbox;
 
-    async fn service() -> SettingsService {
+    async fn service_and_pool() -> (SettingsService, sqlx::PgPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
-        SettingsService::new(pool, EventBroadcaster::default())
+        (SettingsService::new(pool.clone()), pool)
+    }
+
+    async fn service() -> SettingsService {
+        service_and_pool().await.0
+    }
+
+    async fn settings_events(pool: &sqlx::PgPool) -> usize {
+        outbox::event_types_for(pool, &alice())
+            .await
+            .unwrap()
+            .iter()
+            .filter(|t| *t == "SettingsUpdated")
+            .count()
     }
 
     fn alice() -> AccountId {
@@ -469,27 +481,24 @@ mod tests {
     /// An open web client formats every timestamp against these settings, so a
     /// change made over Matrix has to reach the SSE stream.
     #[tokio::test]
-    async fn test_broadcasts_the_change_to_the_owner() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_publishes_the_change_to_the_owner() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings tz Asia/Tokyo")
             .await
             .unwrap();
 
-        let event = rx.try_recv().expect("a settings change must be broadcast");
         assert_eq!(
-            event.owner_id(),
-            &crate::domain::accounts::AccountId::from_seed("@alice:a")
+            settings_events(&pool).await,
+            1,
+            "a settings change must be published"
         );
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
 
     /// A rejected value changed nothing, so it must not announce a change either.
     #[tokio::test]
-    async fn test_does_not_broadcast_when_nothing_was_saved() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_does_not_publish_when_nothing_was_saved() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings tz Mars/Olympus")
             .await
@@ -498,9 +507,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            rx.try_recv().is_err(),
-            "a read or a rejection must not broadcast"
+        assert_eq!(
+            settings_events(&pool).await,
+            0,
+            "a read or a rejection must not publish"
         );
     }
 
@@ -614,22 +624,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_voice_broadcasts_on_success_and_not_on_rejection() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_voice_publishes_on_success_and_not_on_rejection() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings voice alloy")
             .await
             .unwrap();
-        let event = rx.try_recv().expect("a valid voice change must broadcast");
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+        assert_eq!(
+            settings_events(&pool).await,
+            1,
+            "a valid voice change must publish"
+        );
 
         handle_settings_command(&settings, &alice(), "!settings voice a/b")
             .await
             .unwrap();
-        assert!(
-            rx.try_recv().is_err(),
-            "a rejected voice must not broadcast"
+        assert_eq!(
+            settings_events(&pool).await,
+            1,
+            "a rejected voice must not publish"
         );
     }
 

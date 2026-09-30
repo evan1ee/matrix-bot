@@ -30,7 +30,7 @@ pub async fn get_profile(
 }
 
 pub async fn upsert_profile(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     birth_date: &str,
     expected_lifespan_years: i64,
@@ -49,7 +49,7 @@ pub async fn upsert_profile(
         birth_date,
         expected_lifespan_years
     )
-    .fetch_one(pool)
+    .fetch_one(conn)
     .await?;
 
     Ok(LifeProfile {
@@ -93,7 +93,7 @@ pub async fn get_day_log(
 }
 
 pub async fn upsert_day_log(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     log_date: &str,
     input: DayLogInput<'_>,
@@ -126,7 +126,7 @@ pub async fn upsert_day_log(
         note,
         time_allocation
     )
-    .fetch_one(pool)
+    .fetch_one(conn)
     .await?;
 
     Ok(LifeDayLog {
@@ -144,7 +144,7 @@ pub async fn upsert_day_log(
 }
 
 pub async fn update_time_allocation(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     log_date: &str,
     time_allocation: &str,
@@ -162,7 +162,7 @@ pub async fn update_time_allocation(
         log_date,
         time_allocation
     )
-    .fetch_one(pool)
+    .fetch_one(conn)
     .await?;
 
     Ok(LifeDayLog {
@@ -180,7 +180,7 @@ pub async fn update_time_allocation(
 }
 
 pub async fn delete_day_log(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     log_date: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -192,7 +192,7 @@ pub async fn delete_day_log(
         owner_id.as_uuid(),
         log_date
     )
-    .execute(pool)
+    .execute(conn)
     .await?;
 
     Ok(result.rows_affected() > 0)

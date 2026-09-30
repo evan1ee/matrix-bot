@@ -86,14 +86,12 @@ mod tests {
     use super::*;
     use crate::application::reminders::ReminderService;
     use crate::domain::accounts::AccountId;
-    use crate::events::EventBroadcaster;
 
     async fn setup_services() -> (TodoService, SettingsService) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["@bob:1"]).await;
-        let broadcaster = EventBroadcaster::default();
-        let settings = SettingsService::new(pool.clone(), broadcaster.clone());
+        let settings = SettingsService::new(pool.clone());
         let reminders = ReminderService::new(pool.clone());
         let todos = TodoService::new(pool, reminders);
         (todos, settings)

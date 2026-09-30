@@ -124,9 +124,7 @@ pub async fn execute(
     }
 
     // 8. Try bookmark tools
-    if let Some(res) =
-        bookmarks::execute_tool(pool, broadcaster, owner_id, name, &parsed_args).await
-    {
+    if let Some(res) = bookmarks::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 

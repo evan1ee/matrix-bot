@@ -8,9 +8,9 @@ use crate::domain::life::{
     normalize_mood, validate_date_str, DayActivityResponse, LifeDayLog, LifeError, LifeHorizonDay,
     LifeProfile, LifeProfileStats, LifeYearView,
 };
-use crate::events::EventBroadcaster;
 use crate::infrastructure::postgres::read_models::life as life_read;
 use crate::infrastructure::postgres::repositories::life as life_repo;
+use crate::infrastructure::postgres::repositories::outbox;
 
 impl From<LifeError> for AppError {
     fn from(err: LifeError) -> Self {
@@ -22,20 +22,15 @@ impl From<LifeError> for AppError {
 #[derive(Clone)]
 pub struct LifeService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl LifeService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
-    }
-
-    pub fn events(&self) -> &EventBroadcaster {
-        &self.events
     }
 
     pub async fn get_profile(&self, owner_id: &AccountId) -> Result<Option<LifeProfile>, AppError> {
@@ -53,14 +48,19 @@ impl LifeService {
             return Err(LifeError::InvalidLifespan(expected_lifespan_years).into());
         }
 
+        let mut tx = self.pool.begin().await?;
         let profile =
-            life_repo::upsert_profile(&self.pool, owner_id, birth_date, expected_lifespan_years)
+            life_repo::upsert_profile(&mut *tx, owner_id, birth_date, expected_lifespan_years)
                 .await?;
-
-        self.events.send(SystemEvent::LifeProfileUpdated {
-            owner_id: *owner_id,
-            profile: profile.clone(),
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::LifeProfileUpdated {
+                owner_id: *owner_id,
+                profile: profile.clone(),
+            },
+        )
+        .await?;
+        tx.commit().await?;
         Ok(profile)
     }
 
@@ -83,15 +83,12 @@ impl LifeService {
         let mood = normalize_mood(input.mood)
             .ok_or_else(|| LifeError::InvalidMood(input.mood.to_string()))?;
 
-        let log = life_repo::upsert_day_log(
-            &self.pool,
-            owner_id,
-            log_date,
-            DayLogInput { mood, ..input },
-        )
-        .await?;
-
-        self.events.send(SystemEvent::LifeDayLogged(log.clone()));
+        let mut tx = self.pool.begin().await?;
+        let log =
+            life_repo::upsert_day_log(&mut *tx, owner_id, log_date, DayLogInput { mood, ..input })
+                .await?;
+        outbox::publish(&mut tx, &SystemEvent::LifeDayLogged(log.clone())).await?;
+        tx.commit().await?;
         Ok(log)
     }
 
@@ -103,11 +100,11 @@ impl LifeService {
     ) -> Result<LifeDayLog, AppError> {
         validate_date_str(log_date).map_err(|e| LifeError::InvalidDate(e.to_string()))?;
 
-        let log =
-            life_repo::update_time_allocation(&self.pool, owner_id, log_date, time_allocation)
-                .await?;
-
-        self.events.send(SystemEvent::LifeDayLogged(log.clone()));
+        let mut tx = self.pool.begin().await?;
+        let log = life_repo::update_time_allocation(&mut *tx, owner_id, log_date, time_allocation)
+            .await?;
+        outbox::publish(&mut tx, &SystemEvent::LifeDayLogged(log.clone())).await?;
+        tx.commit().await?;
         Ok(log)
     }
 
@@ -118,13 +115,19 @@ impl LifeService {
     ) -> Result<bool, AppError> {
         validate_date_str(log_date).map_err(|e| LifeError::InvalidDate(e.to_string()))?;
 
-        let deleted = life_repo::delete_day_log(&self.pool, owner_id, log_date).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = life_repo::delete_day_log(&mut *tx, owner_id, log_date).await?;
         if deleted {
-            self.events.send(SystemEvent::LifeDayCleared {
-                owner_id: *owner_id,
-                date: log_date.to_string(),
-            });
+            outbox::publish(
+                &mut tx,
+                &SystemEvent::LifeDayCleared {
+                    owner_id: *owner_id,
+                    date: log_date.to_string(),
+                },
+            )
+            .await?;
         }
+        tx.commit().await?;
         Ok(deleted)
     }
 

@@ -123,8 +123,8 @@ impl AppServices {
     /// same channel HTTP and chat subscribe to.
     pub fn with_events(pool: &PgPool, events: &EventBroadcaster) -> Self {
         let accounts = AccountService::new(pool.clone(), events.clone());
-        let bookmarks = BookmarkService::new(pool.clone(), events.clone());
-        let settings = SettingsService::new(pool.clone(), events.clone());
+        let bookmarks = BookmarkService::new(pool.clone());
+        let settings = SettingsService::new(pool.clone());
         let briefing = BriefingService::new(
             pool.clone(),
             events.clone(),
@@ -132,9 +132,9 @@ impl AppServices {
             accounts.clone(),
         );
         let finance = FinanceService::new(pool.clone());
-        let footprints = FootprintService::new(pool.clone(), events.clone(), settings.clone());
-        let habits = HabitService::new(pool.clone(), events.clone());
-        let life = LifeService::new(pool.clone(), events.clone());
+        let footprints = FootprintService::new(pool.clone(), settings.clone());
+        let habits = HabitService::new(pool.clone());
+        let life = LifeService::new(pool.clone());
         let llm = LlmService::new(pool.clone(), events.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
         let reminders = ReminderService::new(pool.clone());

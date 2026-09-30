@@ -179,11 +179,7 @@ mod tests {
             .create_with_id(account_id, "Tester", crate::domain::accounts::STATUS_ACTIVE)
             .await
             .unwrap();
-        RoomService::new(
-            pool.clone(),
-            SettingsService::new(pool, EventBroadcaster::default()),
-            accounts,
-        )
+        RoomService::new(pool.clone(), SettingsService::new(pool), accounts)
     }
 
     fn room(room_id: &str, name: &str, is_direct: bool) -> JoinedRoom {
@@ -347,7 +343,7 @@ mod tests {
             .resolve_or_provision("@evan:mbm.one")
             .await
             .unwrap();
-        let settings_service = SettingsService::new(pool.clone(), EventBroadcaster::default());
+        let settings_service = SettingsService::new(pool.clone());
         let service = RoomService::new(pool.clone(), settings_service.clone(), accounts);
         let settings = UserSettings {
             dev_room_id: Some("!dev:x".to_string()),

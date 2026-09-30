@@ -250,7 +250,7 @@ pub async fn delete_habit<'e>(
 }
 
 pub async fn toggle_log(
-    pool: &sqlx::PgPool,
+    conn: &mut sqlx::PgConnection,
     habit_id: i64,
     owner: &AccountId,
     log_date: &str,
@@ -266,7 +266,7 @@ pub async fn toggle_log(
         owner.as_uuid(),
         log_date
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
 
     match existing {
@@ -283,7 +283,7 @@ pub async fn toggle_log(
                 owner.as_uuid(),
                 log_date
             )
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
             Ok(new_state)
         }
@@ -298,7 +298,7 @@ pub async fn toggle_log(
                 log_date,
                 note
             )
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
             Ok(true)
         }
@@ -373,14 +373,26 @@ mod tests {
             .unwrap();
         assert_eq!(found_name.id, habit.id);
 
-        let toggled = toggle_log(&pool, habit.id, &owner, "2026-09-01", None)
-            .await
-            .unwrap();
+        let toggled = toggle_log(
+            &mut pool.acquire().await.unwrap(),
+            habit.id,
+            &owner,
+            "2026-09-01",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(toggled);
 
-        let toggled2 = toggle_log(&pool, habit.id, &owner, "2026-09-02", None)
-            .await
-            .unwrap();
+        let toggled2 = toggle_log(
+            &mut pool.acquire().await.unwrap(),
+            habit.id,
+            &owner,
+            "2026-09-02",
+            None,
+        )
+        .await
+        .unwrap();
         assert!(toggled2);
 
         let list_status = find_all_with_status(&pool, &owner, "2026-09-02")
