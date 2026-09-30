@@ -196,7 +196,7 @@ mod tests {
 
     #[tokio::test]
     async fn replacing_the_cache_drops_rooms_no_longer_discovered() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!old:x", "old", false)])
@@ -213,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_replacement_keeps_the_previous_cache_whole() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!kept:x", "kept", false)])
@@ -236,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_adopted_discovery_is_cached() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         let adopted = service
             .adopt_discovery(
@@ -253,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_discovery_that_cannot_be_cached_is_returned_in_picker_order() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service.pool.close().await;
 
@@ -275,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_discovery_leaves_the_cache_alone() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!kept:x", "kept", false)])
@@ -293,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_remembered_room_is_cached() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         assert!(!service.is_cached(&acct, "!r:x").await.unwrap());
 
@@ -307,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn targets_resolve_against_the_cache() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         assert_eq!(service.resolve_target_room(&acct, None).await, WEB_ROOM);
 
@@ -371,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreadable_database_resolves_to_the_web_room() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service.pool.close().await;
 

@@ -300,7 +300,7 @@ mod tests {
         CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@alice:a".to_string(),
-            owner_id: AccountId::new("@alice:a"),
+            owner_id: AccountId::from_seed("@alice:a"),
             sender_name: "alice".to_string(),
             command: cmd.to_string(),
             raw_args: raw_args.to_string(),

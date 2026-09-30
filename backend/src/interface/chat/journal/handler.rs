@@ -307,7 +307,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["user_journal_test"]).await;
         let services = AppServices::new(&pool);
-        let owner = AccountId::new("user_journal_test");
+        let owner = AccountId::from_seed("user_journal_test");
 
         let ctx = CommandContext {
             room_id: "!room:1".to_string(),

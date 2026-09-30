@@ -183,7 +183,7 @@ mod tests {
     #[tokio::test]
     async fn a_caller_with_no_saved_row_gets_the_defaults() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         assert_eq!(service.get(&owner).await.unwrap(), UserSettings::default());
         assert_eq!(
             service.get_or_default(&owner).await,
@@ -194,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn get_or_default_degrades_instead_of_failing_on_a_closed_pool() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         service.pool.close().await;
 
         assert_eq!(
@@ -221,7 +221,7 @@ mod tests {
     async fn save_persists_and_broadcasts_to_the_owner() {
         let service = service().await;
         let mut rx = service.events.subscribe();
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
 
         let saved = service
@@ -248,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn update_validates_before_saving_anything() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
         service
             .save(
@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn update_merges_with_the_current_row() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
         service
             .save(
@@ -324,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn last_briefing_date_round_trips() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
         assert_eq!(service.get_last_briefing_date(&owner).await, None);
 
@@ -342,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_an_invalid_timezone_without_persisting_anything() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         let err = service
             .save(
                 &owner,
@@ -364,7 +364,7 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_an_invalid_currency() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         let err = service
             .save(
                 &owner,
@@ -381,7 +381,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_modifies_do_not_lose_an_update() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         ensure_account(&service.pool, &owner).await;
         service
             .save(
@@ -412,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn update_on_a_closed_pool_fails_and_writes_nothing() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         service.pool.close().await;
 
         let err = service

@@ -174,7 +174,12 @@ mod tests {
         let mut rx = broadcaster.subscribe();
         let services = crate::application::AppServices::with_events(&pool, &broadcaster);
 
-        let reply = handle_cash(&services, &AccountId::new("@alice:a"), "deposit 1000 USD").await;
+        let reply = handle_cash(
+            &services,
+            &AccountId::from_seed("@alice:a"),
+            "deposit 1000 USD",
+        )
+        .await;
         assert!(reply.contains("Deposited"), "unexpected reply: {reply}");
 
         let mut saw_transaction_created = false;

@@ -75,6 +75,20 @@ impl AuthUser {
         }
     }
 
+    /// Test-only: [`Self::for_account`] for a fixture named by a label such as
+    /// `"acct_alice"`. The id is derived with `AccountId::from_seed`, so equal
+    /// labels give equal ids and no label is ever parsed as a real id.
+    #[cfg(test)]
+    pub fn for_seed(seed: &str) -> Self {
+        Self::for_account(AccountId::from_seed(seed))
+    }
+
+    /// Test-only: [`Self::named`] with the account derived from a label.
+    #[cfg(test)]
+    pub fn named_seed(display_name: impl Into<String>, seed: &str) -> Self {
+        Self::named(display_name, AccountId::from_seed(seed))
+    }
+
     /// Test-only: a caller whose display name is set independently of the
     /// account, so tests can prove a shared name never implies shared data.
     #[cfg(test)]

@@ -690,7 +690,7 @@ mod tests {
     #[tokio::test]
     async fn claim_returns_account_and_payload() {
         let pool = pool().await;
-        let owner = AccountId::from("acct_alice");
+        let owner = AccountId::from_seed("acct_alice");
         crate::db::pool::seed_account(&pool, &owner).await;
         let t = chrono::Utc::now();
         enqueue(&pool, &NewJob::reminder_fire(owner, 9, t))

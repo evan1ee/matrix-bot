@@ -62,7 +62,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, names).await;
-        let owners = names.iter().map(|n| AccountId::from(*n)).collect();
+        let owners = names.iter().map(|n| AccountId::from_seed(n)).collect();
         (AppServices::new(&pool), owners)
     }
 

@@ -480,7 +480,7 @@ mod tests {
     async fn test_reaction_actions_on_todo() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let alice = AccountId::from("@alice:x");
+        let alice = AccountId::from_seed("@alice:x");
         ensure_account(&pool, &alice).await;
 
         let (todo, _) = services
@@ -565,7 +565,7 @@ mod tests {
     async fn test_completing_by_reaction_cancels_the_reminder() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let alice = AccountId::from("@alice:x");
+        let alice = AccountId::from_seed("@alice:x");
         ensure_account(&pool, &alice).await;
 
         let due = Utc::now() + Duration::hours(4);
@@ -621,7 +621,7 @@ mod tests {
     async fn test_reaction_actions_on_reminder() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let bob = AccountId::from("@bob:x");
+        let bob = AccountId::from_seed("@bob:x");
         ensure_account(&pool, &bob).await;
 
         let initial_trigger = Utc::now() + Duration::hours(2);

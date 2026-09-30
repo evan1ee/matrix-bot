@@ -3,10 +3,10 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-pub mod merge;
+mod merge;
 mod passkeys;
 mod principal;
-pub use merge::MergeService;
+use merge::MergeService;
 
 use crate::application::AppError;
 use crate::domain::accounts::{

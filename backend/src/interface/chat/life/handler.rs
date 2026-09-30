@@ -211,7 +211,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["user_matrix_1"]).await;
         let services = AppServices::new(&pool);
-        let owner = AccountId::new("user_matrix_1");
+        let owner = AccountId::from_seed("user_matrix_1");
 
         // Help
         let help = handle_life_command(&services, &owner, "life", "help")

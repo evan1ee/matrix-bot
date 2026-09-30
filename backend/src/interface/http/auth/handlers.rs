@@ -289,7 +289,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::named("alice", "acct_alice");
+        let user = AuthUser::named_seed("alice", "acct_alice");
 
         let err = media_proxy(
             State(state.clone()),

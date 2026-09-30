@@ -144,7 +144,7 @@ mod tests {
     ) -> (AppServices, AccountId, Reminder, DateTime<Utc>) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner = AccountId::new(owner);
+        let owner = AccountId::from_seed(owner);
         crate::db::pool::seed_account(&pool, &owner).await;
         let services = match events {
             Some(e) => AppServices::with_events(&pool, e),

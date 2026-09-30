@@ -202,7 +202,7 @@ mod tests {
         let state = state().await;
         let settings = get_settings(
             State(state),
-            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+            AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
         )
         .await
         .unwrap();
@@ -215,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_then_read_back() {
         let state = state().await;
-        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+        let user = AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let saved = update_settings(
             State(state.clone()),
@@ -256,7 +256,7 @@ mod tests {
         for bad in ["GMT+8", "Mars/Olympus", "+08:00", ""] {
             let err = update_settings(
                 State(state.clone()),
-                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+                AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
                 Json(body(bad, "USD")),
             )
             .await
@@ -276,7 +276,7 @@ mod tests {
         for bad in ["EURO", "E1R", ""] {
             let err = update_settings(
                 State(state.clone()),
-                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+                AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
                 Json(body("UTC", bad)),
             )
             .await
@@ -298,7 +298,7 @@ mod tests {
 
         let _ = update_settings(
             State(state.clone()),
-            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+            AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Europe/Berlin", "EUR")),
         )
         .await
@@ -307,7 +307,7 @@ mod tests {
         let event = rx.try_recv().unwrap();
         assert_eq!(
             event.owner_id(),
-            crate::domain::accounts::AccountId::from("acct_@evan:mbm.one").to_string()
+            crate::domain::accounts::AccountId::from_seed("acct_@evan:mbm.one").to_string()
         );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }
@@ -320,13 +320,13 @@ mod tests {
 
         let _ = update_settings(
             State(state.clone()),
-            AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+            AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
             Json(body("Asia/Shanghai", "CNY")),
         )
         .await
         .unwrap();
 
-        let local = get_settings(State(state), AuthUser::named("evan", "acct_evan"))
+        let local = get_settings(State(state), AuthUser::named_seed("evan", "acct_evan"))
             .await
             .unwrap();
         assert_eq!(
@@ -338,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_briefing_settings_and_validation() {
         let state = state().await;
-        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+        let user = AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one");
 
         // Valid update
         let mut req = body("Asia/Shanghai", "CNY");
@@ -367,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_stores_a_valid_tts_voice() {
         let state = state().await;
-        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+        let user = AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let mut zero_req = body("UTC", "USD");
         zero_req.tts_voice = Some("0".to_string());
@@ -405,7 +405,7 @@ mod tests {
             req.tts_voice = Some(bad.to_string());
             let err = update_settings(
                 State(state.clone()),
-                AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one"),
+                AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one"),
                 Json(req),
             )
             .await
@@ -424,7 +424,7 @@ mod tests {
     #[tokio::test]
     async fn test_omitting_tts_voice_clears_a_previously_saved_one() {
         let state = state().await;
-        let user = AuthUser::named("@evan:mbm.one", "acct_@evan:mbm.one");
+        let user = AuthUser::named_seed("@evan:mbm.one", "acct_@evan:mbm.one");
 
         let mut req = body("UTC", "USD");
         req.tts_voice = Some("alloy".to_string());

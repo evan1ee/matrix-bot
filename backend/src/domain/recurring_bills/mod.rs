@@ -222,7 +222,7 @@ mod tests {
         let bill = RecurringBill {
             id: 42,
             room_id: "!room:test".to_string(),
-            owner_id: AccountId::new("acct_alice"),
+            owner_id: AccountId::from_seed("acct_alice"),
             sender_name: "alice".to_string(),
             name: "Netflix".to_string(),
             category: "Entertainment".to_string(),

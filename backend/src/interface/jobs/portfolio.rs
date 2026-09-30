@@ -190,7 +190,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, names).await;
-        let owners = names.iter().map(|n| AccountId::from(*n)).collect();
+        let owners = names.iter().map(|n| AccountId::from_seed(n)).collect();
         (AppServices::new(&pool), owners)
     }
 
@@ -207,7 +207,7 @@ mod tests {
     fn alert(condition: &str, target_minor: i64) -> PriceAlert {
         PriceAlert {
             id: 7,
-            owner_id: AccountId::from("acct_pf_fmt"),
+            owner_id: AccountId::from_seed("acct_pf_fmt"),
             symbol: "AAPL".into(),
             target_price_minor: target_minor,
             currency: "USD".into(),

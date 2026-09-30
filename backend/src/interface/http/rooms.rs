@@ -123,8 +123,11 @@ mod tests {
     async fn state_with_account(account_id: &str) -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::db::pool::seed_account(&pool, &crate::domain::accounts::AccountId::from(account_id))
-            .await;
+        crate::db::pool::seed_account(
+            &pool,
+            &crate::domain::accounts::AccountId::from_seed(account_id),
+        )
+        .await;
         ApiState::new(
             crate::db::Database { pool },
             EventBroadcaster::default(),
@@ -137,7 +140,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_rooms_without_a_bot_client_is_empty() {
         let state = state_with_account("acct_alice").await;
-        let user = AuthUser::for_account("acct_alice");
+        let user = AuthUser::for_seed("acct_alice");
 
         let res = list_rooms(State(state), user).await.unwrap();
         assert!(res.0.is_empty());
@@ -150,7 +153,7 @@ mod tests {
             .services
             .rooms
             .replace_cached(
-                &crate::domain::accounts::AccountId::new("acct_test_rooms"),
+                &crate::domain::accounts::AccountId::from_seed("acct_test_rooms"),
                 &[
                     JoinedRoom::new("!room1:example.com", Some("General"), false),
                     JoinedRoom::new("!room2:example.com", Some("DEV"), false),
@@ -158,7 +161,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let user = AuthUser::for_account("acct_test_rooms");
+        let user = AuthUser::for_seed("acct_test_rooms");
 
         let res = list_rooms(State(state), user).await.unwrap();
 
@@ -170,7 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_rooms_without_a_bot_client_is_a_bad_request() {
         let state = state_with_account("acct_alice").await;
-        let user = AuthUser::for_account("acct_alice");
+        let user = AuthUser::for_seed("acct_alice");
 
         let err = sync_rooms(State(state), user).await.unwrap_err();
 

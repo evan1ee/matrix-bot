@@ -494,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn test_buy_sell_flow() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         fund(&state, &alice, "USD").await;
 
         let buy_req = BuyHoldingRequest {
@@ -535,7 +535,7 @@ mod tests {
     #[tokio::test]
     async fn test_summary_reflects_positions() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         fund(&state, &alice, "USD").await;
 
         let res = summary(State(state.clone()), alice.clone())

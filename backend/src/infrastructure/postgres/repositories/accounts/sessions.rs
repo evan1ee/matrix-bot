@@ -212,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn test_the_raw_token_is_never_stored() {
         let pool = db().await;
-        let token = open(&pool, &AccountId::from("acct_a")).await;
+        let token = open(&pool, &AccountId::from_seed("acct_a")).await;
 
         let stored: Vec<String> = sqlx::query_scalar!("SELECT id_hash FROM sessions")
             .fetch_all(&pool)
@@ -231,8 +231,8 @@ mod tests {
     #[tokio::test]
     async fn test_tokens_are_unique_per_session() {
         let pool = db().await;
-        let a = open(&pool, &AccountId::from("acct_a")).await;
-        let b = open(&pool, &AccountId::from("acct_a")).await;
+        let a = open(&pool, &AccountId::from_seed("acct_a")).await;
+        let b = open(&pool, &AccountId::from_seed("acct_a")).await;
         assert_ne!(a, b);
         assert_eq!(a.len(), 64);
     }
@@ -240,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_returns_the_owning_account() {
         let pool = db().await;
-        let evan = AccountId::from("acct_evan");
+        let evan = AccountId::from_seed("acct_evan");
         let token = open(&pool, &evan).await;
 
         let session = resolve(&pool, &token).await.unwrap().unwrap();
@@ -260,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_revoked_session_stops_working_immediately() {
         let pool = db().await;
-        let token = open(&pool, &AccountId::from("acct_a")).await;
+        let token = open(&pool, &AccountId::from_seed("acct_a")).await;
 
         assert!(resolve(&pool, &token).await.unwrap().is_some());
 
@@ -276,10 +276,10 @@ mod tests {
     #[tokio::test]
     async fn test_revoking_others_spares_the_current_session() {
         let pool = db().await;
-        let a = AccountId::from("acct_a");
+        let a = AccountId::from_seed("acct_a");
         let mine = open(&pool, &a).await;
         let other = open(&pool, &a).await;
-        let stranger = open(&pool, &AccountId::from("acct_b")).await;
+        let stranger = open(&pool, &AccountId::from_seed("acct_b")).await;
 
         let revoked = revoke_all_for_account(&pool, &a, Some(&hash_token(&mine)))
             .await
@@ -297,10 +297,10 @@ mod tests {
     #[tokio::test]
     async fn test_listing_shows_only_this_accounts_live_sessions() {
         let pool = db().await;
-        let a = AccountId::from("acct_a");
+        let a = AccountId::from_seed("acct_a");
         let _mine = open(&pool, &a).await;
         let gone = open(&pool, &a).await;
-        let _theirs = open(&pool, &AccountId::from("acct_b")).await;
+        let _theirs = open(&pool, &AccountId::from_seed("acct_b")).await;
 
         revoke(&pool, &hash_token(&gone)).await.unwrap();
 
@@ -312,7 +312,7 @@ mod tests {
     fn fresh(now: DateTime<Utc>) -> Session {
         Session {
             id_hash: "h".into(),
-            account_id: AccountId::from("acct_a"),
+            account_id: AccountId::from_seed("acct_a"),
             created_at: now,
             last_seen_at: now,
             last_verified_at: now,

@@ -9,7 +9,6 @@
 // suggestion.
 #![recursion_limit = "256"]
 
-pub mod accounts;
 pub mod app;
 pub mod application;
 pub mod config;

@@ -191,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn test_notifying_a_missing_account_is_harmless() {
         let services = services().await;
-        let acct_id = AccountId::from("acct_gone");
+        let acct_id = AccountId::from_seed("acct_gone");
         announce_account(
             None,
             &services.accounts,

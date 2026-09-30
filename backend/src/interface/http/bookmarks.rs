@@ -353,15 +353,14 @@ mod tests {
     use crate::db::Database;
     use crate::events::EventBroadcaster;
 
-    async fn setup_state() -> (ApiState, String) {
+    async fn setup_state() -> (ApiState, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = crate::application::AppServices::new(&pool)
             .accounts
             .resolve_or_provision("@alice:mbm.one")
             .await
-            .unwrap()
-            .to_string();
+            .unwrap();
         let state = ApiState::new(
             Database { pool },
             EventBroadcaster::default(),
@@ -375,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn test_bookmarks_api_crud_flow() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         // 1. Create
         let req = CreateBookmarkInput {

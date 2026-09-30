@@ -357,7 +357,7 @@ mod tests {
     }
 
     fn alice() -> AccountId {
-        AccountId::from("@alice:a")
+        AccountId::from_seed("@alice:a")
     }
 
     async fn run(settings: &SettingsService, body: &str) -> String {
@@ -479,7 +479,7 @@ mod tests {
         let event = rx.try_recv().expect("a settings change must be broadcast");
         assert_eq!(
             event.owner_id(),
-            crate::domain::accounts::AccountId::from("@alice:a").to_string()
+            crate::domain::accounts::AccountId::from_seed("@alice:a").to_string()
         );
         assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
     }

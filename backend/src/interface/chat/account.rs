@@ -394,7 +394,7 @@ mod tests {
     async fn test_sensitive_commands_are_refused_with_a_pointer() {
         let (db, services) = setup().await;
         let module = module();
-        let acct = AccountId::from("acct_evan");
+        let acct = AccountId::from_seed("acct_evan");
 
         for (command, _) in WEB_ONLY {
             let reply = module
@@ -416,7 +416,7 @@ mod tests {
     #[tokio::test]
     async fn test_unrelated_commands_are_not_claimed() {
         let (db, services) = setup().await;
-        let acct = AccountId::from("acct_evan");
+        let acct = AccountId::from_seed("acct_evan");
         assert!(module()
             .handle_command(&ctx("todo", &acct, true), &services, &db, None,)
             .await

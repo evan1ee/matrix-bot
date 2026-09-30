@@ -458,7 +458,7 @@ mod tests {
     #[tokio::test]
     async fn test_amount_string_becomes_exact_minor_units() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let created = create_transaction(
             State(state.clone()),
@@ -478,7 +478,7 @@ mod tests {
         let state = test_state().await;
         let created = create_transaction(
             State(state.clone()),
-            AuthUser::named("alice", "acct_alice"),
+            AuthUser::named_seed("alice", "acct_alice"),
             Json(entry("500", "JPY", None)),
         )
         .await
@@ -491,7 +491,7 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_bad_amounts_and_currencies() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         for (amount, currency) in [
             ("15.501", "EUR"),
@@ -517,8 +517,8 @@ mod tests {
     #[tokio::test]
     async fn test_ledger_is_private_to_its_owner() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         let created = create_transaction(
             State(state.clone()),
@@ -562,7 +562,7 @@ mod tests {
         let state = test_state().await;
         let bobs_category = create_category(
             State(state.clone()),
-            AuthUser::named("bob", "acct_bob"),
+            AuthUser::named_seed("bob", "acct_bob"),
             Json(CategoryRequest {
                 name: "food".to_string(),
             }),
@@ -572,7 +572,7 @@ mod tests {
 
         let err = create_transaction(
             State(state.clone()),
-            AuthUser::named("alice", "acct_alice"),
+            AuthUser::named_seed("alice", "acct_alice"),
             Json(entry("10.00", "EUR", Some(bobs_category.id))),
         )
         .await
@@ -584,7 +584,7 @@ mod tests {
     #[tokio::test]
     async fn test_deleting_a_category_keeps_the_entries() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let category = create_category(
             State(state.clone()),
@@ -631,7 +631,7 @@ mod tests {
 
         let err = summary(
             State(state),
-            AuthUser::named("alice", "acct_alice"),
+            AuthUser::named_seed("alice", "acct_alice"),
             Query(SummaryQuery {
                 from: now,
                 to: now - chrono::Duration::days(1),

@@ -355,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn test_api_handlers_integration() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         // Create sample transaction
         state

@@ -255,7 +255,7 @@ mod tests {
     /// authenticator, so the shape of the blob is irrelevant to the ownership
     /// and lockout rules under test here.
     async fn add_raw(pool: &DbPool, id: &str, account_id: &str) {
-        let acct = AccountId::from(account_id);
+        let acct = AccountId::from_seed(account_id);
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
             acct.as_uuid()
@@ -288,20 +288,20 @@ mod tests {
         add_raw(&pool, "cred_a2", "acct_a").await;
         add_raw(&pool, "cred_b1", "acct_b").await;
 
-        let mine = list_for_account(&pool, &AccountId::from("acct_a"))
+        let mine = list_for_account(&pool, &AccountId::from_seed("acct_a"))
             .await
             .unwrap();
         assert_eq!(mine.len(), 2);
         assert!(mine
             .iter()
-            .all(|c| c.account_id == AccountId::from("acct_a")));
+            .all(|c| c.account_id == AccountId::from_seed("acct_a")));
     }
 
     /// Removing the only passkey would lock the account out of itself.
     #[tokio::test]
     async fn test_the_last_passkey_cannot_be_deleted() {
         let pool = db().await;
-        let acct = AccountId::from("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         add_raw(&pool, "cred_only", "acct_a").await;
 
         let outcome = delete(&pool, &acct, "cred_only").await.unwrap();
@@ -312,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_passkey_can_be_deleted_once_a_second_exists() {
         let pool = db().await;
-        let acct = AccountId::from("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         add_raw(&pool, "cred_1", "acct_a").await;
         add_raw(&pool, "cred_2", "acct_a").await;
 
@@ -330,7 +330,10 @@ mod tests {
         add_raw(&pool, "cred_a2", "acct_a").await;
         add_raw(&pool, "cred_b1", "acct_b").await;
         add_raw(&pool, "cred_b2", "acct_b").await;
-        let (a, b) = (AccountId::from("acct_a"), AccountId::from("acct_b"));
+        let (a, b) = (
+            AccountId::from_seed("acct_a"),
+            AccountId::from_seed("acct_b"),
+        );
 
         let outcome = delete(&pool, &b, "cred_a1").await.unwrap();
         assert_eq!(outcome, DeleteOutcome::NotFound);
@@ -350,7 +353,7 @@ mod tests {
         let pool = db().await;
         add_raw(&pool, "cred_broken", "acct_a").await;
 
-        let listed = list_for_account(&pool, &AccountId::from("acct_a"))
+        let listed = list_for_account(&pool, &AccountId::from_seed("acct_a"))
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
@@ -360,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn test_enrollment_token_issue_and_consumption() {
         let pool = db().await;
-        let acct = AccountId::from("acct_matrix");
+        let acct = AccountId::from_seed("acct_matrix");
         let token = issue_enrollment_token(&pool, &acct, 10).await.unwrap();
         assert!(!token.is_empty());
 
@@ -383,7 +386,7 @@ mod tests {
         add_raw(&pool, "cred_only", "acct_primary").await;
 
         // Insert matrix link
-        let acct = AccountId::from("acct_primary");
+        let acct = AccountId::from_seed("acct_primary");
         sqlx::query!(
             "INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', $1)",
             acct.as_uuid()

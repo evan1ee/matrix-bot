@@ -125,7 +125,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
+            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
             sender_name: "alice".to_string(),
             command: body
                 .split_whitespace()
@@ -295,7 +295,7 @@ mod tests {
         services
             .settings
             .save(
-                &crate::domain::accounts::AccountId::new("@alice:a"),
+                &crate::domain::accounts::AccountId::from_seed("@alice:a"),
                 UserSettings {
                     timezone: "UTC".to_string(),
                     currency: "CNY".to_string(),
@@ -345,7 +345,7 @@ mod tests {
         while let Ok(event) = rx.try_recv() {
             assert_eq!(
                 event.owner_id(),
-                crate::domain::accounts::AccountId::from("@alice:a").to_string()
+                crate::domain::accounts::AccountId::from_seed("@alice:a").to_string()
             );
             match event {
                 crate::events::SystemEvent::PortfolioHoldingCreated(_) => saw_holding = true,
@@ -484,7 +484,7 @@ mod tests {
         // Verify deposit and withdraw transactions were posted to the finance ledger
         let txs = crate::infrastructure::postgres::repositories::finance::list(
             &db.pool,
-            &crate::domain::accounts::AccountId::new("@alice:a"),
+            &crate::domain::accounts::AccountId::from_seed("@alice:a"),
             &crate::domain::finance::ListTransactionsFilter {
                 limit: Some(10),
                 ..Default::default()

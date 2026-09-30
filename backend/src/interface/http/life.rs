@@ -525,7 +525,7 @@ mod tests {
     async fn test_profile_and_day_api_flow() {
         let (state, _) = create_test_state().await;
         let user = AuthUser {
-            account_id: crate::domain::accounts::AccountId::new("user_api_1"),
+            account_id: crate::domain::accounts::AccountId::from_seed("user_api_1"),
             display_name: "User Api 1".to_string(),
             session_id_hash: "hash_1".to_string(),
             last_verified_at: chrono::Utc::now(),

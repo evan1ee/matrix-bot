@@ -277,7 +277,7 @@ mod tests {
         TodoItem {
             id: 1,
             room_id: "!room:1".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new(owner),
+            owner_id: crate::domain::accounts::AccountId::from_seed(owner),
             sender_name: "shared-display-name".to_string(),
             text: "task".to_string(),
             priority: crate::domain::todos::TodoPriority::Medium,
@@ -296,11 +296,11 @@ mod tests {
 
         assert_eq!(
             mine.owner_id(),
-            crate::domain::accounts::AccountId::from("@web-evan:api").to_string()
+            crate::domain::accounts::AccountId::from_seed("@web-evan:api").to_string()
         );
         assert_eq!(
             theirs.owner_id(),
-            crate::domain::accounts::AccountId::from("@evan:mbm.one").to_string()
+            crate::domain::accounts::AccountId::from_seed("@evan:mbm.one").to_string()
         );
         assert_ne!(mine.owner_id(), theirs.owner_id());
 

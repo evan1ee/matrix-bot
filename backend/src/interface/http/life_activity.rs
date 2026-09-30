@@ -148,7 +148,7 @@ mod tests {
 
     fn test_user(account_id: &str) -> AuthUser {
         AuthUser {
-            account_id: crate::domain::accounts::AccountId::new(account_id),
+            account_id: crate::domain::accounts::AccountId::from_seed(account_id),
             display_name: account_id.to_string(),
             session_id_hash: "sess_hash".to_string(),
             last_verified_at: crate::utils::time::now_at_storage_precision(),

@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn cached_rooms_come_back_in_picker_order_with_their_cache_time() {
-        let acct_a = AccountId::new("acct_a");
+        let acct_a = AccountId::from_seed("acct_a");
         let pool = pool_with_accounts(&[&acct_a]).await;
         for r in [
             room("!g:x", "general", false),
@@ -140,8 +140,8 @@ mod tests {
 
     #[tokio::test]
     async fn an_account_sees_only_its_own_rooms() {
-        let acct_a = AccountId::new("acct_a");
-        let acct_b = AccountId::new("acct_b");
+        let acct_a = AccountId::from_seed("acct_a");
+        let acct_b = AccountId::from_seed("acct_b");
         let pool = pool_with_accounts(&[&acct_a, &acct_b]).await;
         insert(&pool, &acct_a, &room("!a:x", "a", false))
             .await
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn inserting_a_cached_room_again_keeps_the_first_entry() {
-        let acct_a = AccountId::new("acct_a");
+        let acct_a = AccountId::from_seed("acct_a");
         let pool = pool_with_accounts(&[&acct_a]).await;
         insert(&pool, &acct_a, &room("!a:x", "first", false))
             .await
@@ -172,7 +172,7 @@ mod tests {
     // or be blank; reading them goes through `JoinedRoom::new` like any other.
     #[tokio::test]
     async fn a_stored_name_is_normalised_on_read() {
-        let acct_a = AccountId::new("acct_a");
+        let acct_a = AccountId::from_seed("acct_a");
         let pool = pool_with_accounts(&[&acct_a]).await;
         sqlx::query!(
             "INSERT INTO account_rooms (account_id, room_id, name) \
@@ -191,8 +191,8 @@ mod tests {
 
     #[tokio::test]
     async fn delete_empties_only_that_accounts_cache() {
-        let acct_a = AccountId::new("acct_a");
-        let acct_b = AccountId::new("acct_b");
+        let acct_a = AccountId::from_seed("acct_a");
+        let acct_b = AccountId::from_seed("acct_b");
         let pool = pool_with_accounts(&[&acct_a, &acct_b]).await;
         insert(&pool, &acct_a, &room("!a:x", "a", false))
             .await

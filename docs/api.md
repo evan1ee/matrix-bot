@@ -39,7 +39,7 @@ The broadcast channel is process-wide. `sse::owned_events` narrows it to one own
 
 Passkeys are the only way to establish a session in the browser. There is still no password and no JWT; `bcrypt` survives only to hash recovery codes. A native client (Element X iOS) exchanges a Matrix session for a backend session token and carries it as `Authorization: Bearer` instead of a cookie, and an MCP client authenticates the same way with an `mb_mcp_`-prefixed personal access token — see `README.md` for both. An MCP token never satisfies the step-up gate below: it is a machine credential, so its creation time is never read as a passkey assertion.
 
-`interface/http/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the credential carries the account handle, so there is no username field anywhere and no user enumeration to defend against. `domain::accounts::account_id_to_handle` maps an account id to the WebAuthn user handle and back: the account id *is* a UUID (rendered `acct_<32 hex>`), so the handle needs no column of its own.
+`interface/http/auth/webauthn.rs` runs two ceremonies. Sign-in is **discoverable**: the credential carries the account handle, so there is no username field anywhere and no user enumeration to defend against. `AccountId::to_handle` and `AccountId::from_handle` map an account id to the WebAuthn user handle and back: the account id *is* a UUID (rendered `acct_<32 hex>`), so the handle needs no column of its own.
 
 `register/start` mints the account id but writes **no row**; the id has to travel inside the challenge, and an abandoned ceremony must leave nothing behind. Hence `create_with_id` alongside `create`.
 

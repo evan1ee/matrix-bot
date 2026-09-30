@@ -282,8 +282,8 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let from = AccountId::new("acct_from");
-        let into = AccountId::new("acct_into");
+        let from = AccountId::from_seed("acct_from");
+        let into = AccountId::from_seed("acct_into");
 
         for acc in [&from, &into] {
             sqlx::query!(

@@ -393,7 +393,7 @@ mod tests {
         Reminder {
             id: 7,
             room_id: "!room:test".to_string(),
-            owner_id: AccountId::new("acct_alice"),
+            owner_id: AccountId::from_seed("acct_alice"),
             sender_name: "alice".to_string(),
             message: "stretch".to_string(),
             trigger_at,

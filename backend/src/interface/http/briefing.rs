@@ -153,12 +153,12 @@ mod tests {
     #[tokio::test]
     async fn test_trigger_briefing_returns_payload() {
         let state = state().await;
-        let user = AuthUser::named("@alice:example.org", "acct_alice");
+        let user = AuthUser::named_seed("@alice:example.org", "acct_alice");
 
         let res = trigger_briefing(State(state), user).await.unwrap();
         assert_eq!(
             res.owner_id,
-            crate::domain::accounts::AccountId::from("acct_alice").to_string()
+            crate::domain::accounts::AccountId::from_seed("acct_alice").to_string()
         );
         assert!(res.html_content.contains("早安简报"));
         assert!(res.plain_text.contains("早安简报"));

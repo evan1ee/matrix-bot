@@ -208,7 +208,7 @@ impl Database {
 /// Inserts the `accounts` row a test fixture's owner id refers to.
 ///
 /// Every `owner_id` / `account_id` column is a foreign key to `accounts(id)`,
-/// so a fixture that writes as `AccountId::from("alice")` must create that
+/// so a fixture that writes as `AccountId::from_seed("alice")` must create that
 /// account first. Idempotent, so a test can call it for each id it uses.
 #[cfg(test)]
 pub async fn seed_account(pool: &crate::db::DbPool, id: &crate::domain::accounts::AccountId) {
@@ -227,7 +227,7 @@ pub async fn seed_account(pool: &crate::db::DbPool, id: &crate::domain::accounts
 #[cfg(test)]
 pub async fn seed_accounts(pool: &crate::db::DbPool, names: &[&str]) {
     for name in names {
-        seed_account(pool, &crate::domain::accounts::AccountId::from(*name)).await;
+        seed_account(pool, &crate::domain::accounts::AccountId::from_seed(name)).await;
     }
 }
 

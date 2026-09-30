@@ -470,7 +470,7 @@ mod tests {
     async fn test_a_matrix_add_announces_itself() {
         let (todos, broadcaster) = setup_service().await;
         let mut rx = broadcaster.subscribe();
-        let owner = AccountId::new("@alice:1");
+        let owner = AccountId::from_seed("@alice:1");
 
         let reply = handle_add(&todos, "!room:1", &owner, "alice", "add Buy milk", None)
             .await

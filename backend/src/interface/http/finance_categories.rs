@@ -144,7 +144,7 @@ mod tests {
     #[tokio::test]
     async fn test_duplicate_category_is_a_conflict_not_a_second_row() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let _ = create_category(
             State(state.clone()),

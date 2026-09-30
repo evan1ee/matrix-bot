@@ -395,7 +395,7 @@ mod tests {
     #[tokio::test]
     async fn test_todos_repository_crud() {
         let pool = setup_test_db().await;
-        let owner = AccountId::new("acct_bob");
+        let owner = AccountId::from_seed("acct_bob");
 
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'bob', 'active')",

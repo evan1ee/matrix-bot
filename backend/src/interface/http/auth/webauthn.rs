@@ -114,9 +114,7 @@ pub async fn register_start(
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id: AccountId = crate::utils::random::new_account_id()
-        .parse()
-        .map_err(|_| ApiError::internal("minted an account id with no handle"))?;
+    let account_id = AccountId::generate();
     let handle = account_id.to_handle();
 
     let (options, reg_state) = state

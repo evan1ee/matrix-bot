@@ -52,7 +52,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         run_migrations_unlocked(&pool).await;
 
-        let owner = crate::domain::accounts::AccountId::from("acct_a");
+        let owner = crate::domain::accounts::AccountId::from_seed("acct_a");
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'a', 'active') ON CONFLICT DO NOTHING",
             owner.as_uuid()
@@ -86,8 +86,8 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         run_migrations_unlocked(&pool).await;
 
-        let owner_a = crate::domain::accounts::AccountId::from("acct_a");
-        let owner_b = crate::domain::accounts::AccountId::from("acct_b");
+        let owner_a = crate::domain::accounts::AccountId::from_seed("acct_a");
+        let owner_b = crate::domain::accounts::AccountId::from_seed("acct_b");
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'a', 'active'), ($2, 'b', 'active') ON CONFLICT DO NOTHING",
             owner_a.as_uuid(),
@@ -136,8 +136,8 @@ mod tests {
         let pool = crate::db::pool::connect_pg_schema("trigger_check").await;
         run_migrations_unlocked(&pool).await;
 
-        let owner_a = crate::domain::accounts::AccountId::from("acct_a");
-        let owner_b = crate::domain::accounts::AccountId::from("acct_b");
+        let owner_a = crate::domain::accounts::AccountId::from_seed("acct_a");
+        let owner_b = crate::domain::accounts::AccountId::from_seed("acct_b");
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'a', 'active'), ($2, 'b', 'active') ON CONFLICT DO NOTHING",
             owner_a.as_uuid(),

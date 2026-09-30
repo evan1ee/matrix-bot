@@ -399,7 +399,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_all_prices_empty() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let Json(summary) = refresh_all_prices(State(state), alice).await.unwrap();
         assert!(summary.updated.is_empty());
@@ -409,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_unknown_holding_returns_404() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let err = refresh_single_holding_price(State(state), alice, Path(999))
             .await
@@ -420,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_holding_symbol_api() {
         let state = test_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let Json(recorded) = record_holding_position(
             State(state.clone()),

@@ -432,7 +432,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let bill = create_bill(
             State(state.clone()),
@@ -527,7 +527,7 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         for bad in [0, -5, MAX_LEAD_MINUTES + 1] {
             let err = create_bill(
@@ -577,8 +577,8 @@ mod tests {
             reqwest::Client::new(),
         );
 
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         // Create
         let req = CreateBillPayload {

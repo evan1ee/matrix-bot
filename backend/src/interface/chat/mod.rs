@@ -427,7 +427,7 @@ mod tests {
             let ctx = CommandContext {
                 room_id: "!room:a".to_string(),
                 sender_mxid: "@tester:x".to_string(),
-                owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
+                owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
                 sender_name: "alice".to_string(),
                 command: body
                     .split_whitespace()
@@ -568,7 +568,7 @@ mod tests {
         CommandContext {
             room_id: "!room:a".to_string(),
             sender_mxid: "@tester:x".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
+            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
             sender_name: "alice".to_string(),
             command: command.to_string(),
             raw_args: String::new(),

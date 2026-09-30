@@ -537,10 +537,29 @@ fn interface_never_writes_security_events() {
     writes.extend(production_violations("llm", &WRITE_NEEDLES));
     assert!(
         writes.is_empty(),
-        "interface/llm production code must not write security events;          AccountService records them:
-{}",
-        writes.join("
-")
+        "interface/llm production code must not write security events; \
+         AccountService records them:\n{}",
+        writes.join("\n")
+    );
+
+    // `MergeService::merge` moves the rows but writes no audit row; only
+    // `AccountService::merge` does. The type stays private to
+    // `application::accounts`, and this needle catches a re-export that would
+    // let an adapter skip the row.
+    let mut bypass = production_violations("interface", &["MergeService"]);
+    bypass.extend(production_violations("llm", &["MergeService"]));
+    assert!(
+        bypass.is_empty(),
+        "adapters must merge through AccountService, which records the audit row:\n{}",
+        bypass.join("\n")
+    );
+
+    // llm/ names no event kind at all; interface/ only to word a DM.
+    let llm_kinds = production_violations("llm", &["SecurityEventKind::"]);
+    assert!(
+        llm_kinds.is_empty(),
+        "llm/ must not name security-event kinds:\n{}",
+        llm_kinds.join("\n")
     );
 
     /// Files that name a kind only to word an announcement DM.
@@ -557,13 +576,65 @@ fn interface_never_writes_security_events() {
         .collect();
     assert!(
         stray_kinds.is_empty(),
-        "security-event kinds may be named only to word a DM ({DM_WORDING:?}):
-{}",
-        stray_kinds.join(
-            "
-"
-        )
+        "security-event kinds may be named only to word a DM ({DM_WORDING:?}):\n{}",
+        stray_kinds.join("\n")
     );
 }
 
-const WRITE_NEEDLES: [&str; 2] = ["record_security_event", "security_events::record"];
+const WRITE_NEEDLES: [&str; 3] = [
+    "record_security_event",
+    "security_events::record",
+    "repositories::accounts::security_events",
+];
+
+/// R15: account ids reach the program only as `AccountId` values. The legacy
+/// `accounts/` facade carried them as strings and a `From<&str>` fallback mapped
+/// garbage to the nil UUID; both are gone and must stay gone.
+#[test]
+fn the_legacy_accounts_module_is_gone() {
+    // The directory check also covers lib.rs: `pub mod accounts;` without the
+    // directory would not compile.
+    assert!(
+        !src("accounts").exists(),
+        "backend/src/accounts/ was retired; use domain/application/infrastructure accounts"
+    );
+    // Matches `crate::accounts::...` and `use crate::accounts;`, never
+    // `crate::domain::accounts` / `crate::application::accounts`.
+    let v = violations(
+        "",
+        &[
+            "crate::accounts::",
+            "crate::accounts;",
+            "crate::accounts,",
+            "crate::accounts}",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "nothing may reference the retired crate::accounts:\n{}",
+        v.join("\n")
+    );
+    let lib = fs::read_to_string(src("lib.rs")).expect("lib.rs is readable");
+    assert!(
+        !lib.lines()
+            .any(|l| l.trim_start().starts_with("pub mod accounts")),
+        "lib.rs must not declare `pub mod accounts`"
+    );
+}
+
+#[test]
+fn account_ids_are_never_built_from_strings_implicitly() {
+    let v = violations(
+        "domain/accounts",
+        &[
+            "impl From<&str> for AccountId",
+            "impl From<String> for AccountId",
+            "impl From<&String> for AccountId",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "string ids go through FromStr (R15 closed):\n{}",
+        v.join("\n")
+    );
+}

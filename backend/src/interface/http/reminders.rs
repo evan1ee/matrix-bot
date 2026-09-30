@@ -374,8 +374,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         // Alice creates reminder
         let req = CreateReminderRequest {
@@ -426,8 +426,8 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         let created = create_reminder(
             State(state.clone()),
@@ -505,7 +505,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         // Create 2 reminders
         let r1 = create_reminder(

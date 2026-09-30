@@ -120,7 +120,7 @@ mod tests {
             reqwest::Client::new(),
         );
 
-        let user = AuthUser::for_account("networth_user");
+        let user = AuthUser::for_seed("networth_user");
 
         let res = get_net_worth(State(state), user).await.unwrap();
         assert_eq!(res.primary_currency, "USD");

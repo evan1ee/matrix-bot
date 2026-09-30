@@ -103,7 +103,7 @@ mod tests {
         CommandContext {
             room_id: "!room:1".to_string(),
             sender_mxid: "@bob:1".to_string(),
-            owner_id: AccountId::new("@bob:1"),
+            owner_id: AccountId::from_seed("@bob:1"),
             sender_name: "bob".to_string(),
             command: "todo".to_string(),
             raw_args: String::new(),

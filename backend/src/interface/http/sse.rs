@@ -79,7 +79,7 @@ mod tests {
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::for_account("acct_alice");
+        let user = AuthUser::for_seed("acct_alice");
 
         let _sse = sse_handler(State(state), user).await.unwrap();
     }
@@ -146,7 +146,7 @@ mod tests {
             TodoItem {
                 id: 1,
                 room_id: "!room:1".to_string(),
-                owner_id: AccountId::from(owner),
+                owner_id: AccountId::from_seed(owner),
                 sender_name: "evan".to_string(),
                 text: text.to_string(),
                 priority: TodoPriority::Medium,
@@ -158,11 +158,11 @@ mod tests {
         }
 
         let broadcaster = EventBroadcaster::default();
-        let subscriber = AuthUser::named("evan", "acct_mine");
+        let subscriber = AuthUser::named_seed("evan", "acct_mine");
         let owner_id = subscriber.owner_id();
         assert_eq!(
             owner_id,
-            crate::domain::accounts::AccountId::from("acct_mine").to_string()
+            crate::domain::accounts::AccountId::from_seed("acct_mine").to_string()
         );
 
         let stream = owned_events(&broadcaster, owner_id.clone());
@@ -175,12 +175,12 @@ mod tests {
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 2,
             room_id: "!room:1".to_string(),
-            owner_id: AccountId::from("acct_theirs").to_string(),
+            owner_id: AccountId::from_seed("acct_theirs").to_string(),
         });
         broadcaster.send(SystemEvent::TodoDeleted {
             id: 3,
             room_id: "web".to_string(),
-            owner_id: AccountId::from("acct_mine").to_string(),
+            owner_id: AccountId::from_seed("acct_mine").to_string(),
         });
         drop(broadcaster);
 
@@ -215,7 +215,7 @@ mod tests {
         // Held open as the running server holds it: dropping the last sender
         // would end the stream on its own and hide a missing shutdown hook.
         let _broadcaster = state.broadcaster.clone();
-        let sse = sse_handler(State(state), AuthUser::for_account("acct_alice"))
+        let sse = sse_handler(State(state), AuthUser::for_seed("acct_alice"))
             .await
             .unwrap();
 

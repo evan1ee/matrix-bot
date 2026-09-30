@@ -226,7 +226,7 @@ mod tests {
     fn ctx_for(command: &str, raw_args: &str) -> CommandContext {
         CommandContext {
             room_id: "!room:a".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
+            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
             sender_mxid: "@alice:a".to_string(),
             sender_name: "alice".to_string(),
             command: command.to_string(),

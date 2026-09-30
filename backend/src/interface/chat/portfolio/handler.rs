@@ -221,10 +221,13 @@ mod tests {
         crate::db::pool::seed_accounts(&pool, &["@alice:x"]).await;
         let services = crate::application::AppServices::new(&pool);
 
-        let reply =
-            handle_portfolio_command(&services, &AccountId::new("@alice:x"), "!portfolio refresh")
-                .await
-                .unwrap();
+        let reply = handle_portfolio_command(
+            &services,
+            &AccountId::from_seed("@alice:x"),
+            "!portfolio refresh",
+        )
+        .await
+        .unwrap();
         assert!(reply.contains("no holdings to refresh"));
     }
 
@@ -237,7 +240,7 @@ mod tests {
 
         let reply = handle_portfolio_command(
             &services,
-            &AccountId::new("@alice:x"),
+            &AccountId::from_seed("@alice:x"),
             "!portfolio record AAPL 10 @ 150.00 USD initial",
         )
         .await
@@ -248,7 +251,7 @@ mod tests {
         // Verify holding exists in service
         let h = services
             .portfolio
-            .get_holding_by_symbol(&AccountId::new("@alice:x"), "AAPL")
+            .get_holding_by_symbol(&AccountId::from_seed("@alice:x"), "AAPL")
             .await
             .unwrap()
             .unwrap();

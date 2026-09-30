@@ -201,7 +201,7 @@ mod tests {
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
             room_id: "!room:test".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("acct_test"),
+            owner_id: crate::domain::accounts::AccountId::from_seed("acct_test"),
             sender_mxid: "@user:test".to_string(),
             sender_name: "Test User".to_string(),
             command: cmd.to_string(),
@@ -240,7 +240,7 @@ mod tests {
 
         crate::db::pool::seed_account(
             &pool,
-            &crate::domain::accounts::AccountId::from("acct_test"),
+            &crate::domain::accounts::AccountId::from_seed("acct_test"),
         )
         .await;
 

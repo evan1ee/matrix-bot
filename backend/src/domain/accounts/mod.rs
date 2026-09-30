@@ -135,37 +135,6 @@ impl From<&uuid::Uuid> for AccountId {
     }
 }
 
-// Legacy facades still carry the id as a `String` that this crate formatted
-// itself, so it always parses. Untrusted input (HTTP bodies, CLI flags) must go
-// through `FromStr` and reject a malformed id. An unparseable string maps to the
-// nil UUID, which no `accounts` row can have: reads find nothing and writes fail
-// on the foreign key, so a bad id fails closed instead of reaching another
-// account. Tests instead seed a deterministic id so fixtures can say
-// `AccountId::from("alice")`.
-impl From<&str> for AccountId {
-    fn from(s: &str) -> Self {
-        #[cfg(test)]
-        return s.parse().unwrap_or_else(|_| Self::from_seed(s));
-        #[cfg(not(test))]
-        s.parse().unwrap_or_else(|_| {
-            tracing::error!("malformed account id; using the nil id, which matches no account");
-            Self(uuid::Uuid::nil())
-        })
-    }
-}
-
-impl From<String> for AccountId {
-    fn from(s: String) -> Self {
-        Self::from(s.as_str())
-    }
-}
-
-impl From<&String> for AccountId {
-    fn from(s: &String) -> Self {
-        Self::from(s.as_str())
-    }
-}
-
 impl From<AccountId> for uuid::Uuid {
     fn from(id: AccountId) -> Self {
         id.0
@@ -467,14 +436,6 @@ pub fn display_name_for_mxid(mxid: &str) -> String {
         .to_string()
 }
 
-pub fn account_id_to_handle(account_id: &str) -> Option<uuid::Uuid> {
-    uuid::Uuid::parse_str(account_id.strip_prefix("acct_")?).ok()
-}
-
-pub fn handle_to_account_id(handle: &uuid::Uuid) -> String {
-    format!("acct_{}", handle.simple())
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AccountsError {
     #[error("Account not found")]
@@ -520,11 +481,43 @@ mod tests {
         assert_eq!(format!("{simple}"), "acct_26ab01c0f4c19b7d854f46dca154ee89");
     }
 
+    /// Anything that is not a real account id must fail closed rather than
+    /// producing some other account's handle (or the nil id). The bare-hex form
+    /// is deliberately absent: `FromStr` accepts a raw UUID by design.
     #[test]
     fn test_malformed_account_ids_fail_parsing() {
-        for bad in ["acct_", "acct_nothex", "@user:server", "", "acct_too_short"] {
-            assert!(bad.parse::<AccountId>().is_err());
+        for bad in [
+            "acct_",
+            "acct_nothex",
+            "acct_notactuallyhex",
+            "@user:server",
+            "@evan:mbm.one",
+            "",
+            "acct_too_short",
+        ] {
+            assert!(
+                bad.parse::<AccountId>().is_err(),
+                "{bad} must not parse to an account id"
+            );
         }
+    }
+
+    #[test]
+    fn test_generated_account_ids_are_unique_and_well_formed() {
+        let ids: std::collections::HashSet<String> = (0..500)
+            .map(|_| AccountId::generate().to_string())
+            .collect();
+        assert_eq!(ids.len(), 500, "generate repeated a value");
+
+        let id = AccountId::generate();
+        let text = id.to_string();
+        let hex = text.strip_prefix("acct_").expect("acct_ prefix");
+        assert_eq!(hex.len(), 32);
+        assert!(hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_eq!(text.parse::<AccountId>().unwrap(), id);
+        assert_eq!(AccountId::from_handle(&id.to_handle()), id);
     }
 
     #[test]
@@ -577,18 +570,6 @@ mod tests {
         assert_eq!(display_name_for_mxid("@"), "@");
         assert_eq!(display_name_for_mxid("@:server"), "@:server");
         assert_eq!(display_name_for_mxid("@a:b.c"), "a");
-    }
-
-    /// Anything that is not a real account id must fail closed rather than
-    /// producing some other account's handle.
-    #[test]
-    fn test_malformed_account_ids_have_no_handle() {
-        for bad in ["acct_", "acct_notactuallyhex", "@evan:mbm.one", ""] {
-            assert!(
-                bad.parse::<AccountId>().is_err(),
-                "{bad} must not map to a handle"
-            );
-        }
     }
 
     #[test]

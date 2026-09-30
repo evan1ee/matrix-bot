@@ -66,8 +66,8 @@ mod tests {
     #[tokio::test]
     async fn test_category_names_are_unique_per_owner_not_globally() {
         let pool = setup().await;
-        let owner_a = AccountId::new("acct_a");
-        let owner_b = AccountId::new("acct_b");
+        let owner_a = AccountId::from_seed("acct_a");
+        let owner_b = AccountId::from_seed("acct_b");
         insert_account(&pool, &owner_a).await;
         insert_account(&pool, &owner_b).await;
 
@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn test_deleting_a_category_uncategorises_rather_than_deletes() {
         let pool = setup().await;
-        let owner = AccountId::new("acct_a");
+        let owner = AccountId::from_seed("acct_a");
         insert_account(&pool, &owner).await;
         let cat = categories::create_category(&pool, &owner, "food")
             .await
@@ -125,8 +125,8 @@ mod tests {
     #[tokio::test]
     async fn test_cannot_delete_another_owners_category() {
         let pool = setup().await;
-        let owner_a = AccountId::new("acct_a");
-        let owner_b = AccountId::new("acct_b");
+        let owner_a = AccountId::from_seed("acct_a");
+        let owner_b = AccountId::from_seed("acct_b");
         insert_account(&pool, &owner_a).await;
         insert_account(&pool, &owner_b).await;
 
@@ -151,8 +151,8 @@ mod tests {
     #[tokio::test]
     async fn test_ledger_is_isolated_per_owner() {
         let pool = setup().await;
-        let owner_a = AccountId::new("acct_a");
-        let owner_b = AccountId::new("acct_b");
+        let owner_a = AccountId::from_seed("acct_a");
+        let owner_b = AccountId::from_seed("acct_b");
 
         log(
             &pool,
@@ -191,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn test_direction_filter() {
         let pool = setup().await;
-        let owner = AccountId::new("acct_a");
+        let owner = AccountId::from_seed("acct_a");
 
         log(
             &pool,
@@ -236,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn test_summary_keeps_currencies_apart() {
         let pool = setup().await;
-        let owner = AccountId::new("acct_a");
+        let owner = AccountId::from_seed("acct_a");
         let now = Utc::now();
 
         log(&pool, &owner, Direction::Expense, 1550, "EUR", 2, None, now).await;

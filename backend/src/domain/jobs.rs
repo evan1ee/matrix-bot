@@ -276,7 +276,7 @@ mod tests {
     use chrono::TimeZone;
 
     fn owner() -> AccountId {
-        AccountId::from("acct_alice")
+        AccountId::from_seed("acct_alice")
     }
 
     #[test]

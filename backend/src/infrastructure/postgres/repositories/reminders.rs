@@ -504,7 +504,7 @@ mod tests {
     #[tokio::test]
     async fn test_reminders_crud_flow() {
         let pool = setup_test_db().await;
-        let owner = AccountId::new("acct_alice");
+        let owner = AccountId::from_seed("acct_alice");
 
         sqlx::query!(
             "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'alice', 'active')",
@@ -580,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn record_failed_attempt_keeps_the_trigger() {
         let pool = setup_test_db().await;
-        let owner = AccountId::new("acct_retry_owner");
+        let owner = AccountId::from_seed("acct_retry_owner");
         crate::db::pool::seed_account(&pool, &owner).await;
         let created = create(&pool, &owner, &new_reminder(now_at_storage_precision()))
             .await
@@ -613,7 +613,7 @@ mod tests {
     #[tokio::test]
     async fn find_by_id_ignores_ownership() {
         let pool = setup_test_db().await;
-        let owner = AccountId::new("acct_find_owner");
+        let owner = AccountId::from_seed("acct_find_owner");
         crate::db::pool::seed_account(&pool, &owner).await;
         let created = create(&pool, &owner, &new_reminder(now_at_storage_precision()))
             .await

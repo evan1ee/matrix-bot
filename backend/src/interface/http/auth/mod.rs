@@ -253,7 +253,7 @@ mod tests {
     async fn test_step_up_expires_and_recovery_sessions_never_qualify() {
         use chrono::{Duration, Utc};
 
-        let fresh = AuthUser::for_account("acct_a");
+        let fresh = AuthUser::for_seed("acct_a");
         assert!(fresh.may_perform_sensitive_action(Utc::now()));
 
         // Just past the window.

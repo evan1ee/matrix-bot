@@ -235,7 +235,7 @@ mod tests {
     ) -> Holding {
         Holding {
             id: 1,
-            owner_id: AccountId::from("alice"),
+            owner_id: AccountId::from_seed("alice"),
             symbol: symbol.to_string(),
             quantity_minor: qty,
             avg_cost_minor: avg_cost,
@@ -282,7 +282,7 @@ mod tests {
         let h1 = sample_holding("AAPL", qty, 15_000, Some(17_000), "USD");
         let cash = CashBalance {
             id: 1,
-            owner_id: AccountId::from("alice"),
+            owner_id: AccountId::from_seed("alice"),
             currency: "USD".to_string(),
             currency_exponent: 2,
             balance_minor: 50_000,

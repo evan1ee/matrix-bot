@@ -114,7 +114,7 @@ mod tests {
     async fn setup(name: &str) -> Fixture {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner = AccountId::new(name);
+        let owner = AccountId::from_seed(name);
         crate::db::pool::seed_account(&pool, &owner).await;
         let events = EventBroadcaster::new(16);
         Fixture {
