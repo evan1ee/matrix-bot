@@ -15,6 +15,7 @@
 pub mod adapter;
 #[cfg(test)]
 pub(crate) mod fake;
+pub mod inbound;
 pub mod matrix;
 pub mod message;
 pub mod registry;

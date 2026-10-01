@@ -209,7 +209,7 @@ pub async fn handle_text(
         }
         Err(panic_err) => {
             error!("Command dispatch panicked: {:?}", panic_err);
-            let err_html = "⚠️ <b>指令处理遇到异常</b><br/>• <b>原因:</b> 系统处理请求时发生意外错误<br/>• <b>建议:</b> 请稍后重试，或检查输入内容。";
+            let err_html = crate::interface::channels::inbound::COMMAND_PANIC_REPLY;
             if let Some(indicator) = stage_indicator {
                 let plain_text = crate::utils::strip_html(err_html);
                 indicator.finish_with_reply(&plain_text, err_html).await;
