@@ -1,7 +1,8 @@
-use matrix_sdk::room::Room;
 use tracing::{info, warn};
 
 use crate::db::Database;
+use crate::interface::chat::MediaReply;
+use crate::llm::progress::ProgressSink;
 use crate::utils::html::html_escape;
 
 pub mod models;
@@ -20,39 +21,40 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
 
 use crate::domain::accounts::AccountId;
 
-/// Processes an incoming Matrix audio or voice note message:
+/// Processes an incoming audio or voice note message, whatever channel it came from:
 /// 1. Sends the audio to the configured speech-to-text service.
 /// 2. Builds a structured semantic intent prompt with the transcription.
 /// 3. Executes an AI turn with all productivity tools enabled (add_expense, add_todo, create_reminder).
 /// 4. Formats and returns an HTML reply summarizing the actions taken.
 #[allow(clippy::too_many_arguments)]
-pub async fn process_audio_event(
+pub async fn process_audio(
     db: &Database,
     services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
-    room: &Room,
+    conversation: &str,
     owner_id: &AccountId,
     audio_bytes: &[u8],
     mime_type: Option<&str>,
     audio_duration: Option<std::time::Duration>,
     config: &VoiceConfig,
     stt: &crate::infrastructure::inference::stt::SttClient,
-    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
-) -> String {
+    progress: Option<&dyn ProgressSink>,
+) -> MediaReply {
     if audio_bytes.is_empty() {
         return "⚠️ <b>语音处理失败</b><br/>\
                 • <b>原因:</b> 未接收到有效的音频数据<br/>\
                 • <b>建议:</b> 请尝试重新录制并发送语音，或直接输入文字。"
-            .to_string();
+            .to_string()
+            .into();
     }
 
-    if let Some(reporter) = stage_reporter {
-        reporter.report_stage("🎧 正在转写语音...").await;
+    if let Some(progress) = progress {
+        progress.report_stage("🎧 正在转写语音...").await;
     }
 
     info!(
-        "Beginning voice processing for room [{}] owner [{}] ({} audio bytes)",
-        room.room_id(),
+        "Beginning voice processing for conversation [{}] owner [{}] ({} audio bytes)",
+        conversation,
         owner_id,
         audio_bytes.len()
     );
@@ -74,7 +76,7 @@ pub async fn process_audio_event(
                 "Voice transcription failed for owner {}: {:?}",
                 owner_id, err
             );
-            return voice_error_message(&err);
+            return voice_error_message(&err).into();
         }
     };
 
@@ -82,7 +84,8 @@ pub async fn process_audio_event(
         return "⚠️ <b>语音未能识别</b><br/>\
                 • <b>原因:</b> 未检测到清晰人声（声音过小或背景噪音较大）<br/>\
                 • <b>建议:</b> 请尝试靠近麦克风重新录制，或直接输入文字。"
-            .to_string();
+            .to_string()
+            .into();
     }
 
     info!(
@@ -90,35 +93,21 @@ pub async fn process_audio_event(
         transcription.duration_secs, transcription.text, owner_id
     );
 
-    if let Some(reporter) = stage_reporter {
-        reporter.report_stage("🧠 正在理解与思考...").await;
+    if let Some(progress) = progress {
+        progress.report_stage("🧠 正在理解与思考...").await;
     }
 
     // 2. Build semantic AI prompt from transcribed text
     let ai_prompt = prompt::build_voice_prompt(&transcription.text, transcription.duration_secs);
 
     // 3. Run AI turn with full domain tool capabilities
-    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
-    let turn_ctx = crate::llm::LlmTurnContext::new(
-        services,
-        &db.pool,
-        ai,
-        owner_id,
-        room.room_id().as_str(),
-        progress,
-    );
+    let turn_ctx =
+        crate::llm::LlmTurnContext::new(services, &db.pool, ai, owner_id, conversation, progress);
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
-        Ok(ai_turn) => {
-            crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
-                &db.pool,
-                progress.and_then(|p| p.message_ref()).as_deref(),
-                room.room_id().as_str(),
-                owner_id,
-                &ai_turn.tool_results,
-            )
-            .await;
-            format_voice_turn_response(&ai_turn, &transcription, stt.model())
-        }
+        Ok(ai_turn) => MediaReply {
+            html: format_voice_turn_response(&ai_turn, &transcription, stt.model()),
+            tool_results: ai_turn.tool_results,
+        },
         Err(err) => {
             warn!("AI turn failed for transcribed voice: {}", err);
             format!(
@@ -129,6 +118,7 @@ pub async fn process_audio_event(
                 html_escape(&transcription.text),
                 html_escape(&err.to_string())
             )
+            .into()
         }
     }
 }

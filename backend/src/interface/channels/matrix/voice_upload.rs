@@ -40,7 +40,7 @@ pub async fn deliver_audio(room: &Room, reply: Reply) -> Reply {
     reply
 }
 
-async fn send_voice_message(room: &Room, attachment: &Attachment) -> Result<(), String> {
+pub(super) async fn send_voice_message(room: &Room, attachment: &Attachment) -> Result<(), String> {
     let content_type = attachment
         .mime
         .parse::<mime_guess::mime::Mime>()

@@ -49,7 +49,7 @@ impl DeliverySink for MatrixRoomSink {
             .ok_or_else(|| format!("Bot is not joined to room: {room}"))?;
 
         // The webhook owner must be authorized for the room at delivery time.
-        let authorized = crate::interface::chat::rooms::is_room_authorized_for_account(
+        let authorized = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
             &self.services.rooms,
             Some(&client),
             &delivery.event.account_id,

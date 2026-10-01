@@ -18,9 +18,7 @@
 use async_trait::async_trait;
 
 use crate::interface::channels::message::Reply;
-use matrix_sdk::Client;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::Weak;
 
 use crate::application::AppServices;
 use crate::db::Database;
@@ -28,6 +26,7 @@ use crate::domain::accounts::{
     AccountId, MaturedRecovery, SecurityEventKind, RECOVERY_DELAY_HOURS,
 };
 use crate::interface::channels::matrix::notify::announce_account;
+use crate::interface::channels::registry::ChannelRegistry;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
 
@@ -46,18 +45,13 @@ const WEB_ONLY: &[(&str, &str)] = &[
 ];
 
 pub struct AccountModule {
-    /// This generation's Matrix client, for sending notifications.
-    ///
-    /// Held behind the same shared handle the API uses, so a reconnect swaps it
-    /// out underneath rather than leaving this module holding a dead client.
-    client: Arc<RwLock<Option<Client>>>,
     /// Where to tell people to go. Shown in every refusal.
     web_url: String,
 }
 
 impl AccountModule {
-    pub fn new(client: Arc<RwLock<Option<Client>>>, web_url: String) -> Self {
-        Self { client, web_url }
+    pub fn new(web_url: String) -> Self {
+        Self { web_url }
     }
 }
 
@@ -178,9 +172,8 @@ impl AccountModule {
         // Announced to *every* linked identity, not just this one. If someone
         // else started this, the real owner has to hear about it — on a channel
         // the attacker may not control.
-        let client = self.client.read().await.clone();
         announce_account(
-            client.as_ref(),
+            ctx.outbound.as_ref(),
             &services.identity,
             &ctx.owner_id,
             SecurityEventKind::RecoveryRequested,
@@ -326,13 +319,13 @@ impl AccountModule {
 /// Redeems a matured recovery code presented in the web UI.
 pub async fn redeem_matured_recovery(
     services: &AppServices,
-    client: Option<&Client>,
+    outbound: Option<&Weak<ChannelRegistry>>,
     code: &str,
 ) -> Result<AccountId, RecoveryRejection> {
     match services.accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
             announce_account(
-                client,
+                outbound,
                 &services.identity,
                 &account_id,
                 SecurityEventKind::RecoveryCompleted,
@@ -371,10 +364,7 @@ mod tests {
     }
 
     fn module() -> AccountModule {
-        AccountModule::new(
-            Arc::new(RwLock::new(None)),
-            "https://bot.mbm.one".to_string(),
-        )
+        AccountModule::new("https://bot.mbm.one".to_string())
     }
 
     fn ctx(command: &str, owner_id: &AccountId, is_direct: bool) -> CommandContext {

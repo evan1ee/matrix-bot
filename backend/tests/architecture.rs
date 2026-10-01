@@ -736,16 +736,62 @@ fn the_agent_knows_no_channel() {
     );
 }
 
-/// The chat modules answer through `Reply` and know no platform SDK. Voice,
-/// OCR, rooms, the outage alert, `account.rs` and `llm.rs` still import
-/// `matrix_sdk` (live `Room`/`Client` handles); Task 7 moves them behind the
-/// adapter and removes the `ignore`.
+/// The chat modules answer through `Reply` and know no platform SDK: Matrix
+/// membership, voice/OCR transport and the live client sit in
+/// `interface/channels/matrix`.
 #[test]
-#[ignore = "enabled in Task 7"]
 fn chat_modules_know_no_platform_sdk() {
     let hits = production_violations(
         "interface/chat",
         &["matrix_sdk", "serenity", "teloxide", "lettre", "async_imap"],
+    );
+    assert!(hits.is_empty(), "{}", hits.join("\n"));
+}
+
+/// Adapters and the registry are built once, by the composition root; anything
+/// else constructing them would run a second connection or a second routing table.
+#[test]
+fn only_the_composition_root_builds_adapters_and_the_registry() {
+    for needle in [
+        "MatrixAdapter::new(",
+        "ChannelRegistry::new(",
+        "ChannelRegistry::from_unique(",
+    ] {
+        let hits: Vec<_> = rust_files(&src(""))
+            .into_iter()
+            .filter(|f| {
+                let rel = relative_to_src(f);
+                !rel.starts_with("app.rs") && !rel.starts_with("interface/channels/registry.rs")
+            })
+            .flat_map(|f| {
+                let text = fs::read_to_string(&f).expect("readable source file");
+                let rel = relative_to_src(&f);
+                production_hits(&text, &[needle])
+                    .into_iter()
+                    .map(move |(n, l)| format!("{rel}:{n}: {l}"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "{needle} outside app.rs:\n{}",
+            hits.join("\n")
+        );
+    }
+}
+
+/// Adapters translate; every query lives in a repository behind a service.
+#[test]
+fn channel_adapters_run_no_sql() {
+    let hits = production_violations(
+        "interface/channels",
+        &[
+            "sqlx::",
+            "query!",
+            "query_as!",
+            "query_scalar!",
+            "QueryBuilder",
+        ],
     );
     assert!(hits.is_empty(), "{}", hits.join("\n"));
 }

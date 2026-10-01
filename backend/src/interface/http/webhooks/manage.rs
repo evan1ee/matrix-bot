@@ -58,7 +58,7 @@ pub async fn create_webhook(
     }
 
     let client_guard = state.bot_client.read().await;
-    let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+    let is_auth = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
         &state.services.rooms,
         client_guard.as_ref(),
         &user.account_id,
@@ -110,7 +110,7 @@ pub async fn update_webhook(
 ) -> Result<Json<Webhook>, ApiError> {
     if let Some(ref new_room) = input.default_room_id {
         let client_guard = state.bot_client.read().await;
-        let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+        let is_auth = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
             &state.services.rooms,
             client_guard.as_ref(),
             &user.account_id,

@@ -17,9 +17,14 @@ use tracing::{error, info, warn};
 use crate::application::AppServices;
 use crate::config::Config;
 use crate::db::Database;
+use crate::domain::channels::Channel;
+use crate::interface::channels::adapter::ChannelAdapter;
+use crate::interface::channels::inbound::Inbound;
+use crate::interface::channels::matrix::adapter::MatrixAdapter;
 use crate::interface::channels::matrix::delivery::MatrixDelivery;
 use crate::interface::channels::matrix::handles::BotHandles;
-use crate::interface::channels::matrix::sync_loop::run_bot_loop;
+use crate::interface::channels::matrix::modules::build_modules;
+use crate::interface::channels::registry::{check_unique, ChannelRegistry};
 use crate::interface::http;
 use crate::interface::jobs::Delivery;
 use crate::jobs;
@@ -40,6 +45,33 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
 pub(crate) struct OwnedTask {
     pub name: &'static str,
     pub handle: JoinHandle<()>,
+}
+
+/// Aborts the task it watches when dropped.
+struct AbortOnDrop(tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Adapts an adapter's `run` task to the supervisor's `JoinHandle<()>`.
+///
+/// An `Err` is logged here (an adapter that gives up is a front door that
+/// stopped), a panic is re-raised so the supervisor reports it as one, and
+/// aborting the returned handle aborts `run` too: a bare `JoinHandle` dropped
+/// by the wrapper would detach it instead.
+fn supervised(name: &'static str, handle: JoinHandle<anyhow::Result<()>>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let _abort_with_us = AbortOnDrop(handle.abort_handle());
+        match handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => error!("{name} failed: {err:#}"),
+            Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
+            Err(_cancelled) => {}
+        }
+    })
 }
 
 /// Waits for `shutdown` to be cancelled, or for the API server, the Matrix loop
@@ -126,6 +158,24 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // and the pending merges survive a Matrix reconnect.
     let handles = BotHandles::default();
+    let modules = build_modules(&config).await;
+    check_unique(&[Channel::Matrix])?;
+    let matrix = Arc::new(MatrixAdapter::new(
+        config.clone(),
+        services.clone(),
+        db.clone(),
+        handles.clone(),
+    ));
+    // The pipeline holds a `Weak` of the registry for out-of-band sends, so the
+    // registry is built with `new_cyclic` (A5). Uniqueness was checked just
+    // above, which is what makes the infallible constructor sound.
+    let channels = Arc::new_cyclic(|weak| {
+        // TEMPORARY: Task 9 deletes the web-minted `!link` flow and the pending-merge map.
+        let inbound = Inbound::new(services.clone(), db.clone(), modules, weak.clone())
+            .with_pending_merges(handles.pending_merges.clone());
+        matrix.attach_inbound(Arc::new(inbound));
+        ChannelRegistry::from_unique(vec![matrix.clone() as Arc<dyn ChannelAdapter>])
+    });
     let delivery: Arc<dyn Delivery> = Arc::new(MatrixDelivery::new(handles.matrix.clone()));
     let registry = jobs::Registry::new(crate::interface::jobs::handlers(&services, delivery))?;
     let runtime = jobs::JobRuntime::new(
@@ -167,13 +217,16 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
     // After the API server is up (R35): SSE subscribers exist before events flow.
     let mut events_task = tokio::spawn(events_runtime.run(shutdown.child_token()));
-    let mut matrix = tokio::spawn(run_bot_loop(
-        config,
-        db.clone(),
-        services,
-        handles,
-        shutdown.child_token(),
-    ));
+    let mut matrix = match channels
+        .spawn_all(&shutdown)
+        .into_iter()
+        .find(|(channel, _)| *channel == Channel::Matrix)
+    {
+        Some((_, handle)) => supervised("Matrix sync loop", handle),
+        // Unreachable while `channels` is built from `matrix` above; if it ever
+        // happens the supervisor sees a front door that ended and stops cleanly.
+        None => tokio::spawn(async { error!("No Matrix adapter was registered") }),
+    };
 
     let ended = supervise_front_doors(
         &shutdown,
@@ -522,5 +575,45 @@ mod tests {
             .await;
             assert!(laggards.is_empty(), "{ended_name}: {laggards:?}");
         }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn aborting_the_supervised_handle_aborts_the_adapter_run() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = DropFlag(dropped.clone());
+        let run = tokio::spawn(async move {
+            let _guard = guard;
+            std::future::pending::<anyhow::Result<()>>().await
+        });
+        let wrapper = supervised("adapter", run);
+        tokio::task::yield_now().await;
+
+        wrapper.abort();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(dropped.load(Ordering::SeqCst), "run must not be detached");
+    }
+
+    #[tokio::test]
+    async fn an_adapter_that_returns_an_error_ends_its_supervised_task() {
+        let wrapper = supervised(
+            "adapter",
+            tokio::spawn(async { anyhow::bail!("login refused") }),
+        );
+        assert!(wrapper.await.is_ok(), "the error is logged, not re-raised");
+    }
+
+    #[tokio::test]
+    async fn an_adapter_panic_surfaces_as_a_panic_of_the_supervised_task() {
+        let wrapper = supervised(
+            "adapter",
+            tokio::spawn(async {
+                let healthy = std::hint::black_box(false);
+                assert!(healthy, "adapter bug");
+                Ok(())
+            }),
+        );
+        assert!(wrapper.await.unwrap_err().is_panic());
     }
 }

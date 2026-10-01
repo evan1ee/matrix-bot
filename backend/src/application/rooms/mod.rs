@@ -2,7 +2,7 @@
 //! the bot, and resolving the room an action is delivered to.
 //!
 //! Discovering rooms needs a live Matrix client, so it happens in the Matrix
-//! adapter (`interface/chat/rooms.rs`), which hands the result here.
+//! adapter (`interface/channels/matrix/rooms.rs`), which hands the result here.
 
 use sqlx::PgPool;
 use tracing::warn;

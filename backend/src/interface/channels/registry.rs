@@ -30,9 +30,17 @@ impl ChannelRegistry {
     pub fn new(adapters: Vec<Arc<dyn ChannelAdapter>>) -> anyhow::Result<Self> {
         let channels: Vec<Channel> = adapters.iter().map(|a| a.channel()).collect();
         check_unique(&channels)?;
-        Ok(Self {
+        Ok(Self::from_unique(adapters))
+    }
+
+    /// For `Arc::new_cyclic` in the composition root, whose closure cannot
+    /// return an error. The caller must have run [`check_unique`] on these
+    /// adapters' channels immediately before; were one repeated, the last
+    /// adapter for that channel would silently win.
+    pub fn from_unique(adapters: Vec<Arc<dyn ChannelAdapter>>) -> Self {
+        Self {
             adapters: adapters.into_iter().map(|a| (a.channel(), a)).collect(),
-        })
+        }
     }
 
     pub fn get(&self, channel: Channel) -> Option<&Arc<dyn ChannelAdapter>> {

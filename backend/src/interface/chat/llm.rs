@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 
 use crate::interface::channels::message::Reply;
-use matrix_sdk::Client;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::Weak;
 use tracing::error;
 
 use crate::application::settings::SettingsService;
@@ -11,6 +9,7 @@ use crate::application::AppServices;
 use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
+use crate::interface::channels::registry::ChannelRegistry;
 use crate::interface::chat::llm_alert::{clear_ai_error_state, notify_dev_room_ai_error};
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::llm::context::LlmTurnContext;
@@ -20,22 +19,18 @@ use crate::llm::turn::{run_turn, MAX_PROMPT_LENGTH};
 use crate::utils::html::html_escape;
 
 pub struct LlmModule {
-    client_handle: Arc<RwLock<Option<Client>>>,
     ai: crate::config::AiEnvConfig,
 }
 
 impl Default for LlmModule {
     fn default() -> Self {
-        Self::new(
-            Arc::new(RwLock::new(None)),
-            crate::config::AiEnvConfig::default(),
-        )
+        Self::new(crate::config::AiEnvConfig::default())
     }
 }
 
 impl LlmModule {
-    pub fn new(client_handle: Arc<RwLock<Option<Client>>>, ai: crate::config::AiEnvConfig) -> Self {
-        Self { client_handle, ai }
+    pub fn new(ai: crate::config::AiEnvConfig) -> Self {
+        Self { ai }
     }
 }
 
@@ -87,7 +82,7 @@ impl BotModule for LlmModule {
             services,
             &db.pool,
             &self.ai,
-            Some(&self.client_handle),
+            ctx.outbound.as_ref(),
             &ctx.room_key(),
             &ctx.owner_id,
             ctx.sender_name(),
@@ -109,7 +104,7 @@ pub async fn handle_ai_command(
     services: &AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
-    client_handle: Option<&Arc<RwLock<Option<Client>>>>,
+    outbound: Option<&Weak<ChannelRegistry>>,
     room_id: &str,
     owner_id: &AccountId,
     sender_name: &str,
@@ -124,7 +119,7 @@ pub async fn handle_ai_command(
         services,
         pool,
         ai,
-        client_handle,
+        outbound,
         room_id,
         owner_id,
         sender_name,
@@ -144,7 +139,7 @@ pub async fn handle_ai_command_with_stage(
     services: &AppServices,
     pool: &DbPool,
     ai: &crate::config::AiEnvConfig,
-    client_handle: Option<&Arc<RwLock<Option<Client>>>>,
+    outbound: Option<&Weak<ChannelRegistry>>,
     room_id: &str,
     owner_id: &AccountId,
     _sender_name: &str,
@@ -218,13 +213,8 @@ pub async fn handle_ai_command_with_stage(
         }
         Err(err) => {
             error!("AI execution failed: {}", err);
-            notify_dev_room_ai_error(
-                &services.settings,
-                client_handle,
-                owner_id,
-                &err.to_string(),
-            )
-            .await;
+            notify_dev_room_ai_error(&services.settings, outbound, owner_id, &err.to_string())
+                .await;
             None
         }
     }

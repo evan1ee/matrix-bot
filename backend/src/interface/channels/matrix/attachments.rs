@@ -25,6 +25,7 @@ use crate::domain::channels::PlatformIdentity;
 use crate::infrastructure::postgres::repositories::identities;
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
 use crate::interface::chat::voice::VoiceConfig;
+use crate::llm::progress::ProgressSink;
 
 /// Everything that differs between handling an image and handling a voice
 /// note: which content carries the media, what to call the two processing
@@ -171,18 +172,20 @@ impl<'a> Attachment<'a> {
         media_bytes: &[u8],
         reporter: &StageReporter,
     ) -> String {
-        match self {
+        let conversation = room.room_id().as_str();
+        let progress: Option<&dyn ProgressSink> = Some(reporter);
+        let reply = match self {
             Self::Image { content, ocr } => {
-                crate::interface::chat::ocr::process_image_event(
+                crate::interface::chat::ocr::process_image(
                     db,
                     services,
                     ai,
-                    room,
+                    conversation,
                     owner_id,
                     Some(&content.body),
                     media_bytes,
                     ocr,
-                    Some(reporter),
+                    progress,
                 )
                 .await
             }
@@ -191,11 +194,11 @@ impl<'a> Attachment<'a> {
                 voice_config,
                 stt,
             } => {
-                crate::interface::chat::voice::process_audio_event(
+                crate::interface::chat::voice::process_audio(
                     db,
                     services,
                     ai,
-                    room,
+                    conversation,
                     owner_id,
                     media_bytes,
                     content
@@ -205,11 +208,22 @@ impl<'a> Attachment<'a> {
                     content.info.as_ref().and_then(|info| info.duration),
                     voice_config,
                     stt,
-                    Some(reporter),
+                    progress,
                 )
                 .await
             }
-        }
+        };
+        // The turn knows no channel; the tool targets are recorded against the
+        // stage event, which is what a reaction on the reply resolves through.
+        crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
+            &db.pool,
+            reporter.message_ref().as_deref(),
+            conversation,
+            owner_id,
+            &reply.tool_results,
+        )
+        .await;
+        reply.html
     }
 }
 

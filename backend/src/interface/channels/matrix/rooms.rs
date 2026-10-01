@@ -3,8 +3,9 @@
 //!
 //! Needed by the REST room picker, the inbound webhook endpoints and the
 //! webhook outbox worker; the worker is a background task with no HTTP
-//! request behind it, so this lives with the chat adapter rather than in
-//! `interface/http`. Rooms has no chat commands, hence no `BotModule`.
+//! request behind it, so this lives with the Matrix adapter rather than in
+//! `interface/http`. Room membership is a Matrix concept, so it sits beside
+//! the SDK code and is no `BotModule`: rooms has no chat commands.
 
 use matrix_sdk::room::Room;
 use matrix_sdk::ruma::events::room::member::MembershipState;

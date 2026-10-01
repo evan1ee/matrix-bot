@@ -18,6 +18,7 @@ use crate::application::identity::Resolution;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::channels::Channel;
+use crate::interface::channels::matrix::linking::PendingMerges;
 use crate::interface::chat::{ModuleRegistry, ParsedCommand};
 use crate::llm::progress::ProgressSink;
 
@@ -52,6 +53,10 @@ pub struct Inbound {
     modules: Arc<ModuleRegistry>,
     /// Weak: adapters own the pipeline and the registry owns the adapters (A5).
     registry: Weak<ChannelRegistry>,
+    // TEMPORARY: Task 9 deletes the web-minted flow and this field.
+    /// Where the Matrix `!link` flow records a merge awaiting confirmation in
+    /// the web UI (R79); `None` records none.
+    pending_merges: Option<Arc<PendingMerges>>,
 }
 
 impl Inbound {
@@ -66,7 +71,15 @@ impl Inbound {
             db,
             modules,
             registry,
+            pending_merges: None,
         }
+    }
+
+    // TEMPORARY: Task 9 deletes the web-minted flow and this setter.
+    /// Gives the Matrix `link` branch the pending-merge map shared with the API.
+    pub fn with_pending_merges(mut self, pending_merges: Arc<PendingMerges>) -> Self {
+        self.pending_merges = Some(pending_merges);
+        self
     }
 
     pub async fn handle(
@@ -131,15 +144,14 @@ impl Inbound {
             return InboundOutcome::Ignored;
         }
         // The pending-merge map is a Matrix-flow detail owned by `BotHandles`;
-        // Task 7b threads it in (or Task 9 removes the flow), so the pipeline
-        // passes none.
+        // Task 9 removes the flow together with the map.
         let reply = crate::interface::channels::matrix::linking::handle_link_command(
             &self.services.accounts,
             &self.db,
             raw_args,
             msg.sender.user_id().as_str(),
             msg.is_direct,
-            None,
+            self.pending_merges.as_deref(),
         )
         .await;
         InboundOutcome::Replied(Reply::html(reply))
@@ -520,5 +532,65 @@ mod tests {
                 "Commands available once linked: todo, expense, portfolio, ask.",
             );
         }
+    }
+    /// R79: the Matrix `!link` flow records a merge awaiting confirmation in the
+    /// map `BotHandles` shares with the web UI; over the pipeline it must still.
+    #[tokio::test]
+    async fn the_matrix_link_path_records_a_pending_merge_like_the_old_flow() {
+        use crate::domain::todos::{NewTodo, TodoPriority};
+        use crate::infrastructure::postgres::repositories::todos as todo_repo;
+
+        let (_plain, pool, registry) = pipeline_with(StubModule::claiming("todo")).await;
+        let pending = Arc::new(PendingMerges::default());
+        let inbound = Inbound::new(
+            AppServices::new(&pool),
+            Database { pool: pool.clone() },
+            Arc::new(ModuleRegistry::new()),
+            Arc::downgrade(&registry),
+        )
+        .with_pending_merges(pending.clone());
+
+        let services = AppServices::new(&pool);
+        let old = services
+            .identity
+            .provision_matrix_for_test("@evan:mbm.one")
+            .await;
+        for text in ["one", "two", "three"] {
+            todo_repo::create(
+                &pool,
+                &old,
+                &NewTodo {
+                    room_id: "!r:x".to_string(),
+                    sender_name: "evan".to_string(),
+                    text: text.to_string(),
+                    priority: TodoPriority::Medium,
+                    due_at: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let new = services
+            .accounts
+            .create("web", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let code = services.accounts.issue_link_challenge(&new).await.unwrap();
+
+        let msg = incoming(
+            Channel::Matrix,
+            ConversationAddress::Matrix("!dm:x".into()),
+            mx("@evan:mbm.one"),
+            true,
+        );
+        let out = inbound.handle(&msg, cmd("link", &code), None).await;
+
+        assert_reply_contains(out, "Nothing has been changed");
+        assert_eq!(
+            pending.read().await.get(&new.to_string()),
+            Some(&old.to_string())
+        );
     }
 }

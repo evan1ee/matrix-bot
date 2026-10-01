@@ -1,7 +1,8 @@
-use matrix_sdk::room::Room;
 use tracing::{info, warn};
 
 use crate::db::Database;
+use crate::interface::chat::MediaReply;
+use crate::llm::progress::ProgressSink;
 use crate::utils::html::html_escape;
 
 pub mod models;
@@ -11,38 +12,39 @@ pub use models::{OcrConfig, OcrResult, OcrTextBlock};
 
 use crate::domain::accounts::AccountId;
 
-/// Processes an incoming Matrix image attachment:
+/// Processes an incoming image attachment, whatever channel it came from:
 /// 1. POSTs the decrypted image bytes to the inference server's `/ocr` and
 ///    gets back detection and recognition results.
 /// 2. If text is extracted, synthesizes a structured semantic prompt with the text and user caption.
 /// 3. Executes an AI turn with all domain tools enabled (add_expense, add_todo, create_reminder).
 /// 4. Returns an HTML reply summarizing the actions taken and persisted to the database.
 #[allow(clippy::too_many_arguments)]
-pub async fn process_image_event(
+pub async fn process_image(
     db: &Database,
     services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
-    room: &Room,
+    conversation: &str,
     owner_id: &AccountId,
     caption: Option<&str>,
     image_bytes: &[u8],
     ocr: &crate::infrastructure::inference::ocr::OcrClient,
-    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
-) -> String {
+    progress: Option<&dyn ProgressSink>,
+) -> MediaReply {
     if image_bytes.is_empty() {
         return "⚠️ <b>图片处理失败</b><br/>\
                 • <b>原因:</b> 未接收到有效的图片数据<br/>\
                 • <b>建议:</b> 请尝试重新上传图片，或直接输入文字。"
-            .to_string();
+            .to_string()
+            .into();
     }
 
-    if let Some(reporter) = stage_reporter {
-        reporter.report_stage("🔍 正在识别图片文字 (OCR)...").await;
+    if let Some(progress) = progress {
+        progress.report_stage("🔍 正在识别图片文字 (OCR)...").await;
     }
 
     info!(
-        "Beginning OCR processing for room [{}] owner [{}] ({} image bytes)",
-        room.room_id(),
+        "Beginning OCR processing for conversation [{}] owner [{}] ({} image bytes)",
+        conversation,
         owner_id,
         image_bytes.len()
     );
@@ -51,7 +53,7 @@ pub async fn process_image_event(
         Ok(scan) => scan.into(),
         Err(err) => {
             warn!("OCR extraction failed for owner {}: {:?}", owner_id, err);
-            return ocr_error_message(&err);
+            return ocr_error_message(&err).into();
         }
     };
 
@@ -59,7 +61,8 @@ pub async fn process_image_event(
         return "⚠️ <b>未能识别出文字</b><br/>\
                 • <b>原因:</b> 图片中未检测到清晰文字（可能光照不足、模糊或角度过倾斜）<br/>\
                 • <b>建议:</b> 请在光线明亮处重新拍照，或直接输入文字描述。"
-            .to_string();
+            .to_string()
+            .into();
     }
 
     info!(
@@ -69,33 +72,19 @@ pub async fn process_image_event(
         owner_id
     );
 
-    if let Some(reporter) = stage_reporter {
-        reporter.report_stage("🧠 正在理解与思考...").await;
+    if let Some(progress) = progress {
+        progress.report_stage("🧠 正在理解与思考...").await;
     }
 
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
-    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
-    let turn_ctx = crate::llm::LlmTurnContext::new(
-        services,
-        &db.pool,
-        ai,
-        owner_id,
-        room.room_id().as_str(),
-        progress,
-    );
+    let turn_ctx =
+        crate::llm::LlmTurnContext::new(services, &db.pool, ai, owner_id, conversation, progress);
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
-        Ok(ai_turn) => {
-            crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
-                &db.pool,
-                progress.and_then(|p| p.message_ref()).as_deref(),
-                room.room_id().as_str(),
-                owner_id,
-                &ai_turn.tool_results,
-            )
-            .await;
-            format_ocr_turn_response(&ai_turn, &ocr_result)
-        }
+        Ok(ai_turn) => MediaReply {
+            html: format_ocr_turn_response(&ai_turn, &ocr_result),
+            tool_results: ai_turn.tool_results,
+        },
         Err(err) => {
             warn!("AI turn failed for OCR text: {}", err);
             format!(
@@ -106,6 +95,7 @@ pub async fn process_image_event(
                 html_escape(&ocr_result.combined_text),
                 html_escape(&err.to_string())
             )
+            .into()
         }
     }
 }

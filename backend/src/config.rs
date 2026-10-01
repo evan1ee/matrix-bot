@@ -475,11 +475,10 @@ impl Config {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn valid_config() -> Config {
-        Config {
+impl Config {
+    /// A valid configuration that reaches no network, for tests that need a `Config`.
+    pub(crate) fn for_test() -> Self {
+        Self {
             homeserver: "https://matrix.org".to_string(),
             username: "bot".to_string(),
             password: "secretpassword".to_string(),
@@ -513,6 +512,15 @@ mod tests {
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_config() -> Config {
+        Config::for_test()
     }
 
     #[test]

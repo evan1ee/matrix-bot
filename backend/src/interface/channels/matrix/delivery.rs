@@ -8,7 +8,7 @@ use matrix_sdk::ruma::RoomId;
 use tracing::warn;
 
 use crate::interface::channels::matrix::live_client::MatrixHandle;
-use crate::interface::channels::matrix::notify::send_dm_html;
+use crate::interface::channels::matrix::outbound::send_dm_html;
 use crate::interface::jobs::{Delivery, DeliveryError};
 
 pub struct MatrixDelivery {

@@ -19,7 +19,6 @@ pub mod ocr;
 pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
-pub mod rooms;
 pub mod settings;
 pub mod todos;
 pub mod tts;
@@ -163,6 +162,24 @@ impl CommandContext {
     /// Display name for "who typed this" — never an ownership key.
     pub fn sender_name(&self) -> &str {
         display_name_of(&self.sender)
+    }
+}
+
+/// What an image or voice turn produced: the HTML reply and the tool calls the
+/// turn ran, `(name, result)`. The adapter that showed the progress records the
+/// tool targets against its own progress message; the turn knows no channel.
+pub struct MediaReply {
+    pub html: String,
+    pub tool_results: Vec<(String, String)>,
+}
+
+impl From<String> for MediaReply {
+    /// A reply with no tool calls: every refusal and failure notice.
+    fn from(html: String) -> Self {
+        Self {
+            html,
+            tool_results: Vec::new(),
+        }
     }
 }
 

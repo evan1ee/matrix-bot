@@ -2,7 +2,7 @@
 //! part of a sync session (the job handlers).
 //!
 //! The sync loop publishes each generation's client when that generation
-//! starts and the guard clears it when `MatrixBot::run` returns by any path,
+//! starts and the guard clears it when `sync_generation` returns by any path,
 //! so a handler never sends through a dead generation's client: it sees
 //! `None` and defers its job instead.
 

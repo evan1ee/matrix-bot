@@ -1,16 +1,22 @@
 //! The Matrix sync loop: build a client, sync until it fails, reconnect with
 //! backoff — until shutdown.
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
+use matrix_sdk::config::SyncSettings;
+use matrix_sdk::{Client, LoopCtrl};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::application::AppServices;
-use crate::config::Config;
-use crate::db::Database;
-use crate::interface::channels::matrix::handles::BotHandles;
-use crate::interface::channels::matrix::MatrixBot;
+use crate::interface::channels::inbound::Inbound;
+use crate::interface::channels::matrix::adapter::MatrixAdapter;
+use crate::interface::channels::matrix::client::BotClient;
+use crate::interface::channels::matrix::handler::register_handlers;
+use crate::interface::channels::matrix::verification::{
+    register_verification_handlers, VerificationPolicy,
+};
 
 /// Reconnect backoff bounds for the Matrix sync loop.
 const RECONNECT_MIN: Duration = Duration::from_secs(5);
@@ -19,7 +25,7 @@ const RECONNECT_MAX: Duration = Duration::from_secs(300);
 /// Whether this generation should reconnect at the minimum backoff rather
 /// than doubling from wherever it left off.
 ///
-/// Compares the last recorded sync before and after `bot.run()`: if a new
+/// Compares the last recorded sync before and after the generation: if a new
 /// sync landed during this generation, the connection was healthy for at
 /// least a moment before it dropped, so a fresh problem should not inherit
 /// a backoff built up from a *previous*, unrelated string of failures. A
@@ -36,6 +42,69 @@ fn should_reset_backoff(
     }
 }
 
+/// Logs in (restoring or creating the session; `ensure_self_verified` runs on
+/// every boot inside `build_and_login_with_token_handles`) and answers
+/// verification requests, so the bot's session can be signed into another
+/// user's trust; without that its sessions stay Unverified.
+async fn connect(adapter: &MatrixAdapter) -> Result<Client> {
+    let handles = &adapter.handles;
+    let client = BotClient::build_and_login_with_token_handles(
+        &adapter.config,
+        Some(handles.access_token.clone()),
+        Some(handles.client.clone()),
+    )
+    .await?;
+
+    *handles.client.write().await = Some(client.clone());
+
+    let own_user = client
+        .user_id()
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| adapter.config.username.clone());
+    register_verification_handlers(
+        &client,
+        VerificationPolicy::new(own_user, adapter.config.verification_allowlist.clone()),
+    );
+    Ok(client)
+}
+
+/// One sync generation: register the handlers, publish the client and sync
+/// until it fails.
+async fn sync_generation(
+    adapter: &MatrixAdapter,
+    inbound: &Arc<Inbound>,
+    client: Client,
+) -> Result<()> {
+    register_handlers(
+        &client,
+        &adapter.config,
+        inbound.clone(),
+        adapter.db.clone(),
+        adapter.services.clone(),
+    );
+
+    // Job handlers send through this generation's client while it syncs;
+    // dropping the guard (any return path, including cancellation of this
+    // future) hands them `None`, so their jobs defer instead of failing.
+    let _published = adapter.handles.matrix.publish(client.clone());
+
+    info!("Matrix Bot is active and listening for events...");
+
+    // `sync_with_callback` (rather than plain `sync`) is the hook `/health/ready`
+    // needs: it runs the callback after every successful response, which is
+    // this loop's only clean signal that "a sync completed" — the point at
+    // which the client's local state is caught up with the homeserver.
+    let sync_health = adapter.handles.sync_health.clone();
+    client
+        .sync_with_callback(SyncSettings::default(), move |_response| {
+            sync_health.record_sync(Utc::now());
+            async { LoopCtrl::Continue }
+        })
+        .await?;
+
+    Ok(())
+}
+
 /// Runs the Matrix sync loop until `shutdown` is cancelled.
 ///
 /// Every await that can block for a long time — building the client, syncing,
@@ -44,33 +113,30 @@ fn should_reset_backoff(
 /// outside the select, so once syncing started Ctrl-C could not interrupt it and
 /// the process simply exited from under the running task.
 ///
-/// Returning drops the in-flight `bot.run()` future, and with it that
+/// Returning drops the in-flight `sync_generation` future, and with it that
 /// generation's `PublishedClient` guard, which hands the job handlers and the
 /// events dispatcher `None` until the next generation publishes its client.
 pub async fn run_bot_loop(
-    config: Config,
-    db: Database,
-    services: AppServices,
-    handles: BotHandles,
+    adapter: &MatrixAdapter,
+    inbound: Arc<Inbound>,
     shutdown: CancellationToken,
 ) {
+    let handles = &adapter.handles;
     let mut backoff = RECONNECT_MIN;
 
     loop {
         info!("Starting Matrix bot event loop sync...");
-
-        let build = MatrixBot::new_full(&config, db.clone(), services.clone(), handles.clone());
 
         let bot = tokio::select! {
             _ = shutdown.cancelled() => {
                 info!("Matrix bot loop shutting down cleanly...");
                 return;
             }
-            built = build => built,
+            built = connect(adapter) => built,
         };
 
         match bot {
-            Ok(bot) => {
+            Ok(client) => {
                 let sync_before = handles.sync_health.last_sync();
 
                 let outcome = tokio::select! {
@@ -78,7 +144,7 @@ pub async fn run_bot_loop(
                         info!("Matrix bot loop shutting down cleanly...");
                         return;
                     }
-                    outcome = bot.run() => outcome,
+                    outcome = sync_generation(adapter, &inbound, client) => outcome,
                 };
 
                 let sync_after = handles.sync_health.last_sync();
