@@ -367,7 +367,18 @@ fn assert_sql_safe_only_in_merge() {
 
 #[test]
 fn no_sqlx_in_interface_or_application() {
-    let allowed_idents = ["PgPool", "Transaction", "Error", "Postgres"];
+    // `PgConnection` and `Connection` exist for one caller-owned-transaction
+    // seam, `LinkService::claim_for_new_account`: the signup handler hands over
+    // the passkey-registration connection and the service opens a savepoint on
+    // it. Both are transaction plumbing, not a way to write SQL.
+    let allowed_idents = [
+        "PgPool",
+        "Transaction",
+        "Error",
+        "Postgres",
+        "PgConnection",
+        "Connection",
+    ];
     let mut violations = Vec::new();
 
     for dir_name in ["interface", "application"] {

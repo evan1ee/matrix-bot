@@ -23,12 +23,6 @@ pub use session::{
     IDLE_TIMEOUT_DAYS, STEP_UP_WINDOW_MINUTES,
 };
 
-/// How long a link code stays usable.
-///
-/// Long enough to switch to a Matrix client and paste it, short enough that a
-/// code left on screen is not a standing invitation.
-pub const LINK_CODE_TTL_MINUTES: i64 = 5;
-
 /// The single owner identifier used across all application tables.
 /// Wraps a native `uuid::Uuid`, formatting and serialising as `acct_<32 hex chars>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,7 +210,6 @@ pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
     "recovery_requests",
     "mcp_tokens",
     "passkey_enrollment_tokens",
-    "matrix_link_challenges",
 ];
 
 /// Tables carrying `account_id` that a merge deliberately leaves alone.
@@ -242,30 +235,6 @@ pub struct MatrixLink {
     pub mxid: String,
     pub account_id: AccountId,
     pub linked_at: Option<DateTime<Utc>>,
-}
-
-/// A link challenge issued for an account.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinkChallenge {
-    pub code: String,
-    pub account_id: AccountId,
-    pub expires_at: DateTime<Utc>,
-    pub consumed_at: Option<DateTime<Utc>>,
-}
-
-/// Outcome of attempting to claim a Matrix link code.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LinkOutcome {
-    NotADirectMessage,
-    UnknownCode,
-    AlreadyLinked,
-    Linked {
-        account_id: AccountId,
-    },
-    NeedsMergeConfirmation {
-        account_id: AccountId,
-        from_account: AccountId,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,21 +374,6 @@ pub fn web_only_command_description(cmd: &str) -> Option<&'static str> {
         .iter()
         .find(|(name, _)| *name == clean)
         .map(|(_, desc)| *desc)
-}
-
-/// Accepts the link code however a human typed it — lower case, spaces, missing dash.
-pub fn normalise_link_code(code: &str) -> String {
-    let cleaned: String = code
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-
-    if cleaned.len() == 8 {
-        format!("{}-{}", &cleaned[..4], &cleaned[4..])
-    } else {
-        cleaned
-    }
 }
 
 /// Accepts the recovery code however a human typed it — lower case, spaces, missing dash.
@@ -638,7 +592,6 @@ mod tests {
         assert_eq!(COOKIE_NAME, "mb_session");
         assert_eq!(STEP_UP_WINDOW_MINUTES, 5);
         assert_eq!((IDLE_TIMEOUT_DAYS, ABSOLUTE_TIMEOUT_DAYS), (30, 90));
-        assert_eq!(LINK_CODE_TTL_MINUTES, 5);
         assert_eq!(
             (
                 RECOVERY_DELAY_HOURS,

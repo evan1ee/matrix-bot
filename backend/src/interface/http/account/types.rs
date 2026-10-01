@@ -97,26 +97,9 @@ pub struct SessionSummary {
     pub current: bool,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-pub struct LinkCodeResponse {
-    pub code: String,
-    pub expires_in_seconds: i64,
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UnlinkRequest {
     pub mxid: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PendingMerge {
-    pub from_account: String,
-    pub preview: MergePreview,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct ConfirmMergeRequest {
-    pub from_account: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

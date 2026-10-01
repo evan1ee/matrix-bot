@@ -30,7 +30,7 @@ use self::briefing::BriefingService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
-use self::identity::IdentityService;
+use self::identity::{IdentityService, LinkService};
 use self::life::LifeService;
 use self::llm::LlmService;
 use self::outbox::OutboxService;
@@ -97,6 +97,7 @@ pub struct AppServices {
     pub habits: HabitService,
     pub identity: IdentityService,
     pub life: LifeService,
+    pub link: LinkService,
     pub llm: LlmService,
     pub outbox: OutboxService,
     pub portfolio: PortfolioService,
@@ -122,6 +123,9 @@ impl AppServices {
         let habits = HabitService::new(pool.clone());
         let identity = IdentityService::new(pool.clone());
         let life = LifeService::new(pool.clone());
+        // Boot wiring replaces this with the deployment's `WEB_URL` and
+        // allowlist through `with_link_config`.
+        let link = LinkService::new(pool.clone(), String::new(), Default::default());
         let llm = LlmService::new(pool.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), identity.clone());
         let reminders = ReminderService::new(pool.clone());
@@ -140,6 +144,7 @@ impl AppServices {
             habits,
             identity,
             life,
+            link,
             llm,
             outbox,
             portfolio,
@@ -150,5 +155,17 @@ impl AppServices {
             todos,
             webhooks,
         }
+    }
+
+    /// Gives the link flow the deployment's web origin (where the landing page
+    /// is served) and its signup allowlist (spec D4). Called by the
+    /// composition roots; the default has neither.
+    pub fn with_link_config(
+        mut self,
+        web_url: String,
+        signup_allowlist: std::collections::HashMap<crate::domain::channels::Channel, Vec<String>>,
+    ) -> Self {
+        self.link = self.link.with_config(web_url, signup_allowlist);
+        self
     }
 }

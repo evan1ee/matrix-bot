@@ -12,6 +12,7 @@ pub mod footprints;
 pub mod habits;
 pub mod journal;
 pub mod life;
+pub mod link;
 pub mod llm;
 pub mod llm_alert;
 pub mod mcp;

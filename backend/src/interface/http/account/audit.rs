@@ -25,19 +25,3 @@ pub async fn list_security_events(
         .await?;
     Ok(Json(events.iter().map(SecurityEvent::from).collect()))
 }
-
-use crate::domain::accounts::AccountId;
-
-/// Records that a `!link` needs the web UI to confirm a merge.
-///
-/// Held in memory rather than a table: it is a handoff between two halves of
-/// one flow, valid only until the user answers, and a stale entry should
-/// evaporate on restart rather than linger as a standing authorisation to
-/// absorb an account.
-pub async fn note_pending_merge(state: &ApiState, into: &AccountId, from: &AccountId) {
-    state
-        .pending_merges
-        .write()
-        .await
-        .insert(into.to_string(), from.to_string());
-}

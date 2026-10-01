@@ -81,15 +81,6 @@ fn routes_account() -> Router<auth::ApiState> {
             put(account::passkeys::rename_passkey).delete(account::passkeys::delete_passkey),
         )
         .route("/account/matrix", get(account::links::list_links))
-        .route("/account/matrix/link", post(account::links::start_link))
-        .route(
-            "/account/matrix/pending-merge",
-            get(account::links::pending_merge),
-        )
-        .route(
-            "/account/matrix/confirm-merge",
-            post(account::links::confirm_merge),
-        )
         .route("/account/matrix/unlink", post(account::links::unlink))
         .route("/account/sessions", get(account::sessions::list_sessions))
         .route(

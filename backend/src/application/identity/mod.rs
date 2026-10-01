@@ -6,6 +6,9 @@
 //! (spec §7.2, invariants 1-2): Matrix auto-provisions an unknown sender,
 //! every newer channel must be linked from an existing account first.
 
+mod link;
+pub use link::{LinkOutcome, LinkPreview, LinkService, LinkStart};
+
 use sqlx::PgPool;
 
 use crate::application::AppError;

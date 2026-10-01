@@ -156,14 +156,6 @@ pub struct ApiState {
     /// The origin the SPA is served from, compared against `Origin` on every
     /// state-changing request.
     pub webauthn_origin: String,
-    /// Accounts with a merge awaiting confirmation, `into -> from`.
-    ///
-    /// Written when `!link` finds the MXID already attached to an unclaimed
-    /// account holding data, and read when the web UI asks what it should be
-    /// showing. In memory rather than a table because it is a handoff between
-    /// two halves of one flow: a stale entry should evaporate on restart rather
-    /// than linger as a standing authorisation to absorb an account.
-    pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     /// When the Matrix sync loop last completed a sync, read by `/health/ready`.
     pub sync_health: crate::interface::channels::matrix::sync_health::SyncHealth,
     /// The API server's shutdown token. Long-lived responses (SSE) end on it,
@@ -236,7 +228,6 @@ impl ApiState {
             cookie_secure: false,
             trust_forwarded_for: false,
             webauthn_origin: "http://localhost:8080".to_string(),
-            pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
             ocr_config: crate::interface::chat::ocr::OcrConfig::default(),
@@ -300,7 +291,6 @@ impl ApiState {
             cookie_secure: config.cookie_secure,
             trust_forwarded_for: config.trust_forwarded_for,
             webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
-            pending_merges: handles.pending_merges,
             sync_health: handles.sync_health,
             shutdown,
             ocr_config: crate::interface::chat::ocr::OcrConfig {
@@ -488,6 +478,7 @@ mod tests {
             webauthn_origin: "https://bot.example.com".to_string(),
             cookie_secure: true,
             web_url: "https://bot.example.com".to_string(),
+            link_signup_allowlist: Default::default(),
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,

@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::env;
+
+use crate::domain::channels::Channel;
 
 const DEFAULT_STT_MODEL: &str = "sensevoice-small";
 const DEFAULT_TTS_MODEL: &str = "kokoro";
@@ -142,6 +145,34 @@ fn parse_job_workers(raw: Option<&str>) -> Result<usize> {
     }
 }
 
+/// The signup allowlist, one environment variable per channel, each a
+/// comma-separated list. Entries are trimmed, empty ones dropped, email
+/// addresses lowercased (the canonical form identities are stored in); a
+/// channel with no entries is left out of the map.
+fn parse_link_signup_allowlist(
+    get: impl Fn(&str) -> Option<String>,
+) -> HashMap<Channel, Vec<String>> {
+    [
+        (Channel::Discord, "DISCORD_ALLOWED_USERS"),
+        (Channel::Telegram, "TELEGRAM_ALLOWED_USERS"),
+        (Channel::Email, "EMAIL_ALLOWED_SENDERS"),
+    ]
+    .into_iter()
+    .filter_map(|(channel, name)| {
+        let entries: Vec<String> = get(name)?
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| match channel {
+                Channel::Email => entry.to_lowercase(),
+                _ => entry.to_owned(),
+            })
+            .collect();
+        (!entries.is_empty()).then_some((channel, entries))
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub homeserver: String,
@@ -191,6 +222,11 @@ pub struct Config {
     /// Defaults to the WebAuthn origin, which is by definition where the SPA
     /// is served from — so it is right without being configured twice.
     pub web_url: String,
+    /// Identities that may register a new account from a link token (spec D4),
+    /// per channel: `DISCORD_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`,
+    /// `EMAIL_ALLOWED_SENDERS` (comma-separated). Absent channels and unset
+    /// variables mean nobody may; the values are never logged.
+    pub link_signup_allowlist: HashMap<Channel, Vec<String>>,
     /// Whether OCR image text recognition is enabled.
     pub ocr_enabled: bool,
     /// Base URL of the inference server's OCR endpoint.
@@ -318,6 +354,8 @@ impl Config {
 
         let web_url = env::var("WEB_URL").unwrap_or_else(|_| webauthn_origin.clone());
 
+        let link_signup_allowlist = parse_link_signup_allowlist(|name| env::var(name).ok());
+
         let ocr_enabled = env::var("OCR_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(true);
@@ -395,6 +433,7 @@ impl Config {
             webauthn_origin,
             cookie_secure,
             web_url,
+            link_signup_allowlist,
             ocr_enabled,
             ocr_base_url,
             voice_enabled,
@@ -497,6 +536,7 @@ impl Config {
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            link_signup_allowlist: HashMap::new(),
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
@@ -551,6 +591,32 @@ mod tests {
     }
 
     #[test]
+    fn the_link_signup_allowlist_reads_one_env_name_per_channel() {
+        use crate::domain::channels::Channel;
+        let env = |name: &str| match name {
+            "DISCORD_ALLOWED_USERS" => Some(" 111 , 222,, ".to_string()),
+            "TELEGRAM_ALLOWED_USERS" => Some("42".to_string()),
+            "EMAIL_ALLOWED_SENDERS" => Some("Evan@Example.com, ,b@x.org".to_string()),
+            _ => None,
+        };
+        let list = parse_link_signup_allowlist(env);
+        assert_eq!(list[&Channel::Discord], vec!["111", "222"]);
+        assert_eq!(list[&Channel::Telegram], vec!["42"]);
+        assert_eq!(
+            list[&Channel::Email],
+            vec!["evan@example.com", "b@x.org"],
+            "email entries are lowercased"
+        );
+        assert!(!list.contains_key(&Channel::Matrix));
+    }
+
+    #[test]
+    fn the_link_signup_allowlist_is_empty_when_unset_or_blank() {
+        assert!(parse_link_signup_allowlist(|_| None).is_empty());
+        assert!(parse_link_signup_allowlist(|_| Some(" , ,".to_string())).is_empty());
+    }
+
+    #[test]
     fn test_parse_job_workers() {
         assert_eq!(parse_job_workers(None).unwrap(), DEFAULT_JOB_WORKERS);
         assert_eq!(parse_job_workers(Some("8")).unwrap(), 8);
@@ -593,6 +659,7 @@ mod tests {
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            link_signup_allowlist: HashMap::new(),
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,

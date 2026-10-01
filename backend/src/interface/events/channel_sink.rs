@@ -1,4 +1,4 @@
-//! Delivers outbox copies (webhook alerts) through the channel registry. The
+//! Delivers outbox copies (webhook alerts, link confirmations) through the channel registry. The
 //! checks are the old Matrix sink's, now the adapter's `authorize_delivery`
 //! (joined, and the owner authorized, at delivery time), and every error is retryable (frozen). The
 //! delivery id travels as the message's idempotency key, which Matrix uses as
@@ -10,11 +10,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::outbox::ClaimedDelivery;
+use crate::domain::channels::Channel;
 use crate::domain::events::{Destination, WebhookAlert};
 use crate::events::DeliverySink;
 use crate::interface::channels::adapter::ChannelError;
 use crate::interface::channels::message::{Content, OutgoingMessage, Reply, Target, Visibility};
 use crate::interface::channels::registry::ChannelRegistry;
+use crate::utils::html::html_escape;
 
 pub struct ChannelSink {
     registry: Arc<ChannelRegistry>,
@@ -41,8 +43,6 @@ impl DeliverySink for ChannelSink {
         else {
             return Err(format!("Unsupported destination: {}", delivery.destination));
         };
-        let alert: WebhookAlert = serde_json::from_value(delivery.event.json["payload"].clone())
-            .map_err(|e| format!("Unreadable webhook alert: {e}"))?;
         let channel = address
             .channel()
             .ok_or_else(|| format!("Unsupported destination: {}", delivery.destination))?;
@@ -50,20 +50,34 @@ impl DeliverySink for ChannelSink {
             .registry
             .get(channel)
             .ok_or_else(|| format!("{channel} is not configured"))?;
+        let payload = &delivery.event.json["payload"];
 
-        // The webhook owner must be authorized for the conversation at delivery time.
-        adapter
-            .authorize_delivery(&delivery.event.account_id, &address)
-            .await?;
+        let content = match delivery.event.event_type.as_str() {
+            "WebhookTriggered" => {
+                let alert: WebhookAlert = serde_json::from_value(payload.clone())
+                    .map_err(|e| format!("Unreadable webhook alert: {e}"))?;
+                // The webhook owner chose the room, so they must be authorized
+                // for it at delivery time.
+                adapter
+                    .authorize_delivery(&delivery.event.account_id, &address)
+                    .await?;
+                Content {
+                    plain: alert.plain_body,
+                    html: Some(alert.html_body),
+                    ..Content::default()
+                }
+            }
+            // No `authorize_delivery` (R82): the destination is not owner-chosen
+            // but the direct conversation the linking identity itself wrote to,
+            // recorded by the service when it minted the token.
+            "IdentityLinked" => identity_linked_content(payload)?,
+            other => return Err(format!("Unsupported event type: {other}")),
+        };
 
         let mut message = OutgoingMessage::to(
             Target::Conversation(address),
             Reply {
-                content: Content {
-                    plain: alert.plain_body,
-                    html: Some(alert.html_body),
-                    ..Content::default()
-                },
+                content,
                 visibility: Visibility::Normal,
             },
         );
@@ -80,6 +94,19 @@ impl DeliverySink for ChannelSink {
                 other => other.to_string(),
             })
     }
+}
+
+/// "✓ <Channel> account linked. …", from the event's payload.
+fn identity_linked_content(payload: &serde_json::Value) -> Result<Content, String> {
+    let channel: Channel = serde_json::from_value(payload["channel"].clone())
+        .map_err(|e| format!("Unreadable identity link: {e}"))?;
+    let label = channel.label();
+    let sentence = " account linked. Your workspace is now available here.";
+    Ok(Content {
+        plain: format!("✓ {label}{sentence}"),
+        html: Some(format!("✓ {}{sentence}", html_escape(label))),
+        ..Content::default()
+    })
 }
 
 #[cfg(test)]
@@ -187,6 +214,75 @@ mod tests {
                 .await;
             assert!(out.is_err(), "{destination}: {out:?}");
         }
+        assert!(adapter.sent().is_empty());
+    }
+
+    fn linked_delivery(id: i64, destination: &str, channel: Channel) -> ClaimedDelivery {
+        let owner = AccountId::from_seed("acct_sink_linked");
+        let event = SystemEvent::IdentityLinked {
+            owner_id: owner,
+            channel,
+            user_id: "42".to_string(),
+            conversation: "telegram:42".to_string(),
+        };
+        ClaimedDelivery {
+            id: DeliveryId(id),
+            destination: destination.to_string(),
+            attempts: 1,
+            max_attempts: 10,
+            event: StoredEvent {
+                id: EventId(9),
+                account_id: owner,
+                event_type: "IdentityLinked".to_string(),
+                json: serde_json::to_value(&event).unwrap(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn an_identity_linked_confirmation_is_sent_to_the_dm_that_asked() {
+        // `unauthorized()`: the confirmation is not owner-chosen, so the
+        // webhook room check must not apply to it (R82).
+        let adapter = Arc::new(FakeAdapter::connected(Channel::Telegram).unauthorized());
+
+        let out = sink(&adapter)
+            .deliver(&linked_delivery(5, "telegram:42", Channel::Telegram))
+            .await;
+
+        assert_eq!(out, Ok(()));
+        let sent = adapter.sent();
+        assert_eq!(sent.len(), 1);
+        assert!(matches!(
+            &sent[0].target,
+            Target::Conversation(ConversationAddress::Telegram(42))
+        ));
+        assert_eq!(
+            sent[0].content.plain,
+            "✓ Telegram account linked. Your workspace is now available here."
+        );
+        assert_eq!(
+            sent[0].content.html.as_deref(),
+            Some("✓ Telegram account linked. Your workspace is now available here.")
+        );
+        assert_eq!(sent[0].idempotency_key.as_deref(), Some("outbox-5"));
+        assert!(!sent[0].join_if_needed);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_identity_linked_payload_is_an_error() {
+        let adapter = Arc::new(FakeAdapter::connected(Channel::Telegram));
+        let mut delivery = linked_delivery(6, "telegram:42", Channel::Telegram);
+        delivery.event.json = serde_json::json!({"type": "IdentityLinked", "payload": {}});
+        assert!(sink(&adapter).deliver(&delivery).await.is_err());
+        assert!(adapter.sent().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_event_type_the_sink_does_not_render_is_an_error() {
+        let adapter = Arc::new(FakeAdapter::connected(Channel::Telegram));
+        let mut delivery = linked_delivery(7, "telegram:42", Channel::Telegram);
+        delivery.event.event_type = "TodoCreated".to_string();
+        assert!(sink(&adapter).deliver(&delivery).await.is_err());
         assert!(adapter.sent().is_empty());
     }
 

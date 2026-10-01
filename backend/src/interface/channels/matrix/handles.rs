@@ -1,12 +1,11 @@
 //! The state the API server and the Matrix bot share.
 //!
-//! Both halves need the same three cells, and they are written from one side
-//! and read from the other: the bot's login path fills in its access token and
-//! client, which request handlers borrow to serve `/rooms` and the media proxy;
-//! `!link` records a pending merge that the web UI later confirms.
+//! Both halves need the same cells, and they are written from one side and
+//! read from the other: the bot's login path fills in its access token and
+//! client, which request handlers borrow to serve `/rooms` and the media proxy.
 //!
 //! Created once in `main`, cloned into both. They used to be created *by* the
-//! API server and returned as a bare three-tuple for `main` to thread onward as
+//! API server and returned as a bare tuple for `main` to thread onward as
 //! positional `Option`s, which made the API server look like their owner when
 //! it is only one of two users.
 
@@ -15,7 +14,6 @@ use tokio::sync::RwLock;
 
 use matrix_sdk::Client;
 
-use crate::interface::channels::matrix::linking::PendingMerges;
 use crate::interface::channels::matrix::live_client::MatrixHandle;
 use crate::interface::channels::matrix::sync_health::SyncHealth;
 
@@ -29,12 +27,6 @@ pub struct BotHandles {
     pub access_token: Arc<RwLock<Option<String>>>,
     /// The bot's Matrix SDK client, under the same ownership rule.
     pub client: Arc<RwLock<Option<Client>>>,
-    /// Accounts with a merge awaiting confirmation, `into -> from`.
-    ///
-    /// In memory rather than a table because it is a handoff between two halves
-    /// of one flow: a stale entry should evaporate on restart rather than
-    /// linger as a standing authorisation to absorb an account.
-    pub pending_merges: Arc<PendingMerges>,
     /// When the sync loop last completed a sync, read by `/health/ready`.
     pub sync_health: SyncHealth,
     /// This generation's client for the job handlers; empty while disconnected.

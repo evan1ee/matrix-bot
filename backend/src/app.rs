@@ -153,9 +153,10 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         }
         db = Database::connect(&config.database_url, config.db_max_connections) => db?,
     };
-    let services = AppServices::new(&db.pool);
+    let services = AppServices::new(&db.pool)
+        .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone());
     // Built once and cloned into every reconnect generation, so `SyncHealth`
-    // and the pending merges survive a Matrix reconnect.
+    // survives a Matrix reconnect.
     let handles = BotHandles::default();
     let modules = build_modules(&config).await;
     check_unique(&[Channel::Matrix])?;
@@ -169,9 +170,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // registry is built with `new_cyclic` (A5). Uniqueness was checked just
     // above, which is what makes the infallible constructor sound.
     let channels = Arc::new_cyclic(|weak| {
-        // TEMPORARY: Task 9 deletes the web-minted `!link` flow and the pending-merge map.
-        let inbound = Inbound::new(services.clone(), db.clone(), modules, weak.clone())
-            .with_pending_merges(handles.pending_merges.clone());
+        let inbound = Inbound::new(services.clone(), db.clone(), modules, weak.clone());
         matrix.attach_inbound(Arc::new(inbound));
         ChannelRegistry::from_unique(vec![matrix.clone() as Arc<dyn ChannelAdapter>])
     });

@@ -195,9 +195,7 @@ mod step_up_tests {
     /// the only thing keeping "sensitive actions need a recent passkey" true
     /// rather than aspirational.
     const SENSITIVE: &[(&str, &str)] = &[
-        ("POST", "/api/v1/account/matrix/link"),
         ("POST", "/api/v1/account/matrix/unlink"),
-        ("POST", "/api/v1/account/matrix/confirm-merge"),
         ("POST", "/api/v1/account/sessions/revoke-others"),
         ("DELETE", "/api/v1/account/sessions/some-id"),
         ("POST", "/api/v1/account/recovery-codes"),
@@ -389,6 +387,7 @@ mod server_shutdown_tests {
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            link_signup_allowlist: Default::default(),
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,

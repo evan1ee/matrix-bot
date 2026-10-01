@@ -3,18 +3,18 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-mod merge;
+pub(crate) mod merge;
 mod passkeys;
 mod principal;
 use merge::MergeService;
 
 use crate::application::AppError;
 use crate::domain::accounts::{
-    Account, AccountId, AccountsError, LinkOutcome, MaturedRecovery, MergeOutcome, MergePreview,
-    SecurityEvent, SecurityEventKind, Session,
+    Account, AccountId, AccountsError, MaturedRecovery, MergeOutcome, MergePreview, SecurityEvent,
+    SecurityEventKind, Session,
 };
 use crate::infrastructure::postgres::repositories::accounts::{
-    core, linking, recovery, security_events, sessions,
+    core, recovery, security_events, sessions,
 };
 
 impl From<AccountsError> for AppError {
@@ -158,26 +158,6 @@ impl AccountService {
 
     pub async fn list_sessions(&self, account_id: &AccountId) -> Result<Vec<Session>, AppError> {
         Ok(sessions::list_for_account(&self.pool, account_id).await?)
-    }
-
-    // --- Linking ---
-
-    pub async fn issue_link_challenge(&self, account_id: &AccountId) -> Result<String, AppError> {
-        Ok(linking::issue(&self.pool, account_id).await?)
-    }
-
-    pub async fn claim_link(
-        &self,
-        code: &str,
-        mxid: &str,
-        is_direct: bool,
-    ) -> Result<LinkOutcome, AppError> {
-        let outcome = linking::claim(&self.pool, code, mxid, is_direct).await?;
-        if let LinkOutcome::Linked { ref account_id } = outcome {
-            self.record_security_event(account_id, SecurityEventKind::MatrixLinked, Some(mxid))
-                .await;
-        }
-        Ok(outcome)
     }
 
     // --- Recovery ---
@@ -360,58 +340,5 @@ mod tests {
                 Some(format!("{} rows", outcome.moved.total()))
             )]
         );
-    }
-
-    #[tokio::test]
-    async fn claim_link_records_matrix_linked_once_on_success_only() {
-        let service = service().await;
-        let account = service.create("evan", STATUS_ACTIVE).await.unwrap();
-
-        // Refused outside a DM: the code is burned and nothing is recorded.
-        let code = service.issue_link_challenge(&account).await.unwrap();
-        let outcome = service.claim_link(&code, "@evan:mbm.one", false).await;
-        assert_eq!(outcome.unwrap(), LinkOutcome::NotADirectMessage);
-        assert_eq!(
-            service
-                .claim_link(&code, "@evan:mbm.one", true)
-                .await
-                .unwrap(),
-            LinkOutcome::UnknownCode,
-            "the code was burned by the refusal"
-        );
-        assert!(audit(&service, &account).await.is_empty());
-
-        let code = service.issue_link_challenge(&account).await.unwrap();
-        let outcome = service.claim_link(&code, "@evan:mbm.one", true).await;
-        assert_eq!(
-            outcome.unwrap(),
-            LinkOutcome::Linked {
-                account_id: account
-            }
-        );
-        assert_eq!(
-            audit(&service, &account).await,
-            vec![(
-                "matrix_linked".to_string(),
-                Some("@evan:mbm.one".to_string())
-            )]
-        );
-    }
-
-    #[tokio::test]
-    async fn claiming_an_mxid_on_a_claimed_account_records_nothing() {
-        let service = service().await;
-        let theirs = service.create("theirs", STATUS_ACTIVE).await.unwrap();
-        let held = service.issue_link_challenge(&theirs).await.unwrap();
-        service
-            .claim_link(&held, "@evan:mbm.one", true)
-            .await
-            .unwrap();
-
-        let mine = service.create("mine", STATUS_ACTIVE).await.unwrap();
-        let code = service.issue_link_challenge(&mine).await.unwrap();
-        let outcome = service.claim_link(&code, "@evan:mbm.one", true).await;
-        assert_eq!(outcome.unwrap(), LinkOutcome::AlreadyLinked);
-        assert!(audit(&service, &mine).await.is_empty());
     }
 }

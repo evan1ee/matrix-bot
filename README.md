@@ -91,7 +91,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
-| **Account** | `!link <code>`<br>`!recover` | Link a Matrix account to your web identity, initiate delayed recovery |
+| **Account** | `!link`<br>`!recover` | Get a one-time link that connects this chat account to your web identity, initiate delayed recovery |
 
 `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
 deliberately refused on Matrix and point at the web app (see *Accounts and security*).

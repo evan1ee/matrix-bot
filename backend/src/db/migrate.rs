@@ -212,7 +212,6 @@ mod tests {
             ("platform_identities", "account_id"),
             ("webauthn_credentials", "account_id"),
             ("sessions", "account_id"),
-            ("matrix_link_challenges", "account_id"),
             ("passkey_enrollment_tokens", "account_id"),
             ("recovery_codes", "account_id"),
             ("recovery_requests", "account_id"),

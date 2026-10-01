@@ -473,6 +473,21 @@ pub async fn delivery_probe_for(
         .collect())
 }
 
+/// Test-only: the destination keys of one account's deliveries, oldest first.
+#[cfg(test)]
+pub async fn delivery_destinations_for(
+    ex: impl PgExecutor<'_>,
+    account: &AccountId,
+) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar!(
+        "SELECT d.destination FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id
+         WHERE e.account_id = $1 ORDER BY d.id",
+        account.as_uuid()
+    )
+    .fetch_all(ex)
+    .await
+}
+
 #[cfg(test)]
 pub async fn event_types_for(
     ex: impl PgExecutor<'_>,

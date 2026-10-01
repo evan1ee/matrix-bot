@@ -10,6 +10,7 @@ pub mod habits;
 pub mod identities;
 pub mod jobs;
 pub mod life;
+pub mod link_tokens;
 pub mod llm;
 pub mod mcp;
 pub mod outbox;

@@ -17,8 +17,6 @@ use super::registry::ChannelRegistry;
 use crate::application::identity::Resolution;
 use crate::application::AppServices;
 use crate::db::Database;
-use crate::domain::channels::Channel;
-use crate::interface::channels::matrix::linking::PendingMerges;
 use crate::interface::chat::{ModuleRegistry, ParsedCommand};
 use crate::llm::progress::ProgressSink;
 
@@ -53,10 +51,6 @@ pub struct Inbound {
     modules: Arc<ModuleRegistry>,
     /// Weak: adapters own the pipeline and the registry owns the adapters (A5).
     registry: Weak<ChannelRegistry>,
-    // TEMPORARY: Task 9 deletes the web-minted flow and this field.
-    /// Where the Matrix `!link` flow records a merge awaiting confirmation in
-    /// the web UI (R79); `None` records none.
-    pending_merges: Option<Arc<PendingMerges>>,
 }
 
 impl Inbound {
@@ -71,15 +65,7 @@ impl Inbound {
             db,
             modules,
             registry,
-            pending_merges: None,
         }
-    }
-
-    // TEMPORARY: Task 9 deletes the web-minted flow and this setter.
-    /// Gives the Matrix `link` branch the pending-merge map shared with the API.
-    pub fn with_pending_merges(mut self, pending_merges: Arc<PendingMerges>) -> Self {
-        self.pending_merges = Some(pending_merges);
-        self
     }
 
     pub async fn handle(
@@ -91,12 +77,11 @@ impl Inbound {
         // `link` precedes identity resolution, and that ordering is
         // load-bearing: resolving first would provision an empty account for
         // an unknown sender and turn every first link into a merge of nothing.
-        if let InboundText::Command {
-            command, raw_args, ..
-        } = &text
-        {
+        if let InboundText::Command { command, .. } = &text {
             if command.eq_ignore_ascii_case("link") {
-                return self.link(msg, raw_args).await;
+                return InboundOutcome::Replied(
+                    crate::interface::chat::link::handle_link(&self.services, msg).await,
+                );
             }
         }
 
@@ -136,25 +121,6 @@ impl Inbound {
                 InboundOutcome::Replied(Reply::html(COMMAND_PANIC_REPLY))
             }
         }
-    }
-
-    async fn link(&self, msg: &IncomingMessage, raw_args: &str) -> InboundOutcome {
-        if msg.channel != Channel::Matrix {
-            // Task 9: the channel-neutral `link` flow replaces this; no other channel exists yet.
-            return InboundOutcome::Ignored;
-        }
-        // The pending-merge map is a Matrix-flow detail owned by `BotHandles`;
-        // Task 9 removes the flow together with the map.
-        let reply = crate::interface::channels::matrix::linking::handle_link_command(
-            &self.services.accounts,
-            &self.db,
-            raw_args,
-            msg.sender.user_id().as_str(),
-            msg.is_direct,
-            self.pending_merges.as_deref(),
-        )
-        .await;
-        InboundOutcome::Replied(Reply::html(reply))
     }
 }
 
@@ -204,6 +170,7 @@ mod tests {
     use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
     use crate::infrastructure::postgres::repositories::accounts::core;
     use crate::infrastructure::postgres::repositories::identities;
+    use crate::infrastructure::postgres::repositories::link_tokens;
     use crate::interface::channels::fake::FakeAdapter;
     use crate::interface::channels::message::{IncomingMessage, MessageRef, Reply};
     use crate::interface::channels::registry::ChannelRegistry;
@@ -533,64 +500,62 @@ mod tests {
             );
         }
     }
-    /// R79: the Matrix `!link` flow records a merge awaiting confirmation in the
-    /// map `BotHandles` shares with the web UI; over the pipeline it must still.
     #[tokio::test]
-    async fn the_matrix_link_path_records_a_pending_merge_like_the_old_flow() {
-        use crate::domain::todos::{NewTodo, TodoPriority};
-        use crate::infrastructure::postgres::repositories::todos as todo_repo;
+    async fn link_in_a_direct_message_from_an_unlinked_telegram_identity_mints_a_token() {
+        let (inbound, pool, _reg) = pipeline_with(StubModule::claiming("todo")).await;
+        let before = core::count(&pool).await.unwrap();
+        let msg = incoming(
+            Channel::Telegram,
+            ConversationAddress::Telegram(9),
+            tg("9"),
+            true,
+        );
+        let out = inbound.handle(&msg, cmd("link", ""), None).await;
+        assert_reply_contains(out, "/link?token=");
+        assert_eq!(core::count(&pool).await.unwrap(), before);
+        assert_eq!(link_tokens::count(&pool).await.unwrap(), 1);
+    }
 
-        let (_plain, pool, registry) = pipeline_with(StubModule::claiming("todo")).await;
-        let pending = Arc::new(PendingMerges::default());
-        let inbound = Inbound::new(
-            AppServices::new(&pool),
-            Database { pool: pool.clone() },
-            Arc::new(ModuleRegistry::new()),
-            Arc::downgrade(&registry),
-        )
-        .with_pending_merges(pending.clone());
+    #[tokio::test]
+    async fn link_in_a_group_is_refused_for_every_channel_and_mints_nothing() {
+        let (inbound, pool, _reg) = pipeline_with(StubModule::claiming("todo")).await;
+        let telegram = incoming(
+            Channel::Telegram,
+            ConversationAddress::Telegram(-9),
+            tg("9"),
+            false,
+        );
+        assert_reply_contains(
+            inbound.handle(&telegram, cmd("link", ""), None).await,
+            "direct message",
+        );
+        let matrix = incoming(
+            Channel::Matrix,
+            ConversationAddress::Matrix("!room:x".into()),
+            mx("@evan:mbm.one"),
+            false,
+        );
+        assert_reply_contains(
+            inbound.handle(&matrix, cmd("link", ""), None).await,
+            "direct message",
+        );
+        assert_eq!(link_tokens::count(&pool).await.unwrap(), 0);
+    }
 
-        let services = AppServices::new(&pool);
-        let old = services
-            .identity
-            .provision_matrix_for_test("@evan:mbm.one")
-            .await;
-        for text in ["one", "two", "three"] {
-            todo_repo::create(
-                &pool,
-                &old,
-                &NewTodo {
-                    room_id: "!r:x".to_string(),
-                    sender_name: "evan".to_string(),
-                    text: text.to_string(),
-                    priority: TodoPriority::Medium,
-                    due_at: None,
-                    remind_before_minutes: None,
-                    remind_room_id: None,
-                },
-            )
-            .await
-            .unwrap();
-        }
-        let new = services
-            .accounts
-            .create("web", STATUS_ACTIVE)
-            .await
-            .unwrap();
-        let code = services.accounts.issue_link_challenge(&new).await.unwrap();
-
+    /// The old `!link <code>` accepted a code from the web app; now any
+    /// argument is ignored and the sender is not provisioned either.
+    #[tokio::test]
+    async fn matrix_link_ignores_arguments_and_does_not_provision() {
+        let (inbound, pool, _reg) = pipeline_with(StubModule::claiming("todo")).await;
+        let before = core::count(&pool).await.unwrap();
         let msg = incoming(
             Channel::Matrix,
             ConversationAddress::Matrix("!dm:x".into()),
             mx("@evan:mbm.one"),
             true,
         );
-        let out = inbound.handle(&msg, cmd("link", &code), None).await;
-
-        assert_reply_contains(out, "Nothing has been changed");
-        assert_eq!(
-            pending.read().await.get(&new.to_string()),
-            Some(&old.to_string())
-        );
+        let out = inbound.handle(&msg, cmd("link", "ABCD-1234"), None).await;
+        assert_reply_contains(out, "/link?token=");
+        assert_eq!(core::count(&pool).await.unwrap(), before);
     }
 }

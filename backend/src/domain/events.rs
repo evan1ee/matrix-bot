@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
-use crate::domain::channels::ConversationAddress;
+use crate::domain::channels::{Channel, ConversationAddress};
 use crate::domain::finance::{Category, Transaction};
 use crate::domain::portfolio::{Holding, PortfolioAuditEntry, PriceAlert};
 use crate::domain::recurring_bills::RecurringBill;
@@ -150,6 +150,15 @@ pub enum SystemEvent {
         delivered_at: String,
         summary: String,
     },
+    /// A platform identity was connected to the account. Delivered back to the
+    /// conversation that asked for the link, as "✓ linked".
+    IdentityLinked {
+        owner_id: AccountId,
+        channel: Channel,
+        user_id: String,
+        /// Storage-form address of the conversation that started the link.
+        conversation: String,
+    },
 }
 
 impl SystemEvent {
@@ -209,6 +218,7 @@ impl SystemEvent {
             SystemEvent::BookmarkUpdated(x) => &x.owner_id,
             SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
             SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id,
+            SystemEvent::IdentityLinked { owner_id, .. } => owner_id,
         }
     }
 
@@ -264,6 +274,7 @@ impl SystemEvent {
             SystemEvent::BookmarkUpdated(_) => "BookmarkUpdated",
             SystemEvent::BookmarkDeleted { .. } => "BookmarkDeleted",
             SystemEvent::MorningBriefingSent { .. } => "MorningBriefingSent",
+            SystemEvent::IdentityLinked { .. } => "IdentityLinked",
         }
     }
 
@@ -274,6 +285,14 @@ impl SystemEvent {
                 vec![Destination::Conversation(ConversationAddress::Matrix(
                     alert.room_id.clone(),
                 ))]
+            }
+            // Back to the conversation that asked; the web has nothing to
+            // deliver to and an unreadable address is not guessed at.
+            SystemEvent::IdentityLinked { conversation, .. } => {
+                match ConversationAddress::parse_storage(conversation) {
+                    Ok(ConversationAddress::Web) | Err(_) => Vec::new(),
+                    Ok(address) => vec![Destination::Conversation(address)],
+                }
             }
             _ => Vec::new(),
         }
@@ -700,12 +719,18 @@ mod tests {
                 delivered_at: s(),
                 summary: s(),
             },
+            SystemEvent::IdentityLinked {
+                owner_id: o,
+                channel: crate::domain::channels::Channel::Telegram,
+                user_id: "42".to_string(),
+                conversation: "telegram:42".to_string(),
+            },
         ]
     }
 
     /// Bump when a variant is added; `event_type` and `owner_id` have no
     /// wildcard, so the compiler already forces their arms.
-    const VARIANT_COUNT: usize = 48;
+    const VARIANT_COUNT: usize = 49;
 
     #[test]
     fn event_type_matches_the_serde_tag_for_every_variant() {
@@ -759,6 +784,40 @@ mod tests {
                 "!r:1".to_string()
             ))]
         );
+    }
+
+    #[test]
+    fn an_identity_link_confirmation_goes_to_the_conversation_it_was_started_in() {
+        use crate::domain::channels::Channel;
+        let owner = AccountId::from_seed("acct_alice");
+        let linked = |conversation: &str, channel, user_id: &str| SystemEvent::IdentityLinked {
+            owner_id: owner,
+            channel,
+            user_id: user_id.to_string(),
+            conversation: conversation.to_string(),
+        };
+        let event = linked("telegram:42", Channel::Telegram, "42");
+        assert_eq!(event.owner_id(), &owner);
+        assert_eq!(event.event_type(), "IdentityLinked");
+        assert_eq!(
+            event.destinations(),
+            vec![Destination::Conversation(ConversationAddress::Telegram(42))]
+        );
+        // A bare Matrix room id is the storage form (R71); the key is prefixed.
+        let matrix = linked("!dm:x", Channel::Matrix, "@evan:x").destinations();
+        assert_eq!(matrix.len(), 1);
+        assert_eq!(matrix[0].as_key(), "matrix:!dm:x");
+        // Nothing to deliver to the web UI, and garbage is not guessed at.
+        assert!(linked("web", Channel::Matrix, "@evan:x")
+            .destinations()
+            .is_empty());
+        assert!(linked("???", Channel::Matrix, "@evan:x")
+            .destinations()
+            .is_empty());
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "IdentityLinked");
+        assert_eq!(json["payload"]["channel"], "telegram");
+        assert_eq!(json["payload"]["conversation"], "telegram:42");
     }
 
     #[test]

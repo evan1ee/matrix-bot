@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::accounts::{AccountId, SecurityEvent, SecurityEventKind};
+use crate::domain::channels::{Channel, PlatformIdentity};
 
 struct SecurityEventRow {
     id: i64,
@@ -47,6 +48,30 @@ pub async fn record(
             "Could not record security event"
         );
     }
+}
+
+/// The account an identity was last unlinked from, if it ever was.
+///
+/// Two audit shapes are honoured: `identity_unlinked` (detail
+/// `<platform>:<user_id>`) and, for Matrix only, the historic `matrix_unlinked`
+/// rows whose detail is the bare MXID (A3).
+pub async fn last_unlinked_from(
+    conn: impl sqlx::PgExecutor<'_>,
+    identity: &PlatformIdentity,
+) -> Result<Option<AccountId>, sqlx::Error> {
+    let user_id = identity.user_id().as_str();
+    let account = sqlx::query_scalar!(
+        r#"SELECT account_id AS "account_id: uuid::Uuid" FROM security_events
+           WHERE (kind = 'matrix_unlinked' AND $3 AND detail = $1)
+              OR (kind = 'identity_unlinked' AND detail = $2)
+           ORDER BY id DESC LIMIT 1"#,
+        user_id,
+        format!("{}:{user_id}", identity.channel()),
+        identity.channel() == Channel::Matrix,
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(account.map(AccountId::from_uuid))
 }
 
 pub async fn list(

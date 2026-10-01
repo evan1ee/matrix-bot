@@ -10,7 +10,6 @@ pub mod handler;
 pub mod handles;
 pub mod inbound;
 pub mod invite;
-pub mod linking;
 pub mod live_client;
 pub mod media;
 pub mod modules;

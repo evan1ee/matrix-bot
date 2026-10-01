@@ -87,10 +87,10 @@ impl BotModule for AccountModule {
         vec![
             CommandHelp {
                 name: "link".to_string(),
-                usage: "!link <code>".to_string(),
+                usage: "!link".to_string(),
                 description: "Attach this Matrix account to your web account. \
-                              Get a code from the web app, then send it here in a \
-                              direct message."
+                              Send it in a direct message and open the link I reply \
+                              with."
                     .to_string(),
             },
             CommandHelp {
@@ -355,6 +355,20 @@ mod tests {
     use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::domain::channels::Channel;
     use crate::infrastructure::postgres::repositories::accounts as repo;
+
+    async fn bind_matrix(
+        pool: &sqlx::PgPool,
+        account: &crate::domain::accounts::AccountId,
+        mxid: &str,
+    ) {
+        crate::infrastructure::postgres::repositories::identities::bind(
+            pool,
+            account,
+            &crate::domain::channels::PlatformIdentity::matrix(mxid).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
 
     async fn setup() -> (Database, AppServices) {
         let pool = crate::db::pool::test_pool().await;
@@ -728,12 +742,8 @@ mod tests {
             .await
             .unwrap();
 
-        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
-            .await
-            .unwrap();
-        repo::linking::link(&db.pool, &account, "@evan:other.org")
-            .await
-            .unwrap();
+        bind_matrix(&db.pool, &account, "@evan:mbm.one").await;
+        bind_matrix(&db.pool, &account, "@evan:other.org").await;
 
         let session = services
             .accounts
@@ -793,9 +803,7 @@ mod tests {
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
-        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
-            .await
-            .unwrap();
+        bind_matrix(&db.pool, &account, "@evan:mbm.one").await;
         services
             .accounts
             .add_passkey(&account, "pk1", "{}", "MacBook")

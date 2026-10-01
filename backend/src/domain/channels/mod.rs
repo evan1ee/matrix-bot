@@ -18,6 +18,9 @@
 //! Everything here is pure and synchronous; adapters validate raw platform
 //! input through these constructors before it reaches a service.
 
+mod link;
+pub use link::{decide_link, LinkDecision, LINK_TOKEN_TTL};
+
 use std::fmt;
 use std::str::FromStr;
 
@@ -43,6 +46,16 @@ pub enum Channel {
 }
 
 impl Channel {
+    /// The name shown to people ("Telegram"), as opposed to the storage key.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Matrix => "Matrix",
+            Self::Discord => "Discord",
+            Self::Telegram => "Telegram",
+            Self::Email => "Email",
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Matrix => "matrix",

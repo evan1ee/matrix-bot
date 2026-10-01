@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT platform, platform_user_id, display_name, conversation, expires_at, consumed_at\n         FROM link_tokens WHERE token_hash = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "platform"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "platform_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "conversation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "conversation"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "consumed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "link_tokens",
+            "name": "consumed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "29ff1e23eaa5248c31907b44ff848c99260058819430ec3c199cdd3351fea8b1"
+}
