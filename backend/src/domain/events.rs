@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
+use crate::domain::channels::ConversationAddress;
 use crate::domain::finance::{Category, Transaction};
 use crate::domain::portfolio::{Holding, PortfolioAuditEntry, PriceAlert};
 use crate::domain::recurring_bills::RecurringBill;
@@ -270,7 +271,9 @@ impl SystemEvent {
     pub fn destinations(&self) -> Vec<Destination> {
         match self {
             SystemEvent::WebhookTriggered(alert) => {
-                vec![Destination::MatrixRoom(alert.room_id.clone())]
+                vec![Destination::Conversation(ConversationAddress::Matrix(
+                    alert.room_id.clone(),
+                ))]
             }
             _ => Vec::new(),
         }
@@ -307,22 +310,25 @@ impl std::fmt::Display for DeliveryId {
 /// destination: every instance pushes committed events to its own clients.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Destination {
-    MatrixRoom(String),
+    Conversation(ConversationAddress),
 }
 
 impl Destination {
-    const MATRIX: &'static str = "matrix:";
-
-    /// The `outbox_deliveries.destination` value.
+    /// The `outbox_deliveries.destination` value: the conversation's
+    /// destination form (`matrix:!room:server`, `telegram:42`), so rows written
+    /// before other channels existed parse unchanged. Web has no destination
+    /// form; its key is the storage spelling, which `parse` refuses, so such a
+    /// row is failed by the sink rather than silently dropped.
     pub fn as_key(&self) -> String {
         match self {
-            Self::MatrixRoom(room) => format!("{}{room}", Self::MATRIX),
+            Self::Conversation(address) => address
+                .to_destination()
+                .unwrap_or_else(|| address.to_storage()),
         }
     }
 
     pub fn parse(key: &str) -> Option<Self> {
-        let room = key.strip_prefix(Self::MATRIX)?;
-        (!room.is_empty()).then(|| Self::MatrixRoom(room.to_string()))
+        ConversationAddress::parse_destination(key).map(Self::Conversation)
     }
 }
 
@@ -749,17 +755,33 @@ mod tests {
             .is_empty());
         assert_eq!(
             SystemEvent::WebhookTriggered(alert("!r:1")).destinations(),
-            vec![Destination::MatrixRoom("!r:1".to_string())]
+            vec![Destination::Conversation(ConversationAddress::Matrix(
+                "!r:1".to_string()
+            ))]
         );
     }
 
     #[test]
+    fn legacy_matrix_destination_keys_still_parse() {
+        let d = Destination::parse("matrix:!abc:mbm.one").unwrap();
+        assert_eq!(
+            d,
+            Destination::Conversation(ConversationAddress::Matrix("!abc:mbm.one".into()))
+        );
+        assert_eq!(d.as_key(), "matrix:!abc:mbm.one");
+    }
+
+    #[test]
     fn destination_keys_round_trip() {
-        let d = Destination::MatrixRoom("!abc:example.org".to_string());
+        let d = Destination::Conversation(ConversationAddress::Matrix("!abc:example.org".into()));
         assert_eq!(d.as_key(), "matrix:!abc:example.org");
         assert_eq!(Destination::parse(&d.as_key()), Some(d));
-        assert_eq!(Destination::parse("discord:1"), None);
+        let tg = Destination::Conversation(ConversationAddress::Telegram(42));
+        assert_eq!(tg.as_key(), "telegram:42");
+        assert_eq!(Destination::parse("telegram:42"), Some(tg));
+        assert_eq!(Destination::parse("discord:abc"), None);
         assert_eq!(Destination::parse("matrix:"), None);
+        assert_eq!(Destination::parse("web"), None);
     }
 
     #[test]

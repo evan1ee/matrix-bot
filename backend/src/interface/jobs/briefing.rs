@@ -7,21 +7,23 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{error, info, warn};
 
-use super::{parse_payload, Delivery, DeliveryError, MATRIX_RETRY};
+use super::{deliverable, message, parse_payload, Outbound, SendFailure, CHANNEL_RETRY};
 use crate::application::briefing::BriefingPayload;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
+use crate::domain::channels::ConversationAddress;
 use crate::domain::jobs::{BriefingSendPayload, JobType};
+use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
 
 pub struct BriefingSendHandler {
     services: AppServices,
-    delivery: Arc<dyn Delivery>,
+    outbound: Arc<dyn Outbound>,
 }
 
 impl BriefingSendHandler {
-    pub fn new(services: AppServices, delivery: Arc<dyn Delivery>) -> Self {
-        Self { services, delivery }
+    pub fn new(services: AppServices, outbound: Arc<dyn Outbound>) -> Self {
+        Self { services, outbound }
     }
 }
 
@@ -36,9 +38,6 @@ impl JobHandler for BriefingSendHandler {
         let owner = ctx.account_id.ok_or_else(|| {
             JobError::Permanent(anyhow::anyhow!("briefing.send without an account"))
         })?;
-        if !self.delivery.is_connected() {
-            return Err(JobError::Unavailable(MATRIX_RETRY));
-        }
         let date = p.local_date.format("%Y-%m-%d").to_string();
         // Re-check what the scheduler checked: the user may have turned the
         // briefing off, or another run may have sent it, since enqueue.
@@ -70,13 +69,29 @@ impl JobHandler for BriefingSendHandler {
             info!(%owner, job_date = %p.local_date, %today, "Stale briefing job dropped");
             return Ok(());
         }
+        // Per channel, so the room's platform being down defers the job before
+        // the (costly) generation, as the global Matrix check did.
+        let room = self.services.rooms.default_room(&owner).await;
+        let target = room.as_deref().and_then(deliverable);
+        if let Some((_, channel)) = &target {
+            if !self.outbound.is_connected(*channel) {
+                return Err(JobError::Unavailable(CHANNEL_RETRY));
+            }
+        }
         let briefing = self
             .services
             .briefing
             .generate_briefing(&owner, &settings)
             .await
             .map_err(JobError::Retryable)?;
-        let delivered = self.deliver(&owner, &briefing).await?;
+        let delivered = self
+            .deliver(
+                &owner,
+                room.as_deref(),
+                target.map(|(address, _)| address),
+                &briefing,
+            )
+            .await?;
         // Frozen: the day is recorded even when the send failed (the old loop
         // did the same), so a briefing is sent at most once per local day.
         self.services
@@ -95,27 +110,38 @@ impl JobHandler for BriefingSendHandler {
 
 impl BriefingSendHandler {
     /// Sends to the account's default room. `Ok(false)` covers "no room" and
-    /// a failed send, both best-effort as before; only a lost connection
-    /// defers the job.
+    /// a failed send, both best-effort as before; a room that is no address
+    /// counts as delivered (nothing to do); only a lost connection defers.
     async fn deliver(
         &self,
         owner: &AccountId,
+        room: Option<&str>,
+        address: Option<ConversationAddress>,
         briefing: &BriefingPayload,
     ) -> Result<bool, JobError> {
-        let Some(room) = self.services.rooms.default_room(owner).await else {
+        let Some(room) = room else {
             return Ok(false);
         };
-        match self
-            .delivery
-            .send_to_room(&room, &briefing.plain_text, &briefing.html_content)
-            .await
-        {
+        let Some(address) = address else {
+            return Ok(true);
+        };
+        let sent = self
+            .outbound
+            .send(message(
+                Target::Conversation(address),
+                &briefing.plain_text,
+                &briefing.html_content,
+            ))
+            .await;
+        match sent {
             Ok(_) => Ok(true),
-            Err(DeliveryError::NotConnected) => Err(JobError::Unavailable(MATRIX_RETRY)),
-            Err(DeliveryError::Failed(reason)) => {
-                warn!(%owner, %room, %reason, "Briefing send failed");
-                Ok(false)
-            }
+            Err(err) => match SendFailure::from(err) {
+                SendFailure::Defer => Err(JobError::Unavailable(CHANNEL_RETRY)),
+                SendFailure::Retry(reason) | SendFailure::Permanent(reason) => {
+                    warn!(%owner, %room, %reason, "Briefing send failed");
+                    Ok(false)
+                }
+            },
         }
     }
 }
@@ -127,10 +153,12 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::channels::Channel;
     use crate::domain::events::EventId;
     use crate::domain::jobs::JobId;
     use crate::domain::rooms::JoinedRoom;
-    use crate::interface::jobs::fake::FakeDelivery;
+    use crate::interface::channels::adapter::ChannelError;
+    use crate::interface::jobs::fake::FakeOutbound;
 
     const ROOM: &str = "!briefing:test";
 
@@ -220,7 +248,7 @@ mod tests {
     async fn a_database_error_retries_instead_of_using_defaults() {
         let f = fixture("acct_brief_dberr", true).await;
         let day = today(&f).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
         f.pool.close().await;
 
@@ -228,14 +256,14 @@ mod tests {
         let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
 
         assert!(matches!(out, Err(JobError::Retryable(_))), "{out:?}");
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
     }
 
     /// Given Matrix is disconnected, Then the job waits and the day is open.
     #[tokio::test]
-    async fn without_matrix_the_job_waits() {
+    async fn a_disconnected_channel_defers_the_job() {
         let f = fixture("acct_brief_offline", true).await;
-        let fake = FakeDelivery::disconnected();
+        let fake = FakeOutbound::disconnected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -243,11 +271,11 @@ mod tests {
             .await;
 
         assert!(
-            matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
             "{out:?}"
         );
         assert_eq!(last_date(&f).await, None);
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
     }
 
     #[tokio::test]
@@ -258,7 +286,7 @@ mod tests {
             .update_last_briefing_date(&f.owner, &ymd(today(&f).await))
             .await
             .unwrap();
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -266,13 +294,13 @@ mod tests {
             .await;
 
         assert!(out.is_ok(), "{out:?}");
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
     }
 
     #[tokio::test]
     async fn a_disabled_account_is_skipped() {
         let f = fixture("acct_brief_off", false).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -280,14 +308,14 @@ mod tests {
             .await;
 
         assert!(out.is_ok(), "{out:?}");
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
         assert_eq!(last_date(&f).await, None);
     }
 
     #[tokio::test]
     async fn generates_sends_to_the_default_room_and_records_the_day() {
         let f = fixture("acct_brief_ok", true).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -295,7 +323,7 @@ mod tests {
             .await;
 
         assert!(out.is_ok(), "{out:?}");
-        let sends = fake.room_sends.lock().unwrap().clone();
+        let sends = fake.room_sends();
         assert_eq!(sends.len(), 1);
         assert_eq!(sends[0].0, ROOM);
         assert!(sends[0].2.contains("早安简报"));
@@ -315,7 +343,7 @@ mod tests {
         let f = fixture("acct_brief_fail", true).await;
         let handler = BriefingSendHandler::new(
             f.services.clone(),
-            FakeDelivery::failing_once("homeserver down"),
+            FakeOutbound::failing_once("homeserver down"),
         );
 
         let out = handler
@@ -336,7 +364,7 @@ mod tests {
     #[tokio::test]
     async fn a_job_without_an_account_is_permanent() {
         let f = fixture("acct_brief_noacct", true).await;
-        let handler = BriefingSendHandler::new(f.services.clone(), FakeDelivery::connected());
+        let handler = BriefingSendHandler::new(f.services.clone(), FakeOutbound::connected());
 
         let out = handler.run(&ctx(None), payload(today(&f).await)).await;
 
@@ -348,14 +376,14 @@ mod tests {
     #[tokio::test]
     async fn a_stale_date_is_dropped_without_sending() {
         let f = fixture("acct_brief_stale", true).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
         let yesterday = today(&f).await - Duration::days(1);
 
         let out = handler.run(&ctx(Some(f.owner)), payload(yesterday)).await;
 
         assert!(out.is_ok(), "{out:?}");
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
         assert_eq!(last_date(&f).await, None);
         assert!(sent_events(&f).await.is_empty());
     }
@@ -365,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn last_briefing_date_never_moves_backwards() {
         let f = fixture("acct_brief_order", true).await;
-        let handler = BriefingSendHandler::new(f.services.clone(), FakeDelivery::connected());
+        let handler = BriefingSendHandler::new(f.services.clone(), FakeOutbound::connected());
         let now = today(&f).await;
 
         let newer = handler.run(&ctx(Some(f.owner)), payload(now)).await;
@@ -381,11 +409,11 @@ mod tests {
     #[tokio::test]
     async fn a_connection_lost_during_the_send_waits_and_records_nothing() {
         let f = fixture("acct_brief_lost", true).await;
-        let fake = FakeDelivery::connected();
-        fake.room_results
+        let fake = FakeOutbound::connected();
+        fake.results
             .lock()
             .unwrap()
-            .push_back(Err(DeliveryError::NotConnected));
+            .push_back(Err(ChannelError::NotConnected(Channel::Matrix)));
         let handler = BriefingSendHandler::new(f.services.clone(), fake);
 
         let out = handler
@@ -393,7 +421,7 @@ mod tests {
             .await;
 
         assert!(
-            matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
             "{out:?}"
         );
         assert_eq!(last_date(&f).await, None);

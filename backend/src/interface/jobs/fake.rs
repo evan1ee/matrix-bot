@@ -1,4 +1,5 @@
-//! Scripted `Delivery` for handler tests: never touches Matrix.
+//! Scripted `Outbound` for handler tests: records every message, never
+//! touches a platform.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,22 +7,21 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use super::{Delivery, DeliveryError};
+use super::Outbound;
+use crate::domain::channels::Channel;
+use crate::interface::channels::adapter::{ChannelError, SentRef};
+use crate::interface::channels::message::{MessageRef, OutgoingMessage, Target};
 
 #[derive(Default)]
-pub(crate) struct FakeDelivery {
+pub(crate) struct FakeOutbound {
+    /// One flag for every channel: a test scripts "the platform is down".
     pub connected: AtomicBool,
-    /// Popped per send; empty means `Ok(Some("$evt"))`.
-    pub room_results: Mutex<VecDeque<Result<Option<String>, DeliveryError>>>,
-    /// `(room, plain, html)`
-    pub room_sends: Mutex<Vec<(String, String, String)>>,
-    /// `(mxid, plain, html)`
-    pub dms: Mutex<Vec<(String, String, String)>>,
-    /// Popped per DM (after it is recorded); empty means `Ok(())`.
-    pub dm_results: Mutex<VecDeque<Result<(), DeliveryError>>>,
+    /// Popped per send; empty means `Ok` with the event id `$evt`.
+    pub results: Mutex<VecDeque<Result<SentRef, ChannelError>>>,
+    pub sent: Mutex<Vec<OutgoingMessage>>,
 }
 
-impl FakeDelivery {
+impl FakeOutbound {
     pub fn connected() -> Arc<Self> {
         let fake = Self::default();
         fake.connected.store(true, Ordering::SeqCst);
@@ -34,52 +34,69 @@ impl FakeDelivery {
 
     pub fn failing_once(reason: &str) -> Arc<Self> {
         let fake = Self::connected();
-        fake.room_results
+        fake.results
             .lock()
             .unwrap()
-            .push_back(Err(DeliveryError::Failed(reason.to_string())));
+            .push_back(Err(ChannelError::Transient(reason.to_string())));
         fake
+    }
+
+    /// `(conversation in storage form, plain, html)` of every send to a conversation.
+    pub fn room_sends(&self) -> Vec<(String, String, String)> {
+        self.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match &m.target {
+                Target::Conversation(address) => Some((
+                    address.to_storage(),
+                    m.content.plain.clone(),
+                    m.content.html.clone().unwrap_or_default(),
+                )),
+                Target::Direct(_) => None,
+            })
+            .collect()
+    }
+
+    /// `(user id, plain, html)` of every direct send.
+    pub fn dms(&self) -> Vec<(String, String, String)> {
+        self.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|m| match &m.target {
+                Target::Direct(identity) => Some((
+                    identity.user_id().as_str().to_string(),
+                    m.content.plain.clone(),
+                    m.content.html.clone().unwrap_or_default(),
+                )),
+                Target::Conversation(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn messages(&self) -> Vec<OutgoingMessage> {
+        self.sent.lock().unwrap().clone()
     }
 }
 
 #[async_trait]
-impl Delivery for FakeDelivery {
-    fn is_connected(&self) -> bool {
+impl Outbound for FakeOutbound {
+    fn is_connected(&self, _channel: Channel) -> bool {
         self.connected.load(Ordering::SeqCst)
     }
 
-    async fn send_to_room(
-        &self,
-        room_id: &str,
-        plain: &str,
-        html: &str,
-    ) -> Result<Option<String>, DeliveryError> {
-        if !self.is_connected() {
-            return Err(DeliveryError::NotConnected);
+    async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {
+        if let Some(channel) = message.channel() {
+            if !self.is_connected(channel) {
+                return Err(ChannelError::NotConnected(channel));
+            }
         }
-        self.room_sends
-            .lock()
-            .unwrap()
-            .push((room_id.into(), plain.into(), html.into()));
-        self.room_results
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| Ok(Some("$evt".to_string())))
-    }
-
-    async fn send_dm(&self, mxid: &str, plain: &str, html: &str) -> Result<(), DeliveryError> {
-        if !self.is_connected() {
-            return Err(DeliveryError::NotConnected);
-        }
-        self.dms
-            .lock()
-            .unwrap()
-            .push((mxid.into(), plain.into(), html.into()));
-        self.dm_results
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or(Ok(()))
+        self.sent.lock().unwrap().push(message);
+        self.results.lock().unwrap().pop_front().unwrap_or_else(|| {
+            Ok(SentRef {
+                message: Some(MessageRef("$evt".to_string())),
+            })
+        })
     }
 }

@@ -144,6 +144,9 @@ pub struct OutgoingMessage {
     pub content: Content,
     pub reply_to: Option<MessageRef>,
     pub visibility: Visibility,
+    /// A key identifying this logical message across retries, for platforms
+    /// that can deduplicate (Matrix: the transaction id). Others ignore it.
+    pub idempotency_key: Option<String>,
 }
 
 impl OutgoingMessage {
@@ -153,6 +156,7 @@ impl OutgoingMessage {
             content: reply.content,
             reply_to: None,
             visibility: reply.visibility,
+            idempotency_key: None,
         }
     }
 

@@ -21,12 +21,11 @@ use crate::domain::channels::Channel;
 use crate::interface::channels::adapter::ChannelAdapter;
 use crate::interface::channels::inbound::Inbound;
 use crate::interface::channels::matrix::adapter::MatrixAdapter;
-use crate::interface::channels::matrix::delivery::MatrixDelivery;
 use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::modules::build_modules;
 use crate::interface::channels::registry::{check_unique, ChannelRegistry};
 use crate::interface::http;
-use crate::interface::jobs::Delivery;
+use crate::interface::jobs::Outbound;
 use crate::jobs;
 
 /// Signal to return, including closing the database pool (spec §5.3).
@@ -176,8 +175,10 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         matrix.attach_inbound(Arc::new(inbound));
         ChannelRegistry::from_unique(vec![matrix.clone() as Arc<dyn ChannelAdapter>])
     });
-    let delivery: Arc<dyn Delivery> = Arc::new(MatrixDelivery::new(handles.matrix.clone()));
-    let registry = jobs::Registry::new(crate::interface::jobs::handlers(&services, delivery))?;
+    let registry = jobs::Registry::new(crate::interface::jobs::handlers(
+        &services,
+        channels.clone() as Arc<dyn Outbound>,
+    ))?;
     let runtime = jobs::JobRuntime::new(
         db.pool.clone(),
         services.clone(),
@@ -190,9 +191,8 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         services.outbox.clone(),
         crate::events::EventsConfig::production().subscriber_capacity,
     );
-    let sink: Arc<dyn crate::events::DeliverySink> = Arc::new(
-        crate::interface::events::MatrixRoomSink::new(handles.matrix.clone(), services.clone()),
-    );
+    let sink: Arc<dyn crate::events::DeliverySink> =
+        Arc::new(crate::interface::events::ChannelSink::new(channels.clone()));
     let events_runtime = crate::events::EventsRuntime::new(
         db.pool.clone(),
         services.clone(),

@@ -8,12 +8,14 @@ use tokio_util::sync::CancellationToken;
 
 use super::adapter::{ChannelAdapter, ChannelError, SentRef};
 use super::message::OutgoingMessage;
+use crate::domain::accounts::AccountId;
 use crate::domain::channels::{Channel, ConversationAddress};
 
 pub(crate) struct FakeAdapter {
     channel: Channel,
     connected: AtomicBool,
     sent: Mutex<Vec<OutgoingMessage>>,
+    authorized: AtomicBool,
     named: HashMap<String, ConversationAddress>,
 }
 
@@ -23,6 +25,7 @@ impl FakeAdapter {
             channel,
             connected: AtomicBool::new(true),
             sent: Mutex::new(Vec::new()),
+            authorized: AtomicBool::new(true),
             named: HashMap::new(),
         }
     }
@@ -30,6 +33,12 @@ impl FakeAdapter {
     /// A conversation `find_conversation_by_name` will find under `name`.
     pub(crate) fn with_conversation(mut self, name: &str, address: ConversationAddress) -> Self {
         self.named.insert(name.to_owned(), address);
+        self
+    }
+
+    /// An adapter whose `authorize_delivery` refuses every owner.
+    pub(crate) fn unauthorized(self) -> Self {
+        self.authorized.store(false, Ordering::SeqCst);
         self
     }
 
@@ -65,6 +74,10 @@ impl ChannelAdapter for FakeAdapter {
             .unwrap_or_else(|e| e.into_inner())
             .push(message);
         Ok(SentRef { message: None })
+    }
+
+    async fn authorize_delivery(&self, _owner: &AccountId, _to: &ConversationAddress) -> bool {
+        self.authorized.load(Ordering::SeqCst)
     }
 
     async fn find_conversation_by_name(&self, name: &str) -> Option<ConversationAddress> {

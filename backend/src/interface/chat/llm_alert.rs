@@ -97,6 +97,7 @@ async fn deliver_alert(
         },
         reply_to: None,
         visibility: Visibility::Normal,
+        idempotency_key: None,
     };
     match registry.send(message).await {
         Ok(_) => info!(

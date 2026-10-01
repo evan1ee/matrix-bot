@@ -1,4 +1,4 @@
-//! `reminder.fire`: delivers one due reminder to its Matrix room.
+//! `reminder.fire`: delivers one due reminder to the conversation it was set in.
 
 use std::sync::Arc;
 
@@ -6,21 +6,22 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use tracing::{debug, error, info, warn};
 
-use super::{parse_payload, Delivery, DeliveryError, MATRIX_RETRY};
+use super::{deliverable, message, parse_payload, Outbound, SendFailure, CHANNEL_RETRY};
 use crate::application::AppServices;
 use crate::domain::jobs::{JobType, ReminderFirePayload};
 use crate::domain::reminders::Reminder;
+use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
 use crate::utils::{html_escape, strip_html};
 
 pub struct ReminderFireHandler {
     services: AppServices,
-    delivery: Arc<dyn Delivery>,
+    outbound: Arc<dyn Outbound>,
 }
 
 impl ReminderFireHandler {
-    pub fn new(services: AppServices, delivery: Arc<dyn Delivery>) -> Self {
-        Self { services, delivery }
+    pub fn new(services: AppServices, outbound: Arc<dyn Outbound>) -> Self {
+        Self { services, outbound }
     }
 
     async fn failed_attempt(
@@ -87,9 +88,6 @@ impl JobHandler for ReminderFireHandler {
 
 impl ReminderFireHandler {
     async fn fire(&self, ctx: &JobContext, p: &ReminderFirePayload) -> Result<(), JobError> {
-        if !self.delivery.is_connected() {
-            return Err(JobError::Unavailable(MATRIX_RETRY));
-        }
         let Some(reminder) = self
             .services
             .reminders
@@ -123,18 +121,32 @@ impl ReminderFireHandler {
             reminder.recurrence.as_str(),
         );
         let plain = strip_html(&html);
-        match self
-            .delivery
-            .send_to_room(&reminder.room_id, &plain, &html)
-            .await
-        {
-            Ok(event_id) => {
+        // A room that is no address (or the web UI) has nothing to deliver to;
+        // the reminder counts as delivered, as it always did.
+        let Some((address, channel)) = deliverable(&reminder.room_id) else {
+            self.services
+                .reminders
+                .complete_delivery(&reminder, Utc::now())
+                .await?;
+            return Ok(());
+        };
+        // Checked per channel and before sending, so a reminder for a platform
+        // that is down waits instead of burning an attempt.
+        if !self.outbound.is_connected(channel) {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
+        }
+        let sent = self
+            .outbound
+            .send(message(Target::Conversation(address), &plain, &html))
+            .await;
+        match sent {
+            Ok(sent) => {
                 info!(reminder_id = reminder.id, room = %reminder.room_id, "Delivered reminder");
-                if let Some(event_id) = event_id {
+                if let Some(message) = sent.message {
                     if let Err(err) = self
                         .services
                         .reminders
-                        .record_delivery_target(&reminder, &event_id)
+                        .record_delivery_target(&reminder, &message.0)
                         .await
                     {
                         warn!(reminder_id = reminder.id, error = %err, "Could not record the reaction target");
@@ -146,8 +158,15 @@ impl ReminderFireHandler {
                     .await?;
                 Ok(())
             }
-            Err(DeliveryError::NotConnected) => Err(JobError::Unavailable(MATRIX_RETRY)),
-            Err(DeliveryError::Failed(reason)) => self.failed_attempt(&reminder, ctx, reason).await,
+            Err(err) => match SendFailure::from(err) {
+                SendFailure::Defer => Err(JobError::Unavailable(CHANNEL_RETRY)),
+                SendFailure::Retry(reason) => self.failed_attempt(&reminder, ctx, reason).await,
+                SendFailure::Permanent(reason) => {
+                    error!(reminder_id = reminder.id, %reason, "Reminder delivery rejected; marking failed");
+                    self.services.reminders.mark_failed(reminder.id).await?;
+                    Err(JobError::Permanent(anyhow::anyhow!(reason)))
+                }
+            },
         }
     }
 }
@@ -188,13 +207,16 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::channels::ConversationAddress;
     use crate::domain::jobs::JobId;
     use crate::domain::reminders::{
         NewReminder, RecurrencePattern, ReminderSource, ReminderStatus,
     };
     use crate::infrastructure::postgres::repositories;
+    use crate::interface::channels::adapter::ChannelError;
     use crate::interface::channels::matrix::reaction_targets::get_target;
-    use crate::interface::jobs::fake::FakeDelivery;
+    use crate::interface::channels::message::Target;
+    use crate::interface::jobs::fake::FakeOutbound;
 
     fn utc(y: i32, m: u32, d: u32, h: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(y, m, d, h, 0, 0).unwrap()
@@ -235,6 +257,15 @@ mod tests {
         recurrence: RecurrencePattern,
         source: Option<(ReminderSource, i64)>,
     ) -> Fixture {
+        fixture_in(owner, recurrence, source, "!room:test").await
+    }
+
+    async fn fixture_in(
+        owner: &str,
+        recurrence: RecurrencePattern,
+        source: Option<(ReminderSource, i64)>,
+        room: &str,
+    ) -> Fixture {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AccountId::from_seed(owner);
@@ -248,7 +279,7 @@ mod tests {
                     message: "stretch <now>".to_string(),
                     trigger_at: crate::utils::time::now_at_storage_precision()
                         + Duration::minutes(1),
-                    room_id: "!room:test".to_string(),
+                    room_id: room.to_string(),
                     owner_name: "alice".to_string(),
                     recurrence,
                     source,
@@ -290,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn delivers_formats_in_the_owners_zone_records_the_target_and_advances() {
         let f = fixture("acct_fire_ok", RecurrencePattern::None).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -301,7 +332,7 @@ mod tests {
             .await;
 
         assert!(out.is_ok(), "{out:?}");
-        let sends = fake.room_sends.lock().unwrap().clone();
+        let sends = fake.room_sends();
         assert_eq!(sends.len(), 1);
         assert_eq!(sends[0].0, "!room:test");
         assert!(sends[0].2.contains("提醒时间到了"));
@@ -322,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn skips_a_reminder_that_moved_or_ended() {
         let f = fixture("acct_fire_skip", RecurrencePattern::None).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
 
         let stale = f.reminder.trigger_at - Duration::minutes(1);
@@ -346,7 +377,7 @@ mod tests {
 
         let unknown = serde_json::json!({ "reminder_id": i64::MAX, "trigger_at": stale });
         assert!(handler.run(&ctx(&f.owner, 1), unknown).await.is_ok());
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
     }
 
     #[tokio::test]
@@ -354,7 +385,7 @@ mod tests {
         let f = fixture("acct_fire_retry", RecurrencePattern::None).await;
         let handler = ReminderFireHandler::new(
             f.services.clone(),
-            FakeDelivery::failing_once("homeserver down"),
+            FakeOutbound::failing_once("homeserver down"),
         );
 
         let out = handler
@@ -374,11 +405,11 @@ mod tests {
     #[tokio::test]
     async fn the_last_failed_attempt_marks_the_reminder_failed() {
         let f = fixture("acct_fire_last", RecurrencePattern::None).await;
-        let fake = FakeDelivery::failing_once("boom");
-        fake.room_results
+        let fake = FakeOutbound::failing_once("boom");
+        fake.results
             .lock()
             .unwrap()
-            .push_back(Err(DeliveryError::Failed("boom".to_string())));
+            .push_back(Err(ChannelError::Transient("boom".to_string())));
         let handler = ReminderFireHandler::new(f.services.clone(), fake);
         let trigger = f.reminder.trigger_at;
         let fourth = handler
@@ -403,9 +434,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn without_matrix_the_job_waits() {
+    async fn a_disconnected_channel_defers_the_job() {
         let f = fixture("acct_fire_offline", RecurrencePattern::None).await;
-        let fake = FakeDelivery::disconnected();
+        let fake = FakeOutbound::disconnected();
         let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
 
         let out = handler
@@ -416,10 +447,10 @@ mod tests {
             .await;
 
         assert!(
-            matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
             "{out:?}"
         );
-        assert!(fake.room_sends.lock().unwrap().is_empty());
+        assert!(fake.room_sends().is_empty());
         let after = current(&f).await;
         assert_eq!(after.status, ReminderStatus::Pending);
         assert_eq!(after.retry_count, 0);
@@ -428,7 +459,7 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_payload_is_permanent() {
         let f = fixture("acct_fire_bad", RecurrencePattern::None).await;
-        let handler = ReminderFireHandler::new(f.services.clone(), FakeDelivery::connected());
+        let handler = ReminderFireHandler::new(f.services.clone(), FakeOutbound::connected());
 
         let out = handler
             .run(&ctx(&f.owner, 1), serde_json::json!({ "reminder_id": "x" }))
@@ -445,7 +476,7 @@ mod tests {
             Some((ReminderSource::Todo, 42)),
         )
         .await;
-        let handler = ReminderFireHandler::new(f.services.clone(), FakeDelivery::connected());
+        let handler = ReminderFireHandler::new(f.services.clone(), FakeOutbound::connected());
 
         let out = handler
             .run(
@@ -458,5 +489,67 @@ mod tests {
         let target = get_target(&f.pool, "$evt").await.unwrap().unwrap();
         assert_eq!(target.entity_type, "todo");
         assert_eq!(target.entity_id, 42);
+    }
+
+    #[tokio::test]
+    async fn a_reminder_set_on_telegram_fires_on_telegram() {
+        let f = fixture_in("acct_fire_tg", RecurrencePattern::None, None, "telegram:42").await;
+        let fake = FakeOutbound::connected();
+        let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let sent = fake.messages();
+        assert_eq!(sent.len(), 1);
+        assert!(matches!(
+            &sent[0].target,
+            Target::Conversation(ConversationAddress::Telegram(42))
+        ));
+        assert_eq!(current(&f).await.status, ReminderStatus::Triggered);
+    }
+
+    #[tokio::test]
+    async fn a_web_reminder_is_delivered_nowhere_and_succeeds() {
+        let f = fixture_in("acct_fire_web", RecurrencePattern::None, None, "web").await;
+        let fake = FakeOutbound::connected();
+        let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.messages().is_empty());
+        assert_eq!(current(&f).await.status, ReminderStatus::Triggered);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_send_marks_the_reminder_failed_without_retrying() {
+        let f = fixture("acct_fire_rej", RecurrencePattern::None).await;
+        let fake = FakeOutbound::connected();
+        fake.results
+            .lock()
+            .unwrap()
+            .push_back(Err(ChannelError::Rejected("no such chat".into())));
+        let handler = ReminderFireHandler::new(f.services.clone(), fake);
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+        assert_eq!(current(&f).await.status, ReminderStatus::Failed);
     }
 }

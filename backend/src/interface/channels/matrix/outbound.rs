@@ -4,9 +4,9 @@
 
 use matrix_sdk::room::Room;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
-use matrix_sdk::ruma::{RoomId, UserId};
+use matrix_sdk::ruma::{OwnedTransactionId, RoomId, UserId};
 use matrix_sdk::Client;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::domain::channels::{Channel, ConversationAddress};
 use crate::interface::channels::adapter::{ChannelError, SentRef};
@@ -45,6 +45,12 @@ fn destination(target: &Target) -> Result<Destination<'_>, ChannelError> {
     }
 }
 
+/// The outbox's `outbox-<delivery id>` key, as the transaction id the
+/// homeserver deduplicates on.
+fn transaction_id(key: &str) -> OwnedTransactionId {
+    OwnedTransactionId::from(key)
+}
+
 /// The room message for `content`: rich when it has HTML, else plain.
 fn text_content(content: &Content) -> RoomMessageEventContent {
     match &content.html {
@@ -71,15 +77,18 @@ pub async fn send(
             unsupported.kind
         )));
     }
+    let key = message.idempotency_key.as_deref();
     let client = handle
         .current()
         .ok_or(ChannelError::NotConnected(Channel::Matrix))?;
 
     match destination {
-        Destination::Room(room_id) => deliver_to_room_id(&client, room_id, &message.content).await,
+        Destination::Room(room_id) => {
+            deliver_to_room_id(&client, room_id, &message.content, key).await
+        }
         Destination::Direct(user_id) => {
             let room = dm_room(&client, user_id).await?;
-            deliver(&room, &message.content).await
+            deliver(&room, &message.content, key).await
         }
     }
 }
@@ -90,9 +99,10 @@ async fn deliver_to_room_id(
     client: &Client,
     room_id: &RoomId,
     content: &Content,
+    key: Option<&str>,
 ) -> Result<SentRef, ChannelError> {
     if let Some(room) = client.get_room(room_id) {
-        match deliver(&room, content).await {
+        match deliver(&room, content, key).await {
             Ok(sent) => return Ok(sent),
             Err(err) => warn!(%room_id, error = %err, "Send failed; retrying via join"),
         }
@@ -103,12 +113,19 @@ async fn deliver_to_room_id(
         .join_room_by_id(room_id)
         .await
         .map_err(|e| ChannelError::Transient(format!("join {room_id}: {e}")))?;
-    deliver(&joined, content).await
+    deliver(&joined, content, key).await
 }
 
 /// Audio first (voice bubbles), then the text: the order a voice reply has
 /// always had in the room.
-async fn deliver(room: &Room, content: &Content) -> Result<SentRef, ChannelError> {
+///
+/// A key becomes the transaction id of the text message (not of the voice
+/// uploads), so the homeserver deduplicates a resend within one session.
+async fn deliver(
+    room: &Room,
+    content: &Content,
+    key: Option<&str>,
+) -> Result<SentRef, ChannelError> {
     for attachment in &content.attachments {
         voice_upload::send_voice_message(room, attachment)
             .await
@@ -117,8 +134,11 @@ async fn deliver(room: &Room, content: &Content) -> Result<SentRef, ChannelError
     if content.plain.is_empty() && content.html.is_none() && !content.attachments.is_empty() {
         return Ok(SentRef { message: None });
     }
-    let response = room
-        .send(text_content(content))
+    let mut request = room.send(text_content(content));
+    if let Some(key) = key {
+        request = request.with_transaction_id(transaction_id(key));
+    }
+    let response = request
         .await
         .map_err(|e| ChannelError::Transient(format!("send to {}: {e}", room.room_id())))?;
     Ok(SentRef {
@@ -144,28 +164,6 @@ async fn dm_room(client: &Client, user_id: &UserId) -> Result<Room, ChannelError
         .map_err(|e| ChannelError::Transient(format!("open a DM with {user_id}: {e}")))
 }
 
-/// Sends an HTML message to a user's DM and logs a failure instead of
-/// returning it: the job handlers' `Delivery::send_dm` contract.
-// Plan A Task 8 deletes this with the `Delivery` trait: job handlers then send through the registry.
-pub async fn send_dm_html(client: &Client, mxid: &str, plain: &str, html: &str) {
-    let Ok(user_id) = <&UserId>::try_from(mxid) else {
-        error!("Cannot notify {}: not a valid user ID", mxid);
-        return;
-    };
-    let content = Content {
-        plain: plain.to_owned(),
-        html: Some(html.to_owned()),
-        ..Content::default()
-    };
-    let result = match dm_room(client, user_id).await {
-        Ok(room) => deliver(&room, &content).await,
-        Err(err) => Err(err),
-    };
-    if let Err(err) = result {
-        error!("Could not send an HTML notification to {}: {}", mxid, err);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +176,11 @@ mod tests {
         assert!(matches!(destination(&room), Ok(Destination::Room(_))));
         let user = Target::Direct(PlatformIdentity::matrix("@u:x").unwrap());
         assert!(matches!(destination(&user), Ok(Destination::Direct(_))));
+    }
+
+    #[test]
+    fn the_idempotency_key_is_the_matrix_transaction_id() {
+        assert_eq!(transaction_id("outbox-42").as_str(), "outbox-42");
     }
 
     #[test]

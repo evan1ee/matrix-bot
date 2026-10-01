@@ -1,5 +1,5 @@
 //! Job handlers: the interface layer of the job runtime. Each handler parses
-//! its payload, calls application services and delivers through `Delivery`.
+//! its payload, calls application services and delivers through `Outbound`.
 //! No SQL, no business rules.
 
 use std::sync::Arc;
@@ -7,8 +7,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
+use tracing::{debug, warn};
 
 use crate::application::AppServices;
+use crate::domain::channels::{Channel, ConversationAddress};
+use crate::interface::channels::adapter::{ChannelError, SentRef};
+use crate::interface::channels::message::{Content, OutgoingMessage, Reply, Target, Visibility};
+use crate::interface::channels::registry::ChannelRegistry;
 use crate::jobs::{JobError, JobHandler};
 
 pub mod briefing;
@@ -18,49 +23,104 @@ pub mod reminders;
 #[cfg(test)]
 pub(crate) mod fake;
 
-/// How long a job waits before retrying when Matrix is disconnected.
-pub const MATRIX_RETRY: Duration = Duration::from_secs(30);
+/// How long a job waits before retrying when its channel is disconnected.
+pub const CHANNEL_RETRY: Duration = Duration::from_secs(30);
 
-#[derive(Debug, thiserror::Error)]
-pub enum DeliveryError {
-    #[error("Matrix is not connected")]
-    NotConnected,
-    #[error("delivery failed: {0}")]
-    Failed(String),
+/// How handlers reach a platform; a seam so handler tests never touch one.
+/// `ChannelRegistry` is the production implementation.
+#[async_trait]
+pub trait Outbound: Send + Sync {
+    fn is_connected(&self, channel: Channel) -> bool;
+    async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError>;
 }
 
-/// How handlers reach Matrix; a seam so handler tests never touch a homeserver.
 #[async_trait]
-pub trait Delivery: Send + Sync {
-    fn is_connected(&self) -> bool;
-    /// `Ok(Some(event_id))` sent; `Ok(None)` target is not a valid room id
-    /// (treated as delivered: frozen behaviour).
-    async fn send_to_room(
-        &self,
-        room_id: &str,
-        plain: &str,
-        html: &str,
-    ) -> Result<Option<String>, DeliveryError>;
-    async fn send_dm(&self, mxid: &str, plain: &str, html: &str) -> Result<(), DeliveryError>;
+impl Outbound for ChannelRegistry {
+    fn is_connected(&self, channel: Channel) -> bool {
+        ChannelRegistry::is_connected(self, channel)
+    }
+
+    async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {
+        ChannelRegistry::send(self, message).await
+    }
 }
 
 /// Every job handler.
-pub fn handlers(services: &AppServices, delivery: Arc<dyn Delivery>) -> Vec<Arc<dyn JobHandler>> {
+pub fn handlers(services: &AppServices, outbound: Arc<dyn Outbound>) -> Vec<Arc<dyn JobHandler>> {
     vec![
         Arc::new(reminders::ReminderFireHandler::new(
             services.clone(),
-            delivery.clone(),
+            outbound.clone(),
         )),
         Arc::new(briefing::BriefingSendHandler::new(
             services.clone(),
-            delivery.clone(),
+            outbound.clone(),
         )),
         Arc::new(portfolio::CheckAlertsHandler::new(
             services.clone(),
-            delivery,
+            outbound,
         )),
         Arc::new(portfolio::RefreshPricesHandler::new(services.clone())),
     ]
+}
+
+/// Where a stored room string (`room_id` of a reminder, a default room) is
+/// delivered to. `None` for a string that is no address and for `web`: nothing
+/// is delivered outside a platform, and the job counts as delivered (the
+/// behaviour for a non-room target has always been "nothing to do").
+pub(crate) fn deliverable(room: &str) -> Option<(ConversationAddress, Channel)> {
+    match ConversationAddress::parse_storage(room) {
+        Ok(address) => match address.channel() {
+            Some(channel) => Some((address, channel)),
+            None => {
+                debug!(room, "Web conversation; nothing to deliver");
+                None
+            }
+        },
+        Err(err) => {
+            warn!(room, error = %err, "Not a deliverable conversation; treating as delivered");
+            None
+        }
+    }
+}
+
+/// An HTML message with its plain-text fallback for `target`.
+pub(crate) fn message(target: Target, plain: &str, html: &str) -> OutgoingMessage {
+    OutgoingMessage::to(
+        target,
+        Reply {
+            content: Content {
+                plain: plain.to_owned(),
+                html: Some(html.to_owned()),
+                ..Content::default()
+            },
+            visibility: Visibility::Normal,
+        },
+    )
+}
+
+/// What a failed send means for a job.
+pub(crate) enum SendFailure {
+    /// The channel is down or not configured here: wait for it.
+    Defer,
+    /// May succeed on retry.
+    Retry(String),
+    /// Will never succeed: do not retry.
+    Permanent(String),
+}
+
+impl From<ChannelError> for SendFailure {
+    fn from(err: ChannelError) -> Self {
+        match err {
+            ChannelError::NotConnected(_) | ChannelError::NotConfigured(Some(_)) => Self::Defer,
+            ChannelError::Transient(reason) => Self::Retry(reason),
+            ChannelError::Rejected(reason) => Self::Permanent(reason),
+            // Callers filter Web out first; were one to slip through, no retry helps.
+            ChannelError::NotConfigured(None) => {
+                Self::Permanent("the web UI has no delivery".to_owned())
+            }
+        }
+    }
 }
 
 /// A payload that does not parse never will: fail the job now.

@@ -1,6 +1,6 @@
-//! Delivery sinks for the outbox dispatcher (`crate::events`). The only
-//! Matrix-aware part of the events runtime.
+//! Delivery sinks for the outbox dispatcher (`crate::events`): the only part
+//! of the events runtime that knows channels.
 
-mod matrix_room;
+mod channel_sink;
 
-pub use matrix_room::MatrixRoomSink;
+pub use channel_sink::ChannelSink;

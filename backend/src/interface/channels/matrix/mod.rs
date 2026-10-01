@@ -5,7 +5,6 @@
 pub mod adapter;
 pub mod attachments;
 pub mod client;
-pub mod delivery;
 pub mod dispatcher;
 pub mod handler;
 pub mod handles;

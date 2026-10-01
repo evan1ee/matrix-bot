@@ -7,12 +7,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use super::{Delivery, MATRIX_RETRY};
+use super::{message, Outbound, CHANNEL_RETRY};
 use crate::application::portfolio::TriggeredAlert;
 use crate::application::{AppError, AppServices};
-use crate::domain::channels::Channel;
+use crate::domain::channels::{Channel, PlatformIdentity};
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
+use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
 use crate::utils::html::html_escape;
 
@@ -68,21 +69,32 @@ pub fn format_alert_notification(alert: &PriceAlert, current_price_minor: i64) -
 
 pub struct CheckAlertsHandler {
     services: AppServices,
-    delivery: Arc<dyn Delivery>,
+    outbound: Arc<dyn Outbound>,
 }
 
 impl CheckAlertsHandler {
-    pub fn new(services: AppServices, delivery: Arc<dyn Delivery>) -> Self {
-        Self { services, delivery }
+    pub fn new(services: AppServices, outbound: Arc<dyn Outbound>) -> Self {
+        Self { services, outbound }
     }
 
-    /// DMs every linked identity; a failed send is logged and skipped. The
+    /// DMs every linked Matrix identity (an alert carries no originating conversation, so there is no other channel to prefer); a failed send is logged and skipped. The
     /// alert is already marked triggered, so nothing here may fail the job
     /// into a retry that would double-notify.
     pub(crate) async fn notify(&self, hit: &TriggeredAlert, mxids: Vec<String>) {
         let (plain, html) = format_alert_notification(&hit.alert, hit.price_minor);
         for mxid in mxids {
-            if let Err(err) = self.delivery.send_dm(&mxid, &plain, &html).await {
+            let identity = match PlatformIdentity::matrix(&mxid) {
+                Ok(identity) => identity,
+                Err(err) => {
+                    warn!(%mxid, error = %err, "Alert DM not sent");
+                    continue;
+                }
+            };
+            if let Err(err) = self
+                .outbound
+                .send(message(Target::Direct(identity), &plain, &html))
+                .await
+            {
                 warn!(%mxid, error = %err, "Alert DM not sent");
             }
         }
@@ -99,8 +111,8 @@ impl JobHandler for CheckAlertsHandler {
         // Checked before evaluating: an alert is marked triggered before its
         // DM (the idempotency guard), so evaluating while Matrix is down
         // would consume alerts nobody is told about.
-        if !self.delivery.is_connected() {
-            return Err(JobError::Unavailable(MATRIX_RETRY));
+        if !self.outbound.is_connected(Channel::Matrix) {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
         }
         let symbols = self.services.portfolio.list_active_alert_symbols().await?;
         let portfolio = self.services.portfolio.clone();
@@ -189,8 +201,8 @@ mod tests {
     use crate::domain::accounts::AccountId;
     use crate::domain::jobs::JobId;
     use crate::domain::portfolio::alerts::AlertCondition;
-    use crate::interface::jobs::fake::FakeDelivery;
-    use crate::interface::jobs::DeliveryError;
+    use crate::interface::channels::adapter::ChannelError;
+    use crate::interface::jobs::fake::FakeOutbound;
 
     async fn services(names: &[&str]) -> (AppServices, Vec<AccountId>) {
         let pool = crate::db::pool::test_pool().await;
@@ -240,12 +252,12 @@ mod tests {
     #[tokio::test]
     async fn check_alerts_waits_without_matrix() {
         let (s, _) = services(&["acct_pf_h_offline"]).await;
-        let handler = CheckAlertsHandler::new(s, FakeDelivery::disconnected());
+        let handler = CheckAlertsHandler::new(s, FakeOutbound::disconnected());
 
         let out = handler.run(&ctx(None), serde_json::json!({})).await;
 
         assert!(
-            matches!(out, Err(JobError::Unavailable(d)) if d == MATRIX_RETRY),
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
             "{out:?}"
         );
     }
@@ -259,7 +271,7 @@ mod tests {
             .create_alert(&o[0], "AAPL", 1, "USD", 2, AlertCondition::Above)
             .await
             .unwrap();
-        let handler = CheckAlertsHandler::new(s.clone(), FakeDelivery::disconnected());
+        let handler = CheckAlertsHandler::new(s.clone(), FakeOutbound::disconnected());
 
         let _ = handler.run(&ctx(None), serde_json::json!({})).await;
 
@@ -272,13 +284,13 @@ mod tests {
     #[tokio::test]
     async fn check_alerts_with_no_alerts_sends_nothing() {
         let (s, _) = services(&["acct_pf_h_none"]).await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = CheckAlertsHandler::new(s, fake.clone());
 
         let out = handler.run(&ctx(None), serde_json::json!({})).await;
 
         assert!(out.is_ok(), "{out:?}");
-        assert!(fake.dms.lock().unwrap().is_empty());
+        assert!(fake.dms().is_empty());
     }
 
     /// Every linked identity gets the DM, and one failing send does not stop
@@ -286,11 +298,11 @@ mod tests {
     #[tokio::test]
     async fn a_triggered_alert_is_sent_to_every_linked_mxid() {
         let (s, _) = services(&["acct_pf_h_dm"]).await;
-        let fake = FakeDelivery::connected();
-        fake.dm_results
+        let fake = FakeOutbound::connected();
+        fake.results
             .lock()
             .unwrap()
-            .push_back(Err(DeliveryError::Failed("homeserver down".into())));
+            .push_back(Err(ChannelError::Transient("homeserver down".into())));
         let handler = CheckAlertsHandler::new(s, fake.clone());
         let hit = TriggeredAlert {
             alert: alert("above", 20_000),
@@ -301,7 +313,7 @@ mod tests {
             .notify(&hit, vec!["@a:test".into(), "@b:test".into()])
             .await;
 
-        let dms = fake.dms.lock().unwrap().clone();
+        let dms = fake.dms();
         let to: Vec<&str> = dms.iter().map(|d| d.0.as_str()).collect();
         assert_eq!(to, ["@a:test", "@b:test"]);
         assert!(dms[0].1.contains("Price Alert: AAPL"));
@@ -313,7 +325,7 @@ mod tests {
     async fn dms_for_one_symbol_are_sent_before_the_next_is_evaluated() {
         let (s, _) = services(&["acct_pf_h_order"]).await;
         let owner = s.identity.provision_matrix_for_test("@order:test").await;
-        let fake = FakeDelivery::connected();
+        let fake = FakeOutbound::connected();
         let handler = CheckAlertsHandler::new(s, fake.clone());
         let seen_at_b = Arc::new(std::sync::Mutex::new(None));
 
@@ -325,7 +337,7 @@ mod tests {
                 hit.owner_id = owner;
                 async move {
                     if symbol == "B" {
-                        *seen_at_b.lock().unwrap() = Some(fake.dms.lock().unwrap().len());
+                        *seen_at_b.lock().unwrap() = Some(fake.dms().len());
                         return Ok(Vec::new());
                     }
                     Ok(vec![TriggeredAlert {

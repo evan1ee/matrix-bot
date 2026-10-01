@@ -51,6 +51,12 @@ impl ChannelRegistry {
         self.get(channel).is_some_and(|a| a.is_connected())
     }
 
+    /// Whether any configured adapter is connected: the outbox dispatcher's
+    /// "worth claiming" test while it cannot tell a delivery's channel in advance.
+    pub fn any_connected(&self) -> bool {
+        self.adapters.values().any(|a| a.is_connected())
+    }
+
     /// Routes by the target's channel. Web has none, so it is never delivered.
     pub async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {
         let channel = message.channel().ok_or(ChannelError::NotConfigured(None))?;

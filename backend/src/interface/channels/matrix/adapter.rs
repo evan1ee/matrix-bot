@@ -71,7 +71,7 @@ impl ChannelAdapter for MatrixAdapter {
         outbound::send(&self.handles.matrix, message).await
     }
 
-    /// Today's room-authorization check (`MatrixRoomSink`, the webhook endpoints).
+    /// Today's room-authorization check (`ChannelSink`, the webhook endpoints).
     async fn authorize_delivery(&self, owner: &AccountId, to: &ConversationAddress) -> bool {
         let ConversationAddress::Matrix(room_id) = to else {
             return false;

@@ -344,7 +344,7 @@ impl TryFrom<WebhookLogRow> for WebhookOutboxItem {
         let alert: WebhookAlert = serde_json::from_value(r.payload["payload"].clone())
             .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
         let room_id = match Destination::parse(&r.destination) {
-            Some(Destination::MatrixRoom(room)) => room,
+            Some(Destination::Conversation(address)) => address.to_storage(),
             None => alert.room_id.clone(),
         };
         Ok(Self {
