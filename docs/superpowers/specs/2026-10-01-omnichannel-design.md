@@ -175,10 +175,10 @@ Channel-specific features stay inside their adapter: Matrix E2EE, verification, 
 
 ## 7. Identity and linking
 
-### 7.1 Schema — migrations `0005` (DDL) and `0006` (data)
+### 7.1 Schema — migrations `0006` (DDL), `0007` (data), `0008` (drop)
 
 ```sql
--- 0005_platform_identities.sql
+-- 0006_platform_identities.sql
 CREATE TABLE platform_identities (
     id               BIGSERIAL PRIMARY KEY,
     account_id       UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -203,7 +203,7 @@ CREATE TABLE link_tokens (
 );
 ```
 
-`0006_platform_identities_backfill.sql` starts with a guard that names any `matrix_links` row whose `account_id` has no `accounts` row, copies every `matrix_links` row as `platform = 'matrix'`, then drops `matrix_links` and `matrix_link_challenges`. It is rehearsed on a production copy before release (`AGENTS.md` §6) and the cutover runbook gains a step.
+`0007_platform_identities_backfill.sql` starts with a guard that names any `matrix_links` row whose `account_id` has no `accounts` row, copies every `matrix_links` row as `platform = 'matrix'`, then drops `matrix_links`; `0008_drop_matrix_link_challenges.sql` drops the old challenge table once the web-minted flow is deleted. It is rehearsed on a production copy before release (`AGENTS.md` §6) and the cutover runbook gains a step.
 
 Merge bookkeeping (`domain/accounts`): `platform_identities` joins `ACCOUNT_ID_FOLLOWS` (replacing `matrix_links`), `link_tokens` has no `account_id` and is not listed, `matrix_link_challenges` leaves `ACCOUNT_ID_DISCARDED`. The schema-catalog test keeps the lists honest.
 
@@ -291,7 +291,7 @@ Each adapter maps its client errors (`matrix_sdk::Error`, `serenity::Error`, `te
 - **Domain:** `ConversationAddress` both encodings round-trip; `PlatformUserId` validation per channel; provisioning policy.
 - **Repositories:** `platform_identities` round-trip, `UNIQUE(platform, platform_user_id)`, owner isolation; `link_tokens` consume-once.
 - **Services:** resolve per policy for all four channels → the same `AccountId` once linked; link start/inspect/claim/merge/signup/expiry/reuse; mid-transaction failure leaves the token unconsumed; `IdentityLinked` event published.
-- **Migration:** `0006` backfill on a seeded legacy fixture; guard fires on an orphan.
+- **Migration:** `0007` backfill on a seeded legacy fixture; guard fires on an orphan.
 - **Normalization (pure, fixture-driven, no network):** Matrix event → `IncomingMessage`; Discord interaction JSON → `IncomingMessage`; Telegram `Update` JSON → `IncomingMessage`; raw RFC 5322 mail → `IncomingMessage` (incl. DMARC pass/fail, auto-reply, quoted-history stripping). Fixtures under `contracts/channels/`.
 - **Outbound (pure render functions):** `OutgoingMessage` → Matrix content, Discord embed/response, Telegram `sendMessage` params + keyboard, MIME message. No test contacts a homeserver, Discord, Telegram or a mail server.
 - **Inbound pipeline:** fake adapter end-to-end through the real registry and a test database.
@@ -301,7 +301,7 @@ Each adapter maps its client errors (`matrix_sdk::Error`, `serenity::Error`, `te
 
 | Plan | Scope | Written |
 |---|---|---|
-| **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0005/0006; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | now |
+| **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0006–0008; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | now |
 | **B** Discord | §8.2 | when A is merged into the branch |
 | **C** Telegram | §8.3 | after B |
 | **D** Email | §8.4 | after C |

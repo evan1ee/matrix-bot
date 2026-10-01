@@ -32,7 +32,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 | Sub-project | Phases | Scope | State |
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
-| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`) and Telegram (`teloxide`) adapters; `platform_identities`; one tool registry shared by every channel | Not designed |
+| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Designed** (`specs/2026-10-01-omnichannel-design.md`, approved 2026-10-01); plan A written (`plans/2026-10-01-omnichannel-a-framework.md`); branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
 | 3 — Scheduled agent & storage | 5 | `ScheduledAgentTask` runtime (`scheduled_agent_tasks`, `agent_runs`, `agent_steps`); `StorageService` (local / S3); HTTP contracts between the backend and inference crates standardised | Not designed |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
@@ -202,7 +202,8 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 1. **Task 12: whole-branch review of step 9** (`BASE=65236b5..HEAD`, plan `plans/2026-09-30-outbox.md`), if not yet done; fix its findings.
 2. Clear the §11 items that touch the test suite first.
 3. Hand the user the merge gates (§10). The production rehearsal now covers migrations 0004 and 0005 (0005 drops `webhook_outbox` without history; drain it before release). Merge only on their instruction.
-4. Only then: sub-project 2 (Omnichannel), 3 and 4. Each starts with a design and the user's approval.
+4. Sub-project 2 (Omnichannel) was started early on the user's instruction (2026-10-01) on `feat/omnichannel`, stacked on `refactor/outbox`: execute plan A (`plans/2026-10-01-omnichannel-a-framework.md`) task by task; then write plans B (Discord), C (Telegram), D (Email) against the code A produced. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
+5. Sub-projects 3 and 4 start with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
 
@@ -414,3 +415,8 @@ These need the human. Prepare them; don't perform them.
 | `docs/llm.md` | LLM transport, tool loop, agent limits, MCP |
 | `README.md` | Setup, deployment, *Development* (toolchain, tests, Gitea and CI) |
 | `docs/superpowers/plans/2026-09-28-eliminate-spec-gaps.md` | Master plan across all four sub-projects |
+- **R69:** sub-project 2 starts before sub-project 1 merges, stacked on `refactor/outbox` — the user asked for it (2026-10-01) — cost: a rebase if review changes `refactor/outbox`.
+- **R70 (spec D1–D8):** linking is chat-initiated on every channel (the web-minted `!link <code>` flow is deleted); unlinked Discord/Telegram/Email identities get only `start`/`help`/`link` while Matrix keeps auto-provisioning; outbound is reply-to-origin; new accounts from a link token only for allowlisted identities; one channel-neutral `BotModule` registry; Discord commands take one `args` string; Email is a full channel over IMAP polling + SMTP with DMARC-gated inbound — user interview 2026-10-01 — cost: per decision in the spec.
+- **R71 (spec R-O1):** bare Matrix room ids stay the storage form of a conversation address; other channels are prefixed (`telegram:<id>`); outbox destinations are always prefixed — no rewriting migration over every `room_id` column — cost: one prefix to strip if a later migration unifies them.
+- **R72 (spec R-O2):** no generic metadata map on messages; platform data stays inside the adapter behind an opaque `MessageRef` — keeps email fields out of chat channels — cost: a typed field added later if a second channel needs one.
+- **R73 (plan A, A1–A6):** migrations are 0006–0008 (0005 was taken); Matrix-specific lookups are re-pointed at `platform_identities`; link-time merges keep today's unclaimed-account rule; the AI outage alert targets `dev_room_id` or the Matrix room named "dev"; the inbound pipeline holds `Weak<ChannelRegistry>`; `Reply: From<String>` for a mechanical module sweep — cost: per clarification in the plan.
