@@ -74,6 +74,9 @@ pub struct StageReporter {
     /// The streaming buffer behind `ProgressSink::push_delta`. Shared by clones
     /// so every holder of this reporter feeds the same edit cadence.
     stream: Arc<tokio::sync::Mutex<Option<StreamThrottler>>>,
+    /// Counts `report` calls, so a test can prove an operation sent no edit.
+    #[cfg(test)]
+    reports: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for StageReporter {
@@ -96,10 +99,15 @@ impl StageReporter {
             room: None,
             event_id: None,
             stream: Arc::default(),
+            #[cfg(test)]
+            reports: Arc::default(),
         }
     }
 
     pub async fn report(&self, plain_text: &str, html_text: &str) {
+        #[cfg(test)]
+        self.reports
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let (Some(room), Some(target_id)) = (&self.room, &self.event_id) {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_text)
@@ -137,6 +145,8 @@ impl StageReporter {
             room: self.room.clone(),
             event_id: self.event_id.clone(),
             stream: Arc::default(),
+            #[cfg(test)]
+            reports: self.reports.clone(),
         })
     }
 }
@@ -159,12 +169,11 @@ impl crate::llm::progress::ProgressSink for StageReporter {
             .await;
     }
 
-    /// Sends what is still buffered, then drops the buffer so the next stream
-    /// of the turn starts from empty text instead of appending to this one.
+    /// Marks the end of one streamed reply. Matrix discards the buffer without
+    /// sending it: the next stage or the final reply replaces the message anyway,
+    /// and an extra edit would cost a homeserver request per streamed round.
     async fn flush(&self) {
-        if let Some(mut throttler) = self.stream.lock().await.take() {
-            throttler.flush().await;
-        }
+        self.stream.lock().await.take();
     }
 
     fn message_ref(&self) -> Option<String> {
@@ -270,6 +279,8 @@ impl StageIndicator {
             room: Some(self.room.clone()),
             event_id: self.event_id.clone(),
             stream: Arc::default(),
+            #[cfg(test)]
+            reports: Arc::default(),
         }
     }
 
@@ -379,6 +390,19 @@ mod tests {
             .make_replacement(metadata);
 
         assert!(content.relates_to.is_some());
+    }
+
+    #[tokio::test]
+    async fn flush_ends_a_streamed_reply_without_sending_an_edit() {
+        use crate::llm::progress::ProgressSink;
+        let reporter = StageReporter::noop();
+        reporter.push_delta("Hello").await;
+        reporter.flush().await;
+        assert_eq!(
+            reporter.reports.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert!(reporter.stream.lock().await.is_none());
     }
 
     #[tokio::test]

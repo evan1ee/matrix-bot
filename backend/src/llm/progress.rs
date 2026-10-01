@@ -12,7 +12,8 @@ pub trait ProgressSink: Send + Sync {
     async fn report_tool_call(&self, tool_name: &str);
     /// Streaming text so far is appended; the sink throttles.
     async fn push_delta(&self, delta: &str);
-    /// The stream has ended: deliver anything still buffered and start fresh.
+    /// Marks the end of one streamed reply. A sink may send or discard what it
+    /// buffered; either way the next stream starts from empty text.
     async fn flush(&self);
     /// Adapter message id of the progress message, if any (Matrix: the stage event id).
     fn message_ref(&self) -> Option<String> {
