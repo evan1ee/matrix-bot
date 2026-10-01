@@ -1,6 +1,6 @@
 //! Delivers outbox copies (webhook alerts) through the channel registry. The
-//! checks are the old Matrix sink's: the owner must be authorized for the
-//! conversation at delivery time, and every error is retryable (frozen). The
+//! checks are the old Matrix sink's, now the adapter's `authorize_delivery`
+//! (joined, and the owner authorized, at delivery time), and every error is retryable (frozen). The
 //! delivery id travels as the message's idempotency key, which Matrix uses as
 //! the transaction id, so a resend after a crash within one session is
 //! deduplicated by the homeserver.
@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use crate::application::outbox::ClaimedDelivery;
 use crate::domain::events::{Destination, WebhookAlert};
 use crate::events::DeliverySink;
+use crate::interface::channels::adapter::ChannelError;
 use crate::interface::channels::message::{Content, OutgoingMessage, Reply, Target, Visibility};
 use crate::interface::channels::registry::ChannelRegistry;
 
@@ -51,16 +52,9 @@ impl DeliverySink for ChannelSink {
             .ok_or_else(|| format!("{channel} is not configured"))?;
 
         // The webhook owner must be authorized for the conversation at delivery time.
-        if !adapter
+        adapter
             .authorize_delivery(&delivery.event.account_id, &address)
-            .await
-        {
-            return Err(format!(
-                "Delivery rejected: owner {} is not joined to room {}",
-                delivery.event.account_id,
-                address.to_storage()
-            ));
-        }
+            .await?;
 
         let mut message = OutgoingMessage::to(
             Target::Conversation(address),
@@ -74,11 +68,17 @@ impl DeliverySink for ChannelSink {
             },
         );
         message.idempotency_key = Some(format!("outbox-{}", delivery.id));
+        message.join_if_needed = false;
         self.registry
             .send(message)
             .await
             .map(|_| ())
-            .map_err(|err| format!("Delivery failed: {err}"))
+            // The adapter's own text, unprefixed, so `last_error` in the
+            // webhook log reads as it always did.
+            .map_err(|err| match err {
+                ChannelError::Transient(reason) | ChannelError::Rejected(reason) => reason,
+                other => other.to_string(),
+            })
     }
 }
 
@@ -151,6 +151,7 @@ mod tests {
         assert_eq!(sent[0].content.plain, "deploy done");
         assert_eq!(sent[0].content.html.as_deref(), Some("<b>deploy</b> done"));
         assert_eq!(sent[0].idempotency_key.as_deref(), Some("outbox-42"));
+        assert!(!sent[0].join_if_needed, "an outbox send never joins a room");
     }
 
     #[tokio::test]

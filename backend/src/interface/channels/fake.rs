@@ -76,8 +76,19 @@ impl ChannelAdapter for FakeAdapter {
         Ok(SentRef { message: None })
     }
 
-    async fn authorize_delivery(&self, _owner: &AccountId, _to: &ConversationAddress) -> bool {
-        self.authorized.load(Ordering::SeqCst)
+    async fn authorize_delivery(
+        &self,
+        owner: &AccountId,
+        to: &ConversationAddress,
+    ) -> Result<(), String> {
+        if self.authorized.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Delivery rejected: owner {owner} is not joined to room {}",
+                to.to_storage()
+            ))
+        }
     }
 
     async fn find_conversation_by_name(&self, name: &str) -> Option<ConversationAddress> {

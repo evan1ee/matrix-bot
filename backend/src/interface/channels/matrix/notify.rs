@@ -79,6 +79,7 @@ pub async fn announce_account(
             reply_to: None,
             visibility: Visibility::Private,
             idempotency_key: None,
+            join_if_needed: true,
         };
         if let Err(err) = registry.send(message).await {
             error!("Could not send a notification to {}: {}", mxid, err);

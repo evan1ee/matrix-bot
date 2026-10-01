@@ -38,9 +38,14 @@ pub trait ChannelAdapter: Send + Sync {
     /// a failure the supervisor reports.
     async fn run(self: Arc<Self>, cancel: CancellationToken) -> anyhow::Result<()>;
     async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError>;
-    /// Outbox pre-check (webhook alerts); default allows.
-    async fn authorize_delivery(&self, _owner: &AccountId, _to: &ConversationAddress) -> bool {
-        true
+    /// Outbox pre-check (webhook alerts); default allows. `Err` is the
+    /// delivery error shown in the webhook log.
+    async fn authorize_delivery(
+        &self,
+        _owner: &AccountId,
+        _to: &ConversationAddress,
+    ) -> Result<(), String> {
+        Ok(())
     }
     /// A conversation found by display name (AI outage alert fallback, A4); default none.
     async fn find_conversation_by_name(&self, _name: &str) -> Option<ConversationAddress> {

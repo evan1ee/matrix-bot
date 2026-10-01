@@ -47,6 +47,25 @@ impl MatrixAdapter {
     }
 }
 
+/// The outcome of the two delivery checks; the messages are frozen (they are
+/// the `last_error` the webhook log has always shown).
+fn delivery_verdict(
+    room_id: &str,
+    owner: &AccountId,
+    joined: bool,
+    authorized: bool,
+) -> Result<(), String> {
+    if !joined {
+        return Err(format!("Bot is not joined to room: {room_id}"));
+    }
+    if !authorized {
+        return Err(format!(
+            "Delivery rejected: owner {owner} is not joined to room {room_id}"
+        ));
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl ChannelAdapter for MatrixAdapter {
     fn channel(&self) -> Channel {
@@ -71,18 +90,34 @@ impl ChannelAdapter for MatrixAdapter {
         outbound::send(&self.handles.matrix, message).await
     }
 
-    /// Today's room-authorization check (`ChannelSink`, the webhook endpoints).
-    async fn authorize_delivery(&self, owner: &AccountId, to: &ConversationAddress) -> bool {
+    /// The old webhook sink's checks, in its order and with its messages:
+    /// connected, a valid room id, the bot already joined (delivery never
+    /// joins), the owner authorized for the room.
+    async fn authorize_delivery(
+        &self,
+        owner: &AccountId,
+        to: &ConversationAddress,
+    ) -> Result<(), String> {
         let ConversationAddress::Matrix(room_id) = to else {
-            return false;
+            return Err(format!("Not a Matrix conversation: {}", to.to_storage()));
         };
-        rooms::is_room_authorized_for_account(
-            &self.services.rooms,
-            self.handles.matrix.current().as_ref(),
-            owner,
-            room_id,
-        )
-        .await
+        let client = self
+            .handles
+            .matrix
+            .current()
+            .ok_or("Matrix is not connected")?;
+        let parsed = <&matrix_sdk::ruma::RoomId>::try_from(room_id.as_str())
+            .map_err(|_| format!("Invalid Matrix room ID: {room_id}"))?;
+        let joined = client.get_room(parsed).is_some();
+        let authorized = joined
+            && rooms::is_room_authorized_for_account(
+                &self.services.rooms,
+                Some(&client),
+                owner,
+                room_id,
+            )
+            .await;
+        delivery_verdict(room_id, owner, joined, authorized)
     }
 
     /// The joined room whose name is `name` (the AI outage alert's fallback).
@@ -167,14 +202,31 @@ mod tests {
     async fn without_a_client_nothing_is_authorized_or_found() {
         let a = adapter().await;
         let owner = crate::domain::accounts::AccountId::from_seed("owner");
-        assert!(
-            !a.authorize_delivery(&owner, &ConversationAddress::Matrix("!r:x".into()))
-                .await
+        assert_eq!(
+            a.authorize_delivery(&owner, &ConversationAddress::Matrix("!r:x".into()))
+                .await,
+            Err("Matrix is not connected".to_string())
         );
-        assert!(
-            !a.authorize_delivery(&owner, &ConversationAddress::Telegram(1))
-                .await
-        );
+        assert!(a
+            .authorize_delivery(&owner, &ConversationAddress::Telegram(1))
+            .await
+            .is_err());
         assert!(a.find_conversation_by_name("dev").await.is_none());
+    }
+
+    #[test]
+    fn the_delivery_verdict_keeps_the_frozen_messages_and_order() {
+        let owner = crate::domain::accounts::AccountId::from_seed("owner");
+        assert_eq!(
+            delivery_verdict("!r:x", &owner, false, false),
+            Err("Bot is not joined to room: !r:x".to_string())
+        );
+        assert_eq!(
+            delivery_verdict("!r:x", &owner, true, false),
+            Err(format!(
+                "Delivery rejected: owner {owner} is not joined to room !r:x"
+            ))
+        );
+        assert_eq!(delivery_verdict("!r:x", &owner, true, true), Ok(()));
     }
 }

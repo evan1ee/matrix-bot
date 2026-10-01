@@ -147,6 +147,10 @@ pub struct OutgoingMessage {
     /// A key identifying this logical message across retries, for platforms
     /// that can deduplicate (Matrix: the transaction id). Others ignore it.
     pub idempotency_key: Option<String>,
+    /// Whether the adapter may join a conversation it is not in to deliver
+    /// (job sends do). Outbox deliveries set it false: an alert must never make
+    /// the bot join a room, only reach one it already is in.
+    pub join_if_needed: bool,
 }
 
 impl OutgoingMessage {
@@ -157,6 +161,7 @@ impl OutgoingMessage {
             reply_to: None,
             visibility: reply.visibility,
             idempotency_key: None,
+            join_if_needed: true,
         }
     }
 

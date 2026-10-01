@@ -78,13 +78,14 @@ pub async fn send(
         )));
     }
     let key = message.idempotency_key.as_deref();
+    let join = message.join_if_needed;
     let client = handle
         .current()
         .ok_or(ChannelError::NotConnected(Channel::Matrix))?;
 
     match destination {
         Destination::Room(room_id) => {
-            deliver_to_room_id(&client, room_id, &message.content, key).await
+            deliver_to_room_id(&client, room_id, &message.content, key, join).await
         }
         Destination::Direct(user_id) => {
             let room = dm_room(&client, user_id).await?;
@@ -94,20 +95,27 @@ pub async fn send(
 }
 
 /// Send into a room the bot already has; when that fails (or the room is not
-/// in the store) join it and send once more, the way the job handlers always did.
+/// in the store) and `join` allows it, join and send once more, the way the
+/// job handlers always did. Without `join` the failure is returned as is.
 async fn deliver_to_room_id(
     client: &Client,
     room_id: &RoomId,
     content: &Content,
     key: Option<&str>,
+    join: bool,
 ) -> Result<SentRef, ChannelError> {
     if let Some(room) = client.get_room(room_id) {
         match deliver(&room, content, key).await {
             Ok(sent) => return Ok(sent),
+            Err(err) if !join => return Err(err),
             Err(err) => warn!(%room_id, error = %err, "Send failed; retrying via join"),
         }
-    } else {
+    } else if join {
         warn!(%room_id, "No room handle in the store; joining");
+    } else {
+        return Err(ChannelError::Transient(format!(
+            "Bot is not joined to room: {room_id}"
+        )));
     }
     let joined = client
         .join_room_by_id(room_id)
@@ -138,9 +146,9 @@ async fn deliver(
     if let Some(key) = key {
         request = request.with_transaction_id(transaction_id(key));
     }
-    let response = request
-        .await
-        .map_err(|e| ChannelError::Transient(format!("send to {}: {e}", room.room_id())))?;
+    let response = request.await.map_err(|e| {
+        ChannelError::Transient(format!("Matrix homeserver delivery failed: {e:?}"))
+    })?;
     Ok(SentRef {
         message: Some(MessageRef(response.response.event_id.to_string())),
     })
