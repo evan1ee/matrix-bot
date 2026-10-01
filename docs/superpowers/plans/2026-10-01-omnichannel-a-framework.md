@@ -30,7 +30,19 @@
 - **Hard safety rules** (HANDOFF §6): never read `.env` or `data/` of the main checkout, never run the bot binary (only `cargo run --bin generate-openapi`), never contact a homeserver or external service from tests, never push/merge/PR, never bare `git stash`.
 - **Commits.** Conventional Commits, one logical change each, ending with the committing model's trailer, e.g. `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
-### The Gate (run at the end of every task; every line must pass)
+### Iteration discipline (during TDD, before the Gate)
+
+Do **not** run the full Gate after every code change. While implementing a task:
+
+1. Run the narrowest relevant test first (`cargo test -p matrix-bot <module path or test name>`); use targeted filters whenever possible.
+2. Use `cargo check` or a targeted `cargo clippy` only when it tells you something the current test/build has not already told you.
+3. Do not rerun the full suite while fixing a localized failure; rerun only the failing test, then its module.
+4. Run `cargo sqlx prepare` (and `--check`) only when a query, migration or schema changed.
+5. Regenerate OpenAPI only when an API definition (`#[utoipa::path]`, `ToSchema`, routes) changed.
+
+### The Gate (run once, when the task is complete and just before its commit; every line must pass)
+
+The lines below that depend on a change (`sqlx prepare`, OpenAPI, frontend) run only when the task touched queries/migrations, API definitions or the frontend respectively; the plan names those tasks.
 
 ```bash
 cd D:/01_Data/code/matrix-hello-bot-outbox
@@ -93,7 +105,7 @@ If the test container is not running: `docker start pg18-test`, or `docker run -
 | `frontend/src/modules/link/*`, `frontend/src/components/SecurityPanel.tsx` | link page, identity list | 11 |
 | `backend/tests/architecture.rs` | new boundary tests | 12 |
 
-Task order matters: each task leaves the whole workspace compiling and the Gate green.
+Task order matters: each task leaves the whole workspace compiling and the Gate green at its commit (see Iteration discipline above for how to get there cheaply).
 
 ---
 
