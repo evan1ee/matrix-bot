@@ -130,9 +130,9 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let owner_id =
-            crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+            crate::infrastructure::postgres::repositories::identities::resolve_or_provision(
                 &pool,
-                "@target_user:mbm.one",
+                &crate::domain::channels::PlatformIdentity::matrix("@target_user:mbm.one").unwrap(),
             )
             .await
             .unwrap();

@@ -7,6 +7,17 @@ use super::core;
 use crate::domain::accounts::{
     normalise_link_code, AccountId, LinkChallenge, LinkOutcome, LINK_CODE_TTL_MINUTES,
 };
+use crate::domain::channels::{Channel, PlatformIdentity};
+use crate::infrastructure::postgres::repositories::identities;
+
+/// The Matrix identity for `mxid`, or a decode error for a malformed id (a
+/// real homeserver sender is always well-formed; this only guards the type).
+fn matrix_identity(mxid: &str) -> Result<PlatformIdentity, sqlx::Error> {
+    PlatformIdentity::matrix(mxid).map_err(|err| {
+        tracing::warn!(error = %err, "refusing a malformed Matrix user id");
+        sqlx::Error::Decode(Box::new(err))
+    })
+}
 
 struct LinkChallengeRow {
     code: String,
@@ -106,7 +117,8 @@ pub async fn claim(
         return Ok(LinkOutcome::UnknownCode);
     };
 
-    let existing = core::find_by_mxid(pool, mxid).await?;
+    let identity = matrix_identity(mxid)?;
+    let existing = identities::find_account(pool, &identity).await?;
 
     match existing {
         Some(ref current) if *current == challenge.account_id => Ok(LinkOutcome::Linked {
@@ -135,13 +147,10 @@ pub async fn claim(
             .fetch_optional(pool)
             .await?;
 
-            sqlx::query!(
-                "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
-                mxid,
-                challenge.account_id.as_uuid(),
-            )
-            .execute(pool)
-            .await?;
+            if !identities::bind(pool, &challenge.account_id, &identity).await? {
+                // Someone bound this MXID between the lookup and the insert.
+                return Ok(LinkOutcome::AlreadyLinked);
+            }
 
             if let Some(prev) = previous_account {
                 let prev_id = AccountId::new(prev);
@@ -170,16 +179,18 @@ pub async fn unlink(
     account_id: &AccountId,
     mxid: &str,
 ) -> Result<bool, sqlx::Error> {
-    let affected = sqlx::query!(
-        "DELETE FROM matrix_links WHERE mxid = $1 AND account_id = $2",
-        mxid,
-        account_id.as_uuid(),
+    // A malformed id cannot be bound, so there is nothing to remove.
+    let Ok(identity) = PlatformIdentity::matrix(mxid) else {
+        tracing::warn!("ignoring unlink of a malformed Matrix user id");
+        return Ok(false);
+    };
+    identities::unbind(
+        conn,
+        account_id,
+        Channel::Matrix,
+        identity.user_id().as_str(),
     )
-    .execute(conn)
-    .await?
-    .rows_affected();
-
-    Ok(affected > 0)
+    .await
 }
 
 pub async fn link(
@@ -187,20 +198,28 @@ pub async fn link(
     account_id: &AccountId,
     mxid: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
-        mxid,
-        account_id.as_uuid(),
-    )
-    .execute(conn)
-    .await?;
-    Ok(())
+    let identity = matrix_identity(mxid)?;
+    if identities::bind(conn, account_id, &identity).await? {
+        Ok(())
+    } else {
+        Err(sqlx::Error::Protocol(
+            "Matrix user id is already linked".into(),
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
+
+    async fn find_by_mxid(pool: &PgPool, mxid: &str) -> Result<Option<AccountId>, sqlx::Error> {
+        identities::find_account(pool, &PlatformIdentity::matrix(mxid).unwrap()).await
+    }
+
+    async fn resolve_or_provision(pool: &PgPool, mxid: &str) -> Result<AccountId, sqlx::Error> {
+        identities::resolve_or_provision(pool, &PlatformIdentity::matrix(mxid).unwrap()).await
+    }
 
     async fn db() -> PgPool {
         let pool = crate::db::pool::test_pool().await;
@@ -259,7 +278,7 @@ mod tests {
         );
 
         assert_eq!(
-            core::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
             Some(account)
         );
     }
@@ -282,7 +301,7 @@ mod tests {
             .unwrap();
         assert_eq!(stolen, LinkOutcome::UnknownCode);
 
-        assert!(core::find_by_mxid(&pool, "@bystander:mbm.one")
+        assert!(find_by_mxid(&pool, "@bystander:mbm.one")
             .await
             .unwrap()
             .is_none());
@@ -345,7 +364,8 @@ mod tests {
         let pool = db().await;
         let theirs = core::create(&pool, "theirs", STATUS_ACTIVE).await.unwrap();
         sqlx::query!(
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@evan:mbm.one', $1)",
+            "INSERT INTO platform_identities (account_id, platform, platform_user_id) \
+             VALUES ($1, 'matrix', '@evan:mbm.one')",
             theirs.as_uuid()
         )
         .execute(&pool)
@@ -362,7 +382,7 @@ mod tests {
 
         // The link is untouched.
         assert_eq!(
-            core::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
             Some(theirs)
         );
     }
@@ -373,9 +393,7 @@ mod tests {
     #[tokio::test]
     async fn test_an_unclaimed_account_with_history_asks_to_merge() {
         let pool = db().await;
-        let old = core::resolve_or_provision(&pool, "@evan:mbm.one")
-            .await
-            .unwrap();
+        let old = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
         let new = core::create(&pool, "web", STATUS_ACTIVE).await.unwrap();
         let code = issue(&pool, &new).await.unwrap();
 
@@ -392,9 +410,7 @@ mod tests {
     #[tokio::test]
     async fn test_unlinking_keeps_the_data() {
         let pool = db().await;
-        let account = core::resolve_or_provision(&pool, "@evan:mbm.one")
-            .await
-            .unwrap();
+        let account = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
 
         sqlx::query!(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
@@ -408,7 +424,7 @@ mod tests {
         assert!(unlink(&pool, &account, "@evan:mbm.one").await.unwrap());
 
         // The MXID reaches nothing now.
-        assert!(core::find_by_mxid(&pool, "@evan:mbm.one")
+        assert!(find_by_mxid(&pool, "@evan:mbm.one")
             .await
             .unwrap()
             .is_none());
@@ -427,14 +443,10 @@ mod tests {
     #[tokio::test]
     async fn test_an_unlinked_mxid_comes_back_as_a_stranger() {
         let pool = db().await;
-        let original = core::resolve_or_provision(&pool, "@evan:mbm.one")
-            .await
-            .unwrap();
+        let original = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
         unlink(&pool, &original, "@evan:mbm.one").await.unwrap();
 
-        let fresh = core::resolve_or_provision(&pool, "@evan:mbm.one")
-            .await
-            .unwrap();
+        let fresh = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
         assert_ne!(
             fresh, original,
             "the MXID must not inherit the account it was unlinked from"
@@ -446,14 +458,12 @@ mod tests {
     #[tokio::test]
     async fn test_one_account_cannot_unlink_anothers_mxid() {
         let pool = db().await;
-        let theirs = core::resolve_or_provision(&pool, "@evan:mbm.one")
-            .await
-            .unwrap();
+        let theirs = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
         let mine = core::create(&pool, "mine", STATUS_ACTIVE).await.unwrap();
 
         assert!(!unlink(&pool, &mine, "@evan:mbm.one").await.unwrap());
         assert_eq!(
-            core::find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
+            find_by_mxid(&pool, "@evan:mbm.one").await.unwrap(),
             Some(theirs)
         );
     }

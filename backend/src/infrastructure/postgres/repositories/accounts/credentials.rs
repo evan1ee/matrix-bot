@@ -150,7 +150,8 @@ pub async fn delete(
 
     if count <= 1 {
         let has_matrix_link = sqlx::query_scalar!(
-            r#"SELECT COUNT(*) AS "count!" FROM matrix_links WHERE account_id = $1"#,
+            r#"SELECT COUNT(*) AS "count!" FROM platform_identities
+               WHERE account_id = $1 AND platform = 'matrix'"#,
             account_id.as_uuid(),
         )
         .fetch_one(&mut *tx)
@@ -388,7 +389,8 @@ mod tests {
         // Insert matrix link
         let acct = AccountId::from_seed("acct_primary");
         sqlx::query!(
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ('@alice:matrix.org', $1)",
+            "INSERT INTO platform_identities (account_id, platform, platform_user_id) \
+             VALUES ($1, 'matrix', '@alice:matrix.org')",
             acct.as_uuid()
         )
         .execute(&pool)

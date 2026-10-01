@@ -392,9 +392,9 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
-            crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+            crate::infrastructure::postgres::repositories::identities::resolve_or_provision(
                 &pool,
-                "@alice:mbm.one",
+                &crate::domain::channels::PlatformIdentity::matrix("@alice:mbm.one").unwrap(),
             )
             .await
             .unwrap();

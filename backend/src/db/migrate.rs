@@ -209,7 +209,7 @@ mod tests {
             ("finance_shares", "owner_id"),
             ("recurring_bills", "owner_id"),
             ("bot_message_targets", "owner_id"),
-            ("matrix_links", "account_id"),
+            ("platform_identities", "account_id"),
             ("webauthn_credentials", "account_id"),
             ("sessions", "account_id"),
             ("matrix_link_challenges", "account_id"),
@@ -309,7 +309,9 @@ mod tests {
         .await
         .unwrap();
 
-        migrator_up_to(i64::MAX).run(&pool).await.expect("0002");
+        // Only up to 0002: this test pins the TEXT -> UUID conversion and
+        // reads `matrix_links`, which 0007 later retires (see the 0007 tests).
+        migrator_up_to(2).run(&pool).await.expect("0002");
 
         for (label, query) in [
             ("todos.owner_id", "SELECT owner_id::text FROM todos"),
@@ -513,5 +515,92 @@ mod tests {
             .execute(&pool)
             .await;
         assert!(bad.is_err(), "the status CHECK must reject unknown states");
+    }
+
+    /// Given a database at 0005 with a Matrix link, When 0006/0007 run, Then
+    /// the link is one `platform = 'matrix'` identity on the same account
+    /// (keeping its link time) and `matrix_links` no longer exists.
+    #[tokio::test]
+    async fn test_0007_backfills_matrix_links_into_platform_identities() {
+        let pool = crate::db::pool::test_pool().await;
+        migrator_up_to(5).run(&pool).await.expect("0001-0005");
+        let account = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ($1, 'evan')")
+            .bind(account)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO matrix_links (mxid, account_id, linked_at) \
+             VALUES ('@evan:mbm.one', $1, '2026-01-02T03:04:05Z')",
+        )
+        .bind(account)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        migrator_up_to(i64::MAX)
+            .run(&pool)
+            .await
+            .expect("0006-0007");
+
+        let rows: Vec<(uuid::Uuid, String, String, String)> = sqlx::query_as(
+            "SELECT account_id, platform, platform_user_id, created_at::text \
+             FROM platform_identities",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, account);
+        assert_eq!(rows[0].1, "matrix");
+        assert_eq!(rows[0].2, "@evan:mbm.one");
+        assert!(
+            rows[0].3.starts_with("2026-01-02 03:04:05"),
+            "{}",
+            rows[0].3
+        );
+
+        let gone: Option<String> = sqlx::query_scalar("SELECT to_regclass('matrix_links')::text")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(gone, None, "matrix_links must be dropped");
+    }
+
+    /// A link whose account is gone must abort 0007 by name and change nothing.
+    /// The 0002 foreign key makes an orphan impossible to insert, so the test
+    /// drops that one constraint first, standing in for a hand-edited database.
+    #[tokio::test]
+    async fn test_0007_refuses_a_link_without_an_account_and_changes_nothing() {
+        let pool = crate::db::pool::test_pool().await;
+        migrator_up_to(5).run(&pool).await.expect("0001-0005");
+        // Literal SQL only (AGENTS §6): a DO block finds and drops the FK.
+        sqlx::query(
+            "DO $$ DECLARE fk TEXT; BEGIN \
+               SELECT con.conname INTO fk FROM pg_constraint con \
+               WHERE con.contype = 'f' AND con.conrelid = 'matrix_links'::regclass; \
+               EXECUTE format('ALTER TABLE matrix_links DROP CONSTRAINT %I', fk); \
+             END $$",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO matrix_links (mxid, account_id) VALUES ('@ghost:mbm.one', gen_random_uuid())")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = migrator_up_to(i64::MAX).run(&pool).await.unwrap_err();
+        assert!(err.to_string().contains("@ghost:mbm.one"), "{err}");
+
+        let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matrix_links")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            kept, 1,
+            "a refused migration must leave matrix_links intact"
+        );
     }
 }

@@ -1,9 +1,7 @@
-//! Accounts repository: persistence for the `accounts` table and MXID provisioning.
+//! Accounts repository: persistence for the `accounts` table.
 
+use crate::domain::accounts::{Account, AccountId};
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
-
-use crate::domain::accounts::{display_name_for_mxid, Account, AccountId, STATUS_UNCLAIMED};
 
 struct AccountRow {
     id: uuid::Uuid,
@@ -91,33 +89,6 @@ pub async fn find(
     Ok(row.map(Into::into))
 }
 
-/// Looks up an account ID linked to an MXID.
-pub async fn find_by_mxid(
-    conn: impl sqlx::PgExecutor<'_>,
-    mxid: &str,
-) -> Result<Option<AccountId>, sqlx::Error> {
-    let row = sqlx::query_scalar!(
-        r#"SELECT account_id AS "account_id: uuid::Uuid" FROM matrix_links WHERE mxid = $1"#,
-        mxid,
-    )
-    .fetch_optional(conn)
-    .await?;
-    Ok(row.map(AccountId::new))
-}
-
-/// Every MXID linked to `account_id`, ordered by linked_at.
-pub async fn linked_mxids(
-    conn: impl sqlx::PgExecutor<'_>,
-    account_id: &AccountId,
-) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar!(
-        "SELECT mxid FROM matrix_links WHERE account_id = $1 ORDER BY linked_at",
-        account_id.as_uuid(),
-    )
-    .fetch_all(conn)
-    .await
-}
-
 /// Total count of accounts.
 pub async fn count(conn: impl sqlx::PgExecutor<'_>) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
@@ -149,38 +120,18 @@ pub async fn delete(
     Ok(())
 }
 
-/// Resolves or provisions an unclaimed account for an MXID.
-pub async fn resolve_or_provision(pool: &PgPool, mxid: &str) -> Result<AccountId, sqlx::Error> {
-    if let Some(existing) = find_by_mxid(pool, mxid).await? {
-        return Ok(existing);
-    }
-
-    let account_id = create(pool, &display_name_for_mxid(mxid), STATUS_UNCLAIMED).await?;
-
-    let inserted = sqlx::query!(
-        "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        mxid,
-        account_id.as_uuid(),
-    )
-    .execute(pool)
-    .await?
-    .rows_affected()
-        > 0;
-
-    if inserted {
-        Ok(account_id)
-    } else {
-        delete(pool, &account_id).await?;
-        find_by_mxid(pool, mxid)
-            .await?
-            .ok_or(sqlx::Error::RowNotFound)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::accounts::STATUS_ACTIVE;
+    use crate::domain::channels::{Channel, PlatformIdentity};
+    use crate::infrastructure::postgres::repositories::identities;
+    use sqlx::PgPool;
+
+    /// Test shorthand: provisions the account for a Matrix sender.
+    async fn resolve_or_provision(pool: &PgPool, mxid: &str) -> Result<AccountId, sqlx::Error> {
+        identities::resolve_or_provision(pool, &PlatformIdentity::matrix(mxid).unwrap()).await
+    }
 
     async fn pool() -> PgPool {
         let p = crate::db::pool::test_pool().await;
@@ -257,54 +208,16 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    /// The sync loop does not serialise event handlers, so two messages from a
-    /// brand-new MXID can resolve concurrently. Both must agree on one account,
-    /// and no orphan may be left behind — a stranded account would silently own
-    /// whichever rows the losing task had already written.
-    #[tokio::test]
-    async fn test_concurrent_first_messages_converge_on_one_account() {
-        let pool = pool().await;
-
-        let mut results = Vec::new();
-        for _ in 0..8 {
-            let pool = pool.clone();
-            results.push(tokio::spawn(async move {
-                resolve_or_provision(&pool, "@racer:x").await.unwrap()
-            }));
-        }
-
-        let mut ids = Vec::new();
-        for handle in results {
-            ids.push(handle.await.unwrap());
-        }
-
-        assert!(
-            ids.windows(2).all(|w| w[0] == w[1]),
-            "resolved to different accounts: {ids:?}"
-        );
-
-        let accounts = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(accounts, 1, "the losing task left an orphan account behind");
-    }
-
     #[tokio::test]
     async fn test_linked_mxids_lists_every_route_to_an_account() {
         let pool = pool().await;
         let account = resolve_or_provision(&pool, "@evan:mbm.one").await.unwrap();
+        let work = PlatformIdentity::matrix("@evan:work.org").unwrap();
+        assert!(identities::bind(&pool, &account, &work).await.unwrap());
 
-        sqlx::query!(
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
-            "@evan:work.org",
-            account.as_uuid()
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let mxids = linked_mxids(&pool, &account).await.unwrap();
+        let mxids = identities::user_ids(&pool, &account, Channel::Matrix)
+            .await
+            .unwrap();
         assert_eq!(mxids.len(), 2);
         assert!(mxids.contains(&"@evan:work.org".to_string()));
     }
@@ -319,16 +232,17 @@ mod tests {
         assert_ne!(first, other);
 
         let duplicate = sqlx::query!(
-            "INSERT INTO matrix_links (mxid, account_id) VALUES ($1, $2)",
+            "INSERT INTO platform_identities (account_id, platform, platform_user_id) \
+             VALUES ($1, 'matrix', $2)",
+            other.as_uuid(),
             "@evan:mbm.one",
-            other.as_uuid()
         )
         .execute(&pool)
         .await;
 
         assert!(
             duplicate.is_err(),
-            "the primary key must reject a second link"
+            "the unique key must reject a second link"
         );
     }
 }

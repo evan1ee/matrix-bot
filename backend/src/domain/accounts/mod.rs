@@ -200,7 +200,7 @@ pub const OWNER_ID_MERGED_SEPARATELY: &[&str] = &["portfolio_audit_log"];
 /// Tables keyed by `account_id` whose rows follow the absorbed account.
 /// jobs: pending work follows the account (handlers resolve their subject from the row).
 pub const ACCOUNT_ID_FOLLOWS: &[&str] = &[
-    "matrix_links",
+    "platform_identities",
     "webauthn_credentials",
     "security_events",
     "account_rooms",

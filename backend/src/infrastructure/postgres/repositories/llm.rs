@@ -426,9 +426,9 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let owner =
-            crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
+            crate::infrastructure::postgres::repositories::identities::resolve_or_provision(
                 &pool,
-                "@tester:mbm.one",
+                &crate::domain::channels::PlatformIdentity::matrix("@tester:mbm.one").unwrap(),
             )
             .await
             .unwrap();

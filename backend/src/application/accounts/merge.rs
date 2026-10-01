@@ -91,8 +91,14 @@ impl MergeService {
 mod tests {
     use super::*;
     use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::channels::{Channel, PlatformIdentity};
     use crate::infrastructure::postgres::repositories::accounts::core as repo_core;
     use crate::infrastructure::postgres::repositories::accounts::sessions as repo_sessions;
+    use crate::infrastructure::postgres::repositories::identities;
+
+    fn evan() -> PlatformIdentity {
+        PlatformIdentity::matrix("@evan:mbm.one").unwrap()
+    }
 
     async fn db() -> PgPool {
         let pool = crate::db::pool::test_pool().await;
@@ -174,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_carries_the_matrix_link_over() {
         let pool = db().await;
-        let from = repo_core::resolve_or_provision(&pool, "@evan:mbm.one")
+        let from = identities::resolve_or_provision(&pool, &evan())
             .await
             .unwrap();
         let into = repo_core::create(&pool, "web", STATUS_ACTIVE)
@@ -184,13 +190,13 @@ mod tests {
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
         assert_eq!(
-            repo_core::find_by_mxid(&pool, "@evan:mbm.one")
-                .await
-                .unwrap(),
+            identities::find_account(&pool, &evan()).await.unwrap(),
             Some(into)
         );
         assert_eq!(
-            repo_core::linked_mxids(&pool, &into).await.unwrap(),
+            identities::user_ids(&pool, &into, Channel::Matrix)
+                .await
+                .unwrap(),
             vec!["@evan:mbm.one".to_string()]
         );
     }

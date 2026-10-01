@@ -13,9 +13,23 @@ use crate::domain::accounts::{
     Account, AccountId, AccountsError, LinkOutcome, MaturedRecovery, MergeOutcome, MergePreview,
     SecurityEvent, SecurityEventKind, Session,
 };
+use crate::domain::channels::{Channel, PlatformIdentity};
 use crate::infrastructure::postgres::repositories::accounts::{
     core, linking, recovery, security_events, sessions,
 };
+use crate::infrastructure::postgres::repositories::identities;
+
+/// A Matrix identity from a raw MXID. A malformed id cannot come from a real
+/// homeserver sender; it is logged and treated as unknown rather than trusted.
+fn matrix_identity(mxid: &str) -> Option<PlatformIdentity> {
+    match PlatformIdentity::matrix(mxid) {
+        Ok(identity) => Some(identity),
+        Err(err) => {
+            tracing::warn!(error = %err, "ignoring a malformed Matrix user id");
+            None
+        }
+    }
+}
 
 impl From<AccountsError> for AppError {
     fn from(err: AccountsError) -> Self {
@@ -62,7 +76,12 @@ impl AccountService {
     // --- Core Account Operations ---
 
     pub async fn resolve_or_provision(&self, mxid: &str) -> Result<AccountId, AppError> {
-        Ok(core::resolve_or_provision(&self.pool, mxid).await?)
+        let Some(identity) = matrix_identity(mxid) else {
+            return Err(AppError::Validation(format!(
+                "invalid Matrix user id: {mxid}"
+            )));
+        };
+        Ok(identities::resolve_or_provision(&self.pool, &identity).await?)
     }
 
     pub async fn find(&self, account_id: &AccountId) -> Result<Option<Account>, AppError> {
@@ -70,11 +89,14 @@ impl AccountService {
     }
 
     pub async fn find_by_mxid(&self, mxid: &str) -> Result<Option<AccountId>, AppError> {
-        Ok(core::find_by_mxid(&self.pool, mxid).await?)
+        let Some(identity) = matrix_identity(mxid) else {
+            return Ok(None);
+        };
+        Ok(identities::find_account(&self.pool, &identity).await?)
     }
 
     pub async fn linked_mxids(&self, account_id: &AccountId) -> Result<Vec<String>, AppError> {
-        Ok(core::linked_mxids(&self.pool, account_id).await?)
+        Ok(identities::user_ids(&self.pool, account_id, Channel::Matrix).await?)
     }
 
     pub async fn create(&self, display_name: &str, status: &str) -> Result<AccountId, AppError> {

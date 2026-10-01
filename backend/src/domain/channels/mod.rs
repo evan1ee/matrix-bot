@@ -21,6 +21,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The storage-form spelling of "no external channel" (see [`WEB_ROOM`](crate::domain::rooms::WEB_ROOM)).
@@ -158,6 +159,31 @@ impl PlatformIdentity {
 
     pub fn display_name(&self) -> Option<&str> {
         self.display_name.as_deref()
+    }
+}
+
+/// An identity bound to an account, as listed back to its owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedIdentity {
+    pub channel: Channel,
+    pub user_id: String,
+    pub display_name: Option<String>,
+    pub linked_at: DateTime<Utc>,
+}
+
+impl LinkedIdentity {
+    pub fn new(
+        channel: Channel,
+        user_id: String,
+        display_name: Option<String>,
+        linked_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            channel,
+            user_id,
+            display_name,
+            linked_at,
+        }
     }
 }
 

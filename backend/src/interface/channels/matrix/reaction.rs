@@ -9,7 +9,9 @@
 use crate::application::{AppError, AppServices};
 use crate::db::Database;
 use crate::db::DbPool;
+use crate::domain::channels::PlatformIdentity;
 use crate::domain::todos::TodoPatch;
+use crate::infrastructure::postgres::repositories::identities;
 use crate::interface::channels::matrix::reaction_targets::{
     delete_target_by_entity, get_target, BotMessageTarget,
 };
@@ -82,12 +84,14 @@ pub fn register_reaction_handler(client: &Client, db: Database, services: AppSer
                 None => return,
             };
 
-            let sender_owner_id = match crate::infrastructure::postgres::repositories::accounts::core::resolve_or_provision(
-                &db.pool,
-                ev.sender.as_str(),
-            )
-            .await
-            {
+            let sender = match PlatformIdentity::matrix(ev.sender.as_str()) {
+                Ok(identity) => identity,
+                Err(err) => {
+                    warn!("Ignoring reaction from malformed sender {}: {err}", ev.sender);
+                    return;
+                }
+            };
+            let sender_owner_id = match identities::resolve_or_provision(&db.pool, &sender).await {
                 Ok(oid) => oid,
                 Err(err) => {
                     warn!(

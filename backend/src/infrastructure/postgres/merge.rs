@@ -38,7 +38,6 @@ pub fn row_key(table: &str) -> &'static str {
     match table {
         "finance_shares" | "user_settings" | "life_profiles" | "ai_user_configs" => "owner_id",
         "bot_message_targets" => "event_id",
-        "matrix_links" => "mxid",
         "account_rooms" => "room_id",
         _ => "id",
     }

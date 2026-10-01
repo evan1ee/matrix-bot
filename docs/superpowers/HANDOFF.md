@@ -136,8 +136,8 @@ The last full test run (step 9 final verification at `b2587c7`, `cargo test -p m
 
 | Task | Scope | State | Commit |
 |---|---|---|---|
-| 1 | Domain channel types (`domain/channels`) | ✅ | (this commit) |
-| 2 | `platform_identities` schema and repository; `matrix_links` retired | ⬜ |  |
+| 1 | Domain channel types (`domain/channels`) | ✅ | cade6d3 |
+| 2 | `platform_identities` schema and repository; `matrix_links` retired | ✅ | (this commit) |
 | 3 | `IdentityService` | ⬜ |  |
 | 4 | Neutral message types, adapter trait, registry, renderers | ⬜ |  |
 | 5 | The agent stops depending on Matrix | ⬜ |  |
@@ -437,3 +437,4 @@ These need the human. Prepare them; don't perform them.
 - **R71 (spec R-O1):** bare Matrix room ids stay the storage form of a conversation address; other channels are prefixed (`telegram:<id>`); outbox destinations are always prefixed — no rewriting migration over every `room_id` column — cost: one prefix to strip if a later migration unifies them.
 - **R72 (spec R-O2):** no generic metadata map on messages; platform data stays inside the adapter behind an opaque `MessageRef` — keeps email fields out of chat channels — cost: a typed field added later if a second channel needs one.
 - **R73 (plan A, A1–A6):** migrations are 0006–0008 (0005 was taken); Matrix-specific lookups are re-pointed at `platform_identities`; link-time merges keep today's unclaimed-account rule; the AI outage alert targets `dev_room_id` or the Matrix room named "dev"; the inbound pipeline holds `Weak<ChannelRegistry>`; `Reply: From<String>` for a mechanical module sweep — cost: per clarification in the plan.
+- **R74 (plan A, Task 2):** `identities::resolve_or_provision` creates the unclaimed account and binds in one transaction and rolls back on a lost race (no orphan to delete); a lost `bind` in `linking::claim` is `AlreadyLinked`; a malformed MXID reaching `AccountService`/repositories is logged at warn and treated as unknown (`find` → `None`, `unlink` → `false`, `resolve_or_provision` → validation error, Matrix handlers drop the event); the 0002 conversion test now stops at version 2 because 0007 retires `matrix_links`, and 0007 has its own backfill and orphan-guard tests — cost: none functional; a hand-edited DB with orphan links fails boot by name.

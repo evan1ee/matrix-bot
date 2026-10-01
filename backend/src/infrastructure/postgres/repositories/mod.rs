@@ -7,6 +7,7 @@ pub mod bookmarks;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod identities;
 pub mod jobs;
 pub mod life;
 pub mod llm;
