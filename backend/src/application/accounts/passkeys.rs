@@ -9,11 +9,12 @@
 //! here, so an interface that stores a passkey cannot forget the audit row, and
 //! cannot write it a second time.
 
+use sqlx::PgConnection;
 use webauthn_rs::prelude::Passkey;
 
 use crate::application::AppError;
 use crate::domain::accounts::{AccountId, DeleteOutcome, SecurityEventKind, StoredCredential};
-use crate::infrastructure::postgres::repositories::accounts::credentials;
+use crate::infrastructure::postgres::repositories::accounts::{core, credentials, security_events};
 
 use super::AccountService;
 
@@ -61,6 +62,22 @@ impl AccountService {
         let json = serialise(passkey)?;
         self.add_passkey(account_id, &id, &json, label).await?;
         Ok(id)
+    }
+
+    /// Activates (or creates) the account a registration ceremony minted an id
+    /// for and stores its first passkey, in one transaction: a credential the
+    /// database refuses leaves no active account that nobody can sign in to.
+    pub async fn register_with_passkey(
+        &self,
+        account_id: &AccountId,
+        display_name: &str,
+        passkey: &Passkey,
+        label: &str,
+    ) -> Result<(), AppError> {
+        let mut tx = self.pool.begin().await?;
+        register_account_in(&mut tx, account_id, display_name, passkey, label).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Stores an already-serialised passkey row and records `PasskeyAdded`.
@@ -145,12 +162,70 @@ impl AccountService {
 /// A serialisation failure is our own fault, not an outside dependency's, so it
 /// is reported as `Database` (protocol error), the variant `app_error.rs` maps
 /// to an opaque 500 with the detail logged; the client never sees it.
+/// [`AccountService::register_with_passkey`] on a connection the caller owns,
+/// so a flow that must also do something else atomically (the link-signup
+/// finish binds the identity too) can share the steps. Records
+/// `PasskeyAdded(label)` once, like `register_passkey`.
+pub(crate) async fn register_account_in(
+    conn: &mut PgConnection,
+    account_id: &AccountId,
+    display_name: &str,
+    passkey: &Passkey,
+    label: &str,
+) -> Result<(), AppError> {
+    let id = credentials::credential_id(passkey.cred_id().as_ref());
+    let json = serialise(passkey)?;
+    core::activate_or_create(&mut *conn, account_id, display_name).await?;
+    credentials::add(&mut *conn, account_id, &id, &json, label).await?;
+    security_events::record(
+        &mut *conn,
+        account_id,
+        SecurityEventKind::PasskeyAdded,
+        Some(label),
+    )
+    .await;
+    Ok(())
+}
+
 fn serialise(passkey: &Passkey) -> Result<String, AppError> {
     serde_json::to_string(passkey).map_err(|err| {
         AppError::Database(sqlx::Error::Protocol(format!(
             "could not serialise passkey: {err}"
         )))
     })
+}
+
+/// A structurally valid passkey. Building one through a ceremony needs an
+/// authenticator; the service only cares about its id and that it
+/// round-trips through JSON.
+#[cfg(test)]
+pub(crate) fn test_passkey(raw_id: &[u8], counter: u32) -> Passkey {
+    use base64::Engine;
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    serde_json::from_value(serde_json::json!({
+        "cred": {
+            "cred_id": b64(raw_id),
+            "cred": {
+                "type_": "ES256",
+                "key": { "EC_EC2": { "curve": "SECP256R1", "x": b64(&[1; 32]), "y": b64(&[2; 32]) } }
+            },
+            "counter": counter,
+            "transports": null,
+            "user_verified": true,
+            "backup_eligible": false,
+            "backup_state": false,
+            "registration_policy": "required",
+            "extensions": {
+                "cred_protect": "NotRequested",
+                "hmac_create_secret": "NotRequested",
+                "appid": "NotRequested",
+                "cred_props": "Ignored"
+            },
+            "attestation": { "data": "None", "metadata": "None" },
+            "attestation_format": "none"
+        }
+    }))
+    .expect("the fixture must be a valid passkey")
 }
 
 #[cfg(test)]
@@ -164,37 +239,7 @@ mod tests {
         AccountService::new(pool)
     }
 
-    /// A structurally valid passkey. Building one through a ceremony needs an
-    /// authenticator; the service only cares about its id and that it
-    /// round-trips through JSON.
-    fn passkey(raw_id: &[u8], counter: u32) -> Passkey {
-        use base64::Engine;
-        let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-        serde_json::from_value(serde_json::json!({
-            "cred": {
-                "cred_id": b64(raw_id),
-                "cred": {
-                    "type_": "ES256",
-                    "key": { "EC_EC2": { "curve": "SECP256R1", "x": b64(&[1; 32]), "y": b64(&[2; 32]) } }
-                },
-                "counter": counter,
-                "transports": null,
-                "user_verified": true,
-                "backup_eligible": false,
-                "backup_state": false,
-                "registration_policy": "required",
-                "extensions": {
-                    "cred_protect": "NotRequested",
-                    "hmac_create_secret": "NotRequested",
-                    "appid": "NotRequested",
-                    "cred_props": "Ignored"
-                },
-                "attestation": { "data": "None", "metadata": "None" },
-                "attestation_format": "none"
-            }
-        }))
-        .expect("the fixture must be a valid passkey")
-    }
+    use super::test_passkey as passkey;
 
     /// The account's audit trail, oldest first, as `(kind, detail)`.
     async fn audit(service: &AccountService, account: &AccountId) -> Vec<(String, Option<String>)> {
@@ -401,5 +446,42 @@ mod tests {
             audit(&service, &account).await,
             vec![row("passkey_added", "MacBook")]
         );
+    }
+
+    #[tokio::test]
+    async fn registering_an_account_with_its_passkey_is_one_atomic_step() {
+        let service = service().await;
+        let id = AccountId::generate();
+        service
+            .register_with_passkey(&id, "Evan", &passkey(&[3, 3], 0), "Laptop")
+            .await
+            .unwrap();
+
+        let account = service.find(&id).await.unwrap().expect("account created");
+        assert_eq!(account.display_name, "Evan");
+        assert_eq!(service.list_passkeys(&id).await.unwrap().len(), 1);
+        assert_eq!(
+            audit(&service, &id).await,
+            vec![row("passkey_added", "Laptop")]
+        );
+    }
+
+    /// The old two-call sequence left an active account without a passkey when
+    /// the second call failed; now a rejected passkey leaves nothing behind.
+    #[tokio::test]
+    async fn a_rejected_passkey_leaves_no_account_behind() {
+        let service = service().await;
+        let first = AccountId::generate();
+        service
+            .register_with_passkey(&first, "First", &passkey(&[4, 4], 0), "Key")
+            .await
+            .unwrap();
+
+        let second = AccountId::generate();
+        let err = service
+            .register_with_passkey(&second, "Second", &passkey(&[4, 4], 0), "Key")
+            .await;
+        assert!(err.is_err(), "a credential id is stored once");
+        assert!(service.find(&second).await.unwrap().is_none());
     }
 }

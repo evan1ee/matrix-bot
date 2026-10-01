@@ -55,9 +55,17 @@ Sessions are held server-side (`infrastructure/postgres/repositories/accounts/se
 
 ### Linking, recovery, and the Matrix ceiling
 
-`!link` is handled in `interface/channels/matrix/linking.rs` **before** the sender is resolved, and that ordering is load-bearing: resolving first would provision an empty account for the very MXID being claimed, turning every first-time link into a merge of nothing. Do not move it into a `BotModule`.
+Linking is chat-initiated for every channel (`!link` in a direct conversation mints a ten-minute token; see `application/identity/link.rs`). Proof of identity ownership is the direct conversation that minted the token, proof of account ownership is the passkey session that claims it. The web half:
 
-Proof of ownership is the message sender, so no password is involved. `LinkRepository::claim` refuses `!link` outside a DM and burns the code either way — `claim` calls `consume` on the not-a-DM path before returning, so the code is spent even on refusal: in a public room everyone can read it, and a bystander could send it from their own MXID. A link that finds existing data does not merge; it reports the count and records a pending merge in `ApiState.pending_merges`, which is also the *authorisation* for `confirm-merge` (without it, naming any account id would absorb it).
+| Route | Extractor | Notes |
+|---|---|---|
+| `GET /account/identities` | `AuthUser` | every channel's identities of the caller |
+| `POST /account/identities/unlink` | `VerifiedUser`, in `SENSITIVE` | `{channel, user_id}`; `409` when it is the last way in |
+| `POST /link/inspect` | optional session | read-only preview: `bind`, `already_yours`, `needs_merge`, `owned_elsewhere`, `signup_allowed`, `sign_in_required`, `expired`; an unknown or dead token is `expired` |
+| `POST /link/claim` | `VerifiedUser`, in `SENSITIVE` | binds (or merges, then binds), burns the token, publishes `IdentityLinked` |
+| `POST /link/signup/start` / `finish` | none, rate-limited per IP | only for an identity on the deployment's signup allowlist (`403` otherwise, re-checked at finish); finish creates the account, stores the passkey and binds the identity in **one** transaction, then issues the session cookie |
+
+The token travels in the request body, is capped at 500 characters, and appears in no log line or error. `!link` is still handled before the sender is resolved: resolving first would provision an empty account for the very identity being claimed.
 
 Unlinking keeps every row. Data belongs to the account; unlinking revokes an access path, and the MXID comes back as a stranger.
 

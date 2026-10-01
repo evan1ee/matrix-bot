@@ -243,27 +243,19 @@ pub async fn register_finish(
             ApiError::bad_request("That passkey could not be verified")
         })?;
 
-    // Activate or create the account.
-    let accounts = &state.services.accounts;
-    accounts
-        .activate_or_create(&account_id, &display_name)
+    let label = passkey_label(payload.label.as_deref());
+
+    // One transaction: activating the account and storing its passkey either
+    // both happen or neither does. Records `PasskeyAdded` itself; recording it
+    // here as well would log it twice.
+    state
+        .services
+        .accounts
+        .register_with_passkey(&account_id, &display_name, &passkey, label)
         .await
         .map_err(|err| {
-            ApiError::internal(format!("could not activate or create the account: {err}"))
+            ApiError::internal(format!("could not create the account and passkey: {err}"))
         })?;
-
-    let label = payload
-        .label
-        .as_deref()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .unwrap_or("Passkey");
-
-    // Records `PasskeyAdded` itself; recording it here as well would log it twice.
-    accounts
-        .register_passkey(&account_id, &passkey, label)
-        .await
-        .map_err(|err| ApiError::internal(format!("could not store the passkey: {err}")))?;
 
     issue_session(&state, &account_id, &display_name, &headers).await
 }
@@ -378,13 +370,21 @@ pub async fn login_finish(
     issue_session(&state, &account_id, &account.display_name, &headers).await
 }
 
+/// What to call a freshly registered passkey when the browser sent no label.
+pub(crate) fn passkey_label(label: Option<&str>) -> &str {
+    label
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .unwrap_or("Passkey")
+}
+
 /// Opens a session and returns it as a `Set-Cookie` alongside the body.
 ///
 /// `HttpOnly` keeps the value out of JavaScript's reach; `SameSite=Strict`
 /// means a cross-site request never carries it, which is most of the CSRF
 /// story. `Secure` follows the deployment — see `Config::cookie_secure` for why
 /// it is off in development.
-async fn issue_session(
+pub(crate) async fn issue_session(
     state: &ApiState,
     account_id: &AccountId,
     display_name: &str,

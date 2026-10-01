@@ -30,8 +30,12 @@ pub mod finance_net_worth;
 pub mod footprints;
 pub mod habits;
 pub mod health;
+pub mod identities;
+#[cfg(test)]
+mod identity_api_tests;
 pub mod life;
 pub mod life_activity;
+pub mod link;
 pub mod mcp;
 pub mod ocr;
 pub mod openapi;
@@ -195,7 +199,8 @@ mod step_up_tests {
     /// the only thing keeping "sensitive actions need a recent passkey" true
     /// rather than aspirational.
     const SENSITIVE: &[(&str, &str)] = &[
-        ("POST", "/api/v1/account/matrix/unlink"),
+        ("POST", "/api/v1/account/identities/unlink"),
+        ("POST", "/api/v1/link/claim"),
         ("POST", "/api/v1/account/sessions/revoke-others"),
         ("DELETE", "/api/v1/account/sessions/some-id"),
         ("POST", "/api/v1/account/recovery-codes"),
@@ -206,6 +211,7 @@ mod step_up_tests {
     /// Routes an ordinary, hours-old session must still be able to use.
     const ORDINARY: &[(&str, &str)] = &[
         ("GET", "/api/v1/account/passkeys"),
+        ("GET", "/api/v1/account/identities"),
         ("GET", "/api/v1/account/sessions"),
         ("GET", "/api/v1/account/security-events"),
         ("GET", "/api/v1/account/recovery-status"),

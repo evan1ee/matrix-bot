@@ -5,6 +5,9 @@ use sqlx::PgPool;
 
 pub(crate) mod merge;
 mod passkeys;
+pub(crate) use passkeys::register_account_in;
+#[cfg(test)]
+pub(crate) use passkeys::test_passkey;
 mod principal;
 use merge::MergeService;
 
@@ -76,14 +79,6 @@ impl AccountService {
         status: &str,
     ) -> Result<(), AppError> {
         Ok(core::create_with_id(&self.pool, account_id, display_name, status).await?)
-    }
-
-    pub async fn activate_or_create(
-        &self,
-        account_id: &AccountId,
-        display_name: &str,
-    ) -> Result<(), AppError> {
-        Ok(core::activate_or_create(&self.pool, account_id, display_name).await?)
     }
 
     pub async fn count(&self) -> Result<i64, AppError> {

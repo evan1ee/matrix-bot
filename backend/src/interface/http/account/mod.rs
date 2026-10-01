@@ -8,7 +8,6 @@
 //! — fails if a route in here forgets it.
 
 pub mod audit;
-pub mod links;
 pub mod passkeys;
 pub mod recovery;
 pub mod sessions;
@@ -20,13 +19,10 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::domain::accounts::{hash_token, AccountId, STATUS_ACTIVE};
-    use crate::interface::http::account::{
-        audit::*, links::*, passkeys::*, recovery::*, sessions::*,
-    };
+    use crate::interface::http::account::{audit::*, passkeys::*, recovery::*, sessions::*};
     use crate::interface::http::auth::extractor::VerifiedUser;
     use crate::interface::http::auth::types::{ApiState, AuthUser};
     use axum::extract::{Path, State};
-    use axum::Json;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -62,58 +58,6 @@ mod tests {
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
         }
-    }
-
-    #[tokio::test]
-    async fn test_linked_matrix_accounts_are_listed() {
-        let state = state().await;
-        let user = signed_in(&state, "evan").await;
-        crate::infrastructure::postgres::repositories::identities::bind(
-            &state.db.pool,
-            &user.account_id,
-            &crate::domain::channels::PlatformIdentity::matrix("@evan:mbm.one").unwrap(),
-        )
-        .await
-        .unwrap();
-
-        let links = list_links(State(state), user).await.unwrap();
-        assert_eq!(links.0, vec!["@evan:mbm.one".to_string()]);
-    }
-
-    #[tokio::test]
-    async fn test_unlink_removes_only_your_own_link() {
-        let state = state().await;
-        let mine = signed_in(&state, "mine").await;
-        let theirs = signed_in(&state, "theirs").await;
-
-        crate::infrastructure::postgres::repositories::identities::bind(
-            &state.db.pool,
-            &theirs.account_id,
-            &crate::domain::channels::PlatformIdentity::matrix("@evan:mbm.one").unwrap(),
-        )
-        .await
-        .unwrap();
-
-        let err = unlink(
-            State(state.clone()),
-            VerifiedUser(mine),
-            Json(UnlinkRequest {
-                mxid: "@evan:mbm.one".to_string(),
-            }),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
-
-        // Still linked to its real owner.
-        assert_eq!(
-            state
-                .services
-                .identity
-                .find_matrix_for_test("@evan:mbm.one")
-                .await,
-            Some(theirs.account_id)
-        );
     }
 
     /// The security-events list is a public contract: the web UI reads exactly

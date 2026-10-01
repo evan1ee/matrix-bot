@@ -342,7 +342,13 @@ export class FakeApi {
   pendingEvents: unknown[] = [];
 
   /** A merge waiting on confirmation, as `!link` would have recorded. */
-  pendingMerge: { from_account: string; preview: Record<string, number> } | null = null;
+  /** What `POST /link/inspect` answers (Task 11's link page reads it). */
+  linkPreview: {
+    state: string;
+    channel: string | null;
+    user_id: string | null;
+    merge_item_count: number | null;
+  } = { state: 'bind', channel: 'telegram', user_id: '42', merge_item_count: null };
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
@@ -864,23 +870,26 @@ export class FakeApi {
       this.passkeys = this.passkeys.filter((k) => k.id !== id);
       return route.fulfill({ status: 204, body: '' });
     }
-    if (path === '/account/matrix' && method === 'GET') {
-      return json(route, 200, this.linkedMxids);
+    if (path === '/account/identities' && method === 'GET') {
+      return json(route, 200, {
+        identities: this.linkedMxids.map((user_id) => ({
+          channel: 'matrix',
+          user_id,
+          display_name: null,
+          linked_at: '2026-08-01T10:00:00Z',
+        })),
+      });
     }
-    if (path === '/account/matrix/link' && method === 'POST') {
-      return json(route, 200, { code: 'A3F9-K2QX', expires_in_seconds: 300 });
+    if (path === '/account/identities/unlink' && method === 'POST') {
+      const before = this.linkedMxids.length;
+      this.linkedMxids = this.linkedMxids.filter((m) => m !== body?.user_id);
+      return json(route, 200, { unlinked: this.linkedMxids.length < before });
     }
-    if (path === '/account/matrix/unlink' && method === 'POST') {
-      this.linkedMxids = this.linkedMxids.filter((m) => m !== body?.mxid);
-      return route.fulfill({ status: 204, body: '' });
+    if (path === '/link/inspect' && method === 'POST') {
+      return json(route, 200, this.linkPreview);
     }
-    if (path === '/account/matrix/pending-merge' && method === 'GET') {
-      return json(route, 200, this.pendingMerge);
-    }
-    if (path === '/account/matrix/confirm-merge' && method === 'POST') {
-      const preview = this.pendingMerge?.preview ?? {};
-      this.pendingMerge = null;
-      return json(route, 200, preview);
+    if (path === '/link/claim' && method === 'POST') {
+      return json(route, 200, { outcome: 'linked' });
     }
     if (path === '/account/sessions' && method === 'GET') {
       return json(route, 200, this.sessions);

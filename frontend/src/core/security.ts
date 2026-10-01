@@ -17,20 +17,11 @@ export interface DeviceSession {
   current: boolean;
 }
 
-export interface MergePreview {
-  todos: number;
-  reminders: number;
-  transactions: number;
-  recurring_bills: number;
-  portfolio_holdings: number;
-  portfolio_cash_balances: number;
-  finance_categories: number;
-  user_settings: number;
-}
-
-export interface PendingMerge {
-  from_account: string;
-  preview: MergePreview;
+export interface LinkedIdentity {
+  channel: string;
+  user_id: string;
+  display_name: string | null;
+  linked_at: string;
 }
 
 export interface SecurityEvent {
@@ -47,11 +38,10 @@ export interface RecoveryStatus {
 
 export const SECURITY_KEYS = {
   passkeys: ['account', 'passkeys'],
-  links: ['account', 'matrix'],
+  identities: ['account', 'identities'],
   sessions: ['account', 'sessions'],
   events: ['account', 'security-events'],
   recovery: ['account', 'recovery-status'],
-  pendingMerge: ['account', 'pending-merge'],
 };
 
 export function usePasskeys() {
@@ -61,10 +51,14 @@ export function usePasskeys() {
   });
 }
 
-export function useLinkedAccounts() {
-  return useQuery<string[]>({
-    queryKey: SECURITY_KEYS.links,
-    queryFn: () => fetchApi<string[]>('/account/matrix'),
+/** The Matrix user ids linked to this account, oldest first. */
+export function useMatrixIdentities() {
+  return useQuery<LinkedIdentity[]>({
+    queryKey: SECURITY_KEYS.identities,
+    queryFn: async () =>
+      (await fetchApi<{ identities: LinkedIdentity[] }>('/account/identities')).identities.filter(
+        (identity) => identity.channel === 'matrix'
+      ),
   });
 }
 
@@ -86,16 +80,6 @@ export function useRecoveryStatus() {
   return useQuery<RecoveryStatus>({
     queryKey: SECURITY_KEYS.recovery,
     queryFn: () => fetchApi<RecoveryStatus>('/account/recovery-status'),
-  });
-}
-
-export function usePendingMerge() {
-  return useQuery<PendingMerge | null>({
-    queryKey: SECURITY_KEYS.pendingMerge,
-    queryFn: () => fetchApi<PendingMerge | null>('/account/matrix/pending-merge'),
-    // A merge is announced by a Matrix DM, so the tab may have been open the
-    // whole time it happened. Poll while this screen is showing.
-    refetchInterval: 10_000,
   });
 }
 
@@ -137,19 +121,10 @@ function isStepUpRequired(error: Error): boolean {
 }
 
 export const securityApi = {
-  startLink: () =>
-    fetchApi<{ code: string; expires_in_seconds: number }>('/account/matrix/link', {
+  unlinkMatrix: (userId: string) =>
+    fetchApi<{ unlinked: boolean }>('/account/identities/unlink', {
       method: 'POST',
-    }),
-  unlink: (mxid: string) =>
-    fetchApi<void>('/account/matrix/unlink', {
-      method: 'POST',
-      body: JSON.stringify({ mxid }),
-    }),
-  confirmMerge: (fromAccount: string) =>
-    fetchApi<MergePreview>('/account/matrix/confirm-merge', {
-      method: 'POST',
-      body: JSON.stringify({ from_account: fromAccount }),
+      body: JSON.stringify({ channel: 'matrix', user_id: userId }),
     }),
   deletePasskey: (id: string) =>
     fetchApi<void>(`/account/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' }),

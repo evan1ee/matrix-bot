@@ -134,29 +134,17 @@ test.describe('passkeys', () => {
   });
 });
 
-test.describe('linking a Matrix account', () => {
+test.describe('linked Matrix accounts', () => {
   test('marks the primary Matrix account with primary identity badge', async ({ app, api }) => {
     api.linkedMxids = ['@evan:mbm.one', '@secondary:matrix.org'];
     const dialog = await openSecurity(app);
     await expect(dialog.getByText('primary identity', { exact: true })).toBeVisible();
   });
 
-  test('shows the exact line to send, and that it is single-use', async ({ app }) => {
+  test('points to the chat command for linking another account', async ({ app }) => {
     const dialog = await openSecurity(app);
-    await dialog.getByRole('button', { name: /link a matrix account/i }).click();
-
-    // The user is about to retype this into a different app, so the whole
-    // command is shown rather than the bare code.
-    await expect(dialog.getByText('!link A3F9-K2QX')).toBeVisible();
-    await expect(dialog.getByText(/expires in 5 minutes.*works once/i)).toBeVisible();
-    // The rule that will otherwise surprise them.
-    await expect(dialog.getByText(/shared room cancels it/i)).toBeVisible();
-
-    // Verify copy button works and provides feedback
-    const copyButton = dialog.getByRole('button', { name: /^copy$/i });
-    await expect(copyButton).toBeVisible();
-    await copyButton.click();
-    await expect(dialog.getByText('Copied!')).toBeVisible();
+    await expect(dialog.getByText(/send !link to the bot in a direct message/i)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /link a matrix account/i })).toHaveCount(0);
   });
 
   test('lists linked accounts and unlinks one', async ({ app, api }) => {
@@ -176,43 +164,6 @@ test.describe('linking a Matrix account', () => {
     api.linkedMxids = [];
     const dialog = await openSecurity(app);
     await expect(dialog.getByText(/no matrix account linked/i)).toBeVisible();
-  });
-});
-
-test.describe('merging an account that already has data', () => {
-  test('shows what will move before anything moves', async ({ app, api }) => {
-    api.pendingMerge = {
-      from_account: 'acct_old',
-      preview: { todos: 47, reminders: 8, transactions: 132, recurring_bills: 0,
-                 portfolio_holdings: 3, portfolio_cash_balances: 0,
-                 finance_categories: 0, user_settings: 1 },
-    };
-
-    const dialog = await openSecurity(app);
-
-    // Counts, so the decision is made with the numbers in view.
-    await expect(dialog.getByText(/47 todos/i)).toBeVisible();
-    await expect(dialog.getByText(/132 transactions/i)).toBeVisible();
-    await expect(dialog.getByText(/3 portfolio holdings/i)).toBeVisible();
-    // Empty tables are not listed as "0 bills".
-    await expect(dialog.getByText(/recurring bills/i)).toHaveCount(0);
-
-    await expect(dialog.getByText(/nothing is deleted/i)).toBeVisible();
-  });
-
-  test('confirming moves the data and clears the prompt', async ({ app, api }) => {
-    api.pendingMerge = {
-      from_account: 'acct_old',
-      preview: { todos: 2, reminders: 0, transactions: 0, recurring_bills: 0,
-                 portfolio_holdings: 0, portfolio_cash_balances: 0,
-                 finance_categories: 0, user_settings: 0 },
-    };
-
-    const dialog = await openSecurity(app);
-    await dialog.getByRole('button', { name: /move it into my account/i }).click();
-
-    await expect(dialog.getByText(/waiting to link/i)).toHaveCount(0);
-    expect(api.requests.some((r) => r.url === '/account/matrix/confirm-merge')).toBe(true);
   });
 });
 

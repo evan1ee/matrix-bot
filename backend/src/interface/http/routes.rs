@@ -5,9 +5,9 @@ use axum::{
 
 use super::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, life, life_activity, mcp, ocr, openapi, portfolio,
-    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
-    reminders, rooms, settings, sse, todos, voice, webhooks,
+    finance_net_worth, footprints, habits, identities, life, life_activity, link, mcp, ocr,
+    openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -80,8 +80,15 @@ fn routes_account() -> Router<auth::ApiState> {
             "/account/passkeys/:id",
             put(account::passkeys::rename_passkey).delete(account::passkeys::delete_passkey),
         )
-        .route("/account/matrix", get(account::links::list_links))
-        .route("/account/matrix/unlink", post(account::links::unlink))
+        .route("/account/identities", get(identities::list_identities))
+        .route(
+            "/account/identities/unlink",
+            post(identities::unlink_identity),
+        )
+        .route("/link/inspect", post(link::inspect))
+        .route("/link/claim", post(link::claim))
+        .route("/link/signup/start", post(link::signup_start))
+        .route("/link/signup/finish", post(link::signup_finish))
         .route("/account/sessions", get(account::sessions::list_sessions))
         .route(
             "/account/sessions/revoke-others",

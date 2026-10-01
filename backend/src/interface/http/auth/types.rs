@@ -181,6 +181,15 @@ pub enum Ceremony {
         display_name: String,
         state: webauthn_rs::prelude::PasskeyRegistration,
     },
+    /// Registering a brand-new account's first passkey from a link token
+    /// (`/link/signup/*`). Bound to the token's hash so a challenge started
+    /// for one token cannot finish another.
+    LinkSignup {
+        account_id: crate::domain::accounts::AccountId,
+        display_name: String,
+        token_hash: String,
+        state: webauthn_rs::prelude::PasskeyRegistration,
+    },
     /// A usernameless login. Nobody is identified yet; the credential itself
     /// carries the handle that says which account is signing in.
     Authentication {

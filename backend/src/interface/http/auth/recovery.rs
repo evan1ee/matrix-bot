@@ -34,7 +34,7 @@ fn is_trusted_private_ip(ip: std::net::IpAddr) -> bool {
 /// By default, rate-limiting keys on the peer socket address from `connect_info`.
 /// Forwarded headers (`X-Forwarded-For`, `X-Real-IP`) are ONLY trusted if
 /// `trust_forwarded` is enabled AND the connecting peer is a private/loopback reverse proxy.
-fn extract_client_ip(
+pub(crate) fn extract_client_ip(
     connect_info: Option<&ConnectInfo<SocketAddr>>,
     headers: &HeaderMap,
     trust_forwarded: bool,

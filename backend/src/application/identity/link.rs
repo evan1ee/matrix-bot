@@ -17,7 +17,10 @@ use sqlx::PgPool;
 use sqlx::Postgres;
 use sqlx::Transaction;
 
+use webauthn_rs::prelude::Passkey;
+
 use crate::application::accounts::merge::MergeService;
+use crate::application::accounts::register_account_in;
 use crate::application::AppError;
 use crate::domain::accounts::{hash_token, AccountId, MergePreview, SecurityEventKind};
 use crate::domain::channels::{
@@ -231,6 +234,31 @@ impl LinkService {
         let mut savepoint = conn.begin().await?;
         let outcome = self.claim_in(&mut savepoint, token, account, true).await?;
         savepoint.commit().await?;
+        Ok(outcome)
+    }
+
+    /// The signup finish: creates the account with its first passkey and binds
+    /// the token's identity to it, all in one transaction. Anything but a
+    /// completed bind (a refused allowlist, an expired or lost token, a failed
+    /// write) rolls the new account and credential back with it.
+    pub async fn sign_up_with_passkey(
+        &self,
+        token: &str,
+        account: &AccountId,
+        display_name: &str,
+        passkey: &Passkey,
+        label: &str,
+    ) -> Result<LinkOutcome, AppError> {
+        let mut tx = self.pool.begin().await?;
+        register_account_in(&mut tx, account, display_name, passkey, label).await?;
+        let outcome = self.claim_for_new_account(&mut tx, token, account).await?;
+        if matches!(
+            outcome,
+            LinkOutcome::Linked { .. } | LinkOutcome::Merged { .. }
+        ) {
+            tx.commit().await?;
+        }
+        // Dropping the transaction rolls the account and passkey back.
         Ok(outcome)
     }
 
@@ -894,5 +922,96 @@ mod tests {
             service.inspect(&started.token, None).await.unwrap(),
             LinkPreview::SignInRequired { .. }
         ));
+    }
+
+    async fn count_credentials(pool: &PgPool, account: &AccountId) -> usize {
+        crate::infrastructure::postgres::repositories::accounts::credentials::count_for_account(
+            pool, account,
+        )
+        .await
+        .unwrap() as usize
+    }
+
+    #[tokio::test]
+    async fn signup_creates_the_account_passkey_and_link_together() {
+        let (service, pool) =
+            setup_with(HashMap::from([(Channel::Telegram, vec!["1".to_string()])])).await;
+        let started = service.start(&tg("1"), &dm(1), true).await.unwrap();
+        let fresh = AccountId::generate();
+
+        let outcome = service
+            .sign_up_with_passkey(
+                &started.token,
+                &fresh,
+                "Evan",
+                &crate::application::accounts::test_passkey(&[9, 9], 0),
+                "Passkey",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, LinkOutcome::Linked { account: fresh });
+        assert!(core::find(&pool, &fresh).await.unwrap().is_some());
+        assert_eq!(count_credentials(&pool, &fresh).await, 1);
+        assert_eq!(owner_of_identity(&pool, &tg("1")).await, Some(fresh));
+        assert_eq!(
+            outbox::event_types_for(&pool, &fresh).await.unwrap(),
+            vec!["IdentityLinked"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_link_rolls_the_new_account_and_credential_back() {
+        let (service, pool) =
+            setup_with(HashMap::from([(Channel::Telegram, vec!["1".to_string()])])).await;
+        let started = service.start(&tg("1"), &dm(1), true).await.unwrap();
+        outbox::fail_every_publish(&pool).await;
+        let fresh = AccountId::generate();
+
+        let result = service
+            .sign_up_with_passkey(
+                &started.token,
+                &fresh,
+                "Evan",
+                &crate::application::accounts::test_passkey(&[8, 8], 0),
+                "Passkey",
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(core::find(&pool, &fresh).await.unwrap().is_none());
+        assert_eq!(count_credentials(&pool, &fresh).await, 0);
+        assert_eq!(owner_of_identity(&pool, &tg("1")).await, None);
+        assert!(matches!(
+            service.inspect(&started.token, None).await.unwrap(),
+            LinkPreview::SignupAllowed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn signup_off_the_allowlist_or_with_a_dead_token_creates_nothing() {
+        let (service, pool) = setup().await;
+        let started = service.start(&tg("2"), &dm(2), true).await.unwrap();
+        for token in [started.token.as_str(), "no-such-token"] {
+            let fresh = AccountId::generate();
+            let result = service
+                .sign_up_with_passkey(
+                    token,
+                    &fresh,
+                    "Evan",
+                    &crate::application::accounts::test_passkey(&[7, 1], 0),
+                    "Passkey",
+                )
+                .await;
+            assert!(
+                matches!(
+                    result,
+                    Err(AppError::Forbidden(_)) | Ok(LinkOutcome::Expired)
+                ),
+                "{result:?}"
+            );
+            assert!(core::find(&pool, &fresh).await.unwrap().is_none());
+            assert_eq!(count_credentials(&pool, &fresh).await, 0);
+        }
     }
 }

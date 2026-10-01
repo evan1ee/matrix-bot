@@ -51,6 +51,7 @@ impl InMemoryRateLimiter {
 static WEBHOOK_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static RECOVERY_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static AUTH_START_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
+static LINK_SIGNUP_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static GEOCODE_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 
 /// Webhooks: max 60 requests per minute per webhook token.
@@ -71,6 +72,13 @@ pub fn check_recovery_limit(ip: &str) -> bool {
 pub fn check_auth_start_limit(ip: &str) -> bool {
     AUTH_START_LIMITER
         .get_or_init(|| InMemoryRateLimiter::new(30, Duration::from_secs(60)))
+        .check(ip)
+}
+
+/// Link-token signup (unauthenticated, creates accounts): max 20 per minute per IP.
+pub fn check_link_signup_limit(ip: &str) -> bool {
+    LINK_SIGNUP_LIMITER
+        .get_or_init(|| InMemoryRateLimiter::new(20, Duration::from_secs(60)))
         .check(ip)
 }
 
