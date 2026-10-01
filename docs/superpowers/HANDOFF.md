@@ -132,6 +132,23 @@ All features have moved into the layer-first layout (`domain/`, `application/`, 
 
 The last full test run (step 9 final verification at `b2587c7`, `cargo test -p matrix-bot --all-targets`, no `--skip`): **lib 933 passed / 0 failed / 7 ignored, `main.rs` 2 passed, architecture suite 22 passed**; `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1` 3 passed; fmt, `check --all-targets` and clippy `-D warnings` clean; `cargo sqlx prepare --check` clean; `openapi.json` byte-identical; `npm --prefix frontend run build` green (installed with `npm ci --replace-registry-host=always`: the lockfile's `registry.npmmirror.com` URLs are unreachable from the cloud sandbox). Inference: 71 passed at step 7 (crate unchanged, not re-run).
 
+### Sub-project 2 — Plan A (omnichannel framework, `plans/2026-10-01-omnichannel-a-framework.md`, branch `feat/omnichannel`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Domain channel types (`domain/channels`) | ✅ | (this commit) |
+| 2 | `platform_identities` schema and repository; `matrix_links` retired | ⬜ |  |
+| 3 | `IdentityService` | ⬜ |  |
+| 4 | Neutral message types, adapter trait, registry, renderers | ⬜ |  |
+| 5 | The agent stops depending on Matrix | ⬜ |  |
+| 6 | Channel-neutral `CommandContext` and `Reply` | ⬜ |  |
+| 7 | Inbound pipeline and `MatrixAdapter`; registry in the composition root | ⬜ |  |
+| 8 | Outbound through the registry (jobs and outbox) | ⬜ |  |
+| 9 | Chat-initiated linking (`LinkService`), old flow deleted | ⬜ |  |
+| 10 | Identity and link HTTP API (intentional OpenAPI change) | ⬜ |  |
+| 11 | Web link page and identity list | ⬜ |  |
+| 12 | Boundary tests, docs, hand-off | ⬜ |  |
+
 ## 5. How to work
 
 ### Workflow per task

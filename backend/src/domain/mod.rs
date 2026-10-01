@@ -5,6 +5,7 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod channels;
 pub mod chat;
 pub mod events;
 pub mod finance;
