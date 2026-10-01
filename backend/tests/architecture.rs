@@ -735,3 +735,17 @@ fn the_agent_knows_no_channel() {
         hits.join("\n")
     );
 }
+
+/// The chat modules answer through `Reply` and know no platform SDK. Voice,
+/// OCR, rooms, the outage alert, `account.rs` and `llm.rs` still import
+/// `matrix_sdk` (live `Room`/`Client` handles); Task 7 moves them behind the
+/// adapter and removes the `ignore`.
+#[test]
+#[ignore = "enabled in Task 7"]
+fn chat_modules_know_no_platform_sdk() {
+    let hits = production_violations(
+        "interface/chat",
+        &["matrix_sdk", "serenity", "teloxide", "lettre", "async_imap"],
+    );
+    assert!(hits.is_empty(), "{}", hits.join("\n"));
+}

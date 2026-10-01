@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
@@ -52,8 +54,10 @@ impl BotModule for BriefingModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body).await
+    ) -> Option<Reply> {
+        handler::handle_briefing_command(services, &ctx.owner_id, &ctx.full_body)
+            .await
+            .map(Reply::from)
     }
 }
 

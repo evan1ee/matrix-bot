@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
@@ -109,8 +111,10 @@ impl BotModule for PortfolioModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_portfolio_command(services, &ctx.owner_id, &ctx.full_body).await
+    ) -> Option<Reply> {
+        handler::handle_portfolio_command(services, &ctx.owner_id, &ctx.full_body)
+            .await
+            .map(Reply::private)
     }
 }
 
@@ -122,10 +126,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -137,7 +142,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -225,7 +231,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
-            .expect("the module must answer");
+            .expect("the module must answer")
+            .html_body()
+            .to_owned();
         assert!(reply.contains("AAPL"));
         assert!(
             reply.contains("Cash remaining: 98500.00 USD"),
@@ -235,7 +243,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("AAPL"),
             "the position should be listed: {listed}"
@@ -251,7 +261,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00 USD"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             reply.contains("Need"),
             "should explain the shortfall: {reply}"
@@ -260,7 +272,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("No holdings yet"),
             "a rejected buy must not create a position: {listed}"
@@ -292,7 +306,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!portfolio buy AAPL 10 @ 150.00"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             reply.contains("CNY"),
             "should use the saved currency: {reply}"
@@ -365,7 +381,9 @@ mod tests {
                 &db,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             !note_reply.contains("<script>"),
             "raw markup must not survive: {note_reply}"
@@ -375,7 +393,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!portfolio list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             !listed.contains("<script>"),
             "raw markup must not survive: {listed}"
@@ -392,7 +412,9 @@ mod tests {
         let deposited = module
             .handle_command(&ctx("!portfolio cash deposit 1000 USD"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(deposited.contains("1000.00"), "{deposited}");
 
         module
@@ -402,7 +424,9 @@ mod tests {
         let after_buy = module
             .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(after_buy.contains("250.00"), "{after_buy}");
 
         module
@@ -412,13 +436,17 @@ mod tests {
         let after_sell = module
             .handle_command(&ctx("!portfolio cash"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(after_sell.contains("1150.00"), "{after_sell}");
 
         let withdrawn = module
             .handle_command(&ctx("!portfolio cash withdraw 1150 USD"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(withdrawn.contains("0.00"), "{withdrawn}");
 
         // Verify deposit and withdraw transactions were posted to the finance ledger
@@ -454,7 +482,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!portfolio cash withdraw 101 USD"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             reply.contains("100.00"),
             "should state what is actually available: {reply}"

@@ -3,6 +3,8 @@
 //! Handles `!footprint` / `!footprints` / `!places` Matrix commands via `FootprintService`.
 
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use tracing::error;
 
 use crate::application::footprints::CreateFootprintInput;
@@ -24,6 +26,32 @@ impl FootprintsModule {
 impl Default for FootprintsModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl FootprintsModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        let cmd = ctx.command.to_lowercase();
+        if cmd != "footprint" && cmd != "footprints" && cmd != "places" {
+            return None;
+        }
+
+        let owner = &ctx.owner_id;
+        let trimmed = ctx.raw_args.trim();
+
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("list") {
+            Some(handle_list(services, owner).await)
+        } else if let Some(rest) = trimmed
+            .strip_prefix("delete")
+            .or_else(|| trimmed.strip_prefix("rm"))
+        {
+            Some(handle_delete(services, owner, rest.trim()).await)
+        } else if let Some(rest) = trimmed.strip_prefix("add") {
+            Some(handle_add(services, owner, rest.trim()).await)
+        } else {
+            Some(format_help())
+        }
     }
 }
 
@@ -58,27 +86,8 @@ impl BotModule for FootprintsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        let cmd = ctx.command.to_lowercase();
-        if cmd != "footprint" && cmd != "footprints" && cmd != "places" {
-            return None;
-        }
-
-        let owner = &ctx.owner_id;
-        let trimmed = ctx.raw_args.trim();
-
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("list") {
-            Some(handle_list(services, owner).await)
-        } else if let Some(rest) = trimmed
-            .strip_prefix("delete")
-            .or_else(|| trimmed.strip_prefix("rm"))
-        {
-            Some(handle_delete(services, owner, rest.trim()).await)
-        } else if let Some(rest) = trimmed.strip_prefix("add") {
-            Some(handle_add(services, owner, rest.trim()).await)
-        } else {
-            Some(format_help())
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::from)
     }
 }
 

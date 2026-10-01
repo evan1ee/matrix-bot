@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
@@ -71,15 +73,16 @@ impl BotModule for FinanceModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
+    ) -> Option<Reply> {
         handler::handle_finance_command(
             services,
-            &ctx.room_id,
+            &ctx.room_key(),
             &ctx.owner_id,
-            &ctx.sender_name,
+            ctx.sender_name(),
             &ctx.full_body,
         )
         .await
+        .map(Reply::private)
     }
 }
 
@@ -91,10 +94,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -106,7 +110,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -174,7 +179,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db)
             .await
-            .expect("the module must answer");
+            .expect("the module must answer")
+            .html_body()
+            .to_owned();
         assert!(
             reply.contains("15.50"),
             "reply should confirm the amount: {reply}"
@@ -184,7 +191,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!expense list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("lunch"),
             "the entry should be listed: {listed}"
@@ -200,7 +209,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db)
             .await
-            .expect("the module must answer `!expense add 15.50 lunch`");
+            .expect("the module must answer `!expense add 15.50 lunch`")
+            .html_body()
+            .to_owned();
 
         assert!(
             reply.contains("15.50"),
@@ -237,7 +248,9 @@ mod tests {
         let reply = module
             .handle_command(&ctx("!expense add 15.50 lunch"), &services, &db)
             .await
-            .expect("the module must answer `!expense add 15.50 lunch`");
+            .expect("the module must answer `!expense add 15.50 lunch`")
+            .html_body()
+            .to_owned();
 
         assert!(
             reply.contains("CNY"),
@@ -251,7 +264,9 @@ mod tests {
         let explicit = module
             .handle_command(&ctx("!expense add 9.99 EUR coffee"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             explicit.contains("EUR"),
             "an explicit currency must win: {explicit}"
@@ -268,7 +283,9 @@ mod tests {
         let reply = FinanceModule::new()
             .handle_command(&ctx("!expense add 15.50 EUR lunch"), &services, &db)
             .await
-            .expect("the add must be handled");
+            .expect("the add must be handled")
+            .html_body()
+            .to_owned();
         assert!(reply.contains("Logged"), "unexpected reply: {reply}");
 
         let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
@@ -295,7 +312,9 @@ mod tests {
                 &db,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(
             !reply.contains("<script>"),

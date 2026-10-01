@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
@@ -65,8 +67,10 @@ impl BotModule for LifeModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_life_command(services, &ctx.owner_id, &ctx.command, &ctx.raw_args).await
+    ) -> Option<Reply> {
+        handler::handle_life_command(services, &ctx.owner_id, &ctx.command, &ctx.raw_args)
+            .await
+            .map(Reply::private)
     }
 }
 

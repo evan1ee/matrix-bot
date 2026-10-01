@@ -1,6 +1,8 @@
 //! Matrix chat command handler for webhooks (delivery is `interface::events`).
 
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use tracing::error;
 
 use crate::application::AppServices;
@@ -21,6 +23,53 @@ impl Default for WebhookModule {
 impl WebhookModule {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl WebhookModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        let cmd = ctx.command.to_lowercase();
+        if cmd != "webhook" {
+            return None;
+        }
+
+        let parts: Vec<&str> = ctx.raw_args.split_whitespace().collect();
+        let sub = parts.first().map(|s| s.to_lowercase());
+
+        match sub.as_deref() {
+            Some("list") | None | Some("") => {
+                handle_list(services, &ctx.owner_id, ctx.sender_name()).await
+            }
+            Some("create") | Some("add") => {
+                let name = parts.get(1).copied().unwrap_or("Unnamed Webhook");
+                let room_key = ctx.room_key();
+                let target_room = parts.get(2).copied().unwrap_or(room_key.as_str());
+                handle_create(services, &ctx.owner_id, name, target_room).await
+            }
+            Some("revoke") | Some("delete") | Some("rm") => {
+                if let Some(id) = parts.get(1) {
+                    handle_revoke(services, &ctx.owner_id, id).await
+                } else {
+                    Some("⚠️ Usage: <code>!webhook revoke &lt;webhook_id&gt;</code> (or <code>!webhook rm &lt;id&gt;</code>)".to_string())
+                }
+            }
+            Some("test") | Some("ping") => {
+                if let Some(id) = parts.get(1) {
+                    handle_test(services, &ctx.owner_id, id).await
+                } else {
+                    Some("⚠️ Usage: <code>!webhook test &lt;webhook_id&gt;</code>".to_string())
+                }
+            }
+            _ => Some(
+                "🔌 <b>Webhook Integration Commands:</b><br/>\
+                 • <code>!webhook list</code> — List your registered webhooks<br/>\
+                 • <code>!webhook create &lt;name&gt; [room_id]</code> — Register a new webhook<br/>\
+                 • <code>!webhook test &lt;id&gt;</code> — Send a test notification alert<br/>\
+                 • <code>!webhook revoke &lt;id&gt;</code> — Delete and revoke a webhook"
+                    .to_string(),
+            ),
+        }
     }
 }
 
@@ -60,47 +109,8 @@ impl BotModule for WebhookModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        let cmd = ctx.command.to_lowercase();
-        if cmd != "webhook" {
-            return None;
-        }
-
-        let parts: Vec<&str> = ctx.raw_args.split_whitespace().collect();
-        let sub = parts.first().map(|s| s.to_lowercase());
-
-        match sub.as_deref() {
-            Some("list") | None | Some("") => {
-                handle_list(services, &ctx.owner_id, &ctx.sender_name).await
-            }
-            Some("create") | Some("add") => {
-                let name = parts.get(1).copied().unwrap_or("Unnamed Webhook");
-                let target_room = parts.get(2).copied().unwrap_or(ctx.room_id.as_str());
-                handle_create(services, &ctx.owner_id, name, target_room).await
-            }
-            Some("revoke") | Some("delete") | Some("rm") => {
-                if let Some(id) = parts.get(1) {
-                    handle_revoke(services, &ctx.owner_id, id).await
-                } else {
-                    Some("⚠️ Usage: <code>!webhook revoke &lt;webhook_id&gt;</code> (or <code>!webhook rm &lt;id&gt;</code>)".to_string())
-                }
-            }
-            Some("test") | Some("ping") => {
-                if let Some(id) = parts.get(1) {
-                    handle_test(services, &ctx.owner_id, id).await
-                } else {
-                    Some("⚠️ Usage: <code>!webhook test &lt;webhook_id&gt;</code>".to_string())
-                }
-            }
-            _ => Some(
-                "🔌 <b>Webhook Integration Commands:</b><br/>\
-                 • <code>!webhook list</code> — List your registered webhooks<br/>\
-                 • <code>!webhook create &lt;name&gt; [room_id]</code> — Register a new webhook<br/>\
-                 • <code>!webhook test &lt;id&gt;</code> — Send a test notification alert<br/>\
-                 • <code>!webhook revoke &lt;id&gt;</code> — Delete and revoke a webhook"
-                    .to_string(),
-            ),
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::from)
     }
 }
 

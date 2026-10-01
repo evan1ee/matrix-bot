@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::application::recurring_bills::RecurringBillsService;
 use crate::application::AppServices;
 use crate::db::Database;
@@ -21,6 +23,17 @@ impl RecurringBillsModule {
 impl Default for RecurringBillsModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl RecurringBillsModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        if ctx.command == "bill" || ctx.command == "bills" || ctx.command == "recurring" {
+            handle_bill_command(ctx, &services.recurring_bills).await
+        } else {
+            None
+        }
     }
 }
 
@@ -66,12 +79,8 @@ impl BotModule for RecurringBillsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        if ctx.command == "bill" || ctx.command == "bills" || ctx.command == "recurring" {
-            handle_bill_command(ctx, &services.recurring_bills).await
-        } else {
-            None
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::from)
     }
 }
 
@@ -160,8 +169,8 @@ async fn handle_add(
     let next_due_at = chrono::Utc::now().format("%Y-%m-%d 00:00:00").to_string();
 
     let input = NewRecurringBill {
-        room_id: ctx.room_id.clone(),
-        sender_name: ctx.sender_name.clone(),
+        room_id: ctx.room_key(),
+        sender_name: ctx.sender_name().to_owned(),
         name: name.to_string(),
         category,
         amount_minor,
@@ -296,17 +305,19 @@ mod tests {
 
     fn ctx(cmd: &str, raw_args: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:1".to_string(),
-            sender_mxid: "@alice:a".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:1".to_string(),
+            ),
             owner_id: AccountId::from_seed("@alice:a"),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@alice:a", "alice"),
             command: cmd.to_string(),
             raw_args: raw_args.to_string(),
             full_body: format!("!{} {}", cmd, raw_args),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -327,7 +338,9 @@ mod tests {
         let res = module
             .handle_command(&ctx("bill", "list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("No recurring bills recorded"));
 
         // 2. Add a bill
@@ -338,14 +351,18 @@ mod tests {
                 &db,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("Created recurring bill <b>#1</b>: Netflix (EUR 15.99)"));
 
         // 3. List
         let res = module
             .handle_command(&ctx("bill", "list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("Netflix"));
         assert!(res.contains("15.99"));
 
@@ -353,21 +370,27 @@ mod tests {
         let res = module
             .handle_command(&ctx("bill", "remind 1 60"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("bill <b>#1</b>"));
 
         // 5. Pay
         let res = module
             .handle_command(&ctx("bill", "pay 1"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("Marked bill <b>#1</b> (Netflix) as paid"));
 
         // 6. Delete
         let res = module
             .handle_command(&ctx("bill", "delete 1"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(res.contains("Deleted bill <b>#1</b>"));
     }
 }

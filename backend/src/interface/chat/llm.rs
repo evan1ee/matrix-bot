@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use matrix_sdk::Client;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -80,24 +82,25 @@ impl BotModule for LlmModule {
         ctx: &CommandContext,
         services: &AppServices,
         db: &Database,
-    ) -> Option<String> {
+    ) -> Option<Reply> {
         handle_ai_command_with_stage(
             services,
             &db.pool,
             &self.ai,
             Some(&self.client_handle),
-            &ctx.room_id,
+            &ctx.room_key(),
             &ctx.owner_id,
-            &ctx.sender_name,
+            ctx.sender_name(),
             &ctx.command,
             &ctx.raw_args,
             &ctx.full_body,
             ctx.is_direct,
             ctx.is_mentioned,
             ctx.quoted.as_ref(),
-            ctx.stage_reporter.as_ref(),
+            ctx.progress.as_deref(),
         )
         .await
+        .map(Reply::from)
     }
 }
 
@@ -115,7 +118,7 @@ pub async fn handle_ai_command(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
+    quoted: Option<&crate::domain::chat::QuotedMessage>,
 ) -> Option<String> {
     handle_ai_command_with_stage(
         services,
@@ -150,8 +153,8 @@ pub async fn handle_ai_command_with_stage(
     full_body: &str,
     is_direct: bool,
     is_mentioned: bool,
-    quoted: Option<&crate::interface::channels::matrix::quote::QuotedMessage>,
-    stage_reporter: Option<&crate::interface::channels::matrix::stage::StageReporter>,
+    quoted: Option<&crate::domain::chat::QuotedMessage>,
+    progress: Option<&dyn crate::llm::progress::ProgressSink>,
 ) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let prompt = if cmd_lower == "ai" || cmd_lower == "ask" {
@@ -193,7 +196,6 @@ pub async fn handle_ai_command_with_stage(
         )));
     }
 
-    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
     let turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, progress);
 
     match run_turn(&turn_ctx, &effective_prompt, None).await {

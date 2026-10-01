@@ -36,6 +36,18 @@ pub async fn handle_text(
         return;
     };
 
+    // Built before the parse (the parser records who sent the command); a
+    // sender that is not a valid MXID cannot be answered, so the message is dropped.
+    let sender = match PlatformIdentity::matrix(ev.sender.as_str()) {
+        Ok(sender) => sender,
+        Err(err) => {
+            error!(
+                "Could not parse the sender {}: {:?} — dropping the command",
+                ev.sender, err
+            );
+            return;
+        }
+    };
     let formatted_body = text_content.formatted.as_ref().map(|f| f.body.as_str());
 
     let Some(mut parsed) = CommandParser::parse_or_dm_prompt(
@@ -43,7 +55,7 @@ pub async fn handle_text(
         formatted_body,
         own_id,
         room.room_id().as_str(),
-        ev.sender.localpart(),
+        &sender,
         is_direct,
     ) else {
         return;
@@ -67,7 +79,10 @@ pub async fn handle_text(
 
     info!(
         "Command received in [{}] from [{}]: command='{}', args='{}'",
-        parsed.room_id, parsed.sender_name, parsed.command, parsed.raw_args
+        parsed.conversation.to_storage(),
+        parsed.sender_name(),
+        parsed.command,
+        parsed.raw_args
     );
 
     // `!link` is handled *before* the sender is resolved, and that
@@ -95,16 +110,6 @@ pub async fn handle_text(
     // seen. Deliberately after the parse: an unrelated room message
     // must not cost a query, and must not create an account for
     // someone who only ever said hello to a room the bot is in.
-    let sender = match PlatformIdentity::matrix(ev.sender.as_str()) {
-        Ok(sender) => sender,
-        Err(err) => {
-            error!(
-                "Could not resolve an account for {}: {:?} — dropping the command",
-                ev.sender, err
-            );
-            return;
-        }
-    };
     let owner_id = match services.identity.resolve(&sender).await {
         Ok(Resolution::Account(owner_id)) => owner_id,
         Ok(Resolution::Unlinked) => {
@@ -125,7 +130,7 @@ pub async fn handle_text(
     };
 
     let is_ai = CommandParser::is_ai_prompt_command(&parsed);
-    let mut cmd_ctx = parsed.for_owner(owner_id, ev.sender.as_str(), is_direct);
+    let mut cmd_ctx = parsed.for_owner(owner_id, is_direct);
 
     let typing_guard = if is_direct || cmd_ctx.is_mentioned {
         Some(crate::interface::channels::matrix::stage::TypingGuard::start(room.clone()))
@@ -140,7 +145,7 @@ pub async fn handle_text(
             "🧠 <i>正在思考...</i>",
         )
         .await;
-        cmd_ctx.stage_reporter = Some(ind.reporter());
+        cmd_ctx.progress = Some(Arc::new(ind.reporter()));
         Some(ind)
     } else {
         None
@@ -155,14 +160,20 @@ pub async fn handle_text(
     }
 
     match dispatch_res {
-        Ok(Some(reply_html)) => {
-            let plain_text = crate::utils::strip_html(&reply_html);
+        Ok(Some(reply)) => {
+            // Audio goes first, the caption after it: the order a voice reply
+            // has always had in the room.
+            let reply =
+                crate::interface::channels::matrix::voice_upload::deliver_audio(room, reply).await;
+            let reply_html = reply.html_body();
             let (sent_eid, ph_eid) = if let Some(indicator) = stage_indicator {
-                let ev_id = indicator.finish_with_reply(&plain_text, &reply_html).await;
+                let ev_id = indicator
+                    .finish_with_reply(&reply.content.plain, reply_html)
+                    .await;
                 (ev_id, indicator.event_id().cloned())
             } else {
                 (
-                    crate::interface::channels::matrix::reply::send_html(room, &reply_html).await,
+                    crate::interface::channels::matrix::reply::send_html(room, reply_html).await,
                     None,
                 )
             };
@@ -173,7 +184,7 @@ pub async fn handle_text(
                     eid.as_str(),
                     room.room_id().as_str(),
                     &cmd_ctx.owner_id,
-                    &reply_html,
+                    reply_html,
                 )
                 .await;
             }

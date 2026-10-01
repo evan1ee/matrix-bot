@@ -15,9 +15,10 @@ pub async fn handle_reminder_command(
     settings: &SettingsService,
     ctx: &CommandContext,
 ) -> Option<String> {
-    let room_id = ctx.room_id.as_str();
+    let room_key = ctx.room_key();
+    let room_id = room_key.as_str();
     let owner_id = &ctx.owner_id;
-    let sender_name = ctx.sender_name.as_str();
+    let sender_name = ctx.sender_name();
     let clean_body = ctx.full_body.as_str();
     let quoted = ctx.quoted.as_ref();
 
@@ -313,17 +314,19 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:1".to_string(),
-            sender_mxid: "@bob:1".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:1".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("@bob:1"),
-            sender_name: "bob".to_string(),
+            sender: crate::interface::chat::test_support::sender("@bob:1", "bob"),
             command: "remind".to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 

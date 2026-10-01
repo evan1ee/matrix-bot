@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
@@ -61,7 +63,9 @@ impl BotModule for JournalModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_journal_command(services, ctx).await
+    ) -> Option<Reply> {
+        handler::handle_journal_command(services, ctx)
+            .await
+            .map(Reply::private)
     }
 }

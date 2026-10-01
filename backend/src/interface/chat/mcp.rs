@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
@@ -41,8 +43,8 @@ impl BotModule for McpModule {
         ctx: &CommandContext,
         _services: &crate::application::AppServices,
         db: &Database,
-    ) -> Option<String> {
-        handle_command(ctx, db).await
+    ) -> Option<Reply> {
+        handle_command(ctx, db).await.map(Reply::from)
     }
 }
 
@@ -198,17 +200,19 @@ mod tests {
 
     fn dummy_ctx(cmd: &str, raw_args: &str, is_direct: bool) -> CommandContext {
         CommandContext {
-            room_id: "!room:test".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:test".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("acct_test"),
-            sender_mxid: "@user:test".to_string(),
-            sender_name: "Test User".to_string(),
+            sender: crate::interface::chat::test_support::sender("@user:test", "Test User"),
             command: cmd.to_string(),
             raw_args: raw_args.to_string(),
             full_body: format!("!{} {}", cmd, raw_args),
             is_direct,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 

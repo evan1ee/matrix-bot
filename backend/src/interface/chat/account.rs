@@ -16,6 +16,8 @@
 //! `!export` deserves to know where to go.
 
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use matrix_sdk::Client;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -56,6 +58,28 @@ pub struct AccountModule {
 impl AccountModule {
     pub fn new(client: Arc<RwLock<Option<Client>>>, web_url: String) -> Self {
         Self { client, web_url }
+    }
+}
+
+impl AccountModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        let command = ctx.command.to_lowercase();
+
+        if let Some((_, what)) = WEB_ONLY.iter().find(|(name, _)| *name == command) {
+            return Some(format!(
+                "<b>{}</b> needs a passkey, so it is only available in the web app.<br/>\
+                 Open <code>{}</code> to do it there.",
+                escape(what),
+                escape(&self.web_url)
+            ));
+        }
+
+        match command.as_str() {
+            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
+            "recover" => Some(self.handle_recover(ctx, services).await),
+            _ => None,
+        }
     }
 }
 
@@ -104,23 +128,8 @@ impl BotModule for AccountModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        let command = ctx.command.to_lowercase();
-
-        if let Some((_, what)) = WEB_ONLY.iter().find(|(name, _)| *name == command) {
-            return Some(format!(
-                "<b>{}</b> needs a passkey, so it is only available in the web app.<br/>\
-                 Open <code>{}</code> to do it there.",
-                escape(what),
-                escape(&self.web_url)
-            ));
-        }
-
-        match command.as_str() {
-            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
-            "recover" => Some(self.handle_recover(ctx, services).await),
-            _ => None,
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::private)
     }
 }
 
@@ -153,7 +162,7 @@ impl AccountModule {
             );
         }
 
-        let detail = format!("requested from {}", ctx.sender_mxid);
+        let detail = format!("requested from {}", ctx.sender.user_id().as_str());
         let (code, valid_after) = match services
             .accounts
             .request_recovery(&ctx.owner_id, Some(&detail))
@@ -241,7 +250,7 @@ impl AccountModule {
                          Open this link on your device (iPhone, Mac, Android, Windows) to register Face ID, Touch ID, or Windows Hello:<br/>\
                          <a href=\"{}\">{}</a><br/><br/>\
                          <i>Expires in 10 minutes and can be used once. Add more passkeys later from the web app.</i>",
-                        escape(&ctx.sender_mxid),
+                        escape(ctx.sender_mxid().unwrap_or_default()),
                         escape(&enroll_url),
                         escape(&enroll_url),
                     )
@@ -264,13 +273,13 @@ impl AccountModule {
                         format!(
                             "You have no passkeys linked to <code>{}</code> yet.<br/><br/>\
                              Send <code>!passkey add</code> in a direct message to link this device using Face ID, Touch ID, or Windows Hello.",
-                            escape(&ctx.sender_mxid)
+                            escape(ctx.sender.user_id().as_str())
                         )
                     } else {
                         let mut lines = Vec::new();
                         lines.push(format!(
                             "<b>Linked Passkeys for <code>{}</code>:</b><br/>",
-                            escape(&ctx.sender_mxid)
+                            escape(ctx.sender.user_id().as_str())
                         ));
                         for (idx, cred) in creds.iter().enumerate() {
                             let created_str = cred
@@ -370,21 +379,21 @@ mod tests {
 
     fn ctx(command: &str, owner_id: &AccountId, is_direct: bool) -> CommandContext {
         CommandContext {
-            room_id: if is_direct {
+            conversation: crate::domain::channels::ConversationAddress::Matrix(if is_direct {
                 "!dm:x".into()
             } else {
                 "!public:x".into()
-            },
+            }),
             owner_id: *owner_id,
-            sender_mxid: "@evan:mbm.one".to_string(),
-            sender_name: "evan".to_string(),
+            sender: crate::interface::chat::test_support::sender("@evan:mbm.one", "evan"),
             command: command.to_string(),
             raw_args: String::new(),
             full_body: format!("!{command}"),
             is_direct,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -398,7 +407,9 @@ mod tests {
             let reply = module
                 .handle_command(&ctx(command, &acct, true), &services, &db)
                 .await
-                .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"));
+                .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"))
+                .html_body()
+                .to_owned();
 
             assert!(
                 reply.contains("web app"),
@@ -433,7 +444,9 @@ mod tests {
         let reply = module()
             .handle_command(&ctx("recover", &account, false), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(reply.contains("direct message"));
         assert!(
@@ -459,7 +472,9 @@ mod tests {
         let reply = module()
             .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(reply.contains("!link"), "it should say how to link instead");
         assert!(services
@@ -482,7 +497,9 @@ mod tests {
         let reply = module()
             .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(
             reply.contains("24 hours"),
@@ -653,7 +670,9 @@ mod tests {
         let reply = module()
             .handle_command(&public_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("direct message"));
 
         // In DM: generates ?enroll= token link
@@ -662,7 +681,9 @@ mod tests {
         let reply = module()
             .handle_command(&dm_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("?enroll="));
         assert!(reply.contains("bot.mbm.one"));
     }
@@ -685,7 +706,12 @@ mod tests {
         for (command, args) in [("passkey", "add"), ("passkey", "enroll"), ("web", "")] {
             let mut dm = ctx(command, &account, true);
             dm.raw_args = args.into();
-            let reply = module().handle_command(&dm, &services, &db).await.unwrap();
+            let reply = module()
+                .handle_command(&dm, &services, &db)
+                .await
+                .unwrap()
+                .html_body()
+                .to_owned();
 
             assert!(
                 !reply.contains("?enroll="),
@@ -728,7 +754,12 @@ mod tests {
         for args in ["sessions", "matrix @evan:other.org"] {
             let mut dm = ctx("unlink", &account, true);
             dm.raw_args = args.into();
-            let reply = module().handle_command(&dm, &services, &db).await.unwrap();
+            let reply = module()
+                .handle_command(&dm, &services, &db)
+                .await
+                .unwrap()
+                .html_body()
+                .to_owned();
             assert!(
                 reply.contains("web app"),
                 "`!unlink {args}` must point to the web app: {reply}"
@@ -766,7 +797,9 @@ mod tests {
         let reply = module()
             .handle_command(&list_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
@@ -788,7 +821,9 @@ mod tests {
         let reply = module()
             .handle_command(&list_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("MacBook"));
         assert!(reply.contains("iPhone"));
 
@@ -798,7 +833,9 @@ mod tests {
         let reply = module()
             .handle_command(&remove_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("Passkey Removal Requires Verification"));
         assert!(reply.contains("/account"));
 

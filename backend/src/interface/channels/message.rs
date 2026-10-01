@@ -48,6 +48,10 @@ pub struct Attachment {
     // matrix-sdk uploads take a Vec (R76).
     pub bytes: Vec<u8>,
     pub duration_ms: Option<u64>,
+    /// Loudness buckets of an audio clip, each in `0..=1024` (the MSC3246
+    /// scale; Discord and Telegram voice notes draw the same bars). `None`
+    /// when the synthesis provider sent none: a client then draws no bars.
+    pub waveform: Option<Vec<u16>>,
 }
 
 /// A button: `command` is re-dispatched as if the clicker had typed it.

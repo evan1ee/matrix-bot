@@ -49,6 +49,7 @@ pub mod stage;
 pub mod sync_health;
 pub mod sync_loop;
 pub mod verification;
+pub mod voice_upload;
 
 pub struct MatrixBot {
     client: Client,
@@ -113,7 +114,6 @@ impl MatrixBot {
         // by the AI instead of TTS. Covered by
         // `interface::chat::tests::test_tts_must_be_registered_before_a_direct_message_catch_all`.
         registry.register(crate::interface::chat::tts::TtsModule::new(
-            handles.client.clone(),
             config.tts_client(),
             config.tts_voice.clone(),
         ));

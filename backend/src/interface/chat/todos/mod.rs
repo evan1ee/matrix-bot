@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
@@ -79,8 +81,10 @@ impl BotModule for TodoModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_todo_command(&services.todos, &services.settings, ctx).await
+    ) -> Option<Reply> {
+        handler::handle_todo_command(&services.todos, &services.settings, ctx)
+            .await
+            .map(Reply::from)
     }
 }
 
@@ -91,10 +95,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -106,7 +111,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -167,7 +173,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!todo list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(
             !listed.contains("<img"),
@@ -191,7 +199,9 @@ mod tests {
         let utc_reply = module
             .handle_command(&ctx("!todo due 1 2d"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             utc_reply.contains("UTC"),
             "default must render as UTC: {utc_reply}"
@@ -213,7 +223,9 @@ mod tests {
         let listed = module
             .handle_command(&ctx("!todo list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("CST"),
             "should render in Asia/Shanghai: {listed}"
@@ -235,7 +247,9 @@ mod tests {
         let reply = TodoModule::new()
             .handle_command(&ctx("!todo add Buy milk"), &services, &db)
             .await
-            .expect("the add must be handled");
+            .expect("the add must be handled")
+            .html_body()
+            .to_owned();
         assert!(reply.contains("Added Task"), "unexpected reply: {reply}");
 
         let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");

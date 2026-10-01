@@ -3,6 +3,8 @@
 //! Handles `!habit` / `!habits` Matrix commands via `HabitService`.
 
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use tracing::error;
 
 use crate::application::AppServices;
@@ -22,6 +24,52 @@ impl HabitsModule {
 impl Default for HabitsModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl HabitsModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        let cmd = ctx.command.to_lowercase();
+        if cmd != "habit" && cmd != "habits" {
+            return None;
+        }
+
+        let owner = &ctx.owner_id;
+        let args = ctx.raw_args.trim();
+        let mut parts = args.split_whitespace();
+        let sub = parts.next().unwrap_or("").to_lowercase();
+
+        let today_str = chrono::Utc::now()
+            .naive_utc()
+            .date()
+            .format("%Y-%m-%d")
+            .to_string();
+
+        match sub.as_str() {
+            "list" | "" => Some(handle_list(services, owner, &today_str).await),
+            "done" | "check" => {
+                let target = args
+                    .trim_start_matches("done")
+                    .trim_start_matches("check")
+                    .trim();
+                Some(handle_toggle(services, owner, target, &today_str, true).await)
+            }
+            "undo" => {
+                let target = args.trim_start_matches("undo").trim();
+                Some(handle_toggle(services, owner, target, &today_str, false).await)
+            }
+            "add" => {
+                let habit_name = args.trim_start_matches("add").trim();
+                Some(handle_add(services, owner, habit_name).await)
+            }
+            "streak" | "streaks" => Some(handle_streaks(services, owner, &today_str).await),
+            "delete" | "rm" => {
+                let id_str = parts.next().unwrap_or("");
+                Some(handle_delete(services, owner, id_str).await)
+            }
+            _ => Some(handle_toggle(services, owner, args, &today_str, true).await),
+        }
     }
 }
 
@@ -71,47 +119,8 @@ impl BotModule for HabitsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        let cmd = ctx.command.to_lowercase();
-        if cmd != "habit" && cmd != "habits" {
-            return None;
-        }
-
-        let owner = &ctx.owner_id;
-        let args = ctx.raw_args.trim();
-        let mut parts = args.split_whitespace();
-        let sub = parts.next().unwrap_or("").to_lowercase();
-
-        let today_str = chrono::Utc::now()
-            .naive_utc()
-            .date()
-            .format("%Y-%m-%d")
-            .to_string();
-
-        match sub.as_str() {
-            "list" | "" => Some(handle_list(services, owner, &today_str).await),
-            "done" | "check" => {
-                let target = args
-                    .trim_start_matches("done")
-                    .trim_start_matches("check")
-                    .trim();
-                Some(handle_toggle(services, owner, target, &today_str, true).await)
-            }
-            "undo" => {
-                let target = args.trim_start_matches("undo").trim();
-                Some(handle_toggle(services, owner, target, &today_str, false).await)
-            }
-            "add" => {
-                let habit_name = args.trim_start_matches("add").trim();
-                Some(handle_add(services, owner, habit_name).await)
-            }
-            "streak" | "streaks" => Some(handle_streaks(services, owner, &today_str).await),
-            "delete" | "rm" => {
-                let id_str = parts.next().unwrap_or("");
-                Some(handle_delete(services, owner, id_str).await)
-            }
-            _ => Some(handle_toggle(services, owner, args, &today_str, true).await),
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::from)
     }
 }
 

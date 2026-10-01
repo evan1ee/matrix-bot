@@ -3,6 +3,8 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::application::settings::SettingsService;
 use crate::application::AppServices;
 use crate::db::Database;
@@ -82,8 +84,10 @@ impl BotModule for SettingsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handle_settings_command(&services.settings, &ctx.owner_id, &ctx.full_body).await
+    ) -> Option<Reply> {
+        handle_settings_command(&services.settings, &ctx.owner_id, &ctx.full_body)
+            .await
+            .map(Reply::private)
     }
 }
 
@@ -673,10 +677,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: alice(),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -688,7 +693,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -757,7 +763,9 @@ mod tests {
         let listed = todo
             .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("JST"),
             "the todo list must follow the setting: {listed}"

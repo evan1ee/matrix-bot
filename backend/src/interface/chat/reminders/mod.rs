@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
@@ -53,8 +55,10 @@ impl BotModule for ReminderModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
-        handler::handle_reminder_command(&services.reminders, &services.settings, ctx).await
+    ) -> Option<Reply> {
+        handler::handle_reminder_command(&services.reminders, &services.settings, ctx)
+            .await
+            .map(Reply::from)
     }
 }
 
@@ -65,10 +69,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -80,7 +85,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 

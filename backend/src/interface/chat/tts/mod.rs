@@ -7,17 +7,11 @@
 //! into the room as a voice message.
 
 use async_trait::async_trait;
-use matrix_sdk::attachment::{AttachmentConfig, AttachmentInfo, BaseAudioInfo};
-use matrix_sdk::ruma::{RoomId, UInt};
-use matrix_sdk::Client;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::db::Database;
-use crate::infrastructure::inference::tts::{
-    SynthesizedSpeech, TtsClient, TtsServiceError, WAVEFORM_MAX,
-};
+use crate::infrastructure::inference::tts::{TtsClient, TtsServiceError};
+use crate::interface::channels::message::{Attachment, AttachmentKind, Reply};
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
@@ -57,39 +51,34 @@ fn failure_message(err: &TtsServiceError) -> String {
 }
 
 pub struct TtsModule {
-    /// The shared handle to the bot's own Matrix client. `AiModule` and
-    /// `AccountModule` reach Matrix the same way.
-    client: Arc<RwLock<Option<Client>>>,
     tts: TtsClient,
     default_voice: String,
 }
 
 impl TtsModule {
-    pub fn new(client: Arc<RwLock<Option<Client>>>, tts: TtsClient, default_voice: String) -> Self {
-        Self {
-            client,
-            tts,
-            default_voice,
-        }
+    pub fn new(tts: TtsClient, default_voice: String) -> Self {
+        Self { tts, default_voice }
     }
 
     async fn handle_say(
         &self,
         ctx: &CommandContext,
         services: &crate::application::AppServices,
-    ) -> String {
+    ) -> Reply {
         let text = text::speakable(ctx.raw_args.trim());
         if text.is_empty() {
-            return "⚠️ <b>没有可朗读的文字</b><br/>\
-                    • <b>用法:</b> <code>!say &lt;文字&gt;</code>"
-                .to_string();
+            return Reply::from(
+                "⚠️ <b>没有可朗读的文字</b><br/>\
+                 • <b>用法:</b> <code>!say &lt;文字&gt;</code>"
+                    .to_string(),
+            );
         }
         if text.chars().count() > MAX_SPEAK_CHARS {
-            return format!(
+            return Reply::from(format!(
                 "⚠️ <b>文字过长</b><br/>\
                  • <b>原因:</b> 超过 {} 字符上限，请缩短后重试。",
                 MAX_SPEAK_CHARS
-            );
+            ));
         }
 
         let settings = services.settings.get_or_default(&ctx.owner_id).await;
@@ -99,72 +88,23 @@ impl TtsModule {
             Ok(speech) => speech,
             Err(err) => {
                 warn!("TTS synthesis failed: {}", err);
-                return failure_message(&err);
+                return Reply::from(failure_message(&err));
             }
         };
 
-        match self.send_voice_message(&ctx.room_id, speech).await {
-            Ok(()) => format!("🔊 <b>已朗读:</b> “{}”", html_escape(&text)),
-            Err(err) => {
-                error!("Failed to send TTS voice message: {}", err);
-                "⚠️ <b>语音发送失败</b><br/>\
-                 • <b>原因:</b> 语音已生成，但发送到房间时出错<br/>\
-                 • <b>建议:</b> 请稍后重试。"
-                    .to_string()
-            }
-        }
-    }
-
-    /// Uploads the Ogg Opus clip and sends it as a voice message.
-    ///
-    /// `AttachmentInfo::Voice` is what makes a Matrix client draw a voice
-    /// bubble rather than a file card. The waveform is `None` when the
-    /// provider sent none, and a client then draws the bubble without bars.
-    async fn send_voice_message(
-        &self,
-        room_id: &str,
-        speech: SynthesizedSpeech,
-    ) -> Result<(), String> {
-        let client = self.client.read().await.clone();
-        let client = client.ok_or_else(|| "Matrix client is not connected".to_string())?;
-
-        let parsed_room_id = <&RoomId>::try_from(room_id)
-            .map_err(|_| format!("Invalid Matrix room ID: {}", room_id))?;
-        let room = client
-            .get_room(parsed_room_id)
-            .ok_or_else(|| format!("Bot is not joined to room {}", room_id))?;
-
-        let content_type = "audio/ogg"
-            .parse::<mime_guess::mime::Mime>()
-            .map_err(|e| format!("Invalid MIME type: {}", e))?;
-
-        let info = AttachmentInfo::Voice(BaseAudioInfo {
-            duration: speech.duration,
-            size: UInt::new(speech.audio.len() as u64),
-            waveform: speech.waveform.map(normalise_waveform),
-        });
-
-        room.send_attachment(
-            "voice-message.ogg",
-            &content_type,
-            speech.audio,
-            AttachmentConfig::new().info(info),
+        // The adapter delivers the clip as a voice message in whatever form its
+        // platform has; the caption is the reply text.
+        Reply::html(format!("🔊 <b>已朗读:</b> “{}”", html_escape(&text))).with_attachment(
+            Attachment {
+                kind: AttachmentKind::Audio,
+                mime: "audio/ogg".to_owned(),
+                filename: "voice-message.ogg".to_owned(),
+                duration_ms: speech.duration.map(|d| d.as_millis() as u64),
+                waveform: speech.waveform,
+                bytes: speech.audio,
+            },
         )
-        .await
-        .map_err(|e| format!("Matrix upload/send failed: {:?}", e))?;
-
-        Ok(())
     }
-}
-
-/// matrix-sdk takes the waveform as fractions of full scale and rescales it to
-/// MSC3246's 0..=1024 buckets itself. Dividing by a power of two is exact in
-/// `f32`, so every bucket reaches the event unchanged.
-fn normalise_waveform(buckets: Vec<u16>) -> Vec<f32> {
-    buckets
-        .into_iter()
-        .map(|b| f32::from(b) / f32::from(WAVEFORM_MAX))
-        .collect()
 }
 
 #[async_trait]
@@ -186,7 +126,7 @@ impl BotModule for TtsModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-    ) -> Option<String> {
+    ) -> Option<Reply> {
         if ctx.command != "say" {
             return None;
         }
@@ -199,22 +139,10 @@ impl BotModule for TtsModule {
 mod tests {
     use super::*;
     use crate::infrastructure::inference::tts::TtsDialect;
-    use std::sync::Mutex;
-
-    /// matrix-sdk turns each fraction back into a bucket with
-    /// `(v.clamp(0.0, 1.0) * 1024.0) as u16`; every bucket must survive that.
-    #[test]
-    fn test_normalised_waveform_round_trips_through_the_sdk_rescale() {
-        let buckets: Vec<u16> = (0..=WAVEFORM_MAX).collect();
-        let rescaled: Vec<u16> = normalise_waveform(buckets.clone())
-            .into_iter()
-            .map(|v| (v.clamp(0.0, 1.0) * f32::from(WAVEFORM_MAX)) as u16)
-            .collect();
-        assert_eq!(rescaled, buckets);
-    }
+    use std::sync::{Arc, Mutex};
 
     fn module_with(tts: TtsClient, default_voice: &str) -> TtsModule {
-        TtsModule::new(Arc::new(RwLock::new(None)), tts, default_voice.to_string())
+        TtsModule::new(tts, default_voice.to_string())
     }
 
     fn unconfigured() -> TtsClient {
@@ -222,19 +150,11 @@ mod tests {
     }
 
     fn ctx_for(command: &str, raw_args: &str) -> CommandContext {
-        CommandContext {
-            room_id: "!room:a".to_string(),
-            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
-            sender_mxid: "@alice:a".to_string(),
-            sender_name: "alice".to_string(),
-            command: command.to_string(),
-            raw_args: raw_args.to_string(),
-            full_body: format!("!{} {}", command, raw_args),
-            is_direct: true,
-            is_mentioned: false,
-            quoted: None,
-            stage_reporter: None,
-        }
+        crate::interface::chat::test_support::context(
+            command,
+            raw_args,
+            &format!("!{} {}", command, raw_args),
+        )
     }
 
     async fn memory_db() -> Database {
@@ -278,7 +198,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(reply.contains("语音合成不可用"), "{}", reply);
+        assert!(reply.html_body().contains("语音合成不可用"));
     }
 
     #[tokio::test]
@@ -293,7 +213,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(reply.contains("没有可朗读的文字"), "{}", reply);
+        assert!(reply.html_body().contains("没有可朗读的文字"));
     }
 
     #[tokio::test]
@@ -309,12 +229,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(reply.contains("文字过长"), "{}", reply);
+        assert!(reply.html_body().contains("文字过长"));
     }
 
-    /// Synthesis succeeds against a fake provider; sending then fails only
-    /// because no Matrix client is connected in tests. The request proves
-    /// which voice was resolved.
+    /// Synthesis succeeds against a fake provider; the module answers with the
+    /// caption and the audio as an attachment, and sends nothing itself. The
+    /// request proves which voice was resolved.
     #[tokio::test]
     async fn test_a_user_without_a_saved_voice_is_spoken_in_the_house_default() {
         use axum::{routing::post, Json, Router};
@@ -326,7 +246,7 @@ mod tests {
                 let seen = seen.clone();
                 async move {
                     *seen.lock().unwrap() = body["voice"].as_str().map(str::to_owned);
-                    Vec::<u8>::new()
+                    vec![1u8, 2, 3]
                 }
             }),
         );
@@ -347,12 +267,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(reply.contains("语音发送失败"), "{}", reply);
-        assert!(
-            !reply.contains("Matrix client is not connected"),
-            "leaked internal error detail: {}",
-            reply
-        );
+        assert_eq!(reply.html_body(), "🔊 <b>已朗读:</b> “hello”");
+        let [audio] = reply.content.attachments.as_slice() else {
+            panic!("expected exactly one attachment");
+        };
+        assert_eq!(audio.kind, AttachmentKind::Audio);
+        assert_eq!(audio.mime, "audio/ogg");
+        assert_eq!(audio.filename, "voice-message.ogg");
+        assert_eq!(audio.bytes, vec![1u8, 2, 3]);
         assert_eq!(voice_seen.lock().unwrap().as_deref(), Some("7"));
     }
 

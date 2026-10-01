@@ -310,17 +310,19 @@ mod tests {
         let owner = AccountId::from_seed("user_journal_test");
 
         let ctx = CommandContext {
-            room_id: "!room:1".to_string(),
-            sender_mxid: "@user:1".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:1".to_string(),
+            ),
             owner_id: owner,
-            sender_name: "Tester".to_string(),
+            sender: crate::interface::chat::test_support::sender("@user:1", "Tester"),
             command: "journal".to_string(),
             raw_args: "help".to_string(),
             full_body: "!journal help".to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         };
 
         let help = handle_journal_command(&services, &ctx).await.unwrap();
