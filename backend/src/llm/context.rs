@@ -1,5 +1,6 @@
 use crate::db::DbPool;
 use crate::domain::accounts::AccountId;
+use crate::llm::progress::ProgressSink;
 
 /// Runtime context for an LLM turn.
 ///
@@ -11,7 +12,7 @@ pub struct LlmTurnContext<'a> {
     pub config: &'a crate::config::AiEnvConfig,
     pub owner_id: &'a AccountId,
     pub room_id: &'a str,
-    pub stage_reporter: Option<&'a crate::interface::channels::matrix::stage::StageReporter>,
+    pub progress: Option<&'a dyn ProgressSink>,
 }
 
 impl<'a> LlmTurnContext<'a> {
@@ -21,7 +22,7 @@ impl<'a> LlmTurnContext<'a> {
         config: &'a crate::config::AiEnvConfig,
         owner_id: &'a AccountId,
         room_id: &'a str,
-        stage_reporter: Option<&'a crate::interface::channels::matrix::stage::StageReporter>,
+        progress: Option<&'a dyn ProgressSink>,
     ) -> Self {
         Self {
             services,
@@ -29,7 +30,7 @@ impl<'a> LlmTurnContext<'a> {
             config,
             owner_id,
             room_id,
-            stage_reporter,
+            progress,
         }
     }
 }
@@ -43,6 +44,8 @@ pub struct AiTurnResult {
     pub message: String,
     pub model_used: String,
     pub tool_calls_executed: Vec<String>,
+    /// (tool name, tool result) pairs, in execution order, for an adapter that links replies to records.
+    pub tool_results: Vec<(String, String)>,
 }
 
 pub type LlmTurnResult = AiTurnResult;

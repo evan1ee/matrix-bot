@@ -75,16 +75,27 @@ pub async fn process_image_event(
 
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
+    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
     let turn_ctx = crate::llm::LlmTurnContext::new(
         services,
         &db.pool,
         ai,
         owner_id,
         room.room_id().as_str(),
-        stage_reporter,
+        progress,
     );
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
-        Ok(ai_turn) => format_ocr_turn_response(&ai_turn, &ocr_result),
+        Ok(ai_turn) => {
+            crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
+                &db.pool,
+                progress.and_then(|p| p.message_ref()).as_deref(),
+                room.room_id().as_str(),
+                owner_id,
+                &ai_turn.tool_results,
+            )
+            .await;
+            format_ocr_turn_response(&ai_turn, &ocr_result)
+        }
         Err(err) => {
             warn!("AI turn failed for OCR text: {}", err);
             format!(
@@ -230,6 +241,7 @@ mod tests {
             message: "Recorded **$16.50** expense for **Shake Shack**.".to_string(),
             model_used: "grok-4.6".to_string(),
             tool_calls_executed: vec!["add_expense".to_string()],
+            tool_results: vec![],
         };
         let ocr_result = OcrResult {
             blocks: vec![

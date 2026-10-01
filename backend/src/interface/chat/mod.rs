@@ -13,6 +13,7 @@ pub mod habits;
 pub mod journal;
 pub mod life;
 pub mod llm;
+pub mod llm_alert;
 pub mod mcp;
 pub mod ocr;
 pub mod portfolio;

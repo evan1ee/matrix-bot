@@ -9,8 +9,8 @@ use crate::application::AppServices;
 use crate::db::{Database, DbPool};
 use crate::domain::accounts::AccountId;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
+use crate::interface::chat::llm_alert::{clear_ai_error_state, notify_dev_room_ai_error};
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
-use crate::llm::alert::{clear_ai_error_state, notify_dev_room_ai_error};
 use crate::llm::context::LlmTurnContext;
 use crate::llm::prompt::format_response;
 use crate::llm::resolved_config::ResolvedAiConfig;
@@ -193,11 +193,20 @@ pub async fn handle_ai_command_with_stage(
         )));
     }
 
-    let turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, stage_reporter);
+    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
+    let turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, progress);
 
     match run_turn(&turn_ctx, &effective_prompt, None).await {
         Ok(result) => {
             clear_ai_error_state();
+            crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
+                pool,
+                progress.and_then(|p| p.message_ref()).as_deref(),
+                room_id,
+                owner_id,
+                &result.tool_results,
+            )
+            .await;
             Some(format_response(
                 &result.message,
                 &result.model_used,

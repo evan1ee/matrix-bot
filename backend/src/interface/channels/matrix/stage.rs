@@ -71,6 +71,9 @@ impl Drop for TypingGuard {
 pub struct StageReporter {
     room: Option<Room>,
     event_id: Option<OwnedEventId>,
+    /// The streaming buffer behind `ProgressSink::push_delta`. Shared by clones
+    /// so every holder of this reporter feeds the same edit cadence.
+    stream: Arc<tokio::sync::Mutex<Option<StreamThrottler>>>,
 }
 
 impl std::fmt::Debug for StageReporter {
@@ -92,6 +95,7 @@ impl StageReporter {
         Self {
             room: None,
             event_id: None,
+            stream: Arc::default(),
         }
     }
 
@@ -127,7 +131,44 @@ impl StageReporter {
 
     /// Creates a throttled streaming buffer for in-place token replacement.
     pub fn throttler(&self) -> StreamThrottler {
-        StreamThrottler::new(self.clone())
+        // A clone with its own empty buffer: the throttler must not hold the
+        // buffer that holds it (an `Arc` cycle that would never be freed).
+        StreamThrottler::new(Self {
+            room: self.room.clone(),
+            event_id: self.event_id.clone(),
+            stream: Arc::default(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::llm::progress::ProgressSink for StageReporter {
+    async fn report_stage(&self, text: &str) {
+        StageReporter::report_stage(self, text).await;
+    }
+
+    async fn report_tool_call(&self, tool_name: &str) {
+        StageReporter::report_tool_call(self, tool_name).await;
+    }
+
+    async fn push_delta(&self, delta: &str) {
+        let mut stream = self.stream.lock().await;
+        stream
+            .get_or_insert_with(|| self.throttler())
+            .push_delta(delta)
+            .await;
+    }
+
+    /// Sends what is still buffered, then drops the buffer so the next stream
+    /// of the turn starts from empty text instead of appending to this one.
+    async fn flush(&self) {
+        if let Some(mut throttler) = self.stream.lock().await.take() {
+            throttler.flush().await;
+        }
+    }
+
+    fn message_ref(&self) -> Option<String> {
+        self.event_id.as_ref().map(|id| id.to_string())
     }
 }
 
@@ -228,6 +269,7 @@ impl StageIndicator {
         StageReporter {
             room: Some(self.room.clone()),
             event_id: self.event_id.clone(),
+            stream: Arc::default(),
         }
     }
 
@@ -337,6 +379,26 @@ mod tests {
             .make_replacement(metadata);
 
         assert!(content.relates_to.is_some());
+    }
+
+    #[tokio::test]
+    async fn the_reporter_streams_through_the_progress_sink_and_starts_fresh_after_a_flush() {
+        use crate::llm::progress::ProgressSink;
+        let reporter = StageReporter::noop();
+        let sink: &dyn ProgressSink = &reporter;
+        sink.push_delta("Hello").await;
+        assert_eq!(
+            reporter
+                .stream
+                .lock()
+                .await
+                .as_ref()
+                .map(|t| t.accumulated().to_string()),
+            Some("Hello".to_string())
+        );
+        sink.flush().await;
+        assert!(reporter.stream.lock().await.is_none());
+        assert_eq!(sink.message_ref(), None);
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 use super::resolved_config::ResolvedAiConfig;
-use crate::interface::channels::matrix::quote::QuotedMessage;
+use crate::domain::chat::QuotedMessage;
 
 /// Returns true if the active AI configuration is using xAI (Grok).
 pub fn is_grok_model(config: &ResolvedAiConfig) -> bool {

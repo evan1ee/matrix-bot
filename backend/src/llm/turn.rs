@@ -138,8 +138,8 @@ pub async fn run_turn(
         name: None,
     });
 
-    if let Some(reporter) = ctx.stage_reporter {
-        reporter.report_stage("🤔 思考中...").await;
+    if let Some(sink) = ctx.progress {
+        sink.report_stage("🤔 思考中...").await;
     }
 
     let client = crate::infrastructure::inference::llm::shared_client(ctx.config.proxy.as_deref());
@@ -157,6 +157,7 @@ pub async fn run_turn(
     let max_iterations = MAX_TOOL_ROUNDS;
     let mut final_content = String::new();
     let mut tool_calls_executed = Vec::new();
+    let mut tool_results: Vec<(String, String)> = Vec::new();
 
     while iteration < max_iterations {
         iteration += 1;
@@ -174,7 +175,7 @@ pub async fn run_turn(
             &client,
             &resolved_config,
             &request,
-            ctx.stage_reporter,
+            ctx.progress,
         )
         .await
         {
@@ -205,9 +206,9 @@ pub async fn run_turn(
                         name: None,
                     });
 
-                    if let Some(reporter) = ctx.stage_reporter {
+                    if let Some(sink) = ctx.progress {
                         if let Some(first_tc) = tool_calls.first() {
-                            reporter.report_tool_call(&first_tc.function.name).await;
+                            sink.report_tool_call(&first_tc.function.name).await;
                         }
                     }
 
@@ -238,26 +239,14 @@ pub async fn run_turn(
 
                     let execution_results = futures_util::future::join_all(tool_futures).await;
 
-                    if let Some(reporter) = ctx.stage_reporter {
-                        reporter.report_stage("🧠 正在组织回复...").await;
+                    if let Some(sink) = ctx.progress {
+                        sink.report_stage("🧠 正在组织回复...").await;
                     }
 
                     for (tool_call_id, func_name, result_str) in execution_results {
                         tool_calls_executed.push(func_name.clone());
 
-                        let eid = ctx
-                            .stage_reporter
-                            .and_then(|r| r.event_id())
-                            .map(|e| e.as_str());
-                        crate::interface::channels::matrix::reaction_targets::record_ai_tool_target(
-                            ctx.pool,
-                            eid,
-                            ctx.room_id,
-                            ctx.owner_id,
-                            &func_name,
-                            &result_str,
-                        )
-                        .await;
+                        tool_results.push((func_name.clone(), result_str.clone()));
 
                         // Persist tool result message
                         let _ = llm_repo::add_message(
@@ -334,13 +323,13 @@ pub async fn run_turn(
             max_tokens: Some(resolved_config.max_tokens),
             tools: None,
             tool_choice: None,
-            stream: Some(ctx.stage_reporter.is_some()),
+            stream: Some(ctx.progress.is_some()),
         };
         if let Ok((content, _)) = super::stream::execute_stream_or_complete(
             &client,
             &resolved_config,
             &final_req,
-            ctx.stage_reporter,
+            ctx.progress,
         )
         .await
         {
@@ -388,5 +377,117 @@ pub async fn run_turn(
         message: final_content,
         model_used: resolved_config.model_name,
         tool_calls_executed,
+        tool_results,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::AppServices;
+    use crate::domain::accounts::AccountId;
+    use crate::infrastructure::inference::test_support::spawn_server;
+    use crate::llm::progress::ProgressSink;
+    use axum::{routing::post, Json, Router};
+    use std::sync::Mutex;
+
+    /// Records what the agent tells a channel, in order.
+    #[derive(Default)]
+    struct RecordingSink {
+        seen: Mutex<Vec<String>>,
+    }
+
+    impl RecordingSink {
+        fn note(&self, entry: String) {
+            if let Ok(mut seen) = self.seen.lock() {
+                seen.push(entry);
+            }
+        }
+        fn seen(&self) -> Vec<String> {
+            self.seen.lock().map(|s| s.clone()).unwrap_or_default()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProgressSink for RecordingSink {
+        async fn report_stage(&self, text: &str) {
+            self.note(format!("stage:{text}"));
+        }
+        async fn report_tool_call(&self, tool_name: &str) {
+            self.note(format!("tool:{tool_name}"));
+        }
+        async fn push_delta(&self, delta: &str) {
+            self.note(format!("delta:{delta}"));
+        }
+        async fn flush(&self) {
+            self.note("flush".to_string());
+        }
+        fn message_ref(&self) -> Option<String> {
+            Some("$stage".to_string())
+        }
+    }
+
+    /// A scripted OpenAI-compatible endpoint: while the conversation holds no
+    /// tool result it asks for one `list_finance_transactions` call, afterwards
+    /// it answers. Always replies as an SSE stream, which is what a turn with a
+    /// progress sink asks for.
+    async fn scripted_llm() -> String {
+        let app = Router::new().route(
+            "/chat/completions",
+            post(|Json(body): Json<serde_json::Value>| async move {
+                let has_tool_result = body["messages"]
+                    .as_array()
+                    .map(|m| m.iter().any(|x| x["role"] == "tool"))
+                    .unwrap_or(false);
+                let chunk = if has_tool_result {
+                    serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                        "delta":{"content":"Nothing to report."},"finish_reason":null}]})
+                } else {
+                    serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                        "delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",
+                        "function":{"name":"list_finance_transactions","arguments":"{}"}}]},
+                        "finish_reason":null}]})
+                };
+                (
+                    [("content-type", "text/event-stream")],
+                    format!("data: {chunk}\n\ndata: [DONE]\n\n"),
+                )
+            }),
+        );
+        spawn_server(app).await
+    }
+
+    #[tokio::test]
+    async fn a_turn_reports_tool_stages_through_any_progress_sink() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("turn-progress-sink");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        let config = crate::config::AiEnvConfig {
+            base_url: Some(scripted_llm().await),
+            api_key: Some("sk-test".to_string()),
+            allow_private_base_url: true,
+            ..Default::default()
+        };
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "what did I spend?", None)
+            .await
+            .expect("the scripted turn should complete");
+
+        let seen = sink.seen();
+        assert!(
+            seen.contains(&"tool:list_finance_transactions".to_string()),
+            "{seen:?}"
+        );
+        assert!(
+            seen.contains(&"stage:🧠 正在组织回复...".to_string()),
+            "{seen:?}"
+        );
+        assert_eq!(result.tool_results.len(), 1);
+        assert_eq!(result.tool_results[0].0, "list_finance_transactions");
+        assert_eq!(result.message, "Nothing to report.");
+    }
 }

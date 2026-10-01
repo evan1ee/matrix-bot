@@ -98,16 +98,27 @@ pub async fn process_audio_event(
     let ai_prompt = prompt::build_voice_prompt(&transcription.text, transcription.duration_secs);
 
     // 3. Run AI turn with full domain tool capabilities
+    let progress = stage_reporter.map(|r| r as &dyn crate::llm::progress::ProgressSink);
     let turn_ctx = crate::llm::LlmTurnContext::new(
         services,
         &db.pool,
         ai,
         owner_id,
         room.room_id().as_str(),
-        stage_reporter,
+        progress,
     );
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
-        Ok(ai_turn) => format_voice_turn_response(&ai_turn, &transcription, stt.model()),
+        Ok(ai_turn) => {
+            crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
+                &db.pool,
+                progress.and_then(|p| p.message_ref()).as_deref(),
+                room.room_id().as_str(),
+                owner_id,
+                &ai_turn.tool_results,
+            )
+            .await;
+            format_voice_turn_response(&ai_turn, &transcription, stt.model())
+        }
         Err(err) => {
             warn!("AI turn failed for transcribed voice: {}", err);
             format!(
@@ -172,6 +183,7 @@ mod tests {
             message: "Added task **Review budget** to your to-do list.".to_string(),
             model_used: "grok-4.6".to_string(),
             tool_calls_executed: vec!["add_todo".to_string()],
+            tool_results: vec![],
         };
         let transcription = VoiceTranscriptionResult {
             text: "Remind me to review the budget tomorrow".to_string(),

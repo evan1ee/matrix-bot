@@ -714,3 +714,24 @@ fn only_application_publishes_to_the_outbox() {
         );
     }
 }
+
+#[test]
+fn the_agent_knows_no_channel() {
+    let hits = production_violations(
+        "llm",
+        &[
+            "matrix_sdk",
+            "interface::channels",
+            "serenity",
+            "teloxide",
+            "lettre",
+            "async_imap",
+            "mail_parser",
+        ],
+    );
+    assert!(
+        hits.is_empty(),
+        "llm/ must not know any channel:\n{}",
+        hits.join("\n")
+    );
+}

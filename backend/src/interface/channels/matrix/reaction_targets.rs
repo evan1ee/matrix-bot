@@ -80,6 +80,20 @@ pub async fn record_ai_tool_target(
     }
 }
 
+/// Records the targets of every tool a turn ran, against the turn's progress
+/// message (Matrix: the stage event), in execution order.
+pub async fn record_ai_tool_targets(
+    pool: &DbPool,
+    event_id: Option<&str>,
+    room_id: &str,
+    owner_id: &AccountId,
+    tool_results: &[(String, String)],
+) {
+    for (func_name, result_str) in tool_results {
+        record_ai_tool_target(pool, event_id, room_id, owner_id, func_name, result_str).await;
+    }
+}
+
 /// Links related events across a command turn (stage placeholder, final bot reply, user prompt event)
 /// to ensure reactions on any of these messages resolve to the underlying entity.
 pub async fn link_turn_targets(
