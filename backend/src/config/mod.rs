@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
 
+mod channels;
+
 use crate::domain::channels::Channel;
 
 const DEFAULT_STT_MODEL: &str = "sensevoice-small";
@@ -143,34 +145,6 @@ fn parse_job_workers(raw: Option<&str>) -> Result<usize> {
             .parse::<usize>()
             .with_context(|| format!("JOB_WORKERS must be a whole number (got '{v}')")),
     }
-}
-
-/// The signup allowlist, one environment variable per channel, each a
-/// comma-separated list. Entries are trimmed, empty ones dropped, email
-/// addresses lowercased (the canonical form identities are stored in); a
-/// channel with no entries is left out of the map.
-fn parse_link_signup_allowlist(
-    get: impl Fn(&str) -> Option<String>,
-) -> HashMap<Channel, Vec<String>> {
-    [
-        (Channel::Discord, "DISCORD_ALLOWED_USERS"),
-        (Channel::Telegram, "TELEGRAM_ALLOWED_USERS"),
-        (Channel::Email, "EMAIL_ALLOWED_SENDERS"),
-    ]
-    .into_iter()
-    .filter_map(|(channel, name)| {
-        let entries: Vec<String> = get(name)?
-            .split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| match channel {
-                Channel::Email => entry.to_lowercase(),
-                _ => entry.to_owned(),
-            })
-            .collect();
-        (!entries.is_empty()).then_some((channel, entries))
-    })
-    .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -354,7 +328,8 @@ impl Config {
 
         let web_url = env::var("WEB_URL").unwrap_or_else(|_| webauthn_origin.clone());
 
-        let link_signup_allowlist = parse_link_signup_allowlist(|name| env::var(name).ok());
+        let link_signup_allowlist =
+            channels::parse_link_signup_allowlist(|name| env::var(name).ok());
 
         let ocr_enabled = env::var("OCR_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -591,32 +566,6 @@ mod tests {
     }
 
     #[test]
-    fn the_link_signup_allowlist_reads_one_env_name_per_channel() {
-        use crate::domain::channels::Channel;
-        let env = |name: &str| match name {
-            "DISCORD_ALLOWED_USERS" => Some(" 111 , 222,, ".to_string()),
-            "TELEGRAM_ALLOWED_USERS" => Some("42".to_string()),
-            "EMAIL_ALLOWED_SENDERS" => Some("Evan@Example.com, ,b@x.org".to_string()),
-            _ => None,
-        };
-        let list = parse_link_signup_allowlist(env);
-        assert_eq!(list[&Channel::Discord], vec!["111", "222"]);
-        assert_eq!(list[&Channel::Telegram], vec!["42"]);
-        assert_eq!(
-            list[&Channel::Email],
-            vec!["evan@example.com", "b@x.org"],
-            "email entries are lowercased"
-        );
-        assert!(!list.contains_key(&Channel::Matrix));
-    }
-
-    #[test]
-    fn the_link_signup_allowlist_is_empty_when_unset_or_blank() {
-        assert!(parse_link_signup_allowlist(|_| None).is_empty());
-        assert!(parse_link_signup_allowlist(|_| Some(" , ,".to_string())).is_empty());
-    }
-
-    #[test]
     fn test_parse_job_workers() {
         assert_eq!(parse_job_workers(None).unwrap(), DEFAULT_JOB_WORKERS);
         assert_eq!(parse_job_workers(Some("8")).unwrap(), 8);
@@ -777,7 +726,6 @@ mod tests {
     #[test]
     fn test_only_config_reads_the_environment() {
         const ALLOWED: &[&str] = &[
-            "config.rs",
             "search.rs",
             // Read only inside #[ignore]d live tests.
             "self_verify.rs",
@@ -802,7 +750,9 @@ mod tests {
                     .and_then(|n| n.to_str())
                     .unwrap_or_default()
                     .to_string();
-                if ALLOWED.contains(&name.as_str()) {
+                // `config/` is the one module allowed to read the environment.
+                let in_config = path.components().any(|c| c.as_os_str() == "config");
+                if in_config || ALLOWED.contains(&name.as_str()) {
                     continue;
                 }
                 let source = std::fs::read_to_string(&path).expect("a readable source file");
@@ -837,8 +787,11 @@ mod tests {
     /// makes "does it search parent directories" moot.
     #[test]
     fn test_config_from_env_never_loads_dotenv() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/config.rs");
-        let source = std::fs::read_to_string(&path).expect("config.rs must be readable");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/config");
+        let source: String = ["mod.rs", "channels.rs"]
+            .iter()
+            .map(|file| std::fs::read_to_string(dir.join(file)).expect("config must be readable"))
+            .collect();
         // Built at runtime, not as one string literal: the literal would itself
         // match a repo-wide `grep` for "the parent-searching dotenvy call",
         // which this project uses as its own drift check for this fix.
