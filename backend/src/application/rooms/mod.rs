@@ -7,10 +7,11 @@
 use sqlx::PgPool;
 use tracing::warn;
 
-use crate::application::accounts::AccountService;
+use crate::application::identity::IdentityService;
 use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::channels::Channel;
 use crate::domain::rooms::{self as domain, CachedRoom, JoinedRoom, RoomTarget, WEB_ROOM};
 use crate::infrastructure::postgres::repositories::rooms as repo;
 
@@ -26,15 +27,15 @@ pub enum PickerRooms {
 pub struct RoomService {
     pool: PgPool,
     settings: SettingsService,
-    accounts: AccountService,
+    identity: IdentityService,
 }
 
 impl RoomService {
-    pub fn new(pool: PgPool, settings: SettingsService, accounts: AccountService) -> Self {
+    pub fn new(pool: PgPool, settings: SettingsService, identity: IdentityService) -> Self {
         Self {
             pool,
             settings,
-            accounts,
+            identity,
         }
     }
 
@@ -101,7 +102,7 @@ impl RoomService {
     /// The Matrix identities linked to the account: a room is reachable for
     /// the account when one of them has joined it.
     pub async fn linked_mxids(&self, account_id: &AccountId) -> Result<Vec<String>, AppError> {
-        self.accounts.linked_mxids(account_id).await
+        self.identity.user_ids(account_id, Channel::Matrix).await
     }
 
     /// The room an action is delivered to when it names none; see
@@ -113,7 +114,7 @@ impl RoomService {
     pub async fn default_room(&self, account_id: &AccountId) -> Option<String> {
         let rooms = self.cached_rooms_or_empty(account_id).await;
         let mxids = logged_or_default(
-            self.accounts.linked_mxids(account_id).await,
+            self.identity.user_ids(account_id, Channel::Matrix).await,
             "linked Matrix ids",
             account_id,
         );
@@ -168,6 +169,7 @@ fn logged_or_default<T: Default, E: std::fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::accounts::AccountService;
     use crate::domain::settings::UserSettings;
 
     async fn service_with_account(account_id: &AccountId) -> RoomService {
@@ -178,7 +180,11 @@ mod tests {
             .create_with_id(account_id, "Tester", crate::domain::accounts::STATUS_ACTIVE)
             .await
             .unwrap();
-        RoomService::new(pool.clone(), SettingsService::new(pool), accounts)
+        RoomService::new(
+            pool.clone(),
+            SettingsService::new(pool.clone()),
+            IdentityService::new(pool),
+        )
     }
 
     fn room(room_id: &str, name: &str, is_direct: bool) -> JoinedRoom {
@@ -337,13 +343,10 @@ mod tests {
     async fn the_default_room_reads_linked_ids_and_settings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone());
-        let account = accounts
-            .resolve_or_provision("@evan:mbm.one")
-            .await
-            .unwrap();
+        let identity = IdentityService::new(pool.clone());
+        let account = identity.provision_matrix_for_test("@evan:mbm.one").await;
         let settings_service = SettingsService::new(pool.clone());
-        let service = RoomService::new(pool.clone(), settings_service.clone(), accounts);
+        let service = RoomService::new(pool.clone(), settings_service.clone(), identity);
         let settings = UserSettings {
             dev_room_id: Some("!dev:x".to_string()),
             ..UserSettings::default()

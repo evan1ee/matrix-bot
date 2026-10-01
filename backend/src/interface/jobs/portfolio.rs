@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 use super::{Delivery, MATRIX_RETRY};
 use crate::application::portfolio::TriggeredAlert;
 use crate::application::{AppError, AppServices};
+use crate::domain::channels::Channel;
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::jobs::{JobContext, JobError, JobHandler};
@@ -128,7 +129,12 @@ impl CheckAlertsHandler {
         for symbol in symbols {
             for hit in trigger(symbol).await? {
                 let owner = &hit.alert.owner_id;
-                let mxids = match self.services.accounts.linked_mxids(owner).await {
+                let mxids = match self
+                    .services
+                    .identity
+                    .user_ids(owner, Channel::Matrix)
+                    .await
+                {
                     Ok(mxids) => mxids,
                     Err(err) => {
                         warn!(%owner, error = %err, "Could not read linked identities for an alert");
@@ -306,11 +312,7 @@ mod tests {
     #[tokio::test]
     async fn dms_for_one_symbol_are_sent_before_the_next_is_evaluated() {
         let (s, _) = services(&["acct_pf_h_order"]).await;
-        let owner = s
-            .accounts
-            .resolve_or_provision("@order:test")
-            .await
-            .unwrap();
+        let owner = s.identity.provision_matrix_for_test("@order:test").await;
         let fake = FakeDelivery::connected();
         let handler = CheckAlertsHandler::new(s, fake.clone());
         let seen_at_b = Arc::new(std::sync::Mutex::new(None));

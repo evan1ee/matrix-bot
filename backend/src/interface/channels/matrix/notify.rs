@@ -19,16 +19,17 @@ use matrix_sdk::ruma::UserId;
 use matrix_sdk::Client;
 use tracing::{error, warn};
 
-use crate::application::accounts::AccountService;
+use crate::application::identity::IdentityService;
 use crate::domain::accounts::{AccountId, SecurityEventKind};
+use crate::domain::channels::Channel;
 
 /// Announces an event to every linked Matrix identity.
 ///
-/// Writes no audit row: `AccountService` records the event exactly once, in the
+/// Writes no audit row: `AccountService` or `IdentityService` records the event exactly once, in the
 /// operation that caused it, and a second row here would double it.
 pub async fn announce_account(
     client: Option<&Client>,
-    accounts: &AccountService,
+    identity: &IdentityService,
     account_id: &AccountId,
     kind: SecurityEventKind,
     detail: Option<&str>,
@@ -46,7 +47,7 @@ pub async fn announce_account(
         return;
     };
 
-    let mxids = match accounts.linked_mxids(account_id).await {
+    let mxids = match identity.user_ids(account_id, Channel::Matrix).await {
         Ok(mxids) => mxids,
         Err(err) => {
             error!(
@@ -171,7 +172,7 @@ mod tests {
 
         announce_account(
             None,
-            &services.accounts,
+            &services.identity,
             &acct_id,
             SecurityEventKind::RecoveryRequested,
             Some("from @evan:mbm.one"),
@@ -194,7 +195,7 @@ mod tests {
         let acct_id = AccountId::from_seed("acct_gone");
         announce_account(
             None,
-            &services.accounts,
+            &services.identity,
             &acct_id,
             SecurityEventKind::PasskeyRemoved,
             None,

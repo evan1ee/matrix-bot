@@ -10,7 +10,9 @@ use matrix_sdk::{
 };
 use tracing::{error, info};
 
+use crate::application::identity::Resolution;
 use crate::db::Database;
+use crate::domain::channels::PlatformIdentity;
 use crate::interface::channels::matrix::dispatcher::CommandParser;
 use crate::interface::channels::matrix::linking::PendingMerges;
 use crate::interface::chat::ModuleRegistry;
@@ -93,12 +95,26 @@ pub async fn handle_text(
     // seen. Deliberately after the parse: an unrelated room message
     // must not cost a query, and must not create an account for
     // someone who only ever said hello to a room the bot is in.
-    let owner_id = match services
-        .accounts
-        .resolve_or_provision(ev.sender.as_str())
-        .await
-    {
-        Ok(owner_id) => owner_id,
+    let sender = match PlatformIdentity::matrix(ev.sender.as_str()) {
+        Ok(sender) => sender,
+        Err(err) => {
+            error!(
+                "Could not resolve an account for {}: {:?} — dropping the command",
+                ev.sender, err
+            );
+            return;
+        }
+    };
+    let owner_id = match services.identity.resolve(&sender).await {
+        Ok(Resolution::Account(owner_id)) => owner_id,
+        Ok(Resolution::Unlinked) => {
+            // Matrix provisions every sender; reaching this is a policy bug.
+            error!(
+                "Matrix sender {} resolved as unlinked — dropping the command",
+                ev.sender
+            );
+            return;
+        }
         Err(err) => {
             error!(
                 "Could not resolve an account for {}: {:?} — dropping the command",

@@ -389,10 +389,9 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
         let owner = crate::application::AppServices::new(&db.pool)
-            .accounts
-            .resolve_or_provision("@user:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@user:mbm.one")
+            .await;
         (db, owner)
     }
 

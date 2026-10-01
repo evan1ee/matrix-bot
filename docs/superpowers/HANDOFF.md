@@ -137,8 +137,8 @@ The last full test run (step 9 final verification at `b2587c7`, `cargo test -p m
 | Task | Scope | State | Commit |
 |---|---|---|---|
 | 1 | Domain channel types (`domain/channels`) | ✅ | cade6d3 |
-| 2 | `platform_identities` schema and repository; `matrix_links` retired | ✅ | (this commit) |
-| 3 | `IdentityService` | ⬜ |  |
+| 2 | `platform_identities` schema and repository; `matrix_links` retired | ✅ | a4afe76 |
+| 3 | `IdentityService` | ✅ | (this commit) |
 | 4 | Neutral message types, adapter trait, registry, renderers | ⬜ |  |
 | 5 | The agent stops depending on Matrix | ⬜ |  |
 | 6 | Channel-neutral `CommandContext` and `Reply` | ⬜ |  |
@@ -438,3 +438,4 @@ These need the human. Prepare them; don't perform them.
 - **R72 (spec R-O2):** no generic metadata map on messages; platform data stays inside the adapter behind an opaque `MessageRef` — keeps email fields out of chat channels — cost: a typed field added later if a second channel needs one.
 - **R73 (plan A, A1–A6):** migrations are 0006–0008 (0005 was taken); Matrix-specific lookups are re-pointed at `platform_identities`; link-time merges keep today's unclaimed-account rule; the AI outage alert targets `dev_room_id` or the Matrix room named "dev"; the inbound pipeline holds `Weak<ChannelRegistry>`; `Reply: From<String>` for a mechanical module sweep — cost: per clarification in the plan.
 - **R74 (plan A, Task 2):** `identities::resolve_or_provision` creates the unclaimed account and binds in one transaction and rolls back on a lost race (no orphan to delete); a lost `bind` in `linking::claim` is `AlreadyLinked`; a malformed MXID reaching `AccountService`/repositories is logged at warn and treated as unknown (`find` → `None`, `unlink` → `false`, `resolve_or_provision` → validation error, Matrix handlers drop the event); the 0002 conversion test now stops at version 2 because 0007 retires `matrix_links`, and 0007 has its own backfill and orphan-guard tests — cost: none functional; a hand-edited DB with orphan links fails boot by name.
+- **R75 (plan A, Task 3):** `IdentityService::unlink` refuses (Conflict) removing the last identity of a passkeyless account — the plan's rule; the old `AccountService::unlink` had no such check, so a passkeyless web account can no longer drop its only Matrix link — and locks the `accounts` row (`core::lock`) so concurrent unlinks cannot both pass the check; the unlink audit row is `identity_unlinked` (detail `matrix:<mxid>`), `claim_link` still writes `matrix_linked` until Task 9; the "previously unlinked" lookup in `linking::claim` honours both `matrix_unlinked` (`<mxid>`) and `identity_unlinked` (`matrix:<mxid>`); `redeem_matured_recovery` and `announce_account` take `AppServices`/`IdentityService` instead of `AccountService`; tests use `#[cfg(test)]` `IdentityService::{provision,find}_matrix_for_test` — cost: none on Matrix chat; a passkeyless account must add a passkey before unlinking its last identity.

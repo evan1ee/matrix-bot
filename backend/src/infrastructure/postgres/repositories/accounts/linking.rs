@@ -140,9 +140,11 @@ pub async fn claim(
         None => {
             let previous_account: Option<uuid::Uuid> = sqlx::query_scalar!(
                 r#"SELECT account_id AS "account_id: uuid::Uuid" FROM security_events
-                 WHERE kind = 'matrix_unlinked' AND detail = $1
+                 WHERE (kind = 'matrix_unlinked' AND detail = $1)
+                    OR (kind = 'identity_unlinked' AND detail = $2)
                  ORDER BY id DESC LIMIT 1"#,
                 mxid,
+                format!("matrix:{mxid}"),
             )
             .fetch_optional(pool)
             .await?;
@@ -404,6 +406,46 @@ mod tests {
                 from_account: old
             }
         );
+    }
+
+    /// A3: the "previously unlinked from an account with data" prompt must honour
+    /// both the historic `matrix_unlinked` rows (detail `<mxid>`) and the new
+    /// `identity_unlinked` rows (detail `matrix:<mxid>`).
+    #[tokio::test]
+    async fn test_a_previous_unlink_asks_to_merge_under_either_audit_kind() {
+        use crate::domain::accounts::SecurityEventKind;
+        use crate::infrastructure::postgres::repositories::accounts::security_events;
+
+        for (kind, detail) in [
+            (SecurityEventKind::MatrixUnlinked, "@evan:mbm.one"),
+            (SecurityEventKind::IdentityUnlinked, "matrix:@evan:mbm.one"),
+        ] {
+            let pool = db().await;
+            let mxid = format!("@evan{}:mbm.one", kind.as_str());
+            let detail = detail.replace("@evan:mbm.one", &mxid);
+            let old = core::create(&pool, "old", STATUS_ACTIVE).await.unwrap();
+            sqlx::query!(
+                "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
+                 VALUES ('!r:x', $1, 'evan', 'history', 'medium', FALSE)",
+                old.as_uuid()
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            security_events::record(&pool, &old, kind, Some(&detail)).await;
+
+            let new = core::create(&pool, "web", STATUS_ACTIVE).await.unwrap();
+            let code = issue(&pool, &new).await.unwrap();
+            assert_eq!(
+                claim(&pool, &code, &mxid, true).await.unwrap(),
+                LinkOutcome::NeedsMergeConfirmation {
+                    account_id: new,
+                    from_account: old
+                },
+                "{} rows must still trigger the merge prompt",
+                kind.as_str()
+            );
+        }
     }
 
     /// Unlinking revokes an access path. The rows stay put.

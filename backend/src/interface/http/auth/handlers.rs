@@ -4,6 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::domain::channels::Channel;
 use crate::error::ApiError;
 use crate::interface::http::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
 use crate::interface::http::auth::types::{
@@ -54,8 +55,8 @@ pub async fn get_current_user(
     // so the UI has a picture to show; nothing here decides anything.
     let linked = state
         .services
-        .accounts
-        .linked_mxids(&auth_user.account_id)
+        .identity
+        .user_ids(&auth_user.account_id, Channel::Matrix)
         .await
         .unwrap_or_default();
 

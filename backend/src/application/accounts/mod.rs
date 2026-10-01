@@ -13,23 +13,9 @@ use crate::domain::accounts::{
     Account, AccountId, AccountsError, LinkOutcome, MaturedRecovery, MergeOutcome, MergePreview,
     SecurityEvent, SecurityEventKind, Session,
 };
-use crate::domain::channels::{Channel, PlatformIdentity};
 use crate::infrastructure::postgres::repositories::accounts::{
     core, linking, recovery, security_events, sessions,
 };
-use crate::infrastructure::postgres::repositories::identities;
-
-/// A Matrix identity from a raw MXID. A malformed id cannot come from a real
-/// homeserver sender; it is logged and treated as unknown rather than trusted.
-fn matrix_identity(mxid: &str) -> Option<PlatformIdentity> {
-    match PlatformIdentity::matrix(mxid) {
-        Ok(identity) => Some(identity),
-        Err(err) => {
-            tracing::warn!(error = %err, "ignoring a malformed Matrix user id");
-            None
-        }
-    }
-}
 
 impl From<AccountsError> for AppError {
     fn from(err: AccountsError) -> Self {
@@ -75,28 +61,8 @@ impl AccountService {
 
     // --- Core Account Operations ---
 
-    pub async fn resolve_or_provision(&self, mxid: &str) -> Result<AccountId, AppError> {
-        let Some(identity) = matrix_identity(mxid) else {
-            return Err(AppError::Validation(format!(
-                "invalid Matrix user id: {mxid}"
-            )));
-        };
-        Ok(identities::resolve_or_provision(&self.pool, &identity).await?)
-    }
-
     pub async fn find(&self, account_id: &AccountId) -> Result<Option<Account>, AppError> {
         Ok(core::find(&self.pool, account_id).await?)
-    }
-
-    pub async fn find_by_mxid(&self, mxid: &str) -> Result<Option<AccountId>, AppError> {
-        let Some(identity) = matrix_identity(mxid) else {
-            return Ok(None);
-        };
-        Ok(identities::find_account(&self.pool, &identity).await?)
-    }
-
-    pub async fn linked_mxids(&self, account_id: &AccountId) -> Result<Vec<String>, AppError> {
-        Ok(identities::user_ids(&self.pool, account_id, Channel::Matrix).await?)
     }
 
     pub async fn create(&self, display_name: &str, status: &str) -> Result<AccountId, AppError> {
@@ -212,15 +178,6 @@ impl AccountService {
                 .await;
         }
         Ok(outcome)
-    }
-
-    pub async fn unlink(&self, account_id: &AccountId, mxid: &str) -> Result<bool, AppError> {
-        let ok = linking::unlink(&self.pool, account_id, mxid).await?;
-        if ok {
-            self.record_security_event(account_id, SecurityEventKind::MatrixUnlinked, Some(mxid))
-                .await;
-        }
-        Ok(ok)
     }
 
     // --- Recovery ---
@@ -387,7 +344,9 @@ mod tests {
     async fn merge_records_accounts_merged_once() {
         let service = service().await;
         let into = service.create("into", STATUS_ACTIVE).await.unwrap();
-        let from = service.resolve_or_provision("@old:mbm.one").await.unwrap();
+        let from = crate::application::identity::IdentityService::new(service.pool().clone())
+            .provision_matrix_for_test("@old:mbm.one")
+            .await;
         add_todo(&service, &from).await;
         add_todo(&service, &from).await;
 
@@ -454,36 +413,5 @@ mod tests {
         let outcome = service.claim_link(&code, "@evan:mbm.one", true).await;
         assert_eq!(outcome.unwrap(), LinkOutcome::AlreadyLinked);
         assert!(audit(&service, &mine).await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn unlink_records_matrix_unlinked_only_when_it_removed_something() {
-        let service = service().await;
-        let account = service.create("evan", STATUS_ACTIVE).await.unwrap();
-        let code = service.issue_link_challenge(&account).await.unwrap();
-        service
-            .claim_link(&code, "@evan:mbm.one", true)
-            .await
-            .unwrap();
-
-        let stranger = service.create("stranger", STATUS_ACTIVE).await.unwrap();
-        assert!(!service.unlink(&stranger, "@evan:mbm.one").await.unwrap());
-        assert!(audit(&service, &stranger).await.is_empty());
-
-        assert!(service.unlink(&account, "@evan:mbm.one").await.unwrap());
-        assert!(!service.unlink(&account, "@evan:mbm.one").await.unwrap());
-        assert_eq!(
-            audit(&service, &account).await,
-            vec![
-                (
-                    "matrix_linked".to_string(),
-                    Some("@evan:mbm.one".to_string())
-                ),
-                (
-                    "matrix_unlinked".to_string(),
-                    Some("@evan:mbm.one".to_string())
-                ),
-            ]
-        );
     }
 }

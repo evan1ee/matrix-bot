@@ -105,6 +105,10 @@ mod tests {
         (Database { pool }, accounts)
     }
 
+    fn identity_of(db: &Database) -> crate::application::identity::IdentityService {
+        crate::application::identity::IdentityService::new(db.pool.clone())
+    }
+
     #[tokio::test]
     async fn test_no_code_explains_where_to_get_one() {
         let (db, accounts) = db().await;
@@ -125,7 +129,7 @@ mod tests {
         assert_eq!(count, 1, "no throwaway account may be created for the MXID");
 
         assert_eq!(
-            accounts.find_by_mxid("@evan:mbm.one").await.unwrap(),
+            identity_of(&db).find_matrix_for_test("@evan:mbm.one").await,
             Some(account)
         );
     }
@@ -148,10 +152,9 @@ mod tests {
     #[tokio::test]
     async fn test_existing_history_asks_before_moving_anything() {
         let (db, accounts) = db().await;
-        let old = accounts
-            .resolve_or_provision("@evan:mbm.one")
-            .await
-            .unwrap();
+        let old = identity_of(&db)
+            .provision_matrix_for_test("@evan:mbm.one")
+            .await;
         for text in ["one", "two", "three"] {
             todo_repo::create(
                 &db.pool,
@@ -188,7 +191,7 @@ mod tests {
         // The MXID still points at the old account: the link is deliberately
         // left undone until the merge is confirmed.
         assert_eq!(
-            accounts.find_by_mxid("@evan:mbm.one").await.unwrap(),
+            identity_of(&db).find_matrix_for_test("@evan:mbm.one").await,
             Some(old)
         );
     }

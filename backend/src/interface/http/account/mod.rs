@@ -121,10 +121,9 @@ mod tests {
         assert_eq!(
             state
                 .services
-                .accounts
-                .find_by_mxid("@evan:mbm.one")
-                .await
-                .unwrap(),
+                .identity
+                .find_matrix_for_test("@evan:mbm.one")
+                .await,
             Some(theirs.account_id)
         );
     }
@@ -181,10 +180,9 @@ mod tests {
         let user = signed_in(&state, "evan").await;
         let old = state
             .services
-            .accounts
-            .resolve_or_provision("@evan:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@evan:mbm.one")
+            .await;
 
         for text in ["one", "two"] {
             todo_repo::create(
@@ -236,10 +234,9 @@ mod tests {
         let user = signed_in(&state, "evan").await;
         let old = state
             .services
-            .accounts
-            .resolve_or_provision("@evan:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@evan:mbm.one")
+            .await;
         todo_repo::create(
             &state.db.pool,
             &old,

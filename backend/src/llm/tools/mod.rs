@@ -45,10 +45,9 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool };
         let account_id = crate::application::AppServices::new(&db.pool)
-            .accounts
-            .resolve_or_provision("@alice:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
         (db, account_id)
     }
 

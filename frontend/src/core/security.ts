@@ -176,6 +176,8 @@ export function describeEvent(kind: string): string {
     passkey_renamed: 'Passkey renamed',
     matrix_linked: 'Matrix account linked',
     matrix_unlinked: 'Matrix account unlinked',
+    identity_linked: 'Chat identity linked',
+    identity_unlinked: 'Chat identity unlinked',
     accounts_merged: 'Data merged in',
     recovery_codes_issued: 'Recovery codes generated',
     recovery_code_used: 'Recovery code used',

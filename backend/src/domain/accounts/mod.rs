@@ -277,6 +277,8 @@ pub enum SecurityEventKind {
     PasskeyRenamed,
     MatrixLinked,
     MatrixUnlinked,
+    IdentityLinked,
+    IdentityUnlinked,
     AccountsMerged,
     RecoveryCodesIssued,
     RecoveryCodeUsed,
@@ -296,6 +298,8 @@ impl SecurityEventKind {
             Self::PasskeyRenamed => "passkey_renamed",
             Self::MatrixLinked => "matrix_linked",
             Self::MatrixUnlinked => "matrix_unlinked",
+            Self::IdentityLinked => "identity_linked",
+            Self::IdentityUnlinked => "identity_unlinked",
             Self::AccountsMerged => "accounts_merged",
             Self::RecoveryCodesIssued => "recovery_codes_issued",
             Self::RecoveryCodeUsed => "recovery_code_used",
@@ -320,6 +324,8 @@ impl SecurityEventKind {
             Self::PasskeyRenamed => format!("A passkey was renamed{suffix}."),
             Self::MatrixLinked => format!("A Matrix account was linked{suffix}."),
             Self::MatrixUnlinked => format!("A Matrix account was unlinked{suffix}."),
+            Self::IdentityLinked => format!("A chat identity was linked{suffix}."),
+            Self::IdentityUnlinked => format!("A chat identity was unlinked{suffix}."),
             Self::AccountsMerged => format!("Existing data was merged into your account{suffix}."),
             Self::RecoveryCodesIssued => {
                 format!("New recovery codes were generated{suffix}. Your old codes no longer work.")
@@ -350,6 +356,8 @@ impl std::str::FromStr for SecurityEventKind {
             "passkey_renamed" => Ok(Self::PasskeyRenamed),
             "matrix_linked" => Ok(Self::MatrixLinked),
             "matrix_unlinked" => Ok(Self::MatrixUnlinked),
+            "identity_linked" => Ok(Self::IdentityLinked),
+            "identity_unlinked" => Ok(Self::IdentityUnlinked),
             "accounts_merged" => Ok(Self::AccountsMerged),
             "recovery_codes_issued" => Ok(Self::RecoveryCodesIssued),
             "recovery_code_used" => Ok(Self::RecoveryCodeUsed),
@@ -554,6 +562,24 @@ mod tests {
         let message = SecurityEventKind::RecoveryRequested.message(None);
         assert!(message.contains("24 hours"));
         assert!(message.contains("cancel"));
+    }
+
+    /// Every kind round-trips through its wire name and says something; the
+    /// identity kinds are new, the Matrix ones stay so old rows still parse.
+    #[test]
+    fn test_identity_kinds_have_wire_names_and_messages() {
+        for (kind, wire) in [
+            (SecurityEventKind::IdentityLinked, "identity_linked"),
+            (SecurityEventKind::IdentityUnlinked, "identity_unlinked"),
+            (SecurityEventKind::MatrixLinked, "matrix_linked"),
+            (SecurityEventKind::MatrixUnlinked, "matrix_unlinked"),
+        ] {
+            assert_eq!(kind.as_str(), wire);
+            assert_eq!(wire.parse::<SecurityEventKind>().unwrap(), kind);
+            assert!(kind.message(Some("telegram:1")).contains("telegram:1"));
+        }
+        assert!(SecurityEventKind::IdentityLinked.warrants_a_dm());
+        assert!(SecurityEventKind::IdentityUnlinked.warrants_a_dm());
     }
 
     #[test]

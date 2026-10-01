@@ -20,7 +20,6 @@ use matrix_sdk::Client;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::application::accounts::AccountService;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::{
@@ -173,7 +172,7 @@ impl AccountModule {
         let client = self.client.read().await.clone();
         announce_account(
             client.as_ref(),
-            &services.accounts,
+            &services.identity,
             &ctx.owner_id,
             SecurityEventKind::RecoveryRequested,
             Some(&detail),
@@ -317,15 +316,15 @@ impl AccountModule {
 
 /// Redeems a matured recovery code presented in the web UI.
 pub async fn redeem_matured_recovery(
-    accounts: &AccountService,
+    services: &AppServices,
     client: Option<&Client>,
     code: &str,
 ) -> Result<AccountId, RecoveryRejection> {
-    match accounts.redeem_recovery_request(code).await {
+    match services.accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
             announce_account(
                 client,
-                accounts,
+                &services.identity,
                 &account_id,
                 SecurityEventKind::RecoveryCompleted,
                 None,
@@ -352,6 +351,7 @@ pub enum RecoveryRejection {
 mod tests {
     use super::*;
     use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::channels::Channel;
     use crate::infrastructure::postgres::repositories::accounts as repo;
 
     async fn setup() -> (Database, AppServices) {
@@ -519,7 +519,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, None, &code)
+            redeem_matured_recovery(&services, None, &code)
                 .await
                 .unwrap_err(),
             RecoveryRejection::TooEarly
@@ -549,7 +549,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, None, &code)
+            redeem_matured_recovery(&services, None, &code)
                 .await
                 .unwrap(),
             account
@@ -625,7 +625,7 @@ mod tests {
         .await
         .unwrap();
 
-        redeem_matured_recovery(&services.accounts, None, &code)
+        redeem_matured_recovery(&services, None, &code)
             .await
             .unwrap();
 
@@ -744,7 +744,11 @@ mod tests {
                 .is_some(),
             "the web session must survive"
         );
-        let links = services.accounts.linked_mxids(&account).await.unwrap();
+        let links = services
+            .identity
+            .user_ids(&account, Channel::Matrix)
+            .await
+            .unwrap();
         assert_eq!(links.len(), 2, "the second identity must stay linked");
     }
 

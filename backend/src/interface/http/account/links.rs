@@ -3,6 +3,7 @@
 use axum::{extract::State, Json};
 
 use crate::domain::accounts::{AccountId, LINK_CODE_TTL_MINUTES};
+use crate::domain::channels::Channel;
 use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
@@ -24,8 +25,8 @@ pub async fn list_links(
     Ok(Json(
         state
             .services
-            .accounts
-            .linked_mxids(&user.account_id)
+            .identity
+            .user_ids(&user.account_id, Channel::Matrix)
             .await
             .map_err(ApiError::from)?,
     ))
@@ -159,8 +160,8 @@ pub async fn unlink(
 ) -> Result<axum::http::StatusCode, ApiError> {
     let removed = state
         .services
-        .accounts
-        .unlink(&user.account_id, &payload.mxid)
+        .identity
+        .unlink(&user.account_id, Channel::Matrix, &payload.mxid)
         .await
         .map_err(ApiError::from)?;
 

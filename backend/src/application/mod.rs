@@ -10,6 +10,7 @@ pub mod briefing;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod identity;
 pub mod life;
 pub mod llm;
 pub mod outbox;
@@ -29,6 +30,7 @@ use self::briefing::BriefingService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
+use self::identity::IdentityService;
 use self::life::LifeService;
 use self::llm::LlmService;
 use self::outbox::OutboxService;
@@ -93,6 +95,7 @@ pub struct AppServices {
     pub finance: FinanceService,
     pub footprints: FootprintService,
     pub habits: HabitService,
+    pub identity: IdentityService,
     pub life: LifeService,
     pub llm: LlmService,
     pub outbox: OutboxService,
@@ -117,9 +120,10 @@ impl AppServices {
         let finance = FinanceService::new(pool.clone());
         let footprints = FootprintService::new(pool.clone(), settings.clone());
         let habits = HabitService::new(pool.clone());
+        let identity = IdentityService::new(pool.clone());
         let life = LifeService::new(pool.clone());
         let llm = LlmService::new(pool.clone());
-        let rooms = RoomService::new(pool.clone(), settings.clone(), accounts.clone());
+        let rooms = RoomService::new(pool.clone(), settings.clone(), identity.clone());
         let reminders = ReminderService::new(pool.clone());
         let todos = TodoService::new(pool.clone(), reminders.clone());
         let recurring_bills =
@@ -134,6 +138,7 @@ impl AppServices {
             finance,
             footprints,
             habits,
+            identity,
             life,
             llm,
             outbox,

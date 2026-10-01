@@ -89,6 +89,22 @@ pub async fn find(
     Ok(row.map(Into::into))
 }
 
+/// Takes the account row lock for the rest of the transaction, serialising
+/// read-modify-write decisions about the account (e.g. which sign-in routes
+/// may still be removed). `false` when the account does not exist.
+pub async fn lock(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        "SELECT id FROM accounts WHERE id = $1 FOR UPDATE",
+        account_id.as_uuid(),
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.is_some())
+}
+
 /// Total count of accounts.
 pub async fn count(conn: impl sqlx::PgExecutor<'_>) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM accounts"#)

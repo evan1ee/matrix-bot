@@ -6,6 +6,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::application::identity::Resolution;
+use crate::domain::channels::PlatformIdentity;
 use crate::error::ApiError;
 #[allow(unused_imports)]
 use crate::error::ApiErrorResponse;
@@ -220,10 +222,22 @@ pub async fn issue_matrix_session(
     user_agent: Option<&str>,
 ) -> Result<axum::response::Response, ApiError> {
     let accounts = &state.services.accounts;
-    let account_id = accounts.resolve_or_provision(mxid).await.map_err(|err| {
+    let internal = |err: &dyn std::fmt::Debug| {
         tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
         ApiError::internal("Failed to resolve user account")
-    })?;
+    };
+    let identity = PlatformIdentity::matrix(mxid).map_err(|err| internal(&err))?;
+    let account_id = match state
+        .services
+        .identity
+        .resolve(&identity)
+        .await
+        .map_err(|err| internal(&err))?
+    {
+        Resolution::Account(account_id) => account_id,
+        // Matrix provisions every sender, so this cannot happen.
+        Resolution::Unlinked => return Err(internal(&"matrix identity left unlinked")),
+    };
 
     let display_name = accounts
         .find(&account_id)
@@ -290,10 +304,9 @@ mod tests {
 
         let account_id = state
             .services
-            .accounts
-            .find_by_mxid("@alice:example.org")
-            .await
-            .unwrap();
+            .identity
+            .find_matrix_for_test("@alice:example.org")
+            .await;
         assert!(account_id.is_some());
     }
 

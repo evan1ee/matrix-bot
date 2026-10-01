@@ -739,10 +739,9 @@ mod tests {
         // Auto-provision an account
         let account_id = state
             .services
-            .accounts
-            .resolve_or_provision("@alice:matrix.org")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@alice:matrix.org")
+            .await;
 
         // Issue enrollment token
         let token = state
@@ -782,10 +781,9 @@ mod tests {
         let state = state_with_secret(None).await;
         let account_id = state
             .services
-            .accounts
-            .resolve_or_provision("@alice:matrix.org")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@alice:matrix.org")
+            .await;
         let token = state
             .services
             .accounts

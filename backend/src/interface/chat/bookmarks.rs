@@ -285,10 +285,9 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = AppServices::new(&pool)
-            .accounts
-            .resolve_or_provision("@alice:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
         let services = AppServices::new(&pool);
         (services, owner)
     }

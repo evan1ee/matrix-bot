@@ -108,12 +108,9 @@ pub async fn redeem_recovery(
 
     // 2. If not found in static codes, try 24-hour matured recovery requests
     if resolved_account_id.is_none() {
-        if let Ok(account_id) = crate::interface::chat::account::redeem_matured_recovery(
-            &state.services.accounts,
-            None,
-            code,
-        )
-        .await
+        if let Ok(account_id) =
+            crate::interface::chat::account::redeem_matured_recovery(&state.services, None, code)
+                .await
         {
             resolved_account_id = Some(account_id);
         }

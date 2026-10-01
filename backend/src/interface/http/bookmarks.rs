@@ -356,10 +356,9 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner = crate::application::AppServices::new(&pool)
-            .accounts
-            .resolve_or_provision("@alice:mbm.one")
-            .await
-            .unwrap();
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
         let state = ApiState::new(
             Database { pool },
             None,
