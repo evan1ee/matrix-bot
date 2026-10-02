@@ -11,8 +11,10 @@
 //!   target's channel and supervises the adapters' `run` loops.
 //! - `render`: pure renderers from the module HTML subset to a platform's format.
 //! - `matrix`: the Matrix adapter.
+//! - `discord`: the Discord adapter.
 
 pub mod adapter;
+pub mod discord;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod inbound;

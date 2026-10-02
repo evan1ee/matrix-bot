@@ -1,0 +1,47 @@
+{
+  "id": "1100000000000000001",
+  "application_id": "1100000000000000004",
+  "type": 2,
+  "data": {
+    "id": "1100000000000000005",
+    "name": "todo",
+    "type": 1,
+    "options": [
+      { "name": "args", "type": 3, "value": "add milk" }
+    ]
+  },
+  "guild_id": "1100000000000000006",
+  "channel_id": "1100000000000000002",
+  "member": {
+    "user": {
+      "id": "1100000000000000003",
+      "username": "evan",
+      "global_name": "Evan",
+      "discriminator": "0",
+      "avatar": null
+    },
+    "nick": "Evan in the guild",
+    "roles": [],
+    "joined_at": "2026-01-01T00:00:00.000000+00:00",
+    "deaf": false,
+    "mute": false,
+    "flags": 0,
+    "permissions": "0"
+  },
+  "user": {
+    "id": "1100000000000000003",
+    "username": "evan",
+    "global_name": "Evan",
+    "discriminator": "0",
+    "avatar": null
+  },
+  "token": "fake-interaction-token",
+  "version": 1,
+  "app_permissions": "0",
+  "locale": "en-US",
+  "guild_locale": "en-US",
+  "entitlements": [],
+  "authorizing_integration_owners": { "0": "1100000000000000006" },
+  "context": 0,
+  "attachment_size_limit": 10485760
+}
