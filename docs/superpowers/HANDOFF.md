@@ -189,8 +189,8 @@ Final verification (at b4c4bb5 plus the docs commit; docs change no code):
 | Task | Scope | State | Commit |
 |---|---|---|---|
 | 1 | `TelegramConfig`/`TelegramMode` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_WEBHOOK_SECRET`), `validate_telegram`, `utils::secure::constant_time_eq` | ✅ | `f5f01bc`, `f39ad44` |
-| 2 | `render/telegram_html.rs` (HTML subset → Telegram HTML, message splitting) | ✅ | this commit |
-| 3 | `teloxide-core`; `telegram/{commands,inbound}.rs`; fixtures | ⬜ | |
+| 2 | `render/telegram_html.rs` (HTML subset → Telegram HTML, message splitting) | ✅ | `69e7c56`, `a998532` |
+| 3 | `teloxide-core`; `telegram/{commands,inbound}.rs`; fixtures | ✅ | (this commit) |
 | 4 | Outbound rendering and `send` | ⬜ | |
 | 5 | `TelegramAdapter`: queue, dedupe, workers, progress, polling and webhook registration | ⬜ | |
 | 6 | Webhook endpoint (constant-time secret); the compat shim moves | ⬜ | |
@@ -530,3 +530,4 @@ These need the human. Prepare them; don't perform them.
 - **R99 (B15):** commands have `dm_permission(true)`; `args` max 500, `/ask` `prompt` required, max 4000; the adapter re-checks both and refuses ephemerally — cost: none.
 - **R100 (B16):** an idempotency key of at most 25 characters becomes the message nonce with `enforce_nonce`; `join_if_needed` is ignored on Discord — cost: none.
 - **R101 (plan B, implementation):** (1) `Work` lives in `worker.rs` next to its consumer, not in `gateway.rs` as the plan sketched; (2) `outbound`'s builders, `bounded` and `classify*` are `pub` (the module's interface for the worker, gateway and progress); (3) `Attachment` derives `PartialEq, Eq` so `Post` can be compared in tests; (4) serenity adds `rustls` 0.22 and `tokio-tungstenite` 0.21 to the lockfile, sharing the existing `reqwest` 0.11; (5) the adapter's own `Http` and the gateway client's are separate instances (§11); (6) the integration tests in `discord/mod.rs` run Discord fixtures through the real `build_modules` registry and a test database — cost if wrong: none functional.
+- **R118 (plan C, Task 3):** (1) `teloxide-core` 0.13 adds duplicate majors `reqwest` 0.12, `indexmap` 1.9, `hashbrown` 0.12 and new `schemars` 0.9/1.x (no existing crate changed version); (2) its transitive `takecell` 0.1.2 needs rustc 1.96, the toolchain is 1.94.1, so `Cargo.lock` pins `takecell` 0.1.1 (`cargo update takecell --precise 0.1.1`) — cost if wrong: a later `cargo update` may re-select 0.1.2 and break the build until the toolchain moves; (3) teloxide-core's `Update` deserializes only from a string or bytes: `serde_json::from_value` silently yields `UpdateKind::Error`, so Task 5's workers must use `from_slice` (the fixtures in tests go through `to_string`); (4) `CommandRefusal` has only `TooLong` (any `/name` parses, T2); (5) `message_id`/`reply_to` refs are `message:<chat>:<id>` — cost if wrong: none functional.

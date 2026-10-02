@@ -12,6 +12,7 @@
 //! - `render`: pure renderers from the module HTML subset to a platform's format.
 //! - `matrix`: the Matrix adapter.
 //! - `discord`: the Discord adapter.
+//! - `telegram`: the Telegram adapter.
 
 pub mod adapter;
 pub mod discord;
@@ -22,3 +23,4 @@ pub mod matrix;
 pub mod message;
 pub mod registry;
 pub mod render;
+pub mod telegram;

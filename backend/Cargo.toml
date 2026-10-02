@@ -23,6 +23,7 @@ matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"]
 matrix-sdk-crypto = "0.18"
 # Discord gateway + REST (plan B). No cache/framework: the adapter reads everything from the event.
 serenity = { version = "0.12.5", default-features = false, features = ["builder", "client", "gateway", "http", "model", "rustls_backend", "chrono"] }
+teloxide-core = { version = "0.13", default-features = false, features = ["rustls"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 # CancellationToken: the one shutdown tree `app.rs` owns.
