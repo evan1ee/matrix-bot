@@ -225,6 +225,9 @@ test('registers a passkey using an enrollment token (?enroll=...) from Matrix ch
 
   await dialog.getByRole('button', { name: /Activate passkey for this device/i }).click();
 
+  // The dashboard renders behind the modal while signed out, so its text is no
+  // proof that enrollment finished; the modal closing is.
+  await expect(dialog).toBeHidden();
   await expect(anonApp.getByText(DASHBOARD_READY)).toBeVisible();
 
   // Both halves of enrollment ran
