@@ -61,7 +61,7 @@ Every todo, reminder, transaction, bill, habit, bookmark and holding belongs to 
 
 - **Sign-in:** passkeys only (WebAuthn), one button, no username or password. Sessions are server-side; only the SHA-256 of the cookie is stored. Programmatic clients send `Authorization: Bearer <token>`, and MCP clients use a personal access token (`mb_mcp_…`).
 - **Passkeys:** attach several per account. `!passkey add` (alias `!web`) in a DM mints a 10-minute enrollment link for an account with no passkey yet; `!passkeys` lists them.
-- **Linking:** the web UI shows a one-time code (`!link A3F9-K2QX`) that you send to the bot **in a DM**. Proof of ownership is the message sender, so no Matrix password is typed into the web app. Linking an identity that already has data asks before merging.
+- **Linking:** send `!link` (Matrix) or `/link` (Discord, Telegram) to the bot **in a direct message**; it answers with a link that expires in 10 minutes and works once. Open it in the browser and confirm with a passkey. The direct message proves you own the chat identity and the passkey proves you own the account, so nothing is typed into either side. Linking an identity that already has data shows what will be merged before you confirm, and the bot confirms in the chat afterwards. An identity on a signup allowlist (below) may instead create a new account from that link. The old web-minted `!link <code>` is gone.
 - **Step-up:** sensitive actions (managing passkeys, unlinking, signing out other devices, recovery codes) need a passkey assertion from the last 5 minutes.
 - **Recovery:** ten single-use codes, or `!recover` from a linked Matrix account, which is announced immediately, waits 24 hours, can be cancelled from any signed-in device, and then grants a restricted session for 72 hours.
 - **Audit:** every sensitive action is logged per account and sent as a DM to each linked identity.
@@ -91,7 +91,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
-| **Account** | `!link`<br>`!recover` | Get a one-time link that connects this chat account to your web identity, initiate delayed recovery |
+| **Account** | `!link` (`/link` on Discord and Telegram)<br>`!recover` | Get a 10-minute, single-use link that connects this chat account to your web identity (direct messages only), initiate delayed recovery |
 
 `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
 deliberately refused on Matrix and point at the web app (see *Accounts and security*).
@@ -108,7 +108,7 @@ Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session coo
 |---|---|---|
 | Health | `/health/live`, `/health/ready` | Liveness and readiness probes (router root, no auth) |
 | Auth | `/auth/*` | Passkey ceremonies, logout, profile, authenticated media, recovery-code redemption |
-| Account | `/account/*` | Passkeys, linked Matrix identities and merges, sessions, recovery, security events, AI config, webhook management |
+| Account | `/account/*` | Passkeys, linked chat identities (every channel), sessions, recovery, security events, AI config, webhook management |
 | To-dos, reminders | `/todos`, `/reminders` | CRUD with filters and pagination |
 | Finance | `/finance/*` | Transactions, summaries, categories, analytics |
 | Portfolio | `/portfolio/*` | Holdings, trades, cash, prices and quotes, alerts, history, audit-chain verification |
@@ -118,6 +118,7 @@ Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session coo
 | AI | `/ai/*` | Chat, conversations, connectivity check, retrospective |
 | MCP | `/mcp/*` | HTTP/SSE transport and token management |
 | Inbound gateway | `/webhooks/:token`, `/bot<token>/sendMessage` | Generic and Telegram-compatible webhook receivers |
+| Link | `/link/*` | The landing page's inspect, claim and allowlisted signup calls |
 | Settings, rooms | `/settings`, `/rooms` | Preferences and Matrix room picker |
 | Live events | `/events` | SSE stream scoped to the authenticated owner |
 
@@ -166,6 +167,15 @@ REGISTRATION_OPEN=false                                  # set true or pass --al
 # WEBAUTHN_ORIGIN must match the exact URL the browser loads.
 WEBAUTHN_RP_ID=localhost
 WEBAUTHN_ORIGIN=http://localhost:8080
+
+# Link signup allowlists (Optional) — chat identities that may create a new account
+# from a link token. Comma-separated; unset or empty means nobody may, so an
+# unknown Discord/Telegram/Email sender can only link to an existing account.
+# Matrix needs none: it auto-provisions. WEB_URL (defaults to WEBAUTHN_ORIGIN)
+# is the host the link points at.
+# DISCORD_ALLOWED_USERS=123456789012345678
+# TELEGRAM_ALLOWED_USERS=123456789
+# EMAIL_ALLOWED_SENDERS=me@example.com
 
 # AI Assistant & Live Web Search (Optional)
 AI_ENDPOINT=https://api.x.ai/v1
@@ -390,13 +400,14 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
 ├── tests/architecture.rs     # enforces layer/dependency rules
 └── src/
     ├── main.rs, app.rs       # composition roots; app::run owns startup and graceful shutdown
-    ├── config.rs             # environment config and boot-time validation
+    ├── config/               # environment config and boot-time validation
     ├── domain/<feature>/     # pure rules and invariants (no I/O)
     ├── application/<feature>/# services: use cases, transactions, events (AppServices)
     ├── interface/            # everything that talks to the outside world
     │   ├── http/             #   axum REST + SSE, DTOs, auth extractors
-    │   ├── chat/             #   BotModule command handlers per feature
-    │   ├── channels/matrix/  #   Matrix client, dispatcher, E2EE, verification, linking
+    │   ├── chat/             #   BotModule command handlers per feature (channel-neutral)
+    │   ├── channels/         #   ChannelAdapter, registry, shared inbound pipeline
+    │   │   └── matrix/       #     the Matrix adapter: client, sync loop, E2EE, verification
     │   ├── jobs/             #   job handlers (reminder, briefing, portfolio)
     │   └── mcp/              #   MCP protocol adapters
     ├── jobs/                 # job runtime: workers, reaper, leader-elected scheduler

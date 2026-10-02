@@ -32,7 +32,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 | Sub-project | Phases | Scope | State |
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
-| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Designed** (`specs/2026-10-01-omnichannel-design.md`, approved 2026-10-01); plan A written (`plans/2026-10-01-omnichannel-a-framework.md`); branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
+| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **In progress: plan A done (B–D pending).** Design `specs/2026-10-01-omnichannel-design.md` (approved 2026-10-01, amended after implementation); plan A (`plans/2026-10-01-omnichannel-a-framework.md`, framework, Matrix on `ChannelAdapter`, chat-initiated linking) implemented, final verification pending (§4 Plan A); plans B (Discord), C (Telegram), D (Email) not yet written; branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
 | 3 — Scheduled agent & storage | 5 | `ScheduledAgentTask` runtime (`scheduled_agent_tasks`, `agent_runs`, `agent_steps`); `StorageService` (local / S3); HTTP contracts between the backend and inference crates standardised | Not designed |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
@@ -146,8 +146,10 @@ The last full test run (step 9 final verification at `b2587c7`, `cargo test -p m
 | 8 | Outbound through the registry (jobs and outbox): `Outbound`, `ChannelSink`, `Destination::Conversation`; `Delivery`/`MatrixDelivery`/`MatrixRoomSink` deleted | ✅ | 9fd9611, 934ef50 |
 | 9 | Chat-initiated linking (`LinkService`), old flow deleted; OpenAPI regenerated in Task 10 | ✅ | e1afdfb, 6b6aed7 |
 | 10 | Identity and link HTTP API (intentional OpenAPI change): `interface/http/{identities,link}.rs`, `/account/matrix/*` deleted, `openapi.json` and `api.ts` regenerated, Security panel on `/account/identities` | ✅ | 1a56762 |
-| 11 | Web link page (`modules/link/LinkPage.tsx`, route `/link`, signed-out) and the Security panel's every-channel identity list with Unlink | ✅ | (this commit) |
-| 12 | Boundary tests, docs, hand-off | ⬜ |  |
+| 11 | Web link page (`modules/link/LinkPage.tsx`, route `/link`, signed-out) and the Security panel's every-channel identity list with Unlink | ✅ | 7e9cd7d |
+| 12 | Boundary tests (`application_knows_no_channel_sdk`, `channel_domain_is_pure`; `tokio` added to the domain-purity test), docs (`architecture`, `database`, `api`, `llm`, `SPEC.md` §9, README, AGENTS, spec amendment note, cutover runbook), hand-off | ✅ | (this commit) |
+
+Final verification: see below (orchestrator).
 
 ## 5. How to work
 
@@ -216,10 +218,10 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Task 12: whole-branch review of step 9** (`BASE=65236b5..HEAD`, plan `plans/2026-09-30-outbox.md`), if not yet done; fix its findings.
-2. Clear the §11 items that touch the test suite first.
-3. Hand the user the merge gates (§10). The production rehearsal now covers migrations 0004 and 0005 (0005 drops `webhook_outbox` without history; drain it before release). Merge only on their instruction.
-4. Sub-project 2 (Omnichannel) was started early on the user's instruction (2026-10-01) on `feat/omnichannel`, stacked on `refactor/outbox`: execute plan A (`plans/2026-10-01-omnichannel-a-framework.md`) task by task; then write plans B (Discord), C (Telegram), D (Email) against the code A produced. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
+1. **Final verification of plan A** (orchestrator): the full gate plus release build, `npm --prefix frontend run build`, the Playwright suite and the `live_postgres` tests; record the results under §4 Plan A.
+2. **Write plan B (Discord)** against the code plan A produced (`interface/channels/{adapter,registry,inbound}.rs`, the `MatrixAdapter` as the reference adapter), then C (Telegram) and D (Email). Each needs the user's approval of the plan before code.
+3. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
+4. **Clear the §11 items** that touch the test suite first.
 5. Sub-projects 3 and 4 start with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
@@ -376,7 +378,7 @@ Design: `specs/2026-09-29-job-queue-design.md` (amended to match the code, R31).
 
 These need the human. Prepare them; don't perform them.
 
-1. **Production rehearsal:** first check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'` on production and drain or accept it (0005 drops that table; runbook §1). Then restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/superpowers/runbooks/postgres-foundation-cutover.md`).
+1. **Production rehearsal** (migrations 0004–0008; 0006–0008 add the omnichannel identity tables, see runbook §2a): first check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'` on production and drain or accept it (0005 drops that table; runbook §1). Then restore a `pg_dump` of production into a scratch DB and run `MIGRATE_TEST_DB=… cargo test migrates_a_real_database -- --ignored`. Order: run master once, then take the dump (see `docs/superpowers/runbooks/postgres-foundation-cutover.md`).
 2. **Supervised first boot on matrix-sdk 0.18** against a **copy** of `data/`, following the watch list in the runbook.
 3. **Stray device:** the user checks the bot account for a stray device from about 2026-09-25 00:24 local time.
 
@@ -410,6 +412,9 @@ These need the human. Prepare them; don't perform them.
 - The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`, which hides a silent sqlx reconnect (R63); workers stay correct through their poll, so a missed wake only costs latency.
 - `ReminderService::enqueue_due` is unbounded (one pass enqueues every due reminder).
 
+- Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.
+- `ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.
+- Link tokens are never purged; expired and consumed rows are inert but accumulate (one per `/link`). Add retention if volume ever matters.
 - Four Playwright specs fail on the untouched baseline, before plan A too: `ai-chat.spec.ts:193`, `finance.spec.ts:156`, `screens.spec.ts:117`, `todo-due-reminder.spec.ts:141`. Cause: the custom select's option list stays open after a pick and intercepts the Save click. The sandbox Chromium is rev 1194 while Playwright 1.62.1 expects 1234, so this is unverified on the expected build.
 
 ## 12. Document map
@@ -426,7 +431,9 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-09-29-job-queue.md` | Step 8 plan: Part A job queue, Part B accounts/ retirement |
 | `docs/superpowers/specs/2026-09-30-outbox-design.md` | Step 9 design (transactional outbox), amended to match the code (R53) |
 | `docs/superpowers/plans/2026-09-30-outbox.md` | Step 9 plan: Tasks 1–12, clarifications C1–C9 |
-| `docs/superpowers/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback |
+| `docs/superpowers/runbooks/postgres-foundation-cutover.md` | Production cutover and rollback (§2a: omnichannel migrations 0006–0008) |
+| `docs/superpowers/specs/2026-10-01-omnichannel-design.md` | Sub-project 2 design (D1–D8, R-O1/R-O2 = R71/R72), amended to match the code |
+| `docs/superpowers/plans/2026-10-01-omnichannel-a-framework.md` | Sub-project 2 plan A: Tasks 1–12, clarifications A1–A6 (= R73) |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |
 | `docs/database.md` | Schema and SQLx conventions, migrations, test databases |

@@ -69,11 +69,14 @@ Layer-first layout under `backend/src/`; dependency direction runs one way, enfo
 
 ```text
 domain/<f>/                  entities, value objects, invariants, domain errors (pure, synchronous)
+domain/channels/             Channel, PlatformIdentity, ConversationAddress, link decision (pure; no SDK, no tokio)
 application/<f>/             <F>Service: use cases, transactions, events after commit
                              application/mod.rs: AppError, AppServices
 interface/http/              Axum handlers + DTOs (OpenAPI types)
 interface/chat/              BotModule command handlers per feature
-interface/channels/matrix/   matrix-sdk client, sync loop, E2EE, verification
+interface/channels/          ChannelAdapter trait, ChannelRegistry, neutral messages, shared inbound pipeline,
+                             renderers; no SQL, no business rules
+interface/channels/matrix/   the Matrix adapter: matrix-sdk client, sync loop, E2EE, verification, rooms
 interface/mcp/               MCP protocol adapters
 interface/jobs/              job handlers (payload → service → delivery)
 interface/events/            outbox delivery sinks (Matrix room)
@@ -104,15 +107,15 @@ db/                          pool, migration runner, test pools and the schema c
 
 ### 3.2 Avoid premature abstraction
 
-Prefer a concrete implementation over `Trait → Factory → Registry → Provider → Concrete`. Abstract only for a second real implementation, testability at a real boundary, dependency inversion, an external-service boundary or a significant domain boundary. Repositories are plain functions over `impl sqlx::PgExecutor`, not traits. There is deliberately no per-vendor LLM provider enum. Do not add an abstraction for a single use case; wait for the second one.
+Prefer a concrete implementation over `Trait → Factory → Registry → Provider → Concrete`. Abstract only for a second real implementation, testability at a real boundary, dependency inversion, an external-service boundary or a significant domain boundary. Repositories are plain functions over `impl sqlx::PgExecutor`, not traits. There is deliberately no per-vendor LLM provider enum. Do not add an abstraction for a single use case; wait for the second one. `Arc<dyn ChannelAdapter>` is the deliberate exception that proves the rule: Matrix, Discord, Telegram and Email are four real implementations behind one registry, so the trait object is a justified boundary (`Outbound` in `interface/jobs` is a narrow seam over the registry so handler tests keep a fake).
 
 ### 3.3 Rust-first design
 
-Write idiomatic Rust, not patterns translated from another language. Make invalid states unrepresentable: enums over stringly-typed state, newtypes for identifiers (`AccountId`), `Result`/`Option` for fallibility, immutable data by default, exhaustive `match`. Avoid needless `Arc<Mutex<_>>`, excess `clone()`, `unwrap()`/`expect()` on runtime paths, global mutable state and `Box<dyn Trait>` where a concrete type or generic is clearer. Do not mark a domain operation `async` unless it does I/O.
+Write idiomatic Rust, not patterns translated from another language. Make invalid states unrepresentable: enums over stringly-typed state, newtypes for identifiers (`AccountId`), `Result`/`Option` for fallibility, immutable data by default, exhaustive `match`. Avoid needless `Arc<Mutex<_>>`, excess `clone()`, `unwrap()`/`expect()` on runtime paths, global mutable state and `Box<dyn Trait>` where a concrete type or generic is clearer (`Arc<dyn ChannelAdapter>` is justified: four implementations). Do not mark a domain operation `async` unless it does I/O.
 
 ### 3.4 Plugin and feature shape
 
-Chat features are independent `BotModule`s (`interface/chat/mod.rs`), registered in `interface/channels/matrix/mod.rs`; registration order matters. Never add command handling to `main.rs` or `interface/channels/matrix/handler.rs`. `!link` is handled before the sender is resolved and must never move into a `BotModule`.
+Chat features are independent `BotModule`s (`interface/chat/mod.rs`), registered in `interface/channels/matrix/modules.rs`; registration order matters, and one registry serves every channel. Never add command handling to `main.rs` or `interface/channels/matrix/handler.rs`. `link` is handled by the inbound pipeline before identity resolution and must never move into a BotModule.
 
 ## 4. Workflow
 
@@ -129,7 +132,7 @@ Decide ambiguities yourself using the design doc as authority and write the deci
 
 ### 4.2 Feature template
 
-Rooms is the canonical pattern: read `domain/rooms`, `application/rooms`, `infrastructure/postgres/repositories/rooms.rs`, `interface/http/rooms.rs` and `interface/chat/rooms.rs` before starting. For a feature `<f>`:
+Rooms is the canonical pattern: read `domain/rooms`, `application/rooms`, `infrastructure/postgres/repositories/rooms.rs`, `interface/http/rooms.rs` and `interface/channels/matrix/rooms.rs` before starting. For a feature `<f>`:
 
 1. **Domain** `domain/<f>/mod.rs` — entities, validated commands, business rules as synchronous functions unit-tested in the same file. Private fields behind constructors that enforce invariants. No `sqlx::FromRow`, no `utoipa::ToSchema`. A feature error enum (`thiserror`) with `From<…> for AppError` (→ `Validation`) in `application/<f>`. A rule once expressed as SQL becomes a pure function over rows the service fetched (small bounded inputs only); keep tie-breaks exact (first wins, strict `>`, never `max_by`).
 2. **Migration** if the schema changes ([`docs/database.md`](docs/database.md)); owner-keyed tables go into `OWNED_TABLES`.
@@ -168,12 +171,12 @@ Handlers follow `Request → parse/validate → service → response DTO`. Full 
 
 ### 5.2 Matrix
 
-Matrix is an interface, not the owner of business logic. A handler receives the event, parses the command, resolves the account, invokes a service and formats the result.
+Matrix is an interface, not the owner of business logic. The Matrix adapter (`interface/channels/matrix/`, a `ChannelAdapter`) receives the event and parses it; the shared inbound pipeline (`interface/channels/inbound.rs`) resolves the account and dispatches the `BotModule`s; a module invokes a service and answers with a `Reply`. Everything in this section that names a Matrix API lives in the adapter, and `interface/chat` modules import no platform SDK.
 
 - Always reply with `text_html(&plain, &html)`. Escape every user-supplied value embedded in HTML with `html_escape()` (`backend/src/utils/html.rs`); build the plain-text fallback with `strip_html()`.
 - Quoted-message context (`CommandContext.quoted`) is parsed once in `interface/channels/matrix/quote.rs` into `QuotedMessage`; AI injects it via `to_context_prompt()`, Todo/Reminder use it as the body when none is supplied.
 - Never keep the crypto store across a fresh login and never pin a device ID on one. `ensure_self_verified` must run on every boot; never treat `Recovery::recover()`'s `Ok` as "verified". See [`docs/architecture.md`](docs/architecture.md).
-- `WEB_ONLY` in `interface/chat/account.rs` refuses `!export`, `!sessions`, `!recoverycodes` and `!unlink` with a pointer to the web app. `!passkey add` enrolls only an account's first passkey. `!link` is refused outside a DM and the code is burned either way.
+- `WEB_ONLY` in `interface/chat/account.rs` refuses `!export`, `!sessions`, `!recoverycodes` and `!unlink` with a pointer to the web app. `!passkey add` enrolls only an account's first passkey. `link` is refused outside a DM and mints nothing.
 
 ### 5.3 LLM, agents and MCP
 

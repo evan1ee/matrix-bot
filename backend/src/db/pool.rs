@@ -31,7 +31,7 @@ pub fn lazy_pool(database_url: &str) -> DbPool {
 
 /// The PostgreSQL URL the `#[ignore]`d live tests connect to.
 ///
-/// Lives here because `config.rs`'s "only config reads the environment" guard
+/// Lives here because `config/`'s "only config reads the environment" guard
 /// allow-lists this file, and duplicating the read into other modules would
 /// mean growing that list further.
 #[cfg(test)]

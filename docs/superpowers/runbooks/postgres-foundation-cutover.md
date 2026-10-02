@@ -68,6 +68,34 @@ or in the PR before merging. If step 1.1 is re-run after this rehearsal (e.g.
 because more time has passed before cutover), re-run this rehearsal too —
 its precondition no longer holds otherwise.
 
+### 2a. Omnichannel migrations 0006-0008 (when `feat/omnichannel` ships with it)
+
+The same restored copy must also take the omnichannel migrations, in the same
+rehearsal run (0004-0008 apply in one boot). Two of them rewrite or drop data:
+
+- **0007 backfills and drops `matrix_links`.** It starts with a guard that
+  raises `matrix_links rows reference missing accounts: <mxids>` if any link
+  points at an account that no longer exists; the message names the offending
+  MXIDs. Check beforehand on the copy:
+  ```sql
+  SELECT l.mxid FROM matrix_links l LEFT JOIN accounts a ON a.id = l.account_id WHERE a.id IS NULL;
+  ```
+  A non-empty result stops the boot, so remove those rows (or restore the
+  missing accounts) on production first; never edit `0007`. After a clean
+  run `SELECT COUNT(*) FROM platform_identities WHERE platform = 'matrix'`
+  must equal the old `matrix_links` count taken before the rehearsal.
+- **0008 drops `matrix_link_challenges`.** Pending web-minted link codes and
+  pending merge confirmations are not carried over.
+
+Tell users before release: **`!link <code>` is gone.** Existing links keep
+working (they were migrated), but a new link is started from the chat itself
+with `!link` (Matrix) or `/link` (Discord, Telegram) in a direct message, which
+replies with a 10-minute, single-use link to open in the browser. A link or
+merge that was half finished in the web UI must be started again. Optionally
+set `WEB_URL` (defaults to `WEBAUTHN_ORIGIN`) and the signup allowlists
+(`DISCORD_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`, `EMAIL_ALLOWED_SENDERS`)
+before the first boot.
+
 ## 3. First boot on matrix-sdk 0.18
 
 Watch the log for, in order:
@@ -90,6 +118,11 @@ Watch the log for, in order:
   "verified" (see `docs/architecture.md`'s Verification section).
 - **Sync running.** The sync loop starts with no decryption errors on the
   first messages in encrypted rooms.
+- **Chat identities.** After the omnichannel migrations,
+  `SELECT platform, COUNT(*) FROM platform_identities GROUP BY platform` shows
+  every previously linked Matrix account, `to_regclass('matrix_links')` is
+  null, and `!link` in a DM answers with a `/link?token=` URL (never post
+  that URL anywhere shared).
 - **Migration bookkeeping.** `_sqlx_migrations` has a row for version 1 with
   `success = t`:
   ```sql
@@ -127,7 +160,10 @@ The database normally needs no rollback: `0001_baseline.sql` is a no-op
 against the already-adopted schema, so the previous binary (which never
 applied `sqlx` migrations) sees no difference. If a later migration did run
 and needs undoing, restore the `pg_dump` taken in step 1.3 instead of trying
-to hand-write a down migration.
+to hand-write a down migration. This applies in particular to 0007 and 0008,
+which drop `matrix_links` and `matrix_link_challenges`: the previous binary
+cannot run against a database that has lost them, so a rollback past 0007 is a
+dump restore, never a code-only revert.
 
 To roll back the Matrix side:
 

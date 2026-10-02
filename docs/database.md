@@ -84,7 +84,23 @@ Indexes: `idx_outbox_events_account_type_created` (`account_id, event_type, crea
 - **Claiming.** `claim_due` is one statement with `FOR UPDATE SKIP LOCKED` that increments `attempts` and moves `available_at` 60 s ahead (the lease); a claim that is never recorded reappears after the lease.
 - **Retention.** The hourly purge deletes events older than 30 days that have no `pending` delivery; their deliveries go with them (cascade). A pending delivery is never purged, however old, so an outage cannot silently discard an alert. Webhook logs are read from these rows and therefore cover 30 days.
 - **Account merge.** `outbox_events` is in `ACCOUNT_ID_FOLLOWS` (like `jobs`): history moves to the surviving account. Deliveries reach it through the event and need no entry of their own.
-- **0005 drops `webhook_outbox`.** `0005_drop_webhook_outbox` is a plain `DROP TABLE`; its history is deliberately not migrated (spec O2). Alerts still queued in it at cutover are lost, so drain it (no `pending` rows) before releasing; the rehearsal on a production copy covers 0004 and 0005.
+- **0005 drops `webhook_outbox`.** `0005_drop_webhook_outbox` is a plain `DROP TABLE`; its history is deliberately not migrated (spec O2). Alerts still queued in it at cutover are lost, so drain it (no `pending` rows) before releasing; the rehearsal on a production copy covers 0004 and 0005 (and 0006–0008, below).
+
+## Platform identities and link tokens
+
+Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables with channel-neutral ones ([`architecture.md`](architecture.md#identity-and-linking)). Only `infrastructure/postgres/repositories/identities.rs` and `link_tokens.rs` touch them.
+
+| Table | Meaning |
+|---|---|
+| `platform_identities` | one row per chat identity bound to an account: `id` `BIGSERIAL`, `account_id` `UUID` FK to `accounts` `ON DELETE CASCADE`, `platform` (`matrix`, `discord`, `telegram`, `email`; CHECK), `platform_user_id` (canonical form: MXID, numeric id, lowercased address), `display_name`, `created_at`, `updated_at`; **`UNIQUE (platform, platform_user_id)`**, index on `account_id` |
+| `link_tokens` | one row per minted link token: `token_hash` `TEXT` primary key, `platform`, `platform_user_id`, `display_name`, `conversation` (storage-form address of the direct conversation that asked, where the confirmation goes), `created_at`, `expires_at`, `consumed_at`; partial index on `(platform, platform_user_id) WHERE consumed_at IS NULL` |
+
+- **Link tokens are hash-only, short-lived and single use.** Only the SHA-256 of the token is stored (the token itself exists in the chat reply and the URL and nowhere else), `expires_at` is `created_at` + 10 minutes (`LINK_TOKEN_TTL`), and `consumed_at` is set when the token is claimed or superseded (starting again burns the identity's earlier live token). A claim reads the row with `FOR UPDATE` inside its transaction, so two concurrent claims of one token serialise and only the first can succeed. Rows are not purged on a schedule; an expired or consumed row is inert.
+- **Uniqueness is the race guard.** `UNIQUE (platform, platform_user_id)` is what makes "one chat identity, one account" hold under concurrent links and first messages; a lost bind surfaces as `AlreadyLinked`, never as a second row.
+- **Account merge.** `platform_identities` is in `ACCOUNT_ID_FOLLOWS`: the absorbed account's identities move to the survivor. `link_tokens` has no `account_id` (it belongs to an identity, not an account) and is in no merge list.
+- **`0006_platform_identities`** is plain DDL: both tables and their indexes.
+- **`0007_platform_identities_backfill`** starts with a guard that raises, naming the offending `mxid`s, if any `matrix_links` row references a missing account (a hand-edited database); otherwise it copies every `matrix_links` row into `platform_identities` as `matrix` (using `linked_at` for both timestamps) and drops `matrix_links`. It rewrites data, so it is rehearsed on a production copy ([runbook](superpowers/runbooks/postgres-foundation-cutover.md)).
+- **`0008_drop_matrix_link_challenges`** drops the web-minted challenge table; pending challenges are not carried over (the `!link <code>` flow no longer exists).
 
 ## Migrations
 

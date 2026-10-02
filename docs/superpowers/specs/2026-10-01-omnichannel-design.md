@@ -4,6 +4,15 @@
 **Branch:** `feat/omnichannel`, stacked on `refactor/outbox` (sub-project 1 is not yet merged to `master`; the user chose to start anyway).
 **Roadmap:** `SPEC.md` Phase 4, §9. Where this document and `SPEC.md` §9 disagree, this document wins; `SPEC.md` §9 is updated in the plan's last task.
 
+**Amended after implementation (plan A, 2026-10-02).** The sections below are the design; where the code differs, the code and the ruling named here win (`docs/superpowers/HANDOFF.md` §9):
+
+- Migrations are `0006`–`0008` (plan clarification A1, R73); `0005` was already taken by `drop_webhook_outbox`.
+- `Attachment.bytes` is `Vec<u8>`, not `bytes::Bytes`, and carries an optional neutral `waveform` for voice notes (R76, R78). `render/` holds only `html.rs` for now; the Discord, Telegram and plain renderers arrive with their plans.
+- `ChannelError` variants carry data (`NotConnected(Channel)`, `NotConfigured(Option<Channel>)`), and `ChannelAdapter` has two defaulted hooks the sketch in §4 omits: `authorize_delivery(owner, to) -> Result<(), String>` (the Matrix webhook-alert room check, with the old error texts) and `find_conversation_by_name` (the AI outage alert, A4). `OutgoingMessage` gains `idempotency_key` and `join_if_needed`; outbox sends never join a room (R81). `ChannelSink` skips `authorize_delivery` for `IdentityLinked` (R82), and `DeliverySink::is_ready` means "any adapter connected" (R81).
+- The inbound pipeline holds a `Weak<ChannelRegistry>` because the registry owns the adapters that own the pipeline (A5/R73); job handlers keep the narrow `Outbound` trait.
+- Linking: `claim` also merges the account an identity was last unlinked from when it still holds data, and there is no separate confirm-merge step (R82); signup is `LinkService::sign_up_with_passkey` / `claim_for_new_account`, and `/link/signup/finish` takes `{ceremony_id, token, credential, label?}` (R83); `register_finish` became atomic too (R83).
+- The web `/link` page is chosen by pathname, the SPA having no router (R84).
+
 ## 1. Goal
 
 One application and domain, many interfaces. Matrix, Discord, Telegram and Email become protocol adapters that turn platform traffic into normalized messages, call the same application services and `BotModule`s, and render normalized replies back into platform-native form.

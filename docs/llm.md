@@ -3,7 +3,7 @@
 How the AI assistant, its tools and the MCP server are built. The governing rule: **the LLM is an untrusted orchestration component, not a source of truth.** Its output reaches application state only through a validated, independently authorized tool call into a deterministic application service, never through a direct mutation. Layers and dependency direction are in [`architecture.md`](architecture.md); the wire surface is in [`api.md`](api.md).
 
 ```text
-Matrix DM / mention ─┐
+Chat DM / mention ───┐
 Web chat (/ai/chat) ─┼─► llm::run_turn ─► LLM (OpenAI-compatible) ─► tool call
                      │        ▲                                        │
                      │        └──────────── tool result ◄──────────────┤
@@ -23,7 +23,9 @@ MCP client ──────────┴────────────
 | Effective per-user configuration (env defaults merged with saved settings) | `llm/resolved_config.rs` |
 | LLM HTTP transport and wire types (`ChatCompletionRequest`, `ToolDefinition`, …) | `infrastructure/inference/llm/{client,types}.rs` |
 | Conversations, messages, user config (use cases, events) | `application/llm`, `domain/llm`, `infrastructure/postgres/repositories/llm.rs` |
-| Matrix front door (`!ai`, DMs, mentions) | `interface/chat/llm.rs` |
+| Chat front door (`!ai`, DMs, mentions; any channel) | `interface/chat/llm.rs` |
+| Progress reporting seam (`ProgressSink`, `NoProgress`) | `llm/progress.rs`; Matrix's in-place message editor is `interface/channels/matrix/stage.rs` |
+| Outage alert to the owner's dev conversation | `interface/chat/llm_alert.rs` (through the channel registry) |
 | Web front door (`/ai/*`, `/account/ai-config`) | `interface/http/ai.rs` |
 | MCP server | `interface/mcp/`, `interface/http/mcp.rs`, `interface/chat/mcp.rs`, `domain/mcp`, `infrastructure/postgres/repositories/mcp.rs` |
 
@@ -38,12 +40,16 @@ MCP client ──────────┴────────────
 
 ## The turn
 
-`llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, room and `StageReporter`) and a prompt:
+`llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, conversation key and an optional `&dyn ProgressSink`) and a prompt:
 
 1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`.
 2. **Context.** The active conversation for `(owner, room)` is loaded; one idle longer than `SESSION_TTL_SECONDS` (1 h) is replaced by a fresh one, and `!ai reset` clears it. Immediate retries are deduped by checking the conversation's tail message before inserting.
 3. **Tool loop.** The model may request tools; each round executes them, appends `tool` messages and calls the model again. Concurrent calls in a round run through `futures_util::future::join_all`. The loop stops after `MAX_TOOL_ROUNDS` (5); the Matrix front door rejects prompts over `MAX_PROMPT_LENGTH` (16384 bytes).
-4. **Reply.** Matrix replies go out as `text_html(&plain, &html)`. When a `StageReporter` is present the reply streams as in-place message updates and falls back to a plain completion on any transport error. The web endpoint is `POST /ai/chat`. Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
+4. **Reply.** The turn returns text; the front door wraps it in a `Reply` and the adapter renders it (Matrix: `text_html(&plain, &html)`). When a `ProgressSink` is present the turn reports stages, tool calls and streamed deltas to it and falls back to a plain completion on any transport error; each adapter decides how to show them (Matrix edits one message in place, a channel that cannot edit ignores most of it). Every sink method is best-effort and infallible, so a sink can never fail a turn. The turn does not record which message a tool created: the Matrix callers do that after the turn from the sink's `message_ref()` (R77). The web endpoint is `POST /ai/chat`. Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
+
+### The agent knows no channel
+
+`llm/` imports no channel SDK and nothing from `interface::channels` (`the_agent_knows_no_channel` in `tests/architecture.rs`), so Discord, Telegram or Email arrive without touching the loop: the agent talks to the world through `ProgressSink` going out and `AppServices` going in. The one place the AI addresses a channel on its own is the **outage alert**: when the provider fails, `interface/chat/llm_alert.rs` sends a notice to the owner's `dev_room_id` (parsed from its storage form) or, failing that, to the Matrix room named "dev", through `ChannelRegistry::send` and `find_conversation_by_name` (A4), so it works for whichever channel the room lives on and degrades to a warning log when no registry or adapter is available.
 
 ### Agent rules
 

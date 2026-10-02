@@ -218,6 +218,7 @@ fn domain_depends_on_nothing_outside_itself() {
             "matrix_sdk",
             "reqwest",
             "utoipa",
+            "tokio",
             "crate::application",
             "crate::interface",
             "crate::infrastructure",
@@ -244,6 +245,51 @@ fn application_does_not_know_transports() {
         v.is_empty(),
         "application/ must not depend on transports:\n{}",
         v.join("\n")
+    );
+}
+
+/// The application layer asks channels for nothing: replies leave through
+/// outbox events and jobs, which `interface/` delivers via the registry.
+#[test]
+fn application_knows_no_channel_sdk() {
+    let hits = production_violations(
+        "application",
+        &[
+            "matrix_sdk",
+            "serenity",
+            "teloxide",
+            "lettre",
+            "async_imap",
+            "mail_parser",
+            "interface::channels",
+        ],
+    );
+    assert!(
+        hits.is_empty(),
+        "application/ must know no channel SDK:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Complements `domain_depends_on_nothing_outside_itself` (which already bans
+/// sqlx, axum, matrix_sdk, reqwest, utoipa and tokio for all of `domain/`):
+/// the channel vocabulary must not drift towards a platform SDK either.
+#[test]
+fn channel_domain_is_pure() {
+    let hits = violations(
+        "domain/channels",
+        &[
+            "serenity",
+            "teloxide",
+            "lettre",
+            "async_imap",
+            "mail_parser",
+        ],
+    );
+    assert!(
+        hits.is_empty(),
+        "domain/channels must stay SDK-free:\n{}",
+        hits.join("\n")
     );
 }
 

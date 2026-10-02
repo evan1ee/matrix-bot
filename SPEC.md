@@ -353,7 +353,7 @@ All relational, unstructured (JSONB), and queuing state resides in PostgreSQL 18
 
 | Domain | Tables | Notes |
 |---|---|---|
-| Accounts & auth | `accounts`, `matrix_links`, `matrix_link_challenges`, `webauthn_credentials`, `sessions`, `passkey_enrollment_tokens`, `recovery_codes`, `recovery_requests`, `security_events`, `web_users` | Session cookies stored as SHA-256 only; `matrix_links` generalises to `platform_identities` in Phase 4 |
+| Accounts & auth | `accounts`, `platform_identities`, `link_tokens`, `webauthn_credentials`, `sessions`, `passkey_enrollment_tokens`, `recovery_codes`, `recovery_requests`, `security_events`, `web_users` | Session cookies stored as SHA-256 only; `platform_identities` (migration 0006) replaced `matrix_links` and `link_tokens` replaced `matrix_link_challenges` |
 | Settings | `user_settings` | Missing row means defaults |
 | Rooms & chat state | `account_rooms`, `bot_message_targets` | Room resolution lives only in the rooms repository |
 | Todos & reminders | `todos`, `reminders` | Reminders become `reminder.fire` jobs (§5) |
@@ -894,89 +894,13 @@ The Interface Layer is fully decoupled from the core business logic using an **O
 
 ### 9.1 Unified Chat Channel Contract
 
-All chat platforms implement a common abstraction in `src/interface/channels/`:
-
-```rust
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ChatPlatform {
-    Matrix,
-    Discord,
-    Telegram,
-    Slack,
-}
-
-#[derive(Clone, Debug)]
-pub struct IncomingMessage {
-    pub platform: ChatPlatform,
-    pub platform_user_id: String,     // MXID, Discord Snowflake, Telegram User ID
-    pub channel_id: String,          // Room ID, Guild/DM Channel ID, Chat ID
-    pub message_id: String,
-    pub content: String,
-    pub sender_display_name: Option<String>,
-    pub is_direct_message: bool,
-    pub is_bot_mentioned: bool,
-    pub quoted_message: Option<QuotedContext>,
-    pub attachments: Vec<MediaAttachment>,
-}
-
-#[derive(Clone, Debug)]
-pub struct OutgoingMessage {
-    pub text: String,
-    pub formatted_html: Option<String>,
-    pub discord_embed: Option<DiscordEmbedPayload>,
-    pub telegram_parse_mode: Option<TelegramParseMode>,
-    pub reply_to_message_id: Option<String>,
-    pub attachments: Vec<MediaAttachment>,
-    pub interactive_components: Vec<ComponentRow>,
-}
-
-#[async_trait::async_trait]
-pub trait ChannelAdapter: Send + Sync {
-    fn platform(&self) -> ChatPlatform;
-    async fn start(&self, shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<(), ChannelError>;
-    async fn send_message(&self, channel_id: &str, message: OutgoingMessage) -> Result<String, ChannelError>;
-    async fn send_voice(&self, channel_id: &str, voice_payload: VoicePayload) -> Result<String, ChannelError>;
-    async fn edit_message(&self, channel_id: &str, message_id: &str, message: OutgoingMessage) -> Result<(), ChannelError>;
-    async fn delete_message(&self, channel_id: &str, message_id: &str) -> Result<(), ChannelError>;
-}
-
-/// Extensible Channel Registry: dynamic registration of chat adapters
-pub struct ChannelRegistry {
-    adapters: HashMap<ChatPlatform, Arc<dyn ChannelAdapter>>,
-}
-
-impl ChannelRegistry {
-    pub fn new() -> Self {
-        Self { adapters: HashMap::new() }
-    }
-
-    pub fn register(&mut self, adapter: Arc<dyn ChannelAdapter>) {
-        self.adapters.insert(adapter.platform(), adapter);
-    }
-
-    pub fn get(&self, platform: &ChatPlatform) -> Option<Arc<dyn ChannelAdapter>> {
-        self.adapters.get(platform).cloned()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn ChannelAdapter>> {
-        self.adapters.values()
-    }
-}
-```
-
-#### 9.1.1 Extensible Channel Plugin Architecture
-The system treats every chat platform as an independent, modular plugin:
-* Adding a new platform (e.g. Discord, Telegram, Slack, WhatsApp, Signal) requires only:
-  1. Defining the platform in `ChatPlatform`.
-  2. Implementing the `ChannelAdapter` trait.
-  3. Registering the adapter into `ChannelRegistry` at boot.
-* **Invariants:** Zero changes to Application Services, Domain entities, or existing Channel Adapters. All platform-specific network quirks, rate limits, authentication handshakes, and UI presentation details stay strictly encapsulated inside each adapter.
+Specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` (§3 domain types and message model, §4 `ChannelAdapter` and `ChannelRegistry`, §5 the shared inbound pipeline) and implemented in `backend/src/domain/channels/` and `backend/src/interface/channels/`; the code and `docs/architecture.md#chat-channels` are the current truth, amended where noted in the spec. In brief: every platform is a `ChannelAdapter` (`channel`, `is_connected`, `run`, `send`, plus the optional `authorize_delivery` and `find_conversation_by_name`) held in one `ChannelRegistry`. An adapter parses its platform's syntax into an `IncomingMessage`, the channel-neutral `Inbound` pipeline resolves the sender to an account and dispatches one shared `ModuleRegistry`, and replies and outbound deliveries (jobs, outbox) are `OutgoingMessage`s the registry routes by the target's channel. Adding a platform means one new `ChannelAdapter` plus a `Channel` variant; application services, the domain and the other adapters do not change.
 
 ---
 
 ### 9.2 Matrix Adapter Specification (Active / Current Implementation)
 
-* **Status:** **Active / Currently Implemented** (refactoring to `ChannelAdapter` in Phase 4).
+* **Status:** **Active / Currently Implemented**, on `ChannelAdapter` (`MatrixAdapter`, Phase 4 plan A).
 * **Engine:** `matrix-sdk` with its crypto state in the SDK-managed SQLite store under `data/` (not the application database). Never kept across a fresh login; never pinned to a device ID.
 * **Core Capabilities:**
   * **End-to-End Encryption (E2EE):** Megolm / Olm session management, device verification, cross-signing auto-verification via recovery key.
@@ -1086,42 +1010,7 @@ The Telegram integration supports both modern cloud serverless webhooks and loca
 
 ### 9.5 Omnichannel Account Linking Ceremony (`/link`)
 
-A core strength of the architecture is that **one user account (`accounts.id`) links their Matrix, Discord, and Telegram identities** into a single personal workspace:
-
-```text
-User on Discord or Telegram sends: /link (in private DM)
-  │
-  ▼
-1. Bot verifies interaction is in a private Direct Message:
-   - If in public room: Reject immediately & burn token!
-  │
-  ▼
-2. System mints single-use cryptographic token:
-   Token: mb_link_7f8a9b2c3d4e (TTL: 10 minutes)
-   Stored hashed in PostgreSQL (generalised from matrix_link_challenges)
-  │
-  ▼
-3. Bot replies with secure link:
-   "Click here to link this account to your Personal Life Workspace:
-    https://mybot.domain/link?code=mb_link_7f8a9b2c3d4e"
-  │
-  ▼
-4. User clicks link and opens Web Console in browser:
-   - Browser prompts for WebAuthn passkey assertion.
-   - User verifies biometrics (TouchID / FaceID / YubiKey).
-  │
-  ▼
-5. Server binds identity in PostgreSQL:
-   INSERT INTO platform_identities (
-     account_id, platform, platform_user_id, display_name
-   ) VALUES (
-     $auth_account_id, 'telegram', '987654321', 'Alice'
-   );
-  │
-  ▼
-6. Bot sends confirmation message back on Telegram/Discord:
-   "✓ Telegram account successfully linked! Your workspace is synchronized."
-```
+One account (`accounts.id`) holds the Matrix, Discord, Telegram and Email identities of one person. Linking is chat-initiated on every channel: `link` (`!link` on Matrix, `/link` elsewhere) in a direct conversation mints a single-use token that lives 10 minutes and is stored only as its SHA-256 (`link_tokens`); the reply carries `<WEB_URL>/link?token=…`; the web landing page shows what claiming would do and the claim itself needs a fresh passkey assertion. The direct conversation proves the chat identity, the passkey proves the account. A claim binds the identity to `platform_identities` (merging an unclaimed, auto-provisioned account when one holds it) and the bot confirms in the conversation that asked, through the outbox. An identity on the deployment's signup allowlist may create a new account with a passkey from the same page. The ceremony, its states and its security rules are specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` §7 and amended at R73, R82 and R83 in `docs/superpowers/HANDOFF.md`; the HTTP half is in `docs/api.md`.
 
 ---
 
@@ -1280,13 +1169,17 @@ backend/
 │   ├── 0001_baseline.sql              # Current schema, idempotent: adopts the live DB in place
 │   ├── 0002_account_uuid.sql          # owner_id TEXT -> UUID + foreign keys
 │   ├── 0003_jobs.sql
-│   └── 0004_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
+│   ├── 0004_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
+│   ├── 0005_drop_webhook_outbox.sql
+│   ├── 0006_platform_identities.sql   # platform_identities + link_tokens
+│   ├── 0007_platform_identities_backfill.sql  # matrix_links -> platform_identities, drops matrix_links
+│   └── 0008_drop_matrix_link_challenges.sql
 ├── tests/
 │   └── architecture.rs                # Fails if domain/ imports sqlx/axum/matrix-sdk, or interface/ runs SQL
 └── src/
     ├── main.rs                        # CLI: serve | mcp-stdio
     ├── app.rs                         # Composition root, task spawning, graceful shutdown
-    ├── config.rs
+    ├── config/
     ├── error.rs                       # ApiError (HTTP), AppError (application)
     ├── domain/<feature>/              # Entities, value objects, invariants, DomainError
     ├── application/<feature>/         # Services: transaction + use case + outbox publish
