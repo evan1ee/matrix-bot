@@ -17,11 +17,12 @@ const KEPT: [&str; 10] = [
     "blockquote",
 ];
 
-struct Tag {
+/// One scanned tag; shared with the Markdown renderer so the crate has one HTML scanner.
+pub(super) struct Tag {
     /// Lower-cased.
-    name: String,
-    closing: bool,
-    attrs: String,
+    pub(super) name: String,
+    pub(super) closing: bool,
+    pub(super) attrs: String,
 }
 
 /// Keeps only `b i u code pre br p ul ol li blockquote` and `a` with an
@@ -103,7 +104,7 @@ fn close(open: &mut Vec<&'static str>, name: &str, out: &mut String) {
 /// Parses a tag at the start of `s` (which begins with `<`); `None` when it is
 /// not a tag (stray `<`, or no closing `>`). A `>` inside a quoted attribute
 /// value does not end the tag. Returns the tag and its byte length.
-fn parse_tag(s: &str) -> Option<(Tag, usize)> {
+pub(super) fn parse_tag(s: &str) -> Option<(Tag, usize)> {
     let body = &s[1..];
     let (closing, body) = match body.strip_prefix('/') {
         Some(b) => (true, b),
@@ -142,7 +143,7 @@ fn parse_tag(s: &str) -> Option<(Tag, usize)> {
 }
 
 /// The `href` value when its scheme is allowed.
-fn safe_href(attrs: &str) -> Option<String> {
+pub(super) fn safe_href(attrs: &str) -> Option<String> {
     let value = attr_value(attrs, "href")?;
     let value = value.trim();
     let lower = value.to_ascii_lowercase();
