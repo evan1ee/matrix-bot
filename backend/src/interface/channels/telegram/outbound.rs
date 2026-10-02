@@ -54,7 +54,7 @@ pub async fn send(bot: &Bot, message: OutgoingMessage) -> Result<SentRef, Channe
     deliver(bot, ChatId(chat), reply_to, planned).await
 }
 
-async fn deliver(
+pub(super) async fn deliver(
     bot: &Bot,
     chat: ChatId,
     reply_to: Option<i32>,

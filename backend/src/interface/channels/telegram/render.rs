@@ -33,6 +33,16 @@ pub struct Plan {
     pub keyboard: Vec<(String, String)>,
 }
 
+impl Plan {
+    /// One plain-text message (escaped for HTML mode): the adapter's own notices.
+    pub fn text(text: impl AsRef<str>) -> Self {
+        Self {
+            parts: vec![Part::Text(html_escape(text.as_ref()))],
+            keyboard: Vec::new(),
+        }
+    }
+}
+
 /// Which Bot API method uploads a file (T16).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FileMethod {
