@@ -188,16 +188,13 @@ fn is_ours(reply: &Message, our_username: &str) -> bool {
     })
 }
 
-/// `text` without every `@<our_username>` mention (case-insensitive, whole
+/// `text` without every `@<our_username>` mention (ASCII case-insensitive, whole
 /// handle), or `None` when it holds none. `@MyBotFriend` is not a mention.
 fn strip_mention(text: &str, our_username: &str) -> Option<String> {
-    let handle = format!("@{}", our_username.to_lowercase());
-    let lower = text.to_lowercase();
-    // Lower-casing can change byte lengths for non-ASCII text; then positions no
-    // longer line up with `text`, and a mention (ASCII handle) is not reliable.
-    if lower.len() != text.len() {
-        return None;
-    }
+    // Telegram usernames are ASCII, so ASCII folding suffices and keeps every
+    // byte offset of `lower` valid in `text` (Unicode folding can change lengths).
+    let handle = format!("@{}", our_username.to_ascii_lowercase());
+    let lower = text.to_ascii_lowercase();
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut out = String::with_capacity(text.len());
     let (mut found, mut at) = (false, 0);
@@ -380,6 +377,13 @@ mod tests {
         assert!(matches!(n.text, InboundText::FreeText(ref t) if t == "what is on my list?"));
         let n = ok(&group_text("what is on my list? @MyBot"));
         assert!(matches!(n.text, InboundText::FreeText(ref t) if t == "what is on my list?"));
+    }
+
+    #[test]
+    fn a_mention_beside_text_whose_lowercase_changes_length_is_still_a_mention() {
+        let n = ok(&group_text("@MyBot İstanbul hava?"));
+        assert!(n.message.is_mentioned);
+        assert!(matches!(n.text, InboundText::FreeText(ref t) if t == "İstanbul hava?"));
     }
 
     #[test]
