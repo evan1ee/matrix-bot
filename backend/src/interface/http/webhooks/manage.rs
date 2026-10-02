@@ -272,7 +272,7 @@ mod tests {
     use crate::domain::accounts::STATUS_ACTIVE;
     use crate::interface::http::webhooks::dto::{InboundPayload, TelegramQuery};
     use crate::interface::http::webhooks::inbound::inbound_webhook;
-    use crate::interface::http::webhooks_telegram::telegram_send_message_get;
+    use crate::interface::http::webhooks::telegram_compat::telegram_send_message_get;
     use axum::body::Bytes;
     use axum::http::HeaderMap;
 

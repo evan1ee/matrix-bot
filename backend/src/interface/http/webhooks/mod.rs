@@ -3,10 +3,9 @@
 pub mod dto;
 pub mod inbound;
 pub mod manage;
+pub mod telegram_compat;
 
-pub use crate::interface::http::webhooks_telegram::{
-    telegram_send_message_get, telegram_send_message_post,
-};
 pub use dto::*;
 pub use inbound::*;
 pub use manage::*;
+pub use telegram_compat::{telegram_send_message_get, telegram_send_message_post};

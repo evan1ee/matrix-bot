@@ -52,10 +52,10 @@ pub mod routes;
 pub mod settings;
 pub mod sse;
 pub mod static_files;
+pub mod telegram_webhook;
 pub mod todos;
 pub mod voice;
 pub mod webhooks;
-pub mod webhooks_telegram;
 
 pub use routes::api_routes;
 
@@ -154,6 +154,11 @@ pub fn start_api_server(
             get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
         )
         .route("/webhooks/:token", post(webhooks::inbound_webhook))
+        // Not in OpenAPI (T12); 404 unless Telegram runs in webhook mode.
+        .route(
+            "/api/webhooks/telegram",
+            post(telegram_webhook::telegram_update),
+        )
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         // Infrastructure surface, not application API: no auth, not under
         // `/api/v1`, so a load balancer or orchestrator probe needs no session.

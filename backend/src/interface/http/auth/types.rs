@@ -167,6 +167,9 @@ pub struct ApiState {
     pub stt: crate::infrastructure::inference::stt::SttClient,
     /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
     pub ai: crate::config::AiEnvConfig,
+    /// The Telegram update queue, present only in webhook mode; `None` makes
+    /// `POST /api/webhooks/telegram` a 404.
+    pub telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -248,6 +251,7 @@ impl ApiState {
                 "sensevoice-small".to_string(),
             ),
             ai: crate::config::AiEnvConfig::default(),
+            telegram: None,
         }
     }
 
@@ -317,6 +321,8 @@ impl ApiState {
                 config.stt_model.clone(),
             ),
             ai: config.ai.clone(),
+            // Task 8 hands the adapter's ingress in; until then no webhook mode.
+            telegram: None,
         })
     }
 

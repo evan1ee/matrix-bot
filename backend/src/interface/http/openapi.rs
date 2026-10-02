@@ -34,7 +34,7 @@ use crate::interface::http::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, health, identities, life, life_activity, link, mcp, ocr,
     portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks, webhooks_telegram,
+    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -178,8 +178,8 @@ use crate::interface::http::{
         life::get_day,
         life::delete_day,
         life_activity::get_day_activity,
-        webhooks_telegram::telegram_send_message_get,
-        webhooks_telegram::telegram_send_message_post
+        webhooks::telegram_compat::telegram_send_message_get,
+        webhooks::telegram_compat::telegram_send_message_post
     ),
     components(
         schemas(

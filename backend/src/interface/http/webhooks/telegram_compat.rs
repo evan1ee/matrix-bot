@@ -8,12 +8,10 @@ use axum::{
 };
 use chrono::Utc;
 
+use super::{TelegramMessageResult, TelegramQuery, TelegramResponse, WebhookSeverity};
 use crate::domain::webhooks::hash_token;
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
-use crate::interface::http::webhooks::{
-    TelegramMessageResult, TelegramQuery, TelegramResponse, WebhookSeverity,
-};
 
 /// Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of
 /// Telegram's own Bot API (`https://api.telegram.org/bot<token>/sendMessage`)
@@ -85,7 +83,7 @@ pub async fn telegram_send_message_post(
     };
 
     let message_text = text.ok_or_else(|| ApiError::bad_request("Missing text parameter"))?;
-    super::webhooks::queue_and_broadcast(
+    super::inbound::queue_and_broadcast(
         &state,
         &webhook,
         None,
@@ -140,7 +138,7 @@ pub async fn telegram_send_message_get(
     let message_text = q
         .text
         .ok_or_else(|| ApiError::bad_request("Missing text parameter"))?;
-    super::webhooks::queue_and_broadcast(
+    super::inbound::queue_and_broadcast(
         &state,
         &webhook,
         None,
