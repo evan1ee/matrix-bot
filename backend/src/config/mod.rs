@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use std::env;
 
 mod channels;
+pub use channels::DiscordConfig;
 
-use crate::domain::channels::Channel;
+use crate::domain::channels::{Channel, PlatformUserId};
 
 const DEFAULT_STT_MODEL: &str = "sensevoice-small";
 const DEFAULT_TTS_MODEL: &str = "kokoro";
@@ -201,6 +202,8 @@ pub struct Config {
     /// `EMAIL_ALLOWED_SENDERS` (comma-separated). Absent channels and unset
     /// variables mean nobody may; the values are never logged.
     pub link_signup_allowlist: HashMap<Channel, Vec<String>>,
+    /// The Discord adapter's settings; `None` (no adapter) without `DISCORD_TOKEN`.
+    pub discord: Option<DiscordConfig>,
     /// Whether OCR image text recognition is enabled.
     pub ocr_enabled: bool,
     /// Base URL of the inference server's OCR endpoint.
@@ -330,6 +333,7 @@ impl Config {
 
         let link_signup_allowlist =
             channels::parse_link_signup_allowlist(|name| env::var(name).ok());
+        let discord = channels::parse_discord(|name| env::var(name).ok())?;
 
         let ocr_enabled = env::var("OCR_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -409,6 +413,7 @@ impl Config {
             cookie_secure,
             web_url,
             link_signup_allowlist,
+            discord,
             ocr_enabled,
             ocr_base_url,
             voice_enabled,
@@ -484,6 +489,18 @@ impl Config {
             );
         }
 
+        // A typo would silently keep that person from signing up (spec D4).
+        for entry in self
+            .link_signup_allowlist
+            .get(&Channel::Discord)
+            .into_iter()
+            .flatten()
+        {
+            if PlatformUserId::parse(Channel::Discord, entry).is_err() {
+                anyhow::bail!("DISCORD_ALLOWED_USERS entry '{entry}' is not a Discord user id");
+            }
+        }
+
         Ok(())
     }
 }
@@ -512,6 +529,7 @@ impl Config {
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
             link_signup_allowlist: HashMap::new(),
+            discord: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
@@ -536,6 +554,18 @@ mod tests {
 
     fn valid_config() -> Config {
         Config::for_test()
+    }
+
+    #[test]
+    fn validate_refuses_a_malformed_discord_allowlist_entry() {
+        let mut cfg = valid_config();
+        cfg.link_signup_allowlist
+            .insert(Channel::Discord, vec!["123456789012345678".into()]);
+        assert!(cfg.validate().is_ok());
+        cfg.link_signup_allowlist
+            .insert(Channel::Discord, vec!["123".into(), "evan#0001".into()]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("evan#0001"), "{err}");
     }
 
     #[test]
@@ -609,6 +639,7 @@ mod tests {
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
             link_signup_allowlist: HashMap::new(),
+            discord: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,

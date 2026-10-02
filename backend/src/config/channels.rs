@@ -2,8 +2,52 @@
 //! its own settings here, so `config/mod.rs` stays about the process as a whole.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::domain::channels::Channel;
+
+/// The Discord adapter's settings; present only when `DISCORD_TOKEN` is set.
+#[derive(Clone)]
+pub struct DiscordConfig {
+    /// `DISCORD_TOKEN`: the bot token. A credential; never logged.
+    pub token: String,
+    /// `DISCORD_GUILD_ID`: register the slash commands to this one guild,
+    /// where updates are instant, instead of globally (up to an hour).
+    pub guild_id: Option<u64>,
+}
+
+// Hand-written so the token can never reach a log through `{:?}` of `Config`.
+impl fmt::Debug for DiscordConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DiscordConfig")
+            .field("token", &"<redacted>")
+            .field("guild_id", &self.guild_id)
+            .finish()
+    }
+}
+
+/// `None` when `DISCORD_TOKEN` is unset or blank. `Err` when `DISCORD_GUILD_ID`
+/// is set but is not a non-zero integer: a typo there would silently register
+/// the commands globally instead.
+pub(super) fn parse_discord(
+    get: impl Fn(&str) -> Option<String>,
+) -> anyhow::Result<Option<DiscordConfig>> {
+    let Some(token) = get("DISCORD_TOKEN")
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty())
+    else {
+        return Ok(None);
+    };
+    let guild_id = match get("DISCORD_GUILD_ID").map(|g| g.trim().to_owned()) {
+        None => None,
+        Some(raw) if raw.is_empty() => None,
+        Some(raw) => match raw.parse::<u64>() {
+            Ok(id) if id != 0 => Some(id),
+            _ => anyhow::bail!("DISCORD_GUILD_ID must be a Discord server id (got '{raw}')"),
+        },
+    };
+    Ok(Some(DiscordConfig { token, guild_id }))
+}
 
 /// The signup allowlist, one environment variable per channel, each a
 /// comma-separated list. Entries are trimmed, empty ones dropped, email
@@ -55,6 +99,66 @@ mod tests {
             "email entries are lowercased"
         );
         assert!(!list.contains_key(&Channel::Matrix));
+    }
+
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        }
+    }
+
+    #[test]
+    fn discord_is_absent_without_a_token() {
+        assert!(parse_discord(env_of(&[])).unwrap().is_none());
+        assert!(parse_discord(env_of(&[("DISCORD_TOKEN", "  ")]))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn discord_reads_token_and_optional_guild() {
+        let cfg = parse_discord(env_of(&[("DISCORD_TOKEN", " abc ")]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(cfg.token, "abc");
+        assert_eq!(cfg.guild_id, None);
+        let cfg = parse_discord(env_of(&[
+            ("DISCORD_TOKEN", "abc"),
+            ("DISCORD_GUILD_ID", "123"),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.guild_id, Some(123));
+    }
+
+    #[test]
+    fn a_malformed_guild_id_is_refused() {
+        for bad in ["0", "abc", "-1"] {
+            let err = parse_discord(env_of(&[
+                ("DISCORD_TOKEN", "abc"),
+                ("DISCORD_GUILD_ID", bad),
+            ]))
+            .unwrap_err();
+            assert!(err.to_string().contains("DISCORD_GUILD_ID"), "{err}");
+        }
+    }
+
+    #[test]
+    fn the_discord_token_never_appears_in_debug_output() {
+        let cfg = DiscordConfig {
+            token: "very-secret-token".into(),
+            guild_id: Some(1),
+        };
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("very-secret-token"), "{shown}");
+        assert!(shown.contains("redacted"));
     }
 
     #[test]
