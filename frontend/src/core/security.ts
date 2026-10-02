@@ -51,15 +51,23 @@ export function usePasskeys() {
   });
 }
 
-/** The Matrix user ids linked to this account, oldest first. */
-export function useMatrixIdentities() {
+/** Every chat identity linked to this account, on any channel, oldest first. */
+export function useIdentities() {
   return useQuery<LinkedIdentity[]>({
     queryKey: SECURITY_KEYS.identities,
-    queryFn: async () =>
-      (await fetchApi<{ identities: LinkedIdentity[] }>('/account/identities')).identities.filter(
-        (identity) => identity.channel === 'matrix'
-      ),
+    queryFn: async () => (await fetchApi<{ identities: LinkedIdentity[] }>('/account/identities')).identities,
   });
+}
+
+/** A channel id as a person reads it. */
+export function channelLabel(channel: string): string {
+  const labels: Record<string, string> = {
+    matrix: 'Matrix',
+    discord: 'Discord',
+    telegram: 'Telegram',
+    email: 'Email',
+  };
+  return labels[channel] ?? channel.charAt(0).toUpperCase() + channel.slice(1);
 }
 
 export function useDeviceSessions() {
@@ -121,10 +129,10 @@ function isStepUpRequired(error: Error): boolean {
 }
 
 export const securityApi = {
-  unlinkMatrix: (userId: string) =>
+  unlinkIdentity: ({ channel, userId }: { channel: string; userId: string }) =>
     fetchApi<{ unlinked: boolean }>('/account/identities/unlink', {
       method: 'POST',
-      body: JSON.stringify({ channel: 'matrix', user_id: userId }),
+      body: JSON.stringify({ channel, user_id: userId }),
     }),
   deletePasskey: (id: string) =>
     fetchApi<void>(`/account/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' }),

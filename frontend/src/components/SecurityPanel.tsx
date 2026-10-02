@@ -15,19 +15,20 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  channelLabel,
   describeEvent,
   isAlarming,
   securityApi,
   SECURITY_KEYS,
   useDeviceSessions,
-  useMatrixIdentities,
+  useIdentities,
   usePasskeys,
   useRecoveryStatus,
   useSecurityEvents,
   useSensitiveAction,
 } from '../core/security';
 import { addPasskey, describePasskeyError } from '../core/passkey';
-import { formatDateTimeInZone } from '../core/settings';
+import { formatDateInZone, formatDateTimeInZone } from '../core/settings';
 import { copyToClipboard } from '../core/clipboard';
 import { useSettings } from '../core/settings';
 
@@ -175,7 +176,7 @@ export const SecurityPanel: React.FC = () => {
   };
 
   const passkeys = usePasskeys();
-  const links = useMatrixIdentities();
+  const links = useIdentities();
   const sessions = useDeviceSessions();
   const events = useSecurityEvents();
   const recovery = useRecoveryStatus();
@@ -202,7 +203,7 @@ export const SecurityPanel: React.FC = () => {
     m.mutateAsync(arg).catch((err) => setError(describePasskeyError(err)));
   };
 
-  const unlink = useSensitiveAction(securityApi.unlinkMatrix, [SECURITY_KEYS.identities, SECURITY_KEYS.events]);
+  const unlink = useSensitiveAction(securityApi.unlinkIdentity, [SECURITY_KEYS.identities, SECURITY_KEYS.events]);
   const deletePasskey = useSensitiveAction(securityApi.deletePasskey, [
     SECURITY_KEYS.passkeys,
     SECURITY_KEYS.events,
@@ -304,31 +305,41 @@ export const SecurityPanel: React.FC = () => {
       </Section>
 
       <Section
-        title="Matrix accounts"
-        hint="To link another Matrix account, send !link to the bot in a direct message from it."
+        title="Chat accounts"
+        hint="To link another chat account, send /link to the bot in a direct message from it."
       >
         <ul className="flex flex-col gap-2">
           {links.data?.map((identity, idx) => (
             <li
-              key={identity.user_id}
+              key={`${identity.channel}:${identity.user_id}`}
               className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
             >
               <Link2 size={16} className="shrink-0 text-neutral-500" />
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="truncate text-sm text-neutral-900 dark:text-neutral-100 font-mono">
-                  {identity.user_id}
-                </span>
-                {idx === 0 && (
-                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                    primary identity
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="shrink-0 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                    {channelLabel(identity.channel)}
                   </span>
-                )}
+                  <span className="truncate text-sm text-neutral-900 dark:text-neutral-100 font-mono">
+                    {identity.user_id}
+                  </span>
+                  {idx === 0 && (
+                    <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      primary identity
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                  {identity.display_name ? `${identity.display_name} · ` : ''}Linked{' '}
+                  {formatDateInZone(identity.linked_at, settings.timezone)}
+                </p>
               </div>
               <button
                 type="button"
                 aria-label={`Unlink ${identity.user_id}`}
-                onClick={() => run(unlink, identity.user_id)}
-                className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700"
+                title={`Unlink ${channelLabel(identity.channel)} account`}
+                onClick={() => run(unlink, { channel: identity.channel, userId: identity.user_id })}
+                className="rounded p-1.5 text-neutral-500 transition-colors duration-150 hover:bg-neutral-200 hover:text-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-900 dark:hover:bg-neutral-700 dark:focus-visible:outline-neutral-100"
               >
                 <Trash2 size={15} />
               </button>
@@ -336,7 +347,7 @@ export const SecurityPanel: React.FC = () => {
           ))}
           {links.data?.length === 0 && (
             <li className="text-xs text-neutral-500 dark:text-neutral-400">
-              No Matrix account linked yet.
+              No chat account linked yet.
             </li>
           )}
         </ul>

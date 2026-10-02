@@ -134,7 +134,7 @@ test.describe('passkeys', () => {
   });
 });
 
-test.describe('linked Matrix accounts', () => {
+test.describe('linked chat accounts', () => {
   test('marks the primary Matrix account with primary identity badge', async ({ app, api }) => {
     api.linkedMxids = ['@evan:mbm.one', '@secondary:matrix.org'];
     const dialog = await openSecurity(app);
@@ -143,7 +143,7 @@ test.describe('linked Matrix accounts', () => {
 
   test('points to the chat command for linking another account', async ({ app }) => {
     const dialog = await openSecurity(app);
-    await expect(dialog.getByText(/send !link to the bot in a direct message/i)).toBeVisible();
+    await expect(dialog.getByText(/send \/link to the bot/i)).toBeVisible();
     await expect(dialog.getByRole('button', { name: /link a matrix account/i })).toHaveCount(0);
   });
 
@@ -160,10 +160,50 @@ test.describe('linked Matrix accounts', () => {
     await expect(dialog.getByText('@evan:mbm.one')).toBeVisible();
   });
 
+  test('lists identities of every channel and unlinks a non-Matrix one', async ({ app, api }) => {
+    api.linkedMxids = ['@evan:mbm.one'];
+    api.otherIdentities = [
+      { channel: 'telegram', user_id: '4242', display_name: 'Evan T', linked_at: '2026-08-02T10:00:00Z' },
+    ];
+
+    const dialog = await openSecurity(app);
+    const row = dialog.getByRole('listitem').filter({ hasText: '4242' });
+    await expect(row).toContainText('Telegram');
+    await expect(row).toContainText('Evan T');
+    // Formatted in the user's zone (UTC in the suite), not the raw ISO string.
+    await expect(row).toContainText('Aug 2, 2026');
+
+    await dialog.getByRole('button', { name: /unlink 4242/i }).click();
+
+    await expect(dialog.getByText('4242')).toHaveCount(0);
+    await expect(dialog.getByText('@evan:mbm.one')).toBeVisible();
+    expect(api.requests.find((r) => r.url === '/account/identities/unlink')?.body).toEqual({
+      channel: 'telegram',
+      user_id: '4242',
+    });
+  });
+
+  test('shows the server message when the last way in cannot be unlinked', async ({ app, api }) => {
+    api.otherIdentities = [
+      { channel: 'discord', user_id: '555', display_name: null, linked_at: '2026-08-02T10:00:00Z' },
+    ];
+    api.failNext = {
+      path: /\/account\/identities\/unlink$/,
+      status: 409,
+      error: 'That is your last way in. Add a passkey before unlinking it.',
+    };
+
+    const dialog = await openSecurity(app);
+    await dialog.getByRole('button', { name: /unlink 555/i }).click();
+
+    await expect(dialog.getByRole('alert')).toContainText('last way in');
+    await expect(dialog.getByText('555')).toBeVisible();
+  });
+
   test('says so when nothing is linked', async ({ app, api }) => {
     api.linkedMxids = [];
     const dialog = await openSecurity(app);
-    await expect(dialog.getByText(/no matrix account linked/i)).toBeVisible();
+    await expect(dialog.getByText(/no chat account linked/i)).toBeVisible();
   });
 });
 
