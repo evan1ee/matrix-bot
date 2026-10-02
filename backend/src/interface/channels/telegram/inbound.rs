@@ -157,6 +157,12 @@ pub fn message_ref(chat: i64, message: i32) -> MessageRef {
     MessageRef(format!("message:{chat}:{message}"))
 }
 
+/// `(chat, message)` from a ref minted by [`message_ref`]; malformed refs are `None`.
+pub fn parse_message_ref(r: &MessageRef) -> Option<(i64, i32)> {
+    let (chat, message) = r.0.strip_prefix("message:")?.split_once(':')?;
+    Some((chat.parse().ok()?, message.parse().ok()?))
+}
+
 /// The command as the user would have typed it on Matrix, for `IncomingMessage.text`.
 fn body_of(text: &InboundText) -> String {
     match text {
@@ -559,5 +565,27 @@ mod tests {
             from.remove("last_name");
         });
         assert_eq!(ok(&u).message.sender.display_name(), Some("evan_fixture"));
+    }
+}
+
+#[cfg(test)]
+mod ref_tests {
+    use super::*;
+
+    #[test]
+    fn message_refs_round_trip_and_malformed_ones_parse_to_none() {
+        assert_eq!(
+            parse_message_ref(&message_ref(-1004100000009, 7)),
+            Some((-1004100000009, 7))
+        );
+        for bad in [
+            "interaction:5",
+            "message:x:2",
+            "message:1",
+            "message:1:y",
+            "",
+        ] {
+            assert_eq!(parse_message_ref(&MessageRef(bad.into())), None, "{bad}");
+        }
     }
 }
