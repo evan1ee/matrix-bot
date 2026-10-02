@@ -8,11 +8,19 @@
 //! - `inbound`: interaction / DM → `IncomingMessage` (pure).
 //! - `render`: neutral content → embed posts; where an interaction reply goes (pure).
 //! - `outbound`: `send`, the serenity builders, error classification.
+//! - `gateway`: serenity's event handler: parse, defer, enqueue (B8).
+//! - `worker`: the bounded queue's workers: pipeline call, reply delivery.
+//! - `progress`: interaction-editing and typing `ProgressSink`s.
+//! - `adapter`: `DiscordAdapter`, its run loop and reconnect backoff (B7).
 
+pub mod adapter;
 pub mod commands;
+pub mod gateway;
 pub mod inbound;
 pub mod outbound;
+pub mod progress;
 pub mod render;
+pub mod worker;
 
 #[cfg(test)]
 mod tests {
@@ -20,14 +28,19 @@ mod tests {
 
     use std::sync::Arc;
 
-    use super::commands::{inbound_text, COMMANDS};
+    use serenity::all::CommandInteraction;
+
+    use super::commands::{defer_mode, inbound_text, COMMANDS};
+    use super::inbound::from_command;
+    use super::render::Post;
+    use super::worker::plan_command_reply;
     use crate::application::AppServices;
     use crate::config::Config;
     use crate::db::{Database, DbPool};
     use crate::domain::accounts::STATUS_ACTIVE;
     use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
     use crate::infrastructure::postgres::repositories::accounts::core;
-    use crate::infrastructure::postgres::repositories::identities;
+    use crate::infrastructure::postgres::repositories::{identities, link_tokens};
     use crate::interface::channels::fake::FakeAdapter;
     use crate::interface::channels::inbound::{Inbound, InboundOutcome, InboundText};
     use crate::interface::channels::matrix::modules::build_modules;
@@ -107,5 +120,79 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    const FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/channels/discord_command_interaction.json"
+    ));
+
+    fn interaction(name: &str, value: Option<&str>, in_guild: bool) -> CommandInteraction {
+        let mut v: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        v["data"]["name"] = name.into();
+        v["data"]["options"] = match value {
+            Some(value) => {
+                let option = if name == "ask" { "prompt" } else { "args" };
+                serde_json::json!([{ "name": option, "type": 3, "value": value }])
+            }
+            None => serde_json::json!([]),
+        };
+        if !in_guild {
+            let o = v.as_object_mut().unwrap();
+            o.remove("guild_id");
+            o.remove("member");
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// What the deferred response is edited to: normalization → pipeline → plan.
+    async fn answer(inbound: &Inbound, i: &CommandInteraction) -> Post {
+        let parsed = from_command(i).unwrap();
+        let in_guild = i.guild_id.is_some();
+        let mode = defer_mode(&i.data.name, in_guild);
+        let outcome = inbound.handle(&parsed.message, parsed.text, None).await;
+        plan_command_reply(outcome, in_guild, mode)
+            .unwrap()
+            .original
+    }
+
+    fn text(post: &Post) -> &str {
+        post.description.as_deref().unwrap_or_default()
+    }
+
+    /// Spec invariants 1–2 on Discord.
+    #[tokio::test]
+    async fn an_unlinked_discord_user_reaches_no_module() {
+        let (inbound, _pool, _reg) = pipeline().await;
+        let post = answer(&inbound, &interaction("todo", Some("add milk"), true)).await;
+        assert!(text(&post).contains("not linked yet"), "{post:?}");
+    }
+
+    /// Spec invariant 3 on Discord.
+    #[tokio::test]
+    async fn link_in_a_guild_is_refused_and_mints_nothing() {
+        let (inbound, pool, _reg) = pipeline().await;
+        let post = answer(&inbound, &interaction("link", None, true)).await;
+        assert!(text(&post).contains("`/link`"), "{post:?}");
+        assert!(text(&post).contains("direct message"), "{post:?}");
+        assert_eq!(link_tokens::count(&pool).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn link_in_a_dm_returns_the_landing_url() {
+        let (inbound, pool, _reg) = pipeline().await;
+        let post = answer(&inbound, &interaction("link", None, false)).await;
+        assert!(text(&post).contains("bot.example/link?token="), "{post:?}");
+        assert_eq!(link_tokens::count(&pool).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_linked_user_adds_and_lists_a_todo() {
+        let (inbound, pool, _reg) = pipeline().await;
+        link(&pool).await;
+        let added = answer(&inbound, &interaction("todo", Some("add buy milk"), true)).await;
+        assert!(!text(&added).contains("not linked"), "{added:?}");
+        let listed = answer(&inbound, &interaction("todo", None, false)).await;
+        assert!(text(&listed).contains("buy milk"), "{listed:?}");
     }
 }
