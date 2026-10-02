@@ -24,3 +24,4 @@ pub mod message;
 pub mod registry;
 pub mod render;
 pub mod telegram;
+pub mod throttle;

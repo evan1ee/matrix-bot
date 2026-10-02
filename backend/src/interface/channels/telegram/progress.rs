@@ -9,7 +9,7 @@ use teloxide_core::types::{ChatAction, ChatId, MessageId};
 use tracing::debug;
 
 use super::outbound::bounded;
-use crate::interface::channels::discord::progress::Throttle;
+use crate::interface::channels::throttle::Throttle;
 use crate::llm::progress::ProgressSink;
 
 /// Telegram shows "typing" for about five seconds.

@@ -34,7 +34,7 @@ pub fn to_queue_item(update: &Update) -> Result<Bytes, serde_json::Error> {
 }
 
 /// Whether polling can never succeed: a refused token.
-fn is_fatal(err: &RequestError) -> bool {
+pub(super) fn is_fatal(err: &RequestError) -> bool {
     matches!(err, RequestError::Api(ApiError::InvalidToken))
 }
 
@@ -168,6 +168,15 @@ mod tests {
             let back: Update = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(back, update);
         }
+    }
+
+    #[test]
+    fn only_a_refused_token_is_fatal() {
+        assert!(is_fatal(&RequestError::Api(ApiError::InvalidToken)));
+        assert!(!is_fatal(&RequestError::Api(ApiError::BotBlocked)));
+        assert!(!is_fatal(&RequestError::RetryAfter(
+            teloxide_core::types::Seconds::from_seconds(1)
+        )));
     }
 
     #[test]

@@ -10,34 +10,13 @@ use tracing::debug;
 use super::outbound::{bounded, edit_response};
 use super::render::{Post, EMBED_DESCRIPTION_MAX};
 use crate::interface::channels::render::markdown::escape_markdown;
+use crate::interface::channels::throttle::Throttle;
 use crate::llm::progress::ProgressSink;
 
 /// Discord allows about five interaction edits per five seconds.
 pub const EDIT_GAP: Duration = Duration::from_millis(1500);
 /// The typing indicator lasts ten seconds; pulse a little sooner.
 pub const TYPING_GAP: Duration = Duration::from_secs(8);
-
-/// At most one action per `gap`.
-pub struct Throttle {
-    gap: Duration,
-    last: Option<Instant>,
-}
-
-impl Throttle {
-    pub fn new(gap: Duration) -> Self {
-        Self { gap, last: None }
-    }
-
-    pub fn ready(&mut self, now: Instant) -> bool {
-        match self.last {
-            Some(last) if now.saturating_duration_since(last) < self.gap => false,
-            _ => {
-                self.last = Some(now);
-                true
-            }
-        }
-    }
-}
 
 struct Edits {
     throttle: Throttle,
@@ -169,17 +148,6 @@ impl ProgressSink for TypingProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_throttle_allows_one_action_per_gap() {
-        let start = Instant::now();
-        let mut t = Throttle::new(Duration::from_secs(1));
-        assert!(t.ready(start));
-        assert!(!t.ready(start + Duration::from_millis(500)));
-        assert!(t.ready(start + Duration::from_millis(1000)));
-        assert!(!t.ready(start + Duration::from_millis(1999)));
-        assert!(t.ready(start + Duration::from_secs(3)));
-    }
 
     #[test]
     fn tail_keeps_the_newest_characters() {

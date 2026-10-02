@@ -18,8 +18,8 @@ use url::Url;
 
 use super::commands::ADVERTISED;
 use super::ingress::{RecentUpdates, TelegramIngress, QUEUE_CAPACITY};
-use super::outbound::{self, bounded, redact};
-use super::polling::{backoff, poll};
+use super::outbound::{self, bounded, redact, CALL_TIMEOUT};
+use super::polling::{backoff, is_fatal, poll};
 use super::worker::{run_worker, WorkerCtx, TELEGRAM_WORKERS};
 use crate::config::{TelegramConfig, TelegramMode};
 use crate::domain::channels::Channel;
@@ -88,8 +88,10 @@ impl TelegramAdapter {
     async fn identify(&self, cancel: &CancellationToken) -> anyhow::Result<Option<String>> {
         let mut attempt = 0;
         loop {
-            match bounded(self.bot.get_me().send()).await {
-                Ok(me) => {
+            // The raw error is inspected before classifying: a refused token
+            // is fatal and must not be matched on a message string.
+            match tokio::time::timeout(CALL_TIMEOUT, self.bot.get_me().send()).await {
+                Ok(Ok(me)) => {
                     return me
                         .user
                         .username
@@ -97,15 +99,14 @@ impl TelegramAdapter {
                         .map(Some)
                         .ok_or_else(|| anyhow::anyhow!("the Telegram bot has no username (getMe)"))
                 }
-                Err(ChannelError::Rejected(detail)) if detail.contains("Invalid bot token") => {
+                Ok(Err(err)) if is_fatal(&err) => {
                     return Err(anyhow::anyhow!("Telegram refused the bot token (getMe)"));
                 }
-                Err(err) => {
-                    warn!(error = %err, "Telegram getMe failed");
-                    if !backoff(&mut attempt, cancel).await {
-                        return Ok(None);
-                    }
-                }
+                Ok(Err(err)) => warn!(error = %redact(&err.to_string()), "Telegram getMe failed"),
+                Err(_) => warn!("Telegram getMe timed out"),
+            }
+            if !backoff(&mut attempt, cancel).await {
+                return Ok(None);
             }
         }
     }
