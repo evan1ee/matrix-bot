@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
 
+mod ai;
 mod channels;
+pub use ai::AiEnvConfig;
 pub use channels::{DiscordConfig, TelegramConfig, TelegramMode};
 
 use crate::domain::channels::Channel;
@@ -78,59 +80,6 @@ pub fn database_url_from_env() -> Result<String> {
         .map_err(|_| anyhow::anyhow!("DATABASE_URL is required (a postgres:// URL)"))?;
     validate_database_url(&database_url)?;
     Ok(database_url)
-}
-
-/// AI provider settings that come from the environment.
-///
-/// The endpoint, key and model each have exactly one name. Resolved once at
-/// boot so every caller sees the same answer.
-#[derive(Debug, Clone, Default)]
-pub struct AiEnvConfig {
-    /// `AI_ENDPOINT`: the OpenAI-compatible base URL, including `/v1`.
-    pub base_url: Option<String>,
-    /// `AI_API_KEY`, ignoring a blank value.
-    pub api_key: Option<String>,
-    /// `AI_MODEL`.
-    pub model: Option<String>,
-    /// First of AI_PROXY, HTTPS_PROXY, https_proxy, ALL_PROXY, all_proxy,
-    /// HTTP_PROXY, http_proxy.
-    pub proxy: Option<String>,
-    /// Whether an AI base URL may point at a private or loopback address.
-    ///
-    /// Off by default: a user-supplied base URL is a server-side request this
-    /// process will make, so an unguarded one reaches anything the host can.
-    pub allow_private_base_url: bool,
-}
-
-impl AiEnvConfig {
-    pub fn from_env() -> Self {
-        let base_url = env::var("AI_ENDPOINT").ok();
-
-        let api_key = env::var("AI_API_KEY").ok().filter(|s| !s.trim().is_empty());
-
-        let model = env::var("AI_MODEL").ok();
-
-        let proxy = env::var("AI_PROXY")
-            .or_else(|_| env::var("HTTPS_PROXY"))
-            .or_else(|_| env::var("https_proxy"))
-            .or_else(|_| env::var("ALL_PROXY"))
-            .or_else(|_| env::var("all_proxy"))
-            .or_else(|_| env::var("HTTP_PROXY"))
-            .or_else(|_| env::var("http_proxy"))
-            .ok();
-
-        let allow_private_base_url = env::var("AI_ALLOW_PRIVATE_BASE_URL")
-            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-            .unwrap_or(false);
-
-        Self {
-            base_url,
-            api_key,
-            model,
-            proxy,
-            allow_private_base_url,
-        }
-    }
 }
 
 /// Job queue workers per instance when `JOB_WORKERS` is unset.
@@ -842,9 +791,12 @@ mod tests {
     #[test]
     fn test_config_from_env_never_loads_dotenv() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/config");
-        let source: String = ["mod.rs", "channels.rs"]
-            .iter()
-            .map(|file| std::fs::read_to_string(dir.join(file)).expect("config must be readable"))
+        // Every file in `config/`, so a module split off later stays covered.
+        let source: String = std::fs::read_dir(&dir)
+            .expect("config/ must be readable")
+            .map(|entry| entry.expect("a readable directory entry").path())
+            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("rs"))
+            .map(|path| std::fs::read_to_string(path).expect("config must be readable"))
             .collect();
         // Built at runtime, not as one string literal: the literal would itself
         // match a repo-wide `grep` for "the parent-searching dotenvy call",
