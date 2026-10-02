@@ -811,6 +811,7 @@ fn chat_modules_know_no_platform_sdk() {
 fn only_the_composition_root_builds_adapters_and_the_registry() {
     for needle in [
         "MatrixAdapter::new(",
+        "DiscordAdapter::new(",
         "ChannelRegistry::new(",
         "ChannelRegistry::from_unique(",
     ] {
@@ -851,4 +852,27 @@ fn channel_adapters_run_no_sql() {
         ],
     );
     assert!(hits.is_empty(), "{}", hits.join("\n"));
+}
+
+/// serenity is the Discord adapter's private dependency: nothing else may name
+/// it, so swapping or upgrading it touches one directory.
+#[test]
+fn serenity_stays_inside_the_discord_adapter() {
+    let hits: Vec<_> = rust_files(&src(""))
+        .into_iter()
+        .filter(|f| !relative_to_src(f).starts_with("interface/channels/discord/"))
+        .flat_map(|f| {
+            let text = fs::read_to_string(&f).expect("readable source file");
+            let rel = relative_to_src(&f);
+            production_hits(&text, &["serenity"])
+                .into_iter()
+                .map(move |(n, l)| format!("{rel}:{n}: {l}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "serenity outside interface/channels/discord:\n{}",
+        hits.join("\n")
+    );
 }

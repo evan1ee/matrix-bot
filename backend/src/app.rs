@@ -1,11 +1,12 @@
 //! Composition root: builds every long-lived component once, starts the front
-//! doors (the Axum API server and the Matrix sync loop) and the job runtime, and stops them within
-//! a fixed bound when shutdown is requested.
+//! doors (the Axum API server and every channel adapter: Matrix, and Discord when
+//! configured) and the job and events runtimes, and stops them within a fixed
+//! bound when shutdown is requested.
 //!
 //! Shutdown is one `CancellationToken` tree. The caller (`main.rs`) owns the
-//! root and cancels it on SIGINT/SIGTERM; the API server, the Matrix loop and the job runtime
-//! each get a child token, so cancelling the root reaches all three and none
-//! can cancel another.
+//! root and cancels it on SIGINT/SIGTERM; every front door and runtime gets a
+//! child token, so cancelling the root reaches all of them and none can cancel
+//! another.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +20,7 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::domain::channels::Channel;
 use crate::interface::channels::adapter::ChannelAdapter;
+use crate::interface::channels::discord::adapter::DiscordAdapter;
 use crate::interface::channels::inbound::Inbound;
 use crate::interface::channels::matrix::adapter::MatrixAdapter;
 use crate::interface::channels::matrix::handles::BotHandles;
@@ -55,6 +57,36 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// One channel adapter's supervised `run` task.
+pub(crate) struct AdapterTask {
+    pub name: &'static str,
+    pub handle: JoinHandle<()>,
+}
+
+/// The name the supervisor and the shutdown log use for an adapter's task;
+/// distinct per channel, because `stop_remaining` skips the ended task by name.
+fn front_door_name(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Matrix => "Matrix sync loop",
+        Channel::Discord => "Discord gateway",
+        Channel::Telegram => "Telegram updates",
+        Channel::Email => "Email poller",
+    }
+}
+
+/// Resolves when the first adapter task ends (never, with none), with its name.
+async fn first_adapter_to_end(
+    adapters: &mut [AdapterTask],
+) -> (&'static str, Result<(), tokio::task::JoinError>) {
+    if adapters.is_empty() {
+        return std::future::pending().await;
+    }
+    let (result, index, rest) =
+        futures_util::future::select_all(adapters.iter_mut().map(|a| &mut a.handle)).await;
+    drop(rest);
+    (adapters[index].name, result)
+}
+
 /// Adapts an adapter's `run` task to the supervisor's `JoinHandle<()>`.
 ///
 /// An `Err` is logged here (an adapter that gives up is a front door that
@@ -73,8 +105,8 @@ fn supervised(name: &'static str, handle: JoinHandle<anyhow::Result<()>>) -> Joi
     })
 }
 
-/// Waits for `shutdown` to be cancelled, or for the API server, the Matrix loop
-/// or the job runtime to end on its own — which is always an error, since each holds a child of
+/// Waits for `shutdown` to be cancelled, or for the API server, a channel
+/// adapter or a runtime to end on its own — which is always an error, since each holds a child of
 /// `shutdown` and exit only when it fires. A front door that stops on its
 /// own (task panic, or a bug that lets its loop return) would otherwise leave
 /// the process running with no API or no Matrix connection; instead this
@@ -86,7 +118,7 @@ fn supervised(name: &'static str, handle: JoinHandle<anyhow::Result<()>>) -> Joi
 async fn supervise_front_doors(
     shutdown: &CancellationToken,
     api: &mut JoinHandle<()>,
-    matrix: &mut JoinHandle<()>,
+    adapters: &mut [AdapterTask],
     jobs: &mut JoinHandle<()>,
     events: &mut JoinHandle<()>,
 ) -> Option<&'static str> {
@@ -97,10 +129,10 @@ async fn supervise_front_doors(
             shutdown.cancel();
             Some("REST API server")
         }
-        result = &mut *matrix => {
-            log_early_exit("Matrix sync loop", result);
+        (name, result) = first_adapter_to_end(adapters) => {
+            log_early_exit(name, result);
             shutdown.cancel();
-            Some("Matrix sync loop")
+            Some(name)
         }
         result = &mut *jobs => {
             log_early_exit("Job runtime", result);
@@ -159,7 +191,13 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // survives a Matrix reconnect.
     let handles = BotHandles::default();
     let modules = build_modules(&config).await;
-    check_unique(&[Channel::Matrix])?;
+    let discord = config
+        .discord
+        .clone()
+        .map(|discord| Arc::new(DiscordAdapter::new(discord)));
+    let mut configured = vec![Channel::Matrix];
+    configured.extend(discord.as_ref().map(|_| Channel::Discord));
+    check_unique(&configured)?;
     let matrix = Arc::new(MatrixAdapter::new(
         config.clone(),
         services.clone(),
@@ -170,9 +208,19 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // registry is built with `new_cyclic` (A5). Uniqueness was checked just
     // above, which is what makes the infallible constructor sound.
     let channels = Arc::new_cyclic(|weak| {
-        let inbound = Inbound::new(services.clone(), db.clone(), modules, weak.clone());
-        matrix.attach_inbound(Arc::new(inbound));
-        ChannelRegistry::from_unique(vec![matrix.clone() as Arc<dyn ChannelAdapter>])
+        let inbound = Arc::new(Inbound::new(
+            services.clone(),
+            db.clone(),
+            modules,
+            weak.clone(),
+        ));
+        matrix.attach_inbound(Arc::clone(&inbound));
+        let mut adapters = vec![matrix.clone() as Arc<dyn ChannelAdapter>];
+        if let Some(discord) = &discord {
+            discord.attach_inbound(Arc::clone(&inbound));
+            adapters.push(discord.clone() as Arc<dyn ChannelAdapter>);
+        }
+        ChannelRegistry::from_unique(adapters)
     });
     let registry = jobs::Registry::new(crate::interface::jobs::handlers(
         &services,
@@ -216,21 +264,24 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let mut jobs_task = tokio::spawn(runtime.run(shutdown.child_token()));
     // After the API server is up (R35): SSE subscribers exist before events flow.
     let mut events_task = tokio::spawn(events_runtime.run(shutdown.child_token()));
-    let mut matrix = match channels
-        .spawn_all(&shutdown)
+    // Matrix first, so the shutdown log keeps its order.
+    let mut spawned = channels.spawn_all(&shutdown);
+    spawned.sort_by_key(|(channel, _)| *channel != Channel::Matrix);
+    let mut adapters: Vec<AdapterTask> = spawned
         .into_iter()
-        .find(|(channel, _)| *channel == Channel::Matrix)
-    {
-        Some((_, handle)) => supervised("Matrix sync loop", handle),
-        // Unreachable while `channels` is built from `matrix` above; if it ever
-        // happens the supervisor sees a front door that ended and stops cleanly.
-        None => tokio::spawn(async { error!("No Matrix adapter was registered") }),
-    };
+        .map(|(channel, handle)| {
+            let name = front_door_name(channel);
+            AdapterTask {
+                name,
+                handle: supervised(name, handle),
+            }
+        })
+        .collect();
 
     let ended = supervise_front_doors(
         &shutdown,
         &mut api,
-        &mut matrix,
+        &mut adapters,
         &mut jobs_task,
         &mut events_task,
     )
@@ -241,7 +292,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // The job runtime goes first: its shutdown releases running jobs, which
     // needs the pool open. The events runtime follows it, then the API server
     // (whose SSE streams end on their own token). All share the one deadline.
-    let tasks = vec![
+    let mut tasks = vec![
         OwnedTask {
             name: "Job runtime",
             handle: jobs_task,
@@ -254,11 +305,11 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
             name: "REST API server",
             handle: api,
         },
-        OwnedTask {
-            name: "Matrix sync loop",
-            handle: matrix,
-        },
     ];
+    tasks.extend(adapters.into_iter().map(|a| OwnedTask {
+        name: a.name,
+        handle: a.handle,
+    }));
     let laggards = stop_remaining(deadline, tasks, ended).await;
     if !laggards.is_empty() {
         warn!(
@@ -302,6 +353,13 @@ pub(crate) async fn stop_by(deadline: Instant, tasks: Vec<OwnedTask>) -> Vec<&'s
 }
 
 fn log_registration_mode(config: &Config) {
+    match &config.discord {
+        Some(discord) if discord.guild_id.is_some() => {
+            info!("Discord: enabled (commands registered to one guild)")
+        }
+        Some(_) => info!("Discord: enabled (global commands)"),
+        None => info!("Discord: disabled (DISCORD_TOKEN unset)"),
+    }
     if config.registration_secret.is_some() {
         info!("Registration mode: INVITE-ONLY (invite secret configured)");
     } else if config.registration_open {
@@ -399,17 +457,18 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
         let mut api = tokio::spawn(async {}); // ends immediately, unrequested
-        let mut matrix = tokio::spawn({
+        let matrix = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
+        let mut adapters = matrix_only(matrix);
 
         let mut jobs = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
+        supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert!(
             shutdown.is_cancelled(),
@@ -417,7 +476,7 @@ mod tests {
              instead of running with a missing front door"
         );
         // The other task must now observe the cancellation and finish too.
-        tokio::time::timeout(Duration::from_secs(1), &mut matrix)
+        tokio::time::timeout(Duration::from_secs(1), &mut adapters[0].handle)
             .await
             .expect("matrix task must finish after shutdown was cancelled")
             .unwrap();
@@ -431,17 +490,18 @@ mod tests {
             async move { shutdown.cancelled().await }
         });
         let mut api = tokio::spawn(async { panic!("boom") });
-        let mut matrix = tokio::spawn({
+        let matrix = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
+        let mut adapters = matrix_only(matrix);
 
         let mut jobs = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
+        supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert!(shutdown.is_cancelled());
     }
@@ -457,10 +517,11 @@ mod tests {
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
-        let mut matrix = tokio::spawn({
+        let matrix = tokio::spawn({
             let shutdown = shutdown.clone();
             async move { shutdown.cancelled().await }
         });
+        let mut adapters = matrix_only(matrix);
         shutdown.cancel();
         let mut jobs = tokio::spawn({
             let shutdown = shutdown.clone();
@@ -472,7 +533,7 @@ mod tests {
         // branch under test).
         tokio::time::timeout(
             Duration::from_secs(1),
-            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events),
+            supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events),
         )
         .await
         .expect("must return promptly once shutdown was already requested");
@@ -487,10 +548,11 @@ mod tests {
         });
         let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
         let mut api = waiter(shutdown.clone());
-        let mut matrix = waiter(shutdown.clone());
+        let matrix = waiter(shutdown.clone());
+        let mut adapters = matrix_only(matrix);
         let mut jobs = tokio::spawn(async {}); // ends immediately, unrequested
 
-        supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
+        supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert!(
             shutdown.is_cancelled(),
@@ -504,24 +566,32 @@ mod tests {
         let shutdown = CancellationToken::new();
         let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
         let mut api = waiter(shutdown.clone());
-        let mut matrix = waiter(shutdown.clone());
+        let matrix = waiter(shutdown.clone());
+        let mut adapters = matrix_only(matrix);
         let mut jobs = waiter(shutdown.clone());
         let mut events = tokio::spawn(async {}); // ends immediately, unrequested
 
         let ended =
-            supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events).await;
+            supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert_eq!(ended, Some("Events runtime"));
         assert!(shutdown.is_cancelled());
     }
 
+    fn matrix_only(handle: JoinHandle<()>) -> Vec<AdapterTask> {
+        vec![AdapterTask {
+            name: "Matrix sync loop",
+            handle,
+        }]
+    }
+
     fn tasks_of(
         api: JoinHandle<()>,
-        matrix: JoinHandle<()>,
+        adapters: Vec<AdapterTask>,
         jobs: JoinHandle<()>,
         events: JoinHandle<()>,
     ) -> Vec<OwnedTask> {
-        vec![
+        let mut tasks = vec![
             OwnedTask {
                 name: "Job runtime",
                 handle: jobs,
@@ -534,11 +604,12 @@ mod tests {
                 name: "REST API server",
                 handle: api,
             },
-            OwnedTask {
-                name: "Matrix sync loop",
-                handle: matrix,
-            },
-        ]
+        ];
+        tasks.extend(adapters.into_iter().map(|a| OwnedTask {
+            name: a.name,
+            handle: a.handle,
+        }));
+        tasks
     }
 
     /// Given a task that ended on its own, When shutdown runs, Then the
@@ -556,25 +627,77 @@ mod tests {
                 }
             };
             let mut api = early("REST API server");
-            let mut matrix = waiter(shutdown.clone());
+            let matrix = waiter(shutdown.clone());
+            let mut adapters = matrix_only(matrix);
             let mut jobs = early("Job runtime");
             let mut events = early("Events runtime");
 
             let ended =
-                supervise_front_doors(&shutdown, &mut api, &mut matrix, &mut jobs, &mut events)
+                supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events)
                     .await;
             assert_eq!(ended, Some(ended_name));
 
             let started = Instant::now();
             let laggards = stop_remaining(
                 started + Duration::from_secs(15),
-                tasks_of(api, matrix, jobs, events),
+                tasks_of(api, adapters, jobs, events),
                 ended,
             )
             .await;
             assert!(laggards.is_empty(), "{ended_name}: {laggards:?}");
         }
     }
+    #[tokio::test(start_paused = true)]
+    async fn an_adapter_other_than_matrix_ending_unrequested_stops_the_process() {
+        let shutdown = CancellationToken::new();
+        let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+        let mut api = waiter(shutdown.clone());
+        let mut jobs = waiter(shutdown.clone());
+        let mut events = waiter(shutdown.clone());
+        let mut adapters = vec![
+            AdapterTask {
+                name: front_door_name(Channel::Matrix),
+                handle: waiter(shutdown.clone()),
+            },
+            AdapterTask {
+                name: front_door_name(Channel::Discord),
+                handle: tokio::spawn(async {}), // ends immediately, unrequested
+            },
+        ];
+
+        let ended =
+            supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
+
+        assert_eq!(ended, Some("Discord gateway"));
+        assert!(shutdown.is_cancelled());
+        let started = Instant::now();
+        let laggards = stop_remaining(
+            started + Duration::from_secs(15),
+            tasks_of(api, adapters, jobs, events),
+            ended,
+        )
+        .await;
+        assert!(laggards.is_empty(), "{laggards:?}");
+    }
+
+    #[test]
+    fn front_door_names_are_distinct_per_channel() {
+        let names: Vec<_> = [
+            Channel::Matrix,
+            Channel::Discord,
+            Channel::Telegram,
+            Channel::Email,
+        ]
+        .into_iter()
+        .map(front_door_name)
+        .collect();
+        let mut unique = names.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+        assert_eq!(names[0], "Matrix sync loop");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn aborting_the_supervised_handle_aborts_the_adapter_run() {
         let dropped = Arc::new(AtomicBool::new(false));
